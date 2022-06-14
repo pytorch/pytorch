@@ -30,9 +30,15 @@ using ExtraFilesMap = std::unordered_map<std::string, std::string>;
 // Parse a mobile::Module from flatbuffer's in-memory Module representation.
 // The caller is assumed to manage the lifetimes of Module.
 // This function does step 3 described above.
+// If should_copy_tensor_memory is true, then the returned module will NOT
+// have refences to flatbuffer_module, so it can be discarded.
+// If should_copy_tensor_memory is false, then returned module will have
+// tensors that points inside of flatbuffer_module; the caller need to make
+// sure that flatbuffer_module outlives returned Module.
 TORCH_API mobile::Module initialize_mobile_module(
     mobile::serialization::Module* flatbuffer_module,
-    c10::optional<at::Device> device = c10::nullopt);
+    c10::optional<at::Device> device = c10::nullopt,
+    bool should_copy_tensor_memory = false);
 
 // Parse a mobile::Module from raw bytes.
 // ownership of data is shared to the returned Module.
@@ -64,6 +70,9 @@ TORCH_API std::tuple<std::shared_ptr<char>, size_t> get_stream_content(
 
 TORCH_API uint64_t get_bytecode_version(std::istream& in);
 TORCH_API uint64_t get_bytecode_version(const std::string& filename);
+
+TORCH_API mobile::ModuleInfo get_module_info_from_flatbuffer(
+    char* flatbuffer_content);
 
 class TORCH_API FlatbufferLoader {
  public:
@@ -109,6 +118,22 @@ class TORCH_API FlatbufferLoader {
     return module_;
   }
 
+  bool getShouldCopyTensorMemory() {
+    return should_copy_tensor_memory_;
+  }
+
+  void setShouldCopyTensorMemory(bool should_copy_tensor_memory) {
+    should_copy_tensor_memory_ = should_copy_tensor_memory;
+  }
+
+  // Whether or not should load operators in functions.
+  // Not loading operators is useful because if an operator is not found
+  // then we throw exceptions, and sometimes we want to print out
+  // what operators are included before that to debug.
+  void setShouldLoadOperators(bool should_load_operators) {
+    should_load_operators_ = should_load_operators;
+  }
+
   std::shared_ptr<mobile::CompilationUnit> mcu_;
   std::shared_ptr<CompilationUnit> cu_;
 
@@ -131,6 +156,8 @@ class TORCH_API FlatbufferLoader {
   TypeResolver type_resolver_ = nullptr;
   mobile::serialization::Module* module_ = nullptr;
   bool module_parsed_ = false;
+  bool should_copy_tensor_memory_ = false;
+  bool should_load_operators_ = true;
 };
 
 } // namespace jit

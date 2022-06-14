@@ -4,6 +4,8 @@
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 
+#include <ATen/NumericUtils.h>
+
 template <typename T>
 struct AtomicFPOp;
 
@@ -347,24 +349,37 @@ inline __device__ float gpuAtomicMul (float * address, float val) {
 
 // Atomic maximum implementation.
 
+template <typename T>
+__host__ __device__ T safe_max(T a, T b) {
+  #if defined(__HIPCC__)
+  // TODO: remove this special case for HIP when issue is fixed:
+  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+    T max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max<T>(a, b));
+  #else
+    T max = at::_isnan(b) ? b : std::max<T>(a, b);
+  #endif
+
+  return max;
+}
+
 inline __device__ at::Half gpuAtomicMax(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
-                                  return max(bsum, val);
+                                  return safe_max(bsum, val);
                                 });
 }
 
 inline __device__ at::BFloat16 gpuAtomicMax(at::BFloat16 * address, at::BFloat16 val) {
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) {
-                                      return max(bsum, val);
+                                      return safe_max(bsum, val);
                                     });
 }
 
 inline __device__ double gpuAtomicMax(double * address, double val) {
   return AtomicFPOp<double>()(address, val,
                               [](double val, unsigned long long int assumed) {
-                                return __double_as_longlong(max(val, __longlong_as_double(assumed)));
+                                return __double_as_longlong(safe_max(val, __longlong_as_double(assumed)));
                               });
 }
 
@@ -377,7 +392,7 @@ inline __device__ float gpuAtomicMax(float * address, float val) {
   do {
     assumed = old;
     old = atomicCAS(address_as_ull, assumed,
-                    __float_as_int(max(val, __int_as_float(assumed))));
+                    __float_as_int(safe_max(val, __int_as_float(assumed))));
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);
@@ -387,24 +402,37 @@ inline __device__ float gpuAtomicMax(float * address, float val) {
 
 // Atomic minimum implementation.
 
+template <typename T>
+__host__ __device__ T safe_min(T a, T b) {
+  #if defined(__HIPCC__)
+  // TODO: remove this special case for HIP when issue is fixed:
+  //       https://github.com/ROCm-Developer-Tools/HIP/issues/2209
+    T min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min<T>(a, b));
+  #else
+    T min = at::_isnan(b) ? b : std::min<T>(a, b);
+  #endif
+
+  return min;
+}
+
 inline __device__ at::Half gpuAtomicMin(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
                                 [](at::Half bsum, at::Half val) {
-                                  return min(bsum, val);
+                                  return safe_min(bsum, val);
                                 });
 }
 
 inline __device__ at::BFloat16 gpuAtomicMin(at::BFloat16 * address, at::BFloat16 val) {
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) {
-                                      return min(bsum, val);
+                                      return safe_min(bsum, val);
                                     });
 }
 
 inline __device__ double gpuAtomicMin(double * address, double val) {
   return AtomicFPOp<double>()(address, val,
                               [](double val, unsigned long long int assumed) {
-                                return __double_as_longlong(min(val, __longlong_as_double(assumed)));
+                                return __double_as_longlong(safe_min(val, __longlong_as_double(assumed)));
                               });
 }
 
@@ -417,7 +445,7 @@ inline __device__ float gpuAtomicMin(float * address, float val) {
   do {
     assumed = old;
     old = atomicCAS(address_as_ull, assumed,
-                    __float_as_int(min(val, __int_as_float(assumed))));
+                    __float_as_int(safe_min(val, __int_as_float(assumed))));
 
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
   } while (assumed != old);

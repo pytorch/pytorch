@@ -1,10 +1,11 @@
 # Owner(s): ["oncall: profiler"]
-
 import collections
 import gc
 import io
 import json
 import os
+import re
+import tempfile
 import unittest
 
 import torch
@@ -15,12 +16,13 @@ import torch.utils.data.datapipes as dp
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
-    TemporaryFileName, TemporaryDirectoryName)
+    TEST_WITH_CROSSREF, TemporaryFileName, TemporaryDirectoryName)
 from torch.autograd import (_record_function_with_args_enter, _record_function_with_args_exit)
 from torch.autograd.profiler import profile as _profile
+from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerAction, ProfilerActivity
+    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver
 )
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
@@ -96,12 +98,17 @@ class TestRecordFunction(TestCase):
             with record_function("## TEST 1 ##", "1, 2, 3"):
                 rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], "hello", u)
                 _record_function_with_args_exit(rf_handle)
+            with record_function("## TEST 3 ##"):
+                rf_handle = _record_function_with_args_enter("## TEST 4 ##")
+                _record_function_with_args_exit(rf_handle)
         return prof
 
     def test_record_function(self):
         prof_result = self._record_function_with_param()
         found_test_1 = False
         found_test_2 = False
+        found_test_3 = False
+        found_test_4 = False
         for e in prof_result.function_events:
             if "## TEST 1 ##" == e.name:
                 found_test_1 = True
@@ -109,8 +116,16 @@ class TestRecordFunction(TestCase):
             elif "## TEST 2 ##" == e.name:
                 found_test_2 = True
                 self.assertTrue(e.input_shapes == [[], [], [], [], [], [3, 4, 5]])
+            elif "## TEST 3 ##" == e.name:
+                found_test_3 = True
+                self.assertTrue(e.input_shapes == [])
+            elif "## TEST 4 ##" == e.name:
+                found_test_4 = True
+                self.assertTrue(e.input_shapes == [])
         self.assertTrue(found_test_1)
         self.assertTrue(found_test_2)
+        self.assertTrue(found_test_3)
+        self.assertTrue(found_test_4)
 
     def test_datapipe_with_record_function(self):
         with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
@@ -133,6 +148,43 @@ class TestRecordFunction(TestCase):
         self.assertTrue(has_iter)
         self.assertTrue(has_mux)
 
+    def test_datapipe_delegation_with_profiler(self):
+        class IDPIterator(torch.utils.data.IterDataPipe):
+            def __init__(self):
+                self.data = list(range(10))
+                self._idx = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self._idx >= 10:
+                    self._idx = 0
+                    raise StopIteration
+                self._idx += 1
+                return self.data[self._idx - 1]
+
+            def get_value(self, idx):
+                return self.data[idx]
+
+        dp1 = IDPIterator()  # The object itself is an iterator
+        self.assertEqual(5, dp1.get_value(5))
+        it_dp1 = iter(dp1)  # This creates the 1st iterator
+        self.assertEqual(5, it_dp1.get_value(5))  # type: ignore[attr-defined]
+        self.assertEqual(list(range(10)), list(it_dp1))
+
+        class IDPDelegator(torch.utils.data.IterDataPipe):
+            def __init__(self, datapipe):
+                self.datapipe = datapipe
+
+            def __iter__(self):
+                return iter(self.datapipe)
+
+        dp2 = IDPDelegator(dp1)
+        it_dp2 = iter(dp2)
+        self.assertEqual(5, it_dp2.get_value(5))
+        self.assertEqual(list(range(10)), list(it_dp2))
+
     def test_datapipe_with_record_function_fork(self):
         with _profile(with_stack=True, use_kineto=kineto_available(), record_shapes=True) as prof:
             input_dp = dp.iter.IterableWrapper(range(10))
@@ -151,7 +203,161 @@ class TestRecordFunction(TestCase):
         self.assertTrue(has_iter)
         self.assertTrue(has_child)
 
+
+class TestExecutionGraph(TestCase):
+    def payload(self, use_cuda=False):
+        u = torch.randn(3, 4, 5, requires_grad=True)
+        with record_function("## TEST 1 ##", "1, 2, 3"):
+            rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
+            x = torch.randn(10, 10)
+            if use_cuda:
+                x = x.cuda()
+            y = torch.randn(10, 10)
+            if use_cuda:
+                y = y.cuda()
+            z = x + y + x * y + x * y
+            if use_cuda:
+                z = z.cpu()
+            _record_function_with_args_exit(rf_handle)
+
+    def get_execution_graph_root(self, output_file_name):
+        nodes = []
+        with open(output_file_name, 'r') as f:
+            eg_graph = json.load(f)
+            assert "nodes" in eg_graph
+            nodes = eg_graph["nodes"]
+        return nodes
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_execution_graph_with_kineto(self):
+        trace_called_num = 0
+
+        def trace_handler(p):
+            nonlocal trace_called_num
+            trace_called_num += 1
+
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        # Create a temp file to save execution graph data.
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        fp.close()
+        expected_loop_events = 0
+        eg = ExecutionGraphObserver()
+        eg.register_callback(fp.name)
+        with profile(
+            activities=supported_activities(),
+            schedule=torch.profiler.schedule(
+                skip_first=3,
+                wait=1,
+                warmup=1,
+                active=2),
+            on_trace_ready=trace_handler,
+        ) as p:
+            eg.start()
+            for idx in range(10):
+                expected_loop_events += 1
+                with record_function(f"## LOOP {idx} ##"):
+                    self.payload(use_cuda=use_cuda)
+                p.step()
+            eg.stop()
+
+        eg.unregister_callback()
+
+        assert trace_called_num == 2
+        assert fp.name == eg.get_output_file_path()
+        nodes = self.get_execution_graph_root(fp.name)
+        loop_count = 0
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                found_root_node = True
+            if n["name"].startswith("## LOOP "):
+                loop_count += 1
+        assert found_root_node
+        assert loop_count == expected_loop_events
+
+    def test_execution_graph_alone(self):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        # Create a temp file to save execution graph data.
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        fp.close()
+        expected_loop_events = 0
+
+        eg = ExecutionGraphObserver()
+        eg.register_callback(fp.name)
+        eg.start()
+        for idx in range(5):
+            expected_loop_events += 1
+            with record_function(f"## LOOP {idx} ##"):
+                self.payload(use_cuda=use_cuda)
+        eg.stop()
+        eg.unregister_callback()
+
+        assert fp.name == eg.get_output_file_path()
+        nodes = self.get_execution_graph_root(fp.name)
+        loop_count = 0
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                found_root_node = True
+            if n["name"].startswith("## LOOP "):
+                loop_count += 1
+        assert found_root_node
+        assert loop_count == expected_loop_events
+
+    def test_execution_graph_start_stop(self):
+        use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
+        # Create a temp file to save execution graph data.
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        fp.close()
+        expected_loop_events = 0
+        eg = ExecutionGraphObserver()
+        eg.register_callback(fp.name)
+        for idx in range(10):
+            if idx == 3:
+                eg.start()
+            elif idx == 5:
+                eg.stop()
+            elif idx == 8:
+                eg.start()
+            elif idx == 9:
+                eg.stop()
+                eg.unregister_callback()
+            if eg._execution_graph_running:
+                expected_loop_events += 1
+            with record_function(f"## LOOP {idx} ##"):
+                self.payload(use_cuda=use_cuda)
+
+        assert fp.name == eg.get_output_file_path()
+        nodes = self.get_execution_graph_root(fp.name)
+        loop_count = 0
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                found_root_node = True
+            if n["name"].startswith("## LOOP "):
+                loop_count += 1
+        assert found_root_node
+        assert loop_count == expected_loop_events
+
+    def test_execution_graph_no_capture(self):
+        fp = tempfile.NamedTemporaryFile('w+t', suffix='.json', delete=False)
+        fp.close()
+        eg = ExecutionGraphObserver()
+        eg.register_callback(fp.name)
+        eg.unregister_callback()
+
+        assert fp.name == eg.get_output_file_path()
+        nodes = self.get_execution_graph_root(fp.name)
+        for n in nodes:
+            assert "name" in n
+            if "[pytorch|profiler|execution_graph|process]" in n["name"]:
+                found_root_node = True
+        assert found_root_node
+
+
 class TestProfiler(TestCase):
+
+    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     def test_source(self):
         """Checks that source code attribution works for eager, TS and autograd mode
         """
@@ -179,6 +385,9 @@ class TestProfiler(TestCase):
 
         mod = DummyModule()
 
+        def call_module(x):
+            return mod(x)
+
         with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
@@ -187,7 +396,7 @@ class TestProfiler(TestCase):
             v = 2 * w
             v.backward()
             a = torch.randn(2, 3, 2, 2, requires_grad=True)
-            b = mod(a)
+            b = call_module(a)
             c = b.sum()
             c.backward()
 
@@ -198,6 +407,22 @@ class TestProfiler(TestCase):
                     "test_source" in entry or
                     "ts_method_1" in entry or
                     "ts_method_2" in entry) for entry in e.stack]))
+
+        # TODO: https://github.com/pytorch/kineto/issues/617
+        if kineto_available() and not IS_WINDOWS:
+            with TemporaryFileName(mode="w+") as fname:
+                p.export_chrome_trace(fname)
+                with io.open(fname, 'r') as f:
+                    events = json.load(f)["traceEvents"]
+
+                def extract(pattern: str):
+                    matches = [e for e in events if re.search(pattern, e["name"])]
+                    self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
+                    return matches[0]
+
+                module_event = extract(r"DummyModule_0")
+                wrapper_event = extract(r"call_module")
+                self.assertEqual(module_event["args"]["Python parent id"], wrapper_event["args"]["Python id"])
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
@@ -844,6 +1069,44 @@ class TestProfiler(TestCase):
                 self.assertTrue(all([ts in ts_to_name.keys() for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]]))
                 self.assertTrue(ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits")
                 self.assertTrue(ts_to_name[s_ts_2] == "aten::add")
+
+    def test_profiler_type(self):
+        profiler_type = torch._C._autograd._profiler_type
+        ActiveProfilerType = torch._C._autograd.ActiveProfilerType
+        self.assertEqual(profiler_type(), ActiveProfilerType.NONE)
+
+        # Autograd profiler
+        with _profile_legacy():
+            self.assertEqual(profiler_type(), ActiveProfilerType.LEGACY)
+
+        # Kineto profiler
+        with profile():
+            self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
+
+    def test_profiler_correlation_id(self):
+        '''
+        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        So we will reuse id_uniqueness_set.
+        '''
+        id_uniqueness_set = set()
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        uint32_max = 2**32 - 1
+        for i in range(5):
+            with profile() as prof:
+                model(inputs)
+            for event in prof.profiler.kineto_results.events():
+                corr_id = event.correlation_id()
+                if (corr_id):
+                    self.assertTrue(corr_id not in id_uniqueness_set)
+                    id_uniqueness_set.add(corr_id)
+                    self.assertTrue(corr_id < uint32_max)
+
 
 if __name__ == '__main__':
     run_tests()

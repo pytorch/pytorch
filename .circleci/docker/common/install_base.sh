@@ -20,14 +20,21 @@ install_ubuntu() {
     maybe_libiomp_dev="libiomp-dev"
   fi
 
+  # TODO: Remove this once nvidia package repos are back online
+  # Comment out nvidia repositories to prevent them from getting apt-get updated, see https://github.com/pytorch/pytorch/issues/74968
+  # shellcheck disable=SC2046
+  sed -i 's/.*nvidia.*/# &/' $(find /etc/apt/ -type f -name "*.list")
+
   # Install common dependencies
   apt-get update
   # TODO: Some of these may not be necessary
   ccache_deps="asciidoc docbook-xml docbook-xsl xsltproc"
+  deploy_deps="libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev"
   numpy_deps="gfortran"
   apt-get install -y --no-install-recommends \
     $ccache_deps \
     $numpy_deps \
+    ${deploy_deps} \
     ${cmake3} \
     apt-transport-https \
     autoconf \
@@ -45,8 +52,8 @@ install_ubuntu() {
     libasound2-dev \
     libsndfile-dev \
     software-properties-common \
-    sudo \
     wget \
+    sudo \
     vim
 
   # Should resolve issues related to various apt package repository cert issues

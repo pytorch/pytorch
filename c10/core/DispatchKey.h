@@ -51,12 +51,18 @@ enum class BackendComponent : uint8_t {
   CUDABit,
   HIPBit,
   XLABit,
-  MLCBit,
+  MPSBit,
   IPUBit,
   XPUBit,
   HPUBit,
   VEBit,
   LazyBit,
+  // A meta tensor is a tensor without any data associated with it.  (They
+  // have also colloquially been referred to as tensors on the "null" device).
+  // A meta tensor can be used to dry run operators without actually doing any
+  // computation, e.g., add on two meta tensors would give you another meta
+  // tensor with the output shape and dtype, but wouldn't actually add anything.
+  MetaBit,
   PrivateUse1Bit,
   PrivateUse2Bit,
   PrivateUse3Bit,
@@ -97,7 +103,7 @@ enum class BackendComponent : uint8_t {
 
 // See Note [DispatchKeySet Internal Representation] for more details.
 //
-// NOTE: Keep the list in sync with `DispatchKey` in tools/codegen/model.py
+// NOTE: Keep the list in sync with `DispatchKey` in torchgen/model.py
 enum class DispatchKey : uint16_t {
 
   // ~~~~~~~~~~~~~~~~~~~~~~~~~~ UNDEFINED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -156,13 +162,6 @@ enum class DispatchKey : uint16_t {
   Vulkan,
   Metal,
 
-  // A meta tensor is a tensor without any data associated with it.  (They
-  // have also colloquially been referred to as tensors on the "null" device).
-  // A meta tensor can be used to dry run operators without actually doing any
-  // computation, e.g., add on two meta tensors would give you another meta
-  // tensor with the output shape and dtype, but wouldn't actually add anything.
-  Meta,
-
   // See [Note: Per-Backend Functionality Dispatch Keys]
   Quantized,
 
@@ -204,7 +203,7 @@ enum class DispatchKey : uint16_t {
   // as other functionality keys
   EndOfNonCustomizableBackends = SparseCsrCUDA,
 
-  NestedTensor, // lives out of tree at https://github.com/pytorch/nestedtensor
+  NestedTensor,
 
   // In some situations, it is not immediately obvious what the correct
   // backend for function is, because the function in question doesn't
@@ -214,6 +213,22 @@ enum class DispatchKey : uint16_t {
   BackendSelect,
 
   Python,
+
+  // Out-of-core key for Fake Tensor in torchdistx.
+  // See https://pytorch.org/torchdistx/latest/fake_tensor.html
+  Fake,
+
+  // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
+  // is to insert code after the "autograd subsystem" runs, so this key should
+  // be directly after ADInplaceOrView and all of the autograd keys.
+  FuncTorchDynamicLayerBackMode,
+
+  // Alias and mutation removal.
+  // If some backends want to opt into only alias removal or only mutation
+  // removal,
+  // we can consider adding separate keys dedicated to those individual passes.
+  // See Note [Functionalization Pass In Core] for details.
+  Functionalize,
 
   // The named dispatch key is set for any tensors with named dimensions.
   // Although we have a dispatch key for named tensors, for historical reasons,
@@ -240,11 +255,6 @@ enum class DispatchKey : uint16_t {
   Negative,
 
   ZeroTensor, // registered at build/aten/src/ATen/RegisterZeroTensor.cpp
-
-  // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
-  // is to insert code after the "autograd subsystem" runs, so this key should
-  // be directly after ADInplaceOrView and all of the autograd keys.
-  FuncTorchDynamicLayerBackMode,
 
   // Note [ADInplaceOrView key]
   // ADInplaceOrView key is used by inplace or view ops to register a kernel
@@ -326,6 +336,7 @@ enum class DispatchKey : uint16_t {
   // Autocasting precedes VariableTypeId, to ensure casts are autograd-exposed
   // and inputs are saved for backward in the post-autocast type.
   AutocastCPU,
+  AutocastXPU,
   // Naughtily, AutocastCUDA is also being used for XLA.  In the terminal state,
   // it probably should get its own Autocast key
   AutocastCUDA,
@@ -347,12 +358,10 @@ enum class DispatchKey : uint16_t {
   VmapMode,
 
   FuncTorchGradWrapper, // See Note [Out-of-tree vmap+grad prototype]
-  // Alias and mutation removal.
-  // If some backends want to opt into only alias removal or only mutation
-  // removal,
-  // we can consider adding separate keys dedicated to those individual passes.
-  // See Note [Functionalization Pass In Core] for details.
-  Functionalize,
+
+  // Out-of-core key for Deferred Module Initialization in torchdistx.
+  // See https://pytorch.org/torchdistx/latest/deferred_init.html
+  DeferredInit,
 
   // Used by Python key logic to know the set of tls on entry to the dispatcher
   // This kernel assumes it is the top-most non-functorch-related DispatchKey.
@@ -393,12 +402,13 @@ enum class DispatchKey : uint16_t {
   HIP, // NB: I think this is not actually used, due to Note [Masquerading as
   // CUDA]
   XLA, // lives out of tree at https://github.com/pytorch/xla
-  MLC, // lives out of tree at https://github.com/pytorch/MLCompute
+  MPS, // registered at build/aten/src/ATen/RegisterMPS.cpp
   IPU, // lives out of tree at https://github.com/graphcore/poptorch
   XPU, // For out of tree Intel's heterogeneous computing plug-in
   HPU, // For out of tree & closed source integration of HPU / Habana
   VE, // For out of tree & closed source integration of SX-Aurora / NEC
   Lazy, // For lazy tensor backends
+  Meta,
   // Here are reserved backends for user-defined backends, see Note [Private use
   // DispatchKey]
   // To see some example about how to use this, check out ORT
@@ -417,12 +427,13 @@ enum class DispatchKey : uint16_t {
   QuantizedCUDA, // registered at build/aten/src/ATen/RegisterQuantizedCUDA.cpp
   _QuantizedHIP,
   _QuantizedXLA,
-  _QuantizedMLC,
+  _QuantizedMPS,
   _QuantizedIPU,
   QuantizedXPU, // For out of tree Intel's heterogeneous computing plug-in
   _QuantizedHPU,
   _QuantizedVE,
   _QuantizedLazy,
+  _QuantizedMeta,
   _QuantizedPrivateUse1,
   _QuantizedPrivateUse2,
   _QuantizedPrivateUse3,
@@ -439,16 +450,42 @@ enum class DispatchKey : uint16_t {
   SparseHIP, // TODO: I think this is not actually used, due to Note
   // [Masquerading as CUDA]
   _SparseXLA,
-  _SparseMLC,
+  _SparseMPS,
   _SparseIPU,
   SparseXPU, // For out of tree Intel's heterogeneous computing plug-in
   _SparseHPU,
   SparseVE, // For out of tree & closed source integration of SX-Aurora / NEC
   _SparseLazy,
+  _SparseMeta,
   _SparsePrivateUse1,
   _SparsePrivateUse2,
   _SparsePrivateUse3,
   EndOfSparseBackends = _SparsePrivateUse3,
+
+  // ~~~~~~~~~~~~~~ "NestedTensor" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~~~
+  // //
+  // keys starting with an _ are not currently used,
+  // but are needed to ensure that every backend is indexed correctly.
+
+  // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
+  StartOfNestedTensorBackends,
+  // registered at build/aten/src/ATen/RegisterNestedTensorCPU.cpp
+  NestedTensorCPU,
+  // registered at build/aten/src/ATen/RegisterNestedTensorCUDA.cpp
+  NestedTensorCUDA,
+  _NestedTensorHIP,
+  _NestedTensorXLA,
+  _NestedTensorMPS,
+  _NestedTensorIPU,
+  _NestedTensorXPU,
+  _NestedTensorHPU,
+  _NestedTensorVE,
+  _NestedTensorLazy,
+  _NestedTensorMeta,
+  _NestedTensorPrivateUse1,
+  _NestedTensorPrivateUse2,
+  _NestedTensorPrivateUse3,
+  EndOfNestedTensorBackends = _NestedTensorPrivateUse3,
 
   // ~~~~~~~~~~~~~~ "Autograd" Per-Backend Dispatch keys ~~~~~~~~~~~~~~~~~ //
   // keys starting with an _ are not currently used,
@@ -460,12 +497,13 @@ enum class DispatchKey : uint16_t {
   AutogradCUDA,
   _AutogradHIP,
   AutogradXLA,
-  AutogradMLC,
+  AutogradMPS,
   AutogradIPU,
   AutogradXPU,
   AutogradHPU,
   _AutogradVE,
   AutogradLazy,
+  AutogradMeta,
   // Here are some reserved pre-autograd keys for user-defined backends, see
   // Note [Private use DispatchKey]
   AutogradPrivateUse1,
@@ -562,7 +600,8 @@ constexpr bool isAliasDispatchKey(DispatchKey k) {
 
 constexpr bool isPerBackendFunctionalityKey(DispatchKey k) {
   if (k == DispatchKey::Dense || k == DispatchKey::Quantized ||
-      k == DispatchKey::Sparse || k == DispatchKey::AutogradFunctionality) {
+      k == DispatchKey::Sparse || k == DispatchKey::AutogradFunctionality ||
+      k == DispatchKey::NestedTensor) {
     return true;
   } else {
     return false;
@@ -649,6 +688,12 @@ constexpr BackendComponent toBackendComponent(DispatchKey k) {
         static_cast<uint8_t>(k) -
         static_cast<uint8_t>(DispatchKey::StartOfSparseBackends));
   } else if (
+      k >= DispatchKey::StartOfNestedTensorBackends &&
+      k <= DispatchKey::EndOfNestedTensorBackends) {
+    return static_cast<BackendComponent>(
+        static_cast<uint8_t>(k) -
+        static_cast<uint8_t>(DispatchKey::StartOfNestedTensorBackends));
+  } else if (
       k >= DispatchKey::StartOfAutogradBackends &&
       k <= DispatchKey::EndOfAutogradBackends) {
     return static_cast<BackendComponent>(
@@ -668,6 +713,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
     return DispatchKey::Quantized;
   } else if (k <= DispatchKey::EndOfSparseBackends) {
     return DispatchKey::Sparse;
+  } else if (k <= DispatchKey::EndOfNestedTensorBackends) {
+    return DispatchKey::NestedTensor;
   } else if (k <= DispatchKey::EndOfAutogradBackends) {
     return DispatchKey::AutogradFunctionality;
   } else {
@@ -675,7 +722,8 @@ constexpr DispatchKey toFunctionalityKey(DispatchKey k) {
   }
 }
 
-// Given (DispatchKey::Dense, DispatchKey::CUDABit), returns DispatchKey::CUDA
+// Given (DispatchKey::Dense, BackendComponent::CUDABit), returns
+// DispatchKey::CUDA.
 // See Note [The Ordering of Per-Backend Dispatch Keys Matters!]
 // This function relies on the invariant that the dispatch keys between
 // StartOfDenseBackends and EndOfRuntimeBackendKeys are ordered by backend
@@ -696,6 +744,11 @@ constexpr DispatchKey toRuntimePerBackendFunctionalityKey(
   if (functionality_k == DispatchKey::Quantized) {
     return static_cast<DispatchKey>(
         static_cast<uint8_t>(DispatchKey::StartOfQuantizedBackends) +
+        static_cast<uint8_t>(backend_k));
+  }
+  if (functionality_k == DispatchKey::NestedTensor) {
+    return static_cast<DispatchKey>(
+        static_cast<uint8_t>(DispatchKey::StartOfNestedTensorBackends) +
         static_cast<uint8_t>(backend_k));
   }
   if (functionality_k == DispatchKey::AutogradFunctionality) {

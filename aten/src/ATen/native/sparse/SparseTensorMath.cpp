@@ -677,7 +677,8 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
       dstBuffer.add_(srcBuffer, value);
     }
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf, at::ScalarType::Bool, at::ScalarType::BFloat16, at::ScalarType::Half,
         commonDtype, "add_dense_sparse", [&] {
           add_dense_sparse_worker_cpu<scalar_t>(resultBuffer, value, sparse, indices, valuesBuffer);
         });
@@ -709,8 +710,12 @@ Tensor& mul_sparse_(Tensor& self, const Tensor& other) {
 
 Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
   // // TODO: Use a specialized CSR kernel for performance if needed
-  TORCH_CHECK(t_.is_sparse_csr() || (t_.layout() == c10::kStrided && t_.dim() == 0), "mul(dense, sparse_csr) is not supported");
-  TORCH_CHECK(src_.is_sparse_csr() || (src_.layout() == c10::kStrided && src_.dim() == 0), "mul(sparse_csr, dense) is not supported");
+  if (t_.is_sparse_csr() && src_.layout() == kStrided) {
+    return mul_out_sparse_csr(t_, src_.sparse_mask(t_), r);
+  }
+  if (t_.layout() == kStrided && src_.is_sparse_csr()) {
+    return mul_out_sparse_csr(t_.sparse_mask(src_), src_, r);
+  }
   TORCH_CHECK(r.is_sparse_csr(), "Expected result Tensor to be of format CSR");
   Tensor t = t_.to_sparse();
   Tensor src = src_.to_sparse();
@@ -723,8 +728,12 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 
 Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
   auto commonDtype = at::result_type(self, other);
-  TORCH_CHECK(self.is_sparse_csr(), "mul(dense, sparse_csr) is not supported");
-  TORCH_CHECK(other.is_sparse_csr(), "mul(sparse_csr, dense) is not supported");
+  if (self.is_sparse_csr() && other.layout() == kStrided) {
+    return mul_sparse_csr(self, other.sparse_mask(self));
+  }
+  if (self.layout() == kStrided && other.is_sparse_csr()) {
+    return mul_sparse_csr(self.sparse_mask(other), other);
+  }
   auto result_options = self.options().dtype(commonDtype);
   // CSR is 2d!
   Tensor result = at::empty({0, 0}, result_options);
@@ -895,10 +904,22 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     const Scalar& alpha
 ) {
   // TODO: This error message seems awfully opaque
-  TORCH_CHECK(!t.is_cuda(),  "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!r.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got CUDA tensor");
-  TORCH_CHECK(!sparse_.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
-  TORCH_CHECK(!dense.is_cuda(), "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
+  TORCH_CHECK(
+      t.is_cpu(),
+      "Expected all tensors to be on the same device. addmm expected 't' to be CPU tensor, but got tensor on ",
+      t.device());
+  TORCH_CHECK(
+      r.is_cpu(),
+      "Expected all tensors to be on the same device. addmm: expected 'out' to be CPU tensor, but got tensor on ",
+      t.device());
+  TORCH_CHECK(
+      sparse_.is_cpu(),
+      "Expected all tensors to be on the same device. addmm: expected 'mat1' to be a CPU tensor, but got tensor on ",
+      t.device());
+  TORCH_CHECK(
+      dense.is_cpu(),
+      "Expected all tensors to be on the same device. addmm: expected 'mat2' to be a CPU tensor, but got tensor on ",
+      t.device());
 
   TORCH_CHECK(sparse_.sparse_dim() == 2, "addmm: matrices expected, got ", sparse_.sparse_dim(), "D tensor");
   TORCH_CHECK(sparse_.dense_dim() == 0, "addmm: scalar values expected, got ", sparse_.dense_dim(), "D values");

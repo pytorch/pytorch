@@ -141,7 +141,7 @@ def _batch_trace_XXT(bmat):
     return flat_trace.reshape(bmat.shape[:-2])
 
 
-def kl_divergence(p, q):
+def kl_divergence(p: Distribution, q: Distribution) -> torch.Tensor:
     r"""
     Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
 
@@ -822,4 +822,5 @@ def _add_kl_info():
         rows.append("* :class:`~torch.distributions.{}` and :class:`~torch.distributions.{}`"
                     .format(p.__name__, q.__name__))
     kl_info = '\n\t'.join(rows)
-    kl_divergence.__doc__ += kl_info  # type: ignore[operator]
+    if kl_divergence.__doc__:
+        kl_divergence.__doc__ += kl_info  # type: ignore[operator]

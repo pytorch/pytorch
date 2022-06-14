@@ -14,8 +14,8 @@
 #else
 #include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_strided.h>
-#include <ATen/ops/_weight_norm_cuda_interface_native.h>
-#include <ATen/ops/_weight_norm_cuda_interface_backward_native.h>
+#include <ATen/ops/_weight_norm_interface_native.h>
+#include <ATen/ops/_weight_norm_interface_backward_native.h>
 #endif
 
 
@@ -426,7 +426,7 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   return std::tuple<Tensor, Tensor>{w, norms};
 }
 
-std::tuple<Tensor, Tensor> weight_norm_cuda_backward
+std::tuple<Tensor, Tensor> weight_norm_backward_cuda
   (const Tensor & grad_w,
    const Tensor & saved_v,
    const Tensor & saved_g,

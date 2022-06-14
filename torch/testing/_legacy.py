@@ -96,6 +96,9 @@ _complex_types = _dispatch_dtypes((torch.cfloat, torch.cdouble))
 def complex_types():
     return _complex_types
 
+def complex_types_and(*dtypes):
+    return _complex_types + _validate_dtypes(*dtypes)
+
 _all_types_and_complex = _all_types + _complex_types
 def all_types_and_complex():
     return _all_types_and_complex

@@ -6,11 +6,12 @@ import sys
 import unittest
 
 import torch
+import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp.utils import (
+from torch.distributed.fsdp._utils import (
     _apply_to_tensors,
-    _replace_by_prefix,
 )
+from torch.distributed.utils import _replace_by_prefix
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
@@ -90,6 +91,23 @@ class TestUtils(TestCase):
         }
         _replace_by_prefix(state_dict, "module.layer.", "layer.")
         assert state_dict == original_state_dict
+
+
+    def test_packed_sequence(self):
+        """Test to ensure RNN packed sequences are modified correctly."""
+        rnn = nn.RNN(5, 5)
+
+        x = torch.rand((5, 1, 5), dtype=torch.float)
+        seq_length = torch.tensor([4], dtype=torch.int)
+
+        def fill_fn(x):
+            x.fill_(0)
+
+        x = nn.utils.rnn.pack_padded_sequence(x, seq_length)
+        x, h = rnn(x)
+        x = _apply_to_tensors(fill_fn, x)
+        x, _ = nn.utils.rnn.pad_packed_sequence(x)
+        self.assertEqual(torch.sum(x), 0)
 
 
 instantiate_parametrized_tests(TestUtils)

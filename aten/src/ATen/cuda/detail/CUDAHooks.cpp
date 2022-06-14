@@ -139,6 +139,14 @@ bool CUDAHooks::hasCuSOLVER() const {
 #endif
 }
 
+bool CUDAHooks::hasROCM() const {
+  // Currently, this is same as `compiledWithMIOpen`.
+  // But in future if there are ROCm builds without MIOpen,
+  // then `hasROCM` should return true while `compiledWithMIOpen`
+  // should return false
+  return AT_ROCM_ENABLED();
+}
+
 #if defined(USE_DIRECT_NVRTC)
 static std::pair<std::unique_ptr<at::DynamicLibrary>, at::cuda::NVRTC*> load_nvrtc() {
   return std::make_pair(nullptr, at::cuda::load_nvrtc());

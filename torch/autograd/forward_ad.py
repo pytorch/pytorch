@@ -4,6 +4,8 @@ from collections import namedtuple
 
 from typing import Any
 
+__all__ = ["UnpackedDualTensor", "enter_dual_level", "exit_dual_level", "make_dual", "unpack_dual", "dual_level"]
+
 # Global variable used to make the python API simpler to use
 _current_level = -1
 
@@ -69,10 +71,19 @@ def make_dual(tensor, tangent, *, level=None):
     if level < 0:
         raise RuntimeError("Trying to create a dual Tensor for forward AD but no level "
                            "exists, make sure to enter_dual_level() first.")
+    if not (tensor.is_floating_point() or tensor.is_complex()):
+        raise ValueError(f"Expected primal to be floating point or complex, but got: {tensor.dtype}")
+    if not (tangent.is_floating_point() or tangent.is_complex()):
+        raise ValueError(f"Expected tangent to be floating point or complex, but got: {tangent.dtype}")
 
     return torch._VF._make_dual(tensor, tangent, level=level)
 
-UnpackedDualTensor = namedtuple('UnpackedDualTensor', ['primal', 'tangent'])
+_UnpackedDualTensor = namedtuple('_UnpackedDualTensor', ['primal', 'tangent'])
+
+class UnpackedDualTensor(_UnpackedDualTensor):
+    r"""Namedtuple returned by :func:`unpack_dual` containing the primal and tangent components of the dual tensor.
+    See :func:`unpack_dual` for more details."""
+    pass
 
 def unpack_dual(tensor, *, level=None):
     r"""Unpacks a "dual tensor" to get both its Tensor value and its forward AD gradient.

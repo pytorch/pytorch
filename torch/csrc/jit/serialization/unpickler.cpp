@@ -77,6 +77,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StreamObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
+      case MemoryFormatType::Kind:
       case ScalarTypeType::Kind:
       case RRefType::Kind:
       case AnyType::Kind:

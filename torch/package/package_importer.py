@@ -7,7 +7,7 @@ import os.path
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import cast, Any, BinaryIO, Callable, Dict, List, Optional, Union
+from typing import Any, BinaryIO, Callable, cast, Dict, Iterable, List, Optional, Union
 from weakref import WeakValueDictionary
 
 import torch
@@ -21,11 +21,24 @@ from ._importlib import (
     _resolve_name,
     _sanity_check,
 )
-from ._mangling import PackageMangler, demangle
+from ._mangling import demangle, PackageMangler
 from ._package_unpickler import PackageUnpickler
-from .file_structure_representation import Directory, _create_directory_from_file_list
+from .file_structure_representation import _create_directory_from_file_list, Directory
 from .glob_group import GlobPattern
 from .importer import Importer
+
+__all__ = ["PackageImporter"]
+
+
+# This is a list of imports that are implicitly allowed even if they haven't
+# been marked as extern. This is to work around the fact that Torch implicitly
+# depends on numpy and package can't track it.
+# https://github.com/pytorch/MultiPy/issues/46
+IMPLICIT_IMPORT_ALLOWLIST: Iterable[str] = [
+    "numpy",
+    "numpy.core",
+    "numpy.core._multiarray_umath",
+]
 
 
 class PackageImporter(Importer):
@@ -45,6 +58,7 @@ class PackageImporter(Importer):
     """The dictionary of already loaded modules from this package, equivalent to ``sys.modules`` but
     local to this importer.
     """
+
     modules: Dict[str, types.ModuleType]
 
     def __init__(
@@ -65,6 +79,8 @@ class PackageImporter(Importer):
         Raises:
             ImportError: If the package will use a disallowed module.
         """
+        torch._C._log_api_usage_once("torch.package.PackageImporter")
+
         self.zip_reader: Any
         if isinstance(file_or_buffer, torch._C.PyTorchFileReader):
             self.filename = "<pytorch_file_reader>"
@@ -237,7 +253,7 @@ class PackageImporter(Importer):
         # Load the data (which may in turn use `persistent_load` to load tensors)
         data_file = io.BytesIO(self.zip_reader.get_record(pickle_file))
         unpickler = self.Unpickler(data_file)
-        unpickler.persistent_load = persistent_load
+        unpickler.persistent_load = persistent_load  # type: ignore[assignment]
 
         @contextmanager
         def set_deserialization_context():
@@ -357,6 +373,9 @@ class PackageImporter(Importer):
         cur: _PathNode = self.root
         for atom in name.split("."):
             if not isinstance(cur, _PackageNode) or atom not in cur.children:
+                if name in IMPLICIT_IMPORT_ALLOWLIST:
+                    module = self.modules[name] = importlib.import_module(name)
+                    return module
                 raise ModuleNotFoundError(
                     f'No module named "{name}" in self-contained archive "{self.filename}"'
                     f" and the module is also not in the list of allowed external modules: {self.extern_modules}",
@@ -634,14 +653,14 @@ _package_imported_modules: WeakValueDictionary = WeakValueDictionary()
 _orig_getfile = inspect.getfile
 
 
-def patched_getfile(object):
+def _patched_getfile(object):
     if inspect.isclass(object):
         if object.__module__ in _package_imported_modules:
             return _package_imported_modules[object.__module__].__file__
     return _orig_getfile(object)
 
 
-inspect.getfile = patched_getfile
+inspect.getfile = _patched_getfile
 
 
 class _PackageResourceReader:

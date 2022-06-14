@@ -4,8 +4,32 @@
 #include <torch/csrc/jit/passes/onnx/helper.h>
 #include <torch/csrc/jit/python/python_arg_flatten.h>
 
+#include <utility>
+
 namespace torch {
 namespace jit {
+
+// Merges existing_type and inferred_type.
+// Returns {merged type, whether or not inferred_type was used}.
+//
+// The inferred type will take higher precedence, since it is produced by ONNX
+// shape inference, and is more compatible with ONNX. In cases where ONNX shape
+// inference fails to produce an inferred type, or produces an inferred type
+// that is incomplete, refer to existing type and fill in the gap that is
+// missing. Currently the following cases are supported.
+//  1. existing type: Tensor[], inferred type: Tensor[]
+//    For list of tensors, existing type does not store datatype nor shape for
+//    inner tensor. Thus inferred type always contain more information, and is
+//    returned.
+//  2. existing type: Tensor, inferred type: Tensor
+//    Fill in missing info (shape, data type) for inferred type from existing
+//    type.
+//  3. existing type: Scalar[], inferred type: Tensor
+//    ONNX represents list of scalars by 1-d Tensor. Return inferred type since
+//    it is more compatible with ONNX.
+std::pair<TypePtr, bool> MergeInferredType(
+    TypePtr existing_type,
+    TypePtr inferred_type);
 
 void MergeInferredTypeAndSetMap(
     Value* dest_v,
@@ -32,7 +56,8 @@ TORCH_API void ONNXAssignOutputShape(
     std::shared_ptr<Graph>& graph,
     at::ArrayRef<at::Tensor> outputs,
     const python::IODescriptor& desc,
-    bool onnx_shape_inference);
+    bool onnx_shape_inference,
+    bool is_script);
 
 // Utilize ONNX Shape Inference for node.
 // The node must have ONNX namespace, and is valid ONNX node according to spec.

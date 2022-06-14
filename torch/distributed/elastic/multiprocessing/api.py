@@ -47,7 +47,7 @@ class SignalException(Exception):
         self.sigval = sigval
 
 
-def _terminate_process_handler(signum: int, frame: FrameType) -> None:
+def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
     """Termination handler that raises exceptions on the main process.
 
     When the process receives death signal(SIGTERM, SIGINT), this termination handler will

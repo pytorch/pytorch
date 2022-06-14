@@ -5,22 +5,12 @@ set -eux -o pipefail
 windows_s3_link="https://ossci-windows.s3.amazonaws.com"
 
 case ${CUDA_VERSION} in
-    10.1)
-        # This is typically blank but for CUDA 10* it'll be set to 10
-        cudnn_file_name="cudnn-${CUDA_VERSION}-windows10-x64-v7.6.4.38"
-        ;;
     10.2)
         cudnn_file_name="cudnn-${CUDA_VERSION}-windows10-x64-v7.6.5.32"
         ;;
-    11.1)
-        cudnn_file_name="cudnn-${CUDA_VERSION}-windows-x64-v8.0.5.39"
-        ;;
     11.3)
-        cudnn_file_name="cudnn-${CUDA_VERSION}-windows-x64-v8.2.0.53"
-        ;;
-    11.5)
-        # Since cudnn 8.3  the filename have changed
-        cudnn_file_name="cudnn-windows-x86_64-8.3.2.44_cuda${CUDA_VERSION}-archive"
+        # Use cudnn8.3 with hard-coded cuda11.3 version
+        cudnn_file_name="cudnn-windows-x86_64-8.3.2.44_cuda11.5-archive"
         ;;
     11.6)
         # Use cudnn8.3 with hard-coded cuda11.5 version

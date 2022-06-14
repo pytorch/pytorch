@@ -13,10 +13,10 @@ architectures:
 from typing import Dict, List, Tuple, Optional
 
 
-CUDA_ARCHES = ["10.2", "11.3", "11.5", "11.6"]
+CUDA_ARCHES = ["10.2", "11.3", "11.6"]
 
 
-ROCM_ARCHES = ["4.5.2", "5.0"]
+ROCM_ARCHES = ["5.0", "5.1.1"]
 
 
 def arch_type(arch_version: str) -> str:

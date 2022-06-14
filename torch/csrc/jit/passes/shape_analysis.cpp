@@ -361,7 +361,6 @@ class ShapePropagator : public PropertyPropBase {
   }
 
   OperatorSet cannot_propagate_shape_by_running_it = {
-      "aten::solve(Tensor self, Tensor A) -> (Tensor, Tensor)",
       "aten::inverse(Tensor self) -> Tensor",
   };
 

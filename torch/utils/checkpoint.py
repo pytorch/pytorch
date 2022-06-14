@@ -1,6 +1,6 @@
 import torch
 import warnings
-from typing import Any, Iterable, List, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
@@ -332,7 +332,7 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
             had_cuda_in_fwd = True
             fwd_gpu_devices, fwd_gpu_states = get_device_states(*args)
 
-    storage: List[Union[torch.Tensor, None]] = []
+    storage: Dict[int, Optional[torch.Tensor]] = {}
     counter = 0
 
     def pack(x):
@@ -343,10 +343,13 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
         return counter - 1
 
     def unpack(x):
+        unpack_counter = 0
         if len(storage) == 0:
 
             def inner_pack(inner):
-                storage.append(inner)
+                nonlocal unpack_counter
+                storage[unpack_counter] = inner
+                unpack_counter += 1
                 return None
 
             def inner_unpack(packed):
@@ -367,11 +370,18 @@ def _checkpoint_without_reentrant(function, preserve_rng_state=True, *args):
                     with torch.autograd.graph.saved_tensors_hooks(inner_pack, inner_unpack):
                         _unused = function(*args)
 
-        return storage[x]
+        if x not in storage:
+            raise RuntimeError(
+                "Attempt to retrieve a tensor saved by autograd multiple times without checkpoint"
+                " recomputation being triggered in between, this is not currently supported. Please"
+                " open an issue with details on your use case so that we can prioritize adding this."
+            )
+
+        return storage.pop(x)
 
     with torch.autograd.graph.saved_tensors_hooks(pack, unpack):
         output = function(*args)
-        if torch.cuda._initialized and not had_cuda_in_fwd:
+        if torch.cuda._initialized and preserve_rng_state and not had_cuda_in_fwd:
             # Cuda was not initialized before running the forward, so we didn't
             # stash the CUDA state.
             raise RuntimeError(

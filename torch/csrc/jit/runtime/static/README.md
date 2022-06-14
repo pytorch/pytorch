@@ -170,6 +170,7 @@ The following diagram shows the core data structure. An arrow from `A` to `B` me
 `A` stores a reference to `B`. If the reference is unowned,
 `A` may not out live `B` or anything that `B` stores a reference to (directly or indirectly).
 If the reference is owned, the lifetimes of `A` and `B` are the same.
+```
 
                          IValue array◄────────────────┐─────────────────────────────────────────┐
                               ▲                       │               Owns                      │       Owns
@@ -185,6 +186,7 @@ BlockInfo◄├─────────────────────�
       Owns│                                                                                     │
           ▼                                                                                     │
 ProcessedFunction ◄─────────────────────────────────────────────────────────────────────────────┘
+```
 
 Each class is described in detail below.
 

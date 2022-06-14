@@ -90,7 +90,8 @@ index_select_add(const Tensor &select_indices,
                              const Tensor& /*offsets*/,
                              bool /*include_last_offset*/,
                              Tensor &bag_size,
-                             index_t padding_idx) {
+                             index_t padding_idx,
+                             _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   TORCH_CHECK(select_indices.numel() == add_indices.numel());
   auto* add_indices_data = add_indices.data_ptr<index_t>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -167,7 +168,8 @@ index_select_add(const Tensor &select_indices,
                              const Tensor& offsets,
                              bool include_last_offset,
                              Tensor &bag_size,
-                             index_t padding_idx) {
+                             index_t padding_idx,
+                             _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<at::Half>();
@@ -196,7 +198,8 @@ index_select_add(const Tensor &select_indices,
 
 #ifdef USE_FBGEMM
     using float16 = uint16_t;
-    auto kernel_fp16_index_t =
+    auto kernel_fp16_index_t = fbgemm_kernel_cache ?
+      fbgemm_kernel_cache->getCallback</* has_weight */ false, index_t, float16>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float16, index_t, index_t, float16>(
         /* block_size */ddim,
         /* has_weight */false,
@@ -316,7 +319,8 @@ index_select_add(const Tensor &select_indices,
                              const Tensor& offsets,
                              bool include_last_offset,
                              Tensor &bag_size,
-                             index_t padding_idx) {
+                             index_t padding_idx,
+                             _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* select_indices_data = select_indices.data_ptr<index_t>();
   auto* output_data = output.data_ptr<float>();
@@ -345,6 +349,8 @@ index_select_add(const Tensor &select_indices,
 
 #ifdef USE_FBGEMM
     auto kernel_fp32_index_t =
+      fbgemm_kernel_cache ?
+      fbgemm_kernel_cache->getCallback</* has_weight */ false, index_t, float>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float, index_t, index_t>(
         /* block_size */ddim,
         /* has_weight */false,
@@ -443,7 +449,8 @@ index_select_scale_add(const Tensor &select_indices,
                                    const Tensor& /*offsets*/,
                                    bool /*include_last_offset*/,
                                    Tensor &bag_size,
-                                   index_t padding_idx) {
+                                   index_t padding_idx,
+                                  _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
   auto* add_indices_data = add_indices.data_ptr<index_t>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -498,7 +505,8 @@ index_select_scale_add(const Tensor &select_indices,
                        const Tensor& offsets,
                        bool include_last_offset,
                        Tensor &bag_size,
-                       index_t padding_idx) {
+                       index_t padding_idx,
+                       _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<at::Half>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -531,6 +539,8 @@ index_select_scale_add(const Tensor &select_indices,
     using float16 = uint16_t;
     fbgemm::Float16ToFloat_simd(reinterpret_cast<const float16*>(scale_data), scale_data_fp32, scale_fp32.numel());
     auto kernel_fp16_index_t =
+      fbgemm_kernel_cache ?
+      fbgemm_kernel_cache->getCallback</* has_weight */ true, index_t, float16>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float16, index_t, index_t, float16>(
         /* block_size */ddim,
         /* has_weight */true,
@@ -650,7 +660,8 @@ index_select_scale_add(const Tensor &select_indices,
                                           const Tensor& offsets,
                                           bool include_last_offset,
                                           Tensor &bag_size,
-                                          index_t padding_idx) {
+                                          index_t padding_idx,
+                                          _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* scale_data = scale.data_ptr<float>();
   auto* select_indices_data = select_indices.data_ptr<index_t>();
@@ -678,6 +689,8 @@ index_select_scale_add(const Tensor &select_indices,
 
 #ifdef USE_FBGEMM
     auto kernel_fp32_index_t =
+      fbgemm_kernel_cache ?
+      fbgemm_kernel_cache->getCallback</* has_weight */ true, index_t, float>(ddim) :
       fbgemm::GenerateEmbeddingSpMDM<float, index_t, index_t>(
         /* block_size */ddim,
         /* has_weight */true,
@@ -947,7 +960,7 @@ static Tensor apply_bag_size_backward(
 
 template <typename scalar_t>
 void embedding_bag_cpu_max_out(
-    Tensor& max_indices,
+    Tensor* max_indices,
     const Tensor& weight,
     const Tensor& indices,
     const Tensor& offset2bag,
@@ -962,8 +975,12 @@ void embedding_bag_cpu_max_out(
     auto* indices_data = indices.data_ptr<index_t>();
     auto* offset2bag_data = offset2bag.data_ptr<index_t>();
 
-    auto* max_indices_data = max_indices.data_ptr<index_t>();
-    auto max_indices_stride = max_indices.strides()[0];
+    index_t* max_indices_data = nullptr;
+    int64_t max_indices_stride = 0;
+    if (max_indices) {
+      max_indices_data = max_indices->data_ptr<index_t>();
+      max_indices_stride = max_indices->strides()[0];
+    }
 
     auto* weight_data = weight.data_ptr<scalar_t>();
     auto* output_data = output.data_ptr<scalar_t>();
@@ -990,7 +1007,9 @@ void embedding_bag_cpu_max_out(
 
           if (is_first_for_bag || (weight_item > current_item)) {
             current_item = weight_item;
-            max_indices_data[max_indices_stride * bag + dim] = word_idx;
+            if (max_indices_data) {
+              max_indices_data[max_indices_stride * bag + dim] = word_idx;
+            }
           }
         }
         if (is_first_for_bag) {
@@ -1005,22 +1024,22 @@ void embedding_bag_cpu_max_out(
 }
 
 void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
-                            Tensor& bag_size, Tensor& max_indices,
+                            Tensor& bag_size, Tensor* max_indices,
                             const Tensor &weight, const Tensor &indices,
                             const Tensor &offsets, const int64_t mode,
                             const c10::optional<Tensor>& per_sample_weights,
-                            bool include_last_offset, int64_t padding_idx) {
+                            bool include_last_offset, int64_t padding_idx, _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   if (mode == MODE_MEAN || mode == MODE_SUM) {
     AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, weight.scalar_type(), "embedding_bag_no_grad_cpu_out",
-      [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx]() {
+      [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
       AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_no_grad_cpu_out",
-        [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx]() {
+        [&indices, &offset2bag, &per_sample_weights, &weight, &output, &offsets, &include_last_offset, &mode, &bag_size, &padding_idx, &fbgemm_kernel_cache]() {
         if (per_sample_weights.has_value() && per_sample_weights.value().defined()) {
           TORCH_INTERNAL_ASSERT(mode == MODE_SUM);
           index_select_scale_add<scalar_t, index_t>(
-            indices, offset2bag, per_sample_weights.value(), weight, output, offsets, include_last_offset, bag_size, padding_idx);
+            indices, offset2bag, per_sample_weights.value(), weight, output, offsets, include_last_offset, bag_size, padding_idx, fbgemm_kernel_cache);
         } else {
-          index_select_add<scalar_t, index_t>(indices, offset2bag, weight, output, offsets, include_last_offset, bag_size, padding_idx);
+          index_select_add<scalar_t, index_t>(indices, offset2bag, weight, output, offsets, include_last_offset, bag_size, padding_idx, fbgemm_kernel_cache);
         }
       });
     });
@@ -1029,7 +1048,9 @@ void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
       // make bag_size output deterministic
       at::native::zero_(bag_size);
     }
-     max_indices.copy_(bag_size);
+    if (max_indices) {
+      max_indices->copy_(bag_size);
+    }
   } else { // MODE_MAX
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       weight.scalar_type(), "embedding_bag_cpu_max_out", [&]() {
@@ -1067,7 +1088,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
   Tensor max_indices = make_max_indices(weight, indices, offsets, bag_size, mode, include_last_offset);
 
   _embedding_bag_cpu_impl_out(output, offset2bag,
-                          bag_size, max_indices,
+                          bag_size, &max_indices,
                           weight, indices, offsets,
                           mode, per_sample_weights,
                           include_last_offset, padding_idx);
@@ -1164,6 +1185,63 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
       include_last_offset,
       padding_idx,
       /*requires_grad=*/true);
+}
+
+void _embedding_bag_cpu_out(
+    at::Tensor& output,
+    at::Tensor& offset2bag,
+    at::Tensor& bag_size,
+    at::Tensor* p_max_indices,
+    const at::Tensor& weight,
+    const at::Tensor& indices,
+    const at::Tensor& offsets,
+    const bool /* scale_grad_by_freq */,
+    const int64_t mode,
+    const bool /* sparse */,
+    const c10::optional<at::Tensor>& per_sample_weights,
+    const bool include_last_offset,
+    const c10::optional<int64_t>& padding_idx,
+    _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
+  at::native::check_arguments(
+      weight, indices, offsets, mode, per_sample_weights, include_last_offset);
+
+  at::native::make_offset2bag_out(
+      offset2bag,
+      output,
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      padding_idx.value_or(-1));
+
+  at::native::make_bag_size_out(
+      bag_size, offsets, indices, mode, include_last_offset, false);
+
+  if (p_max_indices) {
+    at::native::make_max_indices_out(
+        *p_max_indices,
+        weight,
+        indices,
+        offsets,
+        bag_size,
+        mode,
+        include_last_offset);
+  }
+
+  at::native::_embedding_bag_cpu_impl_out(
+      output,
+      offset2bag,
+      bag_size,
+      p_max_indices,
+      weight,
+      indices,
+      offsets,
+      mode,
+      per_sample_weights,
+      include_last_offset,
+      padding_idx.value_or(-1),
+      fbgemm_kernel_cache);
 }
 
 // Assumes all input tensors are contiguous.

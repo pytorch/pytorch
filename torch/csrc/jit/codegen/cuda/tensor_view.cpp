@@ -183,7 +183,7 @@ void TensorView::convertRfactorToRootDomain() {
             ++idx;
           } else {
             TORCH_INTERNAL_ASSERT(!id->isRFactorProduct());
-            new_root_domain[idx++] = id->clone();
+            new_root_domain[idx++] = id->cloneWithoutRFactor();
           }
         }
 
@@ -604,6 +604,10 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   TORCH_CHECK(
       !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
 
+  TORCH_CHECK(
+      !definition()->isA<GroupedReductionOp>(),
+      "For GroupedReducitonOp, use TensorView::rFactor(const std::vector<int>& axes, const std::vector<TensorView*>& tvs)");
+
   ReductionOp* this_definition = definition()->as<ReductionOp>();
 
   // Split tensor view into 2 parts
@@ -640,7 +644,7 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   return producer;
 }
 
-TensorView* TensorView::welfordRfactorHelper(
+TensorView* TensorView::multiOutputRfactorHelper(
     TensorView* tv,
     const std::vector<int>& axes) {
   TORCH_INTERNAL_ASSERT(
@@ -698,84 +702,101 @@ TensorView* TensorView::welfordRfactorHelper(
   return producer;
 }
 
-WelfordResult TensorView::rFactor(
+std::vector<TensorView*> TensorView::rFactor(
     const std::vector<int>& axes,
-    TensorView* avg,
-    TensorView* var,
-    TensorView* n) {
-  TORCH_INTERNAL_ASSERT(
+    const std::vector<TensorView*>& tvs) {
+  TORCH_CHECK(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
-  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
+  TORCH_CHECK(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
   FusionGuard fg(fusion());
   TORCH_CHECK(
       definition() != nullptr &&
-          definition()->getExprType() == ExprType::WelfordOp,
+          (definition()->getExprType() == ExprType::GroupedReductionOp ||
+           definition()->getExprType() == ExprType::WelfordOp),
       "Error rfactoring welford ",
       this,
-      " its definition is either a nullptr or not a welford.");
+      " its definition is either a nullptr or not a GroupedReductionOp or a WelfordOp.");
   TORCH_CHECK(
       !domain()->hasRFactor(), "Cannot call rfactor on the same view twice.");
 
-  WelfordOp* wop = definition()->as<WelfordOp>();
+  TORCH_CHECK(
+      definition()->outputs().size() == tvs.size(),
+      "Rfactor of a multi-output reduction not used correctly");
 
-  TORCH_INTERNAL_ASSERT(
-      avg->sameAs(wop->outAvg()), "Welford rfactor not used correctly");
-  TORCH_INTERNAL_ASSERT(
-      var->sameAs(wop->outVar()), "Welford rfactor not used correctly");
-  TORCH_INTERNAL_ASSERT(
-      n->sameAs(wop->outN()), "Welford rfactor not used correctly");
+  for (const auto i : c10::irange(tvs.size())) {
+    TORCH_CHECK(
+        definition()->output(i) == tvs.at(i),
+        "Rfactor of a multi-output reduction not used correctly");
+  }
 
-  std::vector<std::pair<TensorView*, TensorView*>> tv2rf{
-      {avg, nullptr}, {var, nullptr}, {n, nullptr}};
+  std::vector<TensorView*> rf_tvs(tvs.size());
 
   // Make sure this gets rfactored last so everybody gets
   //  replayed correctly
-  for (auto& it : tv2rf) {
-    if (!sameAs(it.first)) {
-      it.second = welfordRfactorHelper(it.first, axes);
+  for (const auto i : c10::irange(tvs.size())) {
+    if (this != tvs.at(i)) {
+      rf_tvs.at(i) = multiOutputRfactorHelper(tvs.at(i), axes);
     }
   }
 
-  for (auto& it : tv2rf) {
-    if (sameAs(it.first)) {
-      it.second = welfordRfactorHelper(it.first, axes);
+  for (const auto i : c10::irange(tvs.size())) {
+    if (this == tvs.at(i)) {
+      rf_tvs.at(i) = multiOutputRfactorHelper(tvs.at(i), axes);
     }
   }
 
-  TensorView* producer_avg = tv2rf[0].second;
-  TensorView* producer_var = tv2rf[1].second;
-  TensorView* producer_n = tv2rf[2].second;
+  if (auto wop = dynamic_cast<WelfordOp*>(definition())) {
+    TensorView* producer_avg = rf_tvs.at(0);
+    TensorView* producer_var = rf_tvs.at(1);
+    TensorView* producer_n = rf_tvs.at(2);
 
-  // Setup dependency chain, inserting producer before this op.
-  // Expr* producer_definition =
-  IrBuilder::create<WelfordOp>(
-      producer_avg,
-      producer_var,
-      producer_n, /*out var/avg/count */
-      wop->initAvg(),
-      wop->initVar(),
-      wop->initN(), /*init var/avg/count */
-      wop->inAvg(),
-      wop->inVar(),
-      wop->inN());
+    // Setup dependency chain, inserting producer before this op.
+    // Expr* producer_definition =
+    IrBuilder::create<WelfordOp>(
+        producer_avg,
+        producer_var,
+        producer_n, /*out var/avg/count */
+        wop->initAvg(),
+        wop->initVar(),
+        wop->initN(), /*init var/avg/count */
+        wop->inAvg(),
+        wop->inVar(),
+        wop->inN());
 
-  // Expr* consumer_definition =
-  IrBuilder::create<WelfordOp>(
-      avg,
-      var,
-      n,
-      wop->initAvg(),
-      wop->initVar(),
-      wop->initN(),
-      producer_avg,
-      producer_var,
-      producer_n);
+    // Expr* consumer_definition =
+    IrBuilder::create<WelfordOp>(
+        wop->outAvg(),
+        wop->outVar(),
+        wop->outN(),
+        wop->initAvg(),
+        wop->initVar(),
+        wop->initN(),
+        producer_avg,
+        producer_var,
+        producer_n);
+  } else if (
+      auto grouped_rop = dynamic_cast<GroupedReductionOp*>(definition())) {
+    IrBuilder::create<GroupedReductionOp>(
+        grouped_rop->getReductionOpTypes(),
+        grouped_rop->initVals(),
+        std::vector<Val*>{rf_tvs.begin(), rf_tvs.end()},
+        grouped_rop->inputs());
 
-  return WelfordResult(producer_avg, producer_var, producer_n);
+    IrBuilder::create<GroupedReductionOp>(
+        grouped_rop->getReductionOpTypes(),
+        grouped_rop->initVals(),
+        grouped_rop->outputs(),
+        std::vector<Val*>{rf_tvs.begin(), rf_tvs.end()});
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Invalid definition: ", definition()->toString());
+  }
+
+  return rf_tvs;
 }
 
-TensorView* TensorView::cache_before() {
+TensorView* TensorView::cacheBefore(c10::optional<LoadStoreOpType> cache_op) {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -783,17 +804,9 @@ TensorView* TensorView::cache_before() {
 
   TORCH_CHECK(
       definition() != nullptr && !isFusionInput(),
-      "Error adding cache_before ",
+      "Error adding cacheBefore ",
       this,
-      " its definition is a nullptr and we restrict using cache_before on an input.");
-
-  TORCH_CHECK(
-      isFusionOutput() ||
-          definition()->getExprType() != ExprType::ReductionOp ||
-          definition()->getExprType() != ExprType::WelfordOp,
-      "Error adding cache_before ",
-      this,
-      " its definition is a reduction and it is not an output, instead please use cache_after.");
+      " its definition is a nullptr and we restrict using cacheBefore on an input.");
 
   // Previously, caching computed-at tensors was allowed but was never
   // really robust. Make it an error unless it is really needed.
@@ -834,7 +847,7 @@ TensorView* TensorView::cache_before() {
       TensorDomain::noReductions(getMaybeRFactorDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
   for (const auto& dom : no_reduction_root_domain) {
-    new_root_domain[i++] = dom->clone();
+    new_root_domain[i++] = dom->cloneWithoutRFactor();
   }
 
   consumer->setDomain(IrBuilder::create<TensorDomain>(
@@ -852,7 +865,13 @@ TensorView* TensorView::cache_before() {
   ir_utils::replaceValInExpr(definition(), this, producer);
 
   // Expr* producer_uses =
-  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, consumer, producer);
+  if (cache_op.has_value()) {
+    IrBuilder::create<LoadStoreOp>(
+        container(), cache_op.value(), consumer, producer);
+  } else {
+    IrBuilder::create<UnaryOp>(
+        container(), UnaryOpType::Set, consumer, producer);
+  }
 
   // definition_ is no longer valid
   // setDefinition(nullptr);
@@ -864,7 +883,7 @@ TensorView* TensorView::cache_before() {
   return producer;
 }
 
-TensorView* TensorView::cache_fork() {
+TensorView* TensorView::cacheFork() {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -876,7 +895,7 @@ TensorView* TensorView::cache_fork() {
 
   TORCH_CHECK(
       this->isFusionOutput() && !this->uses().empty(),
-      "Error adding cache_fork ",
+      "Error adding cacheFork ",
       this,
       " this TensorView must be an output with subsequent uses");
 
@@ -911,7 +930,7 @@ TensorView* TensorView::cache_fork() {
   return new_output;
 }
 
-TensorView* TensorView::cache_after() {
+TensorView* TensorView::cacheAfter(c10::optional<LoadStoreOpType> cache_op) {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -920,9 +939,9 @@ TensorView* TensorView::cache_after() {
   // Get all the uses for this Tensorview
   TORCH_CHECK(
       !isFusionOutput(),
-      "Error adding cache_after ",
+      "Error adding cacheAfter ",
       this,
-      " we restrict using cache_after on an output.");
+      " we restrict using cacheAfter on an output.");
 
   // Previously, caching computed-at tensors was allowed but was never
   // really robust. Make it an error unless it is really needed.
@@ -952,7 +971,7 @@ TensorView* TensorView::cache_after() {
       TensorDomain::noReductions(getMaybeRFactorDomain());
   std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
   for (const auto& dom : no_reduction_root_domain) {
-    new_root_domain[i++] = dom->clone();
+    new_root_domain[i++] = dom->cloneWithoutRFactor();
   }
 
   // This domain will be the producer, so create the consumer
@@ -977,7 +996,13 @@ TensorView* TensorView::cache_after() {
   }
 
   // Expr* consumer_definition =
-  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, consumer, producer);
+  if (cache_op.has_value()) {
+    IrBuilder::create<LoadStoreOp>(
+        container(), cache_op.value(), consumer, producer);
+  } else {
+    IrBuilder::create<UnaryOp>(
+        container(), UnaryOpType::Set, consumer, producer);
+  }
 
   return consumer;
 }
@@ -1030,7 +1055,7 @@ bool TensorView::isEmptyTensor() const {
 
 void TensorView::applyMmaSwizzle(MmaOptions options) {
   switch (options.operand) {
-    case MmaOptions::Operand::NotOperand:
+    case MmaOptions::Operand::Accumulator:
       mma_util::WarpMmaSwizzler::scheduleMmaWarpOutput(this, options);
       break;
     case MmaOptions::Operand::A:
@@ -1105,13 +1130,6 @@ TensorView* TensorViewBuilder::build() const {
   // Create the final TensorView
   return IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(domain, contiguity_), dtype_);
-}
-
-void TensorView::configureMma(MmaOptions options) {
-  TORCH_CHECK(definition(), "configureMma: invalid for input tensor ", this);
-  auto mma = dynamic_cast<MmaOp*>(definition());
-  TORCH_CHECK(mma, "configureMma: invalid for non-mma output: ", this);
-  mma->configureOptions(options);
 }
 
 } // namespace cuda

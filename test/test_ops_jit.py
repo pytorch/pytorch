@@ -38,8 +38,7 @@ class TestJit(JitCommonTestCase):
     # TODO WARNING: inplace x {traced, scripted} not currently tested
     @_variant_ops(op_db)
     def test_variant_consistency_jit(self, device, dtype, op):
-        _requires_grad = op.supports_autograd and (dtype.is_floating_point or
-                                                   op.supports_complex_autograd(torch.device(device).type))
+        _requires_grad = (dtype in op.supported_backward_dtypes(torch.device(device).type))
 
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
         samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad, include_conjugated_inputs=include_conjugated_inputs)
