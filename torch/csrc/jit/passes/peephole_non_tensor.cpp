@@ -19,19 +19,23 @@ namespace {
  *       constant.
  */
 c10::optional<int64_t> checkArithNode(Node& node) {
-  if (node.inputs().size() != 2 || node.input(0)->type() != IntType::get() ||
-      node.input(1)->type() != IntType::get()) {
+  if (node.inputs().size() != 2) {
     return {};
   }
 
-  if (node.kind() == aten::mul || node.kind() == aten::add) {
+  if ((node.kind() == aten::mul || node.kind() == aten::add) &&
+      node.input(0)->type() == IntType::get()) {
     if (auto i = constant_as<int64_t>(node.input(0))) {
       node.permuteInputs({1, 0});
       return i;
     }
   }
 
-  return constant_as<int64_t>(node.input(1));
+  if (node.input(1)->type() == IntType::get()) {
+    return constant_as<int64_t>(node.input(1));
+  } else {
+    return {};
+  }
 }
 
 /**
