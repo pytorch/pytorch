@@ -155,12 +155,19 @@ def download_and_extract_s3_reports(
         Prefix=f"pytorch/pytorch/{workflow_run_id}/{workflow_run_attempt}/artifact/test-reports"
     )
 
+    found_one = False
     for obj in objs:
+        found_one = True
         p = Path(Path(obj.key).name)
         print(f"Downloading and extracting {p}")
         with open(p, "wb") as f:
             f.write(obj.get()["Body"].read())
         unzip(p)
+
+    if not found_one:
+        raise RuntimeError(
+            "Didn't find any test reports in s3, there is probably a bug!"
+        )
 
 
 if __name__ == "__main__":

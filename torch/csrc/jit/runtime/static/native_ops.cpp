@@ -834,6 +834,71 @@ std::vector<IValue> collectLoopSubBlockInputs(const ProcessedNode& p_node) {
 
 } // namespace
 
+/*
+prim::fork forks the execution of a subgraph. It returns a future on which
+the corresponding aten::wait op waits until future is marked complete
+Current implementation uses InterpreterState for async execution of subgraph.
+This will be removed in future for faster implementation of async subgraph
+*/
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::fork,
+    prim_Fork,
+    [](Node* node) -> SROperator {
+      auto graph = node->g(attr::Subgraph);
+      Code code(graph, "");
+      return [code](ProcessedNode* p_node) {
+        auto num_outputs = p_node->num_outputs();
+        Stack stack;
+        if (p_node->Output(0).isNone()) {
+          stack.reserve(p_node->num_inputs());
+        } else {
+          stack.reserve(p_node->num_inputs() + num_outputs);
+          for (const auto& o : p_node->outputs()) {
+            stack.emplace_back(o);
+          }
+        }
+        for (auto i : c10::irange(p_node->num_inputs())) {
+          stack.emplace_back(p_node->Input(i));
+        }
+        TaskLauncher taskLauncher_ = at::launch;
+        InterpreterState interpreter{code, taskLauncher_};
+        InterpreterContinuation continuation(interpreter, stack);
+        taskLauncher_(std::move(continuation));
+        p_node->Output(0) = interpreter.getFuture();
+      };
+    });
+/*
+  aten::wait waits on the future (present in corresponding fork)
+  to be executed. Once the execution is complete, the future is marked
+  completed and wait execution continues.
+*/
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::wait,
+    aten_Wait,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        TORCH_INTERNAL_ASSERT(p_node->Input(0).isFuture());
+        auto future = p_node->Input(0).toFuture();
+
+        // blocking call: waiting for the future to be completed
+        future->waitAndThrow();
+
+        TORCH_INTERNAL_ASSERT(future->completed());
+        TORCH_INTERNAL_ASSERT(!future->hasError());
+        TORCH_INTERNAL_ASSERT(future->hasValue());
+
+        if (!future->value().isTuple()) {
+          p_node->Output(0) = future->value();
+          return;
+        }
+        auto& elems = future->value().toTupleRef().elements();
+        DCHECK_EQ(elems.size(), p_node->num_outputs());
+        for (const auto i : c10::irange(elems.size())) {
+          p_node->Output(i) = elems[i];
+        }
+      };
+    });
+
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::Loop,
     prim_Loop,

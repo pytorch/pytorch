@@ -14,8 +14,9 @@
 
 #include <torch/csrc/utils/structseq.h>
 #include <torch/csrc/utils/six.h>
-#include <structmember.h>
 #include <sstream>
+
+#include <structmember.h>
 
 namespace torch {
 namespace utils {

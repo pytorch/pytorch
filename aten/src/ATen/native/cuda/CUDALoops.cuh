@@ -37,6 +37,7 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/macros/Macros.h>
+#include <c10/core/DynamicCast.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/TypeCast.h>
 #include <c10/util/C++17.h>
