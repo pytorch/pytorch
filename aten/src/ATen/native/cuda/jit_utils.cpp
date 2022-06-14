@@ -168,17 +168,20 @@ const std::string jit_epilogue;
 
 const std::string jit_common_types = R"ESCAPE(
   #ifdef __HIPCC__
+  #define ERROR_UNSUPPORTED_CAST ;
+  // corresponds to aten/src/ATen/native/cuda/thread_constants.h
+  #define CUDA_OR_ROCM_NUM_THREADS 256
+  // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
+  #define MAX_DIMS 16
   #ifndef __forceinline__
   #define __forceinline__ inline __attribute__((always_inline))
   #endif
   // Map HIP_DYNAMIC_SHARED to "extern __shared__" for compatibility with old HIP applications
   #define HIP_DYNAMIC_SHARED(type, var) extern __shared__ type var[];
   #define HIP_DYNAMIC_SHARED_ATTRIBUTE
-  // corresponds to aten/src/ATen/native/cuda/thread_constants.h
-  #define CUDA_OR_ROCM_NUM_THREADS 256
-  // corresponds to aten/src/ATen/cuda/detail/OffsetCalculator.cuh
-  #define MAX_DIMS 16
   #else
+  //TODO use _assert_fail, because assert is disabled in non-debug builds
+  #define ERROR_UNSUPPORTED_CAST assert(false);
   #define CUDA_OR_ROCM_NUM_THREADS 128
   #define MAX_DIMS 25
   #endif
@@ -198,11 +201,6 @@ const std::string jit_common_types = R"ESCAPE(
   constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
   constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
-  #ifdef __HIPCC__
-  #define ERROR_UNSUPPORTED_CAST ;
-  #else
-  //TODO use _assert_fail, because assert is disabled in non-debug builds
-  #define ERROR_UNSUPPORTED_CAST assert(false);
   #endif
 
   ${traits_string}
