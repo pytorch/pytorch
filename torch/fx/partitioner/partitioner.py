@@ -7,7 +7,6 @@ from torch.fx.passes.fuser_utils import fuse_by_partitions
 from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 
 import torch
-# from torch.fx.passes.graph_manipulation import get_size_of_all_nodes
 # from torch.fx.experimental.partitioner_utils import (
 #     Partition,
 #     Device,
@@ -20,10 +19,6 @@ import torch
 # )
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, map_arg
-# from torch.fx.passes.split_module import split_module
-
-from torch.fx.passes.split_utils import Component
-
 from torch.fx.passes.operator_support import (
     get_node_target,
     OperatorSupportBase,
@@ -99,9 +94,6 @@ class CapabilityBasedPartitioner:
             g = groupby(iterable)
             return next(g, True) and not next(g, False)
 
-        def compare(partition_a, partition_b) -> bool:
-            return self.__partition_depends_on(partition_a, partition_b)
-
         # visit candidates in reversed topological order
         for node in reversed(candidates):
 
@@ -121,7 +113,7 @@ class CapabilityBasedPartitioner:
 
             # TODO: simple sort is probably not enough, need to do strict topo sort
             # After sorting: partitions_sorted[0] <= partitions_sorted[1] <=... partitions_sorted[n]
-            partitions_sorted = sorted(partition_candidates, key=cmp_to_key(compare))
+            partitions_sorted = sorted(partition_candidates, key=cmp_to_key(self.__partition_depends_on))
 
             print(node)
             print("partitions_sorted", partitions_sorted)
@@ -130,12 +122,11 @@ class CapabilityBasedPartitioner:
             # After filtering: partition_candidates[0] == partition_candidates[1] ==... partition_candidates[n]
             partition_candidates = [ partitions_sorted[0] ]
             for partition in partitions_sorted[1:]:
-                if compare(partition_candidates[-1], partition):
+                if self.__partition_depends_on(partition_candidates[-1], partition):
                     # partition depends on partition_candidates[-1]
                     break
                 else:
                     partition_candidates.append(partition)
-
 
             # We use the following rules for partition assignment:
             # 1. If none of the candidates has been assigned to a partition, create a new partition

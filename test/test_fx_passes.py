@@ -224,8 +224,6 @@ class TestFXGraphPasses(JitTestCase):
         (forward9, [['add_3'], ['add_2'], ['add_1', 'add']]),
         (forward10, [['add_3', 'add_2', 'add'], ['add_1']]),
         (forward11, [['add_1'], ['add']]),
-
-
     ])
     # failing cases
     # @parametrize("fn, expected_partition", [
@@ -249,6 +247,9 @@ class TestFXGraphPasses(JitTestCase):
         partitions = partitioner.partition(candidates)
 
         partitions_name = [[node.name for node in partition] for partition in partitions]
+
+        print("partitions_name", partitions_name)
+        print("expected_partition", expected_partition)
 
         assert len(partitions_name) == len(expected_partition)
         for i in range(len(partitions_name)):
