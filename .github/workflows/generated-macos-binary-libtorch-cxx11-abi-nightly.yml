@@ -25,7 +25,6 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: macos-binary-libtorch-cxx11-abi
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   SKIP_ALL_TESTS: 1
 concurrency:

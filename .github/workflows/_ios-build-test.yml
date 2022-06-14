@@ -49,7 +49,6 @@ jobs:
       IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET }}
       IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID }}
       IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
-      PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
