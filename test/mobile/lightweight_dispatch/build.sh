@@ -10,7 +10,7 @@ set -ex -o pipefail
 # shellcheck disable=SC2034
 echo "Build lite interpreter with lightweight dispatch."
 
-CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
 mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
 
 BUILD_LIBTORCH_PY="$PWD/tools/build_libtorch.py"
@@ -25,9 +25,7 @@ export USE_DISTRIBUTED=0
 export USE_LIGHTWEIGHT_DISPATCH=1
 export STATIC_DISPATCH_BACKEND="CPU"
 export BUILD_LITE_INTERPRETER=1
-OP_LIST="lightweight_dispatch_ops.yaml"
-export SELECTED_OP_LIST=$TEST_SRC_ROOT/$OP_LIST
-export USE_FBGEMM=0
+
 python "${BUILD_LIBTORCH_PY}"
 ret=$?
 
@@ -45,6 +43,12 @@ fi
 
 # shutdown test
 python "$TEST_SRC_ROOT/tests_setup.py" shutdown
+
+# run lite interpreter tests
+if ! build/bin/test_lite_interpreter_runtime; then
+  echo "test_lite_interpreter_runtime has failure!"
+  exit 1
+fi
 
 popd
 
