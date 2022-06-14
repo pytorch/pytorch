@@ -24,12 +24,13 @@ class _InternalGlobals:
 
     def __init__(self):
         self._export_onnx_opset_version = _constants.onnx_default_opset
+        self._in_onnx_export: bool = False
         self.operator_export_type: Optional[_C_onnx.OperatorExportTypes] = None
         self.training_mode: Optional[_C_onnx.TrainingMode] = None
         self.onnx_shape_inference: bool = False
 
     @property
-    def export_onnx_opset_version(self):
+    def export_onnx_opset_version(self) -> int:
         return self._export_onnx_opset_version
 
     @export_onnx_opset_version.setter
@@ -39,6 +40,17 @@ class _InternalGlobals:
         if value not in supported_versions:
             raise ValueError(f"Unsupported ONNX opset version: {value}")
         self._export_onnx_opset_version = value
+
+    @property
+    def in_onnx_export(self) -> bool:
+        """Whether it is in the middle of ONNX export."""
+        return self._in_onnx_export
+
+    @in_onnx_export.setter
+    def in_onnx_export(self, value: bool):
+        if type(value) is not bool:
+            raise TypeError("in_onnx_export must be a boolean")
+        self._in_onnx_export = value
 
 
 GLOBALS = _InternalGlobals()
