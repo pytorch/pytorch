@@ -71,10 +71,10 @@ template at::Tensor PackedConvWeight<3>::apply_dynamic(
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
-    bool reduce_range) {
+    bool /*reduce_range*/) {
   if (reduce_range) {
-    TORCH_WARN("reduce_range is set to true for the conv operator while using qnnpack backend, but qnnpack does "
-    " not require a reduction in range. We recommend switching this flag to false so that accuracy isn't compromised");
+    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release. "
+    "Reducing the range for qnnpack would currently lead to bc-breaking behavior.");
   }
 
   // On empty input, no output data will be generated,
@@ -100,7 +100,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
       is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
       /*preserve_sparsity=*/false,
       /*force_scale_power_of_two=*/false,
-      /*reduce_range=*/reduce_range);
+      /*reduce_range=*/false); // note: this is set to false rather than
+                               // reduce_range for qnnpack
 
   // Quantize input
   at::Tensor q_input = at::quantize_per_tensor(
