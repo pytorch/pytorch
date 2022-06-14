@@ -507,7 +507,7 @@ def meta_embedding_bag(
 @torch.library.impl(meta_lib, "diag.out")
 @out_wrapper
 def meta_diag(self, dim=0):
-    check(self.dim() in (1, 2), "matrix or a vector expected")
+    check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
     if self.dim() == 1:
         sz = self.size(0) + abs(dim)
         return self.new_empty((sz, sz))
