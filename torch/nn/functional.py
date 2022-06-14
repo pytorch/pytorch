@@ -1292,14 +1292,18 @@ def dropout2d(input: Tensor, p: float = 0.5, training: bool = True, inplace: boo
                     "a channel dimension, and an optional batch dimension (i.e. 3D or 4D inputs).")
         warnings.warn(warn_msg)
 
-    is_batched = inp_dim == 4
-    if not is_batched:
-        input = input.unsqueeze_(0) if inplace else input.unsqueeze(0)
+    # TODO: Properly support no-batch-dim inputs. For now, these are NOT supported; passing
+    # a 3D input will perform dropout1d behavior instead. This was done historically and the
+    # behavior is maintained here for now.
+    # See https://github.com/pytorch/pytorch/issues/77081
+    if inp_dim == 3:
+        warnings.warn("dropout2d: Received a 3D input to dropout2d and assuming that channel-wise "
+                      "1D dropout behavior is desired - input is interpreted as shape (N, C, L), where C "
+                      "is the channel dim. This behavior will change in a future release to interpret the "
+                      "input as one without a batch dimension, i.e. shape (C, H, W). To maintain the 1D "
+                      "channel-wise dropout behavior, please switch to using dropout1d instead.")
 
     result = _VF.feature_dropout_(input, p, training) if inplace else _VF.feature_dropout(input, p, training)
-
-    if not is_batched:
-        result = result.squeeze_(0) if inplace else result.squeeze(0)
 
     return result
 
