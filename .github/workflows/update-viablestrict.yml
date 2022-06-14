@@ -32,7 +32,7 @@ jobs:
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
-          output=$(python3 -m .github/scripts/print_latest_commits.py)
+          output=$(python3.8 .github/scripts/print_latest_commits.py)
           echo "::set-output name=latest_viable_sha::$output"
         id: get-latest-commit
 
