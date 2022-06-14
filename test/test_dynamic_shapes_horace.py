@@ -55,15 +55,6 @@ def cat_meta(tensors, dim=0):
     return tensors[0].new_empty(new_shape)
 
 
-@register_meta(aten.sum.default)
-def sum_meta(x):
-    return x.new_empty(())
-
-
-@register_meta(aten.expand.SymInt)
-def expand_symint_meta(a, size, implicit=False):
-    return a.new_empty(size)
-
 from functorch import make_fx
 
 x = torch.randn(3, 4, 5, requires_grad=True)
@@ -72,7 +63,6 @@ def f(y):
     x = y * 2
     assert x.shape[0] > 1
     x = x.sum()
-    # return x
     return torch.autograd.grad(x, y)
 
 traced_graph = make_fx(f, decomposition_table={torch.ops.aten.detach.default: lambda x: x})(x)
@@ -82,14 +72,3 @@ print(traced_graph)
 print(traced_graph.shape_env.guards)
 
 exit(0)
-y = (x + 2).sum()
-out = torch.autograd.grad(y, x)
-print(out[0].shape)
-exit(0)
-expand_x = x.expand(x.shape[0], x.shape[0])
-if expand_x.shape[0] > 3:
-    result = expand_x + expand_x
-else:
-    result = expand_x + expand_x
-print(torch.cat([expand_x, expand_x]).shape[0])
-print(shape_env.guards)
