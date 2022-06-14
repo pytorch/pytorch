@@ -4576,7 +4576,9 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if dim is None:
         self = symbolic_helper._reshape_helper(g, self, [-1])
-        keepdim = None
+        keepdim = 0
+    else:
+        keepdim = int(keepdim)
 
     if ord == math.inf:
         result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
@@ -4587,14 +4589,14 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
             "linalg_vector_norm", 9, 11, "ord=0 not supported"
         )
     else:
-        ord_op = g.op("Constant", value_t=torch.FloatTensor([ord]))
+        ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
         result = symbolic_helper._reducesum_helper(
             g, g.op("Pow", g.op("Abs", self), ord_op), axes_i=dim, keepdims_i=keepdim
         )
         result = g.op(
             "Pow",
             result,
-            g.op("Div", g.op("Constant", value_t=torch.FloatTensor([1])), ord_op),
+            g.op("Div", g.op("Constant", value_t=torch.tensor(1, dtype=torch.float32)), ord_op),
         )
     return result
 
