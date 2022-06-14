@@ -248,8 +248,8 @@ class TestFXGraphPasses(JitTestCase):
 
         partitions_name = [[node.name for node in partition.nodes] for partition in partitions]
 
-        print("partitions_name", partitions_name)
-        print("expected_partition", expected_partition)
+        # print("partitions_name", partitions_name)
+        # print("expected_partition", expected_partition)
 
         assert len(partitions_name) == len(expected_partition)
         for i in range(len(partitions_name)):

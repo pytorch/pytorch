@@ -156,22 +156,19 @@ class CapabilityBasedPartitioner:
             # 2. If all of the candidate has been assigned to the same partition, assign to the same partition
             # 3. If candidates has been assigned to more then one paritions, assign to the largest partition (by node count)
             # 4. If none of rule above can break the tie, randomly assign to one of the largest partition among candidates
-            candidate_partition_ids = []
-            for partition in user_partitions:
-                if partition.id is not None:
-                    candidate_partition_ids.append(partition.id)
+            assigned_candidate_partition_ids = [partition.id for partition in user_partitions if partition.id is not None]
 
-            if len(candidate_partition_ids) == 0:
+            if len(assigned_candidate_partition_ids) == 0:
                 # create a new partition
                 id = len(partitions_by_id)
                 assign(node, id)
 
-            elif all_equal(candidate_partition_ids):
-                id = candidate_partition_ids[0]
+            elif all_equal(assigned_candidate_partition_ids):
+                id = assigned_candidate_partition_ids[0]
                 assign(node, id)
 
             else:
-                partitions_size_by_id = [ [partitions_by_id[id].size(), id] for id in candidate_partition_ids]
+                partitions_size_by_id = [ [partitions_by_id[id].size(), id] for id in assigned_candidate_partition_ids]
                 partitions_size_by_id = sorted(partitions_size_by_id, reverse=True)
 
                 id = partitions_size_by_id[0][1]
