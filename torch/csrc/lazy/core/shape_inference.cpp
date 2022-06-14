@@ -450,7 +450,7 @@ std::vector<Shape> compute_shape_expand(const at::Tensor & self, c10::SymIntArra
     std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode = _sizes[idx].toSymbolicIntNode();
     auto lazySymIntNode = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(symbolicIntNode);
     auto size_node = lazySymIntNode->node_;
-    auto static_value = std::dynamic_pointer_cast<DimensionNode>(size_node)->getStaticValue();
+    auto static_value = std::dynamic_pointer_cast<DimensionNode>(size_node)->getStaticValue(); //TODO: blocked on landing torch::lazy::DimensionNode
     target_size[idx] = static_value == -1 ? padded_self[idx] : static_value;
   }
   return {Shape(self.scalar_type(), target_size)};
