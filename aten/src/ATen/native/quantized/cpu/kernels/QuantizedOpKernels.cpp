@@ -6,9 +6,9 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/affine_quantizer.h>
-#include <ATen/native/quantized/fake_quant_affine.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
+#include <ATen/native/quantized/FakeQuantAffine.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
