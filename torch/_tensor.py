@@ -96,7 +96,11 @@ class Tensor(torch._C._TensorBase):
             # doesn't work because of
             # https://github.com/pytorch/pytorch/issues/47442
             # Update the test in test_serialization if you remove 'meta' from here
-            if self.is_sparse or self.device.type in ['lazy', 'xla', 'mps', 'ort', 'meta', 'hpu'] or \
+
+            fake_tensor_dispatch = isinstance(torch._C._get_torch_dispatch_mode(), torch._subclasses.fake_tensor.FakeTensorMode)
+            if fake_tensor_dispatch:
+                new_tensor = torch._C._get_torch_dispatch_mode().from_tensor(self)
+            elif self.is_sparse or self.device.type in ['lazy', 'xla', 'mps', 'ort', 'meta', 'hpu'] or \
                     (type(self) is not Tensor and self.data_ptr() == 0):
                 new_tensor = self.clone()
                 if type(new_tensor) is not type(self):
@@ -155,6 +159,10 @@ class Tensor(torch._C._TensorBase):
                 new_tensor.requires_grad_()
             if self.grad is not None:
                 new_tensor.grad = self.grad.__deepcopy__(memo)
+
+            if fake_tensor_dispatch:
+                memo[id(self)] = new_tensor
+                return new_tensor
 
             if not type(self) is Tensor:
                 if type(new_tensor) is not type(self):

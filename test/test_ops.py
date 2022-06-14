@@ -377,9 +377,7 @@ class TestCommon(TestCase):
             try:
                 with enable_torch_dispatch_mode(mode):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-            except torch._subclasses.fake_tensor.ComplexInputException:
-                continue
-            except torch._subclasses.fake_tensor.SparseInputException:
+            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
 
             if isinstance(result, torch.Tensor):
@@ -1543,7 +1541,7 @@ fake_skips = (
     "segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
-    "nn.functional.one_hot",
+    # "nn.functional.one_hot",
 )
 
 dynamic_output_op_tests = (
@@ -1607,8 +1605,6 @@ class TestFakeTensorNonErroring(TestCase):
                 self.assertTrue(name not in dynamic_output_op_tests)
 
             except torch._subclasses.fake_tensor.ComplexInputException:
-                pass
-            except torch._subclasses.fake_tensor.SparseInputException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)

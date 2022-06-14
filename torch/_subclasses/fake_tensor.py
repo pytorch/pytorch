@@ -17,39 +17,14 @@ from dataclasses import dataclass
 aten = torch.ops.aten
 
 
-class ComplexInputException(Exception):
-    pass
-
-class SparseInputException(Exception):
-    pass
+@dataclass
+class UnsupportedFakeTensorException(Exception):
+    reason: str
 
 @dataclass
 class DynamicOutputShapeException(Exception):
     func: OpOverload
 
-
-# TODO: use tags when available
-# operators whose output shape depends on input tensor data
-_data_dependent_operators = (
-    aten.bincount.default,
-    aten.one_hot.default,
-    aten.nonzero.out,
-    aten.nonzero.default,
-    aten.nonzero_numpy.default,
-    aten.unique_dim.default,
-    aten.unique_consecutive.default,
-    aten.unique_dim_consecutive.default,
-    aten._unique2.default,
-    aten.index.Tensor,
-    aten.index_select.out,
-    aten.index_select.default,
-    aten.index_select.dimname_out,
-    aten.index_select.dimname,
-    aten.masked_select.out,
-    aten.masked_select.default,
-    aten.linalg_lstsq.default,
-    aten.linalg_lstsq.out,
-)
 
 _device_not_kwarg_ops = (
     aten._resize_output_.default,
@@ -85,6 +60,10 @@ _like_tensor_constructors = (
     aten.randn_like.default,
     aten.zeros_like.default,
     aten.new_empty.default,
+    aten.new_empty_strided.default,
+    aten.new_full.default,
+    aten.new_zeros.default,
+    aten.new_ones.default,
 )
 
 
@@ -129,10 +108,11 @@ class FakeTensorConverter(object):
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_complex():
-            raise ComplexInputException
+            raise UnsupportedFakeTensorException("complex nyi in meta tensors")
         if t.is_sparse:
-            raise SparseInputException
-
+            raise UnsupportedFakeTensorException("sparse nyi in meta tensors")
+        if t.is_quantized:
+            raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         self.tensor_memo[t] = out
         return out
@@ -188,7 +168,6 @@ def contructors(fake_mode, func, *args, **kwargs):
     r = func(*args, **new_kwargs)
     return FakeTensor(fake_mode, r, out_device)
 
-
 @register_op_impl(lambda func: func in (aten.to.prim_Device, aten.to.device))
 def non_kwarg_to(fake_mode, func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -231,7 +210,7 @@ def clone(fake_mode, func, input, memory_format=None):
         out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
-@register_op_impl(lambda func: func in _data_dependent_operators)
+@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags)
 def data_dep_op(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
@@ -264,7 +243,6 @@ class FakeTensor(torch.Tensor):
     def from_tensor(t, fake_mode):
         existing_device = t.device
         return FakeTensor(fake_mode, t.to(device="meta"), existing_device)
-
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
@@ -356,8 +334,9 @@ class FakeTensor(torch.Tensor):
 
 
 class FakeTensorMode(TorchDispatchMode):
-    def __init__(self, allow_cpu_fallback=True):
+    def __init__(self, allow_cpu_fallback=True, allow_non_fake_inputs=False):
         self.allow_cpu_fallback = allow_cpu_fallback
+        self.allow_non_fake_inputs = allow_non_fake_inputs
         self.fake_tensor_converter = FakeTensorConverter()
 
         # [in_kernel_invocation]
@@ -415,16 +394,18 @@ class FakeTensorMode(TorchDispatchMode):
             # and just support constructors. TODO: extend more broadly
             conversion_made = False
 
-            def check_non_fake_tensor(x):
+            def convert_non_fake_tensor(x):
                 nonlocal conversion_made
-                conversion_made = conversion_made or (
-                    isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
-                )
+                if isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor):
+                    conversion_made = True
+                    return self.from_tensor(x)
+                else:
+                    return x
 
-            tree_map(check_non_fake_tensor, args)
-            tree_map(check_non_fake_tensor, kwargs)
+            args = tree_map(convert_non_fake_tensor, args)
+            kwargs = tree_map(convert_non_fake_tensor, kwargs)
 
-            if conversion_made:
+            if conversion_made and not self.allow_non_fake_inputs:
                 raise Exception(
                     "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
                     f"Please convert all Tensors to FakeTensors first. Found in {func}"
@@ -463,7 +444,6 @@ class FakeTensorMode(TorchDispatchMode):
 
 def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
     with no_dispatch():
-
         def to_cpu(e):
             if isinstance(e, FakeTensor):
                 return torch.zeros_like(e, device="cpu")
@@ -472,6 +452,7 @@ def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
         try:
             args = tree_map(to_cpu, args)
             kwargs = tree_map(to_cpu, kwargs)
+
             r = func(*args, **kwargs)
         except Exception as new_exception:
             raise orig_not_implemented_exception from new_exception
