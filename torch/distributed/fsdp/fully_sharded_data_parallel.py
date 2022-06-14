@@ -1675,12 +1675,10 @@ class FullyShardedDataParallel(nn.Module):
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
     def _need_prefetch_full_params(self, state: TrainingState_) -> bool:
-        assert state in (
+        allowed_states = (
             TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST
-        ), (
-            f"state needs to be in the set of "
-            f"(TrainingState_.FORWARD, TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST)"
         )
+        assert state in allowed_states, f"state needs to be in the set of {allowed_states}"
         valid_fsdp_graph_and_index = (
             self._fsdp_graph_order is not None
             and self._my_fsdp_idx_in_graph is not None
