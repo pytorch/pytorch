@@ -156,7 +156,11 @@ function print_sccache_stats() {
   echo 'PyTorch Build Statistics'
   sccache --show-stats
 
-  sccache --show-stats \
-    | python -m tools.stats.sccache_stats_to_json \
-    > "sccache-stats-${BUILD_ENVIRONMENT}-${OUR_GITHUB_JOB_ID}.json"
+  if [[ -n "${OUR_GITHUB_JOB_ID}" ]]; then
+    sccache --show-stats \
+      | python -m tools.stats.sccache_stats_to_json \
+      > "sccache-stats-${BUILD_ENVIRONMENT}-${OUR_GITHUB_JOB_ID}.json"
+  else
+    echo "env var OUR_GITHUB_JOB_ID not set, will not write sccache stats to json"
+  fi
 }
