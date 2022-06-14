@@ -4882,8 +4882,8 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
                 return (
                     torch.argmin(input),
                     torch.argmax(input),
-                    torch.argmin(input, keepdim=True),
-                    torch.argmax(input, keepdim=True),
+                    torch.argmin(input, dim=0, keepdim=True),
+                    torch.argmax(input, dim=1, keepdim=True),
                 )
 
         self.run_test(ArgminArgmaxModel(), input)
