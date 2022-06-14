@@ -8,6 +8,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/Exception.h>
 #include <c10/util/variant.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -94,6 +95,8 @@ struct InputMetadata {
     return grad.sizes().equals(shape_as_dim_vector());
   }
   bool is_expandable_to_shape(const at::Tensor& grad) const {
+    // Currently NestedTensors are not expandable. If this support is added then
+    // updates to reduce_grad will be needed
     TORCH_CHECK(
         grad.is_nested() == is_nested_tensor(),
         "Both grad and InputMetadata need to be either nested or non nested tensors.")
@@ -102,8 +105,11 @@ struct InputMetadata {
         : at::is_expandable_to(shape_as_dim_vector(), grad.sizes());
   }
 
-  at::Tensor expand_grad(at::Tensor& grad) const {
-    TORCH_CHECK(!grad.is_nested() && !is_nested_tensor())
+  at::Tensor reduce_grad(at::Tensor& grad) const {
+    // Currently reduce_grad is only called if is_expandable_to_shape returns
+    // true For nested tensors this always returns False, so this check
+    // shouldn't fail
+    TORCH_INTERNAL_ASSERT(!grad.is_nested() && !is_nested_tensor())
     return at::sum_to(std::move(grad), shape_as_dim_vector());
   }
 

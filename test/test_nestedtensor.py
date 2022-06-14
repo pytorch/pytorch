@@ -502,7 +502,7 @@ class TestNestedTensorAutograd(TestCase):
         mask = torch.ones_like(data[:, :, 0]).bool()
         return torch._nested_tensor_from_mask(data, mask)
 
-    def test_requires_grad(self):
+    def test_set_requires_grad(self):
         nt = self._create_nested_tensor_from_list()
         nt.requires_grad_()
         assert nt.requires_grad
