@@ -111,11 +111,13 @@ static void min_kernel_impl(
     compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
+        value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t min_number = self_data[0];
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
           scalar_t value = self_data[i * self_dim_stride];
-          if (!(value >= min_number)) {
+          if (!(zabs_(value) >= zabs_(min_number))) {
             min_number = value;
             index = i;
             if (_isnan<scalar_t>(value)) {
@@ -142,11 +144,13 @@ static void max_kernel_impl(
     compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
+        using value_t = typename c10::scalar_value_type<scalar_t>::type;
+        value_t (*zabs_)(scalar_t) = zabs<scalar_t, value_t>;
         scalar_t max_number = self_data[0];
         int64_t index = 0;
         for (const auto i : c10::irange(self_dim_size)) {
           scalar_t value = self_data[i * self_dim_stride];
-          if (!(value <= max_number)) {
+          if (!(zabs_(value) <= zabs_(max_number))) {
             max_number = value;
             index = i;
             if (_isnan<scalar_t>(value)) {
