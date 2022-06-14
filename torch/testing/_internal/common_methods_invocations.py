@@ -20450,6 +20450,18 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.heaviside",
+        torch_opinfo_name="heaviside",
+        supports_rhs_python_scalar=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.hypot",
+        torch_opinfo_name="hypot",
+        supports_rhs_python_scalar=False,
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.igamma",
         torch_opinfo_name="igamma",
         supports_nvfuser=False,

@@ -111,8 +111,8 @@ __all__ = [
     # 'gcd',
     "ge",
     "gt",
-    # 'heaviside',
-    # 'hypot',
+    "heaviside",
+    "hypot",
     "igamma",
     "igammac",
     "isclose",
@@ -847,6 +847,20 @@ gt = _make_elementwise_binary_reference(
     prims.gt,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     supports_lhs_python_scalar=False,
+)
+
+heaviside = _make_elementwise_binary_reference(
+    prims.heaviside,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+
+hypot = _make_elementwise_binary_reference(
+    prims.hypot,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
 )
 
 igamma = _make_elementwise_binary_reference(
