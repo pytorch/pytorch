@@ -5008,7 +5008,7 @@
     CUDA: _unique2_cuda
   tags: dynamic_output_shape
 
-- func: _unsafe_view(Tensor(a) self, int[] size) -> Tensor(a)
+- func: _unsafe_view(Tensor self, int[] size) -> Tensor
   dispatch:
     CompositeExplicitAutograd: _unsafe_view
 
@@ -11991,12 +11991,12 @@
   dispatch:
     CompositeExplicitAutograd: _test_warn_in_autograd
 
-- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
+- func: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: segment_reduce_kernel
 
-- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, Tensor? offsets=None, int axis=0, Scalar? initial=None) -> Tensor
+- func: _segment_reduce_backward(Tensor grad, Tensor output, Tensor data, str reduce, *, Tensor? lengths=None, int axis=0, Scalar? initial=None) -> Tensor
   variants: function
   dispatch:
     CPU, CUDA: _segment_reduce_backward_kernel
@@ -12146,12 +12146,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: transpose_copy_int
-  tags: view_copy
-
-- func: _unsafe_view_copy(Tensor self, int[] size) -> Tensor
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: _unsafe_view_copy
   tags: view_copy
 
 - func: unsqueeze_copy(Tensor self, int dim) -> Tensor
@@ -12368,12 +12362,6 @@
   variants: function
   dispatch:
     CompositeExplicitAutograd: transpose_copy_int_out
-
-
-- func: _unsafe_view_copy.out(Tensor self, int[] size, *, Tensor(a!) out) -> Tensor(a!)
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: _unsafe_view_copy_out
 
 
 - func: unsqueeze_copy.out(Tensor self, int dim, *, Tensor(a!) out) -> Tensor(a!)
