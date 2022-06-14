@@ -335,10 +335,6 @@ void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
     // look at its uses to try to find a profile node.
     std::vector<bool> requiresGradResults;
     for (auto& use : diff_graph->output(i)->uses()) {
-      std::cerr << "--> user " << *use.user << std::endl;
-    }
-    for (auto& use : diff_graph->output(i)->uses()) {
-      std::cerr << "--> user " << *use.user << std::endl;
       if (use.user->kind() == prim::profile) {
         c10::optional<bool> req_grad_use;
         if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
