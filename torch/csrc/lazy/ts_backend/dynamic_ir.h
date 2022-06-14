@@ -46,13 +46,13 @@ namespace lazy {
 class TORCH_API DimensionNode : public lazy::TsNode {
  public:
   DimensionNode(OpKind op, OpList operands, hash_t hash_seed = kHashSeed);
-  bool isDynamic() {
-    return false;
-  }
-
+  virtual bool isDynamic() const = 0;
   std::string ToString() const override;
-
   virtual int64_t getStaticValue() const = 0;
+
+ protected:
+  // Only valid for ops which have DimensionNode operands.
+  const DimensionNode* getOpDimNode(size_t index) const;
 };
 
 // Represents the result of calling `size` on a Tensor
@@ -60,6 +60,7 @@ class TORCH_API SizeNode : public DimensionNode {
  public:
   SizeNode(Value input, size_t dim);
   int64_t getStaticValue() const override;
+  bool isDynamic() const override;
   std::string ToString() const override;
   size_t dim_ = 0;
   virtual TSOpVector Lower(
@@ -71,6 +72,7 @@ class TORCH_API SizeAdd : public DimensionNode {
  public:
   SizeAdd(Value a, Value b);
   int64_t getStaticValue() const override;
+  bool isDynamic() const override;
   std::string ToString() const override;
 };
 
@@ -78,6 +80,7 @@ class TORCH_API SizeMul : public DimensionNode {
  public:
   SizeMul(Value a, Value b);
   int64_t getStaticValue() const override;
+  bool isDynamic() const override;
   std::string ToString() const override;
 };
 
@@ -85,6 +88,7 @@ class TORCH_API SizeDiv : public DimensionNode {
  public:
   SizeDiv(Value a, Value b);
   int64_t getStaticValue() const override;
+  bool isDynamic() const override;
   std::string ToString() const override;
 };
 
