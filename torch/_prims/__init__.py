@@ -2194,10 +2194,9 @@ def _sum_nvfuser(
     fd: Any,
     a: TensorLikeType,
     dims: DimsSequenceType,
-    *,
-    output_dtype: Optional[torch.dtype] = None,
 ):
     keep_dims = False
+    output_dtype = torch._C._nvfuser.DataType.Null
     return fd.Ops.sum(a, dims, keep_dims, output_dtype)
 
 

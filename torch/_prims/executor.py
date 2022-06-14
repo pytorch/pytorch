@@ -4,7 +4,7 @@ import torch
 
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._prims.utils import getnvFuserDtype
+from torch._prims.utils import getnvFuserDtype, Number
 from torch._prims.context import TorchRefsMode
 import torch.overrides
 from torch.utils._pytree import tree_map
@@ -34,8 +34,15 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
         fusion = Fusion()
         with FusionDefinition(fusion) as fd:
 
+            def _to_nvfuser_constant(arg):
+                if isinstance(arg, Number):
+                    return fd.define_constant(arg)
+                else:
+                    return arg
+
             class FusionInterpreter(torch.fx.Interpreter):
                 def call_function(self, target, args, kwargs):
+                    args = tuple(map(_to_nvfuser_constant, args))
                     target = target.impl_nvfuser
                     args = (fd,) + args
                     return target(*args, **kwargs)
