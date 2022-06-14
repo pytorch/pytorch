@@ -533,12 +533,6 @@ def log_softmax(
     return _maybe_convert_to_dtype(a - logsumexp(a, dim, keepdim=True), result_dtype)
 
 
-def _squeeze_multiple(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
-    for dim in reversed(dims):
-        a = squeeze(a, dim)
-    return a
-
-
 @out_wrapper
 def logsumexp(
     a: TensorLikeType,
@@ -553,7 +547,7 @@ def logsumexp(
         # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
         a_max = amax(a, dims, keepdim=True)
         a_max = where(abs(a_max) == float("inf"), 0.0, a_max)
-        a_max_squeezed = _squeeze_multiple(a_max, dims) if not keepdim else a_max
+        a_max_squeezed = prims.squeeze(a_max, dims) if not keepdim else a_max
         result = log(sum(exp(a - a_max), dims, keepdim=keepdim)) + a_max_squeezed
     else:
         # This case covers boolean and integer dtypes and we use non-stabilized computation
