@@ -9,7 +9,8 @@ class TensorAPoT(torch.Tensor):
     def quantize_APoT(tensor2quantize: Tensor) -> Tensor:
         raise NotImplementedError
 
-    def dequantize(self, tensor2dequantize: Tensor, b: int, k: int):
+    @staticmethod
+    def dequantize(tensor2dequantize: Tensor, b: int, k: int) -> Tensor:  # type: ignore[override]
         max_val = torch.max(tensor2dequantize)
 
         # make observer

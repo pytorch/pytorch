@@ -29,7 +29,7 @@ class APoTObserver(ObserverBase):
         self.b = b
         self.k = k
 
-    def calculate_qparams(self, signed):
+    def calculate_qparams(self, signed) -> Tuple:
         return self._calculate_qparams(signed)
 
     r""" Calculates nonuniform quantization parameters given min and max value tensors.
