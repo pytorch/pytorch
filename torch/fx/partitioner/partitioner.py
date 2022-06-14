@@ -27,6 +27,22 @@ from torch.fx.passes.operator_support import (
 from itertools import groupby
 from collections import defaultdict
 
+class Partition:
+    def __init__(self, partition_id=None, nodes=set()):
+        self.partition_id = partition_id
+        self.nodes: Set[Node] = nodes
+
+    def __str__(self):
+        return str(self.partition_id)
+
+    def __repr__(self) -> str:
+        return str(self.nodes)
+
+    def add_node(self, node: Node):
+        self.nodes.add(node)
+
+    def size(self):
+        return len(self.nodes)
 
 class CapabilityBasedPartitioner:
 
@@ -90,6 +106,10 @@ class CapabilityBasedPartitioner:
         partition_id = 0
         partitions_by_id = defaultdict(list)
 
+        def assign(node, id):
+            assignment[node] = id
+            partitions_by_id[id].append(node)
+
         def all_equal(iterable):
             g = groupby(iterable)
             return next(g, True) and not next(g, False)
@@ -140,31 +160,22 @@ class CapabilityBasedPartitioner:
             for partition in partition_candidates:
                 if partition[0] in assignment:
                     candidate_partition_ids.append(assignment[partition[0]])
-                else:
-                    candidate_partition_ids.append(-1)
-            assigned_candidate_partition_ids = [id for id in candidate_partition_ids if id >= 0]
 
-
-            if len(assigned_candidate_partition_ids) == 0:
+            if len(candidate_partition_ids) == 0:
                 # create a new partition
-                assignment[node] = partition_id
-                partitions_by_id[partition_id].append(node)
+                assign(node, partition_id)
                 partition_id += 1
 
-            elif all_equal(assigned_candidate_partition_ids):
-                id = assigned_candidate_partition_ids[0]
-
-                assignment[node] = id
-                partitions_by_id[id].append(node)
+            elif all_equal(candidate_partition_ids):
+                id = candidate_partition_ids[0]
+                assign(node, id)
 
             else:
-
-                partitions_size_by_id = [ [len(partitions_by_id[id]), id] for id in assigned_candidate_partition_ids]
+                partitions_size_by_id = [ [len(partitions_by_id[id]), id] for id in candidate_partition_ids]
                 partitions_size_by_id = sorted(partitions_size_by_id, reverse=True)
 
                 id = partitions_size_by_id[0][1]
-                assignment[node] = id
-                partitions_by_id[id].append(node)
+                assign(node, id)
 
         print("assignment", assignment)
 
