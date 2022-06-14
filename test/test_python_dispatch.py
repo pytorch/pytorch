@@ -7,7 +7,7 @@ from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
-from torch.utils._mode_utils import no_dispatch
+from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map
@@ -15,6 +15,7 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode, push_torch_
 
 import logging
 from functools import partial
+
 
 class TestPythonRegistration(TestCase):
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
@@ -277,6 +278,7 @@ class TestPythonRegistration(TestCase):
 
         test_helper("CONSERVATIVE")
 
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -319,7 +321,6 @@ $5 = torch._ops.aten.add.Tensor($4, $3)''')
 $0 = input('x')
 $1 = input('y')
 $2 = torch._ops.aten.abs.out($0, out=$1)''')
-
 
     def test_kwarg_only(self) -> None:
         with capture_logs() as logs:
@@ -1081,7 +1082,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
         x = A()
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
                 with x:
                     pass
 
@@ -1095,6 +1096,105 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
             with A():
                 x + x
+
+    def test_error_with_ancestor(self):
+        x = LoggingTensorMode()
+        with x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
+                pass
+
+    def test_restore_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with LoggingTensorMode().restore():
+                pass
+
+        x = LoggingTensorMode()
+        with LoggingTensorMode():
+            with x:
+                pass
+
+        with LoggingTensorMode():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
+
+    def test_restore_ancestor_mode(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        z = LoggingTensorMode()
+        with y.restore():
+            with z:
+                pass
+
+        with x.restore():
+            with z.restore():
+                pass
+
+    def test_find_outermost_mode(self):
+        self.assertIsNone(find_outermost_mode([None, None]))
+
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        self.assertEqual(find_outermost_mode([x, y]), y)
+
+        z = LoggingTensorMode()
+        with y.restore():
+            with z:
+                pass
+
+        self.assertEqual(find_outermost_mode([z, x]), z)
+        i = LoggingTensorMode()
+
+        with self.assertRaisesRegex(RuntimeError, "doesn't have ancestors set so the ordering with other modes"):
+            find_outermost_mode([i, x, y, z])
+
+        k = LoggingTensorMode()
+        with k:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "don't come from the same scope"):
+            find_outermost_mode([k, x, y, z])
+
+    def test_all_same_mode(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        self.assertTrue(all_same_mode([x, x, x]))
+        self.assertFalse(all_same_mode([x, None]))
+        self.assertFalse(all_same_mode([x, y]))
+
+    def test_all_same_mode_scope(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        z = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        with x.restore():
+            with z:
+                pass
+
+        i = LoggingTensorMode()
+
+        self.assertTrue(all_same_mode_scope([x, y], y))
+        self.assertTrue(all_same_mode_scope([x, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, z], y))
+        self.assertFalse(all_same_mode_scope([x, y, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, i], y))
+
+        no_ancestor = LoggingTensorMode()
+        self.assertFalse(all_same_mode_scope([x, y, z], no_ancestor))
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
@@ -1392,7 +1492,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                         return not_contiguous_data.is_contiguous()
                     return NotImplemented
 
-
             err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
             e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
@@ -1481,7 +1580,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                         return data.dim()
                     return NotImplemented
 
-
             err_msg = "no implementation found for 'torch.ops.aten.dim'"
             e = DimNotImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
             with self.assertRaisesRegex(TypeError, err_msg):
@@ -1502,6 +1600,50 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
     def test_standard_is_not_subclass(self):
         # https://github.com/pytorch/pytorch/issues/79079
         self.assertFalse(torch._C._dispatch_isTensorSubclassLike(torch.empty(0)))
+
+    def test_strides_slow_path(self):
+        for use_wrapper_subclass in [True, False]:
+            class StridesNotImplemented(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class StridesCustomReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func == torch.ops.aten.stride:
+                        return (4, 2)
+                    return NotImplemented
+
+            class StridesDefaultReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func == torch.ops.aten.stride:
+                        return None
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.aten.stride'"
+            e = StridesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.stride()
+
+            e = StridesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.stride(), (4, 2))
+
+            e = StridesDefaultReturn(torch.randn(6, 2), use_wrapper_subclass)
+            self.assertEqual(e.stride(), (2, 1))
 
 if __name__ == '__main__':
     run_tests()

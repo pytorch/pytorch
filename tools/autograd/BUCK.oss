@@ -25,6 +25,7 @@ python_library(
         "templates/python_torch_functions.cpp",
         "templates/python_variable_methods.cpp",
         "templates/variable_factories.h",
+        "templates/python_enum_tag.cpp",
     ],
     visibility = ["PUBLIC"],
     deps = [
