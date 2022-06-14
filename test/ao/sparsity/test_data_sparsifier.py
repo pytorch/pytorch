@@ -237,7 +237,7 @@ class TestBaseDataSparsifier(TestCase):
 class TestNormDataSparsifierType(TestBaseDataSparsiferType):
     def __init__(self, data_list, defaults, data_with_config, norm_type='L1'):
         super().__init__(data_list=data_list, defaults=defaults, data_with_config=data_with_config)
-        assert norm_type in ['L1']
+        assert norm_type in ['L1', 'L2']
         self.norm_type = norm_type
 
     def get_bounds_on_actual_sparsity(self, config, tensor_shape):
@@ -270,7 +270,7 @@ class TestNormDataSparsifierType(TestBaseDataSparsiferType):
             return lower_bound, upper_bound
 
     def get_sparsifier(self):
-        sparsifier = DataNormSparsifier(data_list=self.data_list, **self.defaults)
+        sparsifier = DataNormSparsifier(data_list=self.data_list, norm=self.norm_type, **self.defaults)
         assert len(sparsifier.data_groups) == len(self.data_list)
         for data_config_dict in self.data_with_config:
             name, data, config = data_config_dict['name'], data_config_dict['data'], data_config_dict['config']
@@ -299,8 +299,9 @@ class TestNormDataSparsifierType(TestBaseDataSparsiferType):
             assert actual_sparsity > 0.0  # exact sparsity level cannot be achieved due to size of tensor
 
         iters_before_collapse = 100
-        if self.norm_type == 'L1':
-            test_sparsifier = DataNormSparsifier(sparsity_level=0.5, sparse_block_shape=(1, 4), zeros_per_block=4)
+
+        test_sparsifier = DataNormSparsifier(sparsity_level=0.5, sparse_block_shape=(1, 4), zeros_per_block=4, norm=self.norm_type)
+
         for _ in range(iters_before_collapse):
             new_data = torch.randn(20, 20)
             test_sparsifier.add_data(name='test_data', data=new_data)
@@ -312,12 +313,12 @@ class TestNormDataSparsifierType(TestBaseDataSparsiferType):
         # overriding default config for test purposes
         default_config = {'sparsity_level': 1.0, 'zeros_per_block': 2, 'sparse_block_shape': (1, 4)}
         data_list = [('test_data', torch.randn(4, 4))]
-        if self.norm_type == 'L1':
-            sparsifier = DataNormSparsifier(data_list=data_list, **default_config)
+
+        sparsifier = DataNormSparsifier(data_list=data_list, norm=self.norm_type, **default_config)
         sparsifier.step()
 
         for some_data in data_list:
-            name, data = some_data
+            name, _ = some_data
             mask = sparsifier.get_mask(name=name)
             self.assertAlmostEqual(1.0 - mask.mean().item(), 0.5, places=2)
             for row in mask:
@@ -397,6 +398,10 @@ class TestNormDataSparsifiers(TestCase):
                                                     data_with_config=data_with_config, norm_type='L1')
         tensor_test_l1.run_tests()
 
+        tensor_test_l2 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
+                                                    data_with_config=data_with_config, norm_type='L2')
+        tensor_test_l2.run_tests()
+
     def test_nn_parameters(self):
         param1, param2, param3 = nn.Parameter(torch.randn(3, 3)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
         param4, param5 = nn.Parameter(torch.randn(10, 10)), nn.Parameter(torch.randn(4, 4))
@@ -416,6 +421,10 @@ class TestNormDataSparsifiers(TestCase):
         param_test_l1 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
                                                    data_with_config=data_with_config, norm_type='L1')
         param_test_l1.run_tests()
+
+        param_test_l2 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
+                                                   data_with_config=data_with_config, norm_type='L2')
+        param_test_l2.run_tests()
 
     def test_nn_embeddings(self):
         emb1, emb2, = nn.Embedding(10, 3), nn.Embedding(20, 3)
@@ -438,3 +447,8 @@ class TestNormDataSparsifiers(TestCase):
         emb_test_l1 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
                                                  data_with_config=data_with_config, norm_type='L1')
         emb_test_l1.run_tests()
+
+        emb_test_l2 = TestNormDataSparsifierType(data_list=data_list, defaults=defaults,
+                                                 data_with_config=data_with_config, norm_type='L2')
+
+        emb_test_l2.run_tests()
