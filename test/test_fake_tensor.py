@@ -173,6 +173,14 @@ class FakeTensorTest(TestCase):
             self.checkMetaProps(param, param_copied)
             self.assertEqual(isinstance(param, torch.nn.Parameter), isinstance(param_copied, torch.nn.Parameter))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_new(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            a = torch.rand([16, 1])
+            self.checkType(a.new(10, 10), "cpu", [10, 10])
+            self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
+            self.checkType(a.new(device='cuda'), "cuda", [0])
+
     def test_non_fake_inputs(self):
         x = torch.rand([1])
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_non_fake_inputs=True)):
