@@ -302,9 +302,8 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
     If a list of fractions is given, the lengths will be computed automatically as
     floor(frac * len(dataset)).
     If the sum of the list of the fractions is not equal to 1 or the split leaves a
-    remainder,
-    a new entry will be appended
-    to the end of the list with the remaining fraction
+    remainder, a new entry will be appended to the end of the list with the
+    remaining fraction
 
     Optionally fix the generator for reproducible results, e.g.:
 
@@ -340,6 +339,5 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
     if sum(lengths) != len(dataset):    # type: ignore[arg-type]
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
 
-    # lengths are already set to be a list of integers, so no worries.
     indices = randperm(sum(lengths), generator=generator).tolist()  # type: ignore[call-overload]
     return [Subset(dataset, indices[offset - length : offset]) for offset, length in zip(_accumulate(lengths), lengths)]
