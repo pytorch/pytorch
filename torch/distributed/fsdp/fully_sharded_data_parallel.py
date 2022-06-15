@@ -1615,7 +1615,8 @@ class FullyShardedDataParallel(nn.Module):
             return
         # No FSDP instance wraps this, else _is_root would be set to False.
         self._is_root = True
-        self._exec_order_data.init(self)
+        if self._check_exec_order:
+            self._exec_order_data.init(self)
         # If final backward callback is never been queued, state should be IDLE.
         # If final backward callback is queued, the callback should be finished
         # and the state was reset to be IDLE.
@@ -2958,7 +2959,8 @@ class FullyShardedDataParallel(nn.Module):
                 torch.cuda.current_stream().synchronize()
 
         # A backward pass is done, clean up below.
-        self._exec_order_data.reset()
+        if self._check_exec_order:
+            self._exec_order_data.reset()
 
         def _finalize_params(fsdp_module: FullyShardedDataParallel) -> None:
             """Helper used below on all fsdp modules."""
