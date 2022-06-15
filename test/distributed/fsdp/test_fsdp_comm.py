@@ -44,6 +44,7 @@ class TestCommunication(FSDPTest):
         nested_model: bool,
         sharding_strategy: ShardingStrategy,
         device: torch.device,
+        check_exec_order: bool,
     ):
         group = dist.distributed_c10d._get_default_group()
         if nested_model:
@@ -52,12 +53,16 @@ class TestCommunication(FSDPTest):
             )
             fsdp_model: FSDP = FSDP(
                 model, group, sharding_strategy=sharding_strategy,
+                check_exec_order=check_exec_order,
             ).to(device)
         else:
             fsdp_model: FSDP = self._get_wrapped_model(
                 group,
                 cuda_first=False,
-                config={"sharding_strategy": sharding_strategy},
+                config={
+                    "sharding_strategy": sharding_strategy,
+                    "check_exec_order": check_exec_order,
+                },
             )
         return fsdp_model
 
@@ -84,6 +89,7 @@ class TestCommunication(FSDPTest):
         sharding_strategy: Optional[ShardingStrategy],
         is_first_iter: bool,
         is_last_iter_no_sync: bool,
+        check_exec_order: bool,
     ) -> int:
         """Returns the reference number of all-gathers in an iteration, summing
         over the forward and backward passes."""
@@ -94,6 +100,7 @@ class TestCommunication(FSDPTest):
                 pass_type,
                 is_first_iter,
                 is_last_iter_no_sync,
+                check_exec_order,
             ) for pass_type in PassType
         )
 
@@ -104,6 +111,7 @@ class TestCommunication(FSDPTest):
         pass_type: PassType,
         is_first_iter: bool,
         is_last_iter_no_sync: bool,
+        check_exec_order: bool,
     ):
         """Returns the reference number of all-gathers for a given setting."""
         if sharding_strategy is None:
@@ -135,7 +143,7 @@ class TestCommunication(FSDPTest):
                 f"is_first_iter={is_first_iter} " \
                 f"is_last_iter_no_sync={is_last_iter_no_sync} " \
                 f"sharding_strategy={sharding_strategy}"
-        if is_first_iter and pass_type == PassType.FWD:
+        if check_exec_order and is_first_iter and pass_type == PassType.FWD:
             # With execution order validation, on the first iteration, we have
             # an additional all-gather before every actual all-gather in the
             # forward pass
@@ -149,6 +157,7 @@ class TestCommunication(FSDPTest):
         pass_type: PassType,
         is_first_iter: bool,
         is_last_iter_no_sync: bool,
+        check_exec_order: bool,
     ):
         """Helper method for printing the number of all-gathers for a specific
         setting. This may be helpful since the branching is complex."""
@@ -156,7 +165,7 @@ class TestCommunication(FSDPTest):
             return  # only print on one rank
         num_all_gathers = self._get_ref_num_all_gathers_in_pass(
             num_fsdp, sharding_strategy, pass_type, is_first_iter,
-            is_last_iter_no_sync,
+            is_last_iter_no_sync, check_exec_order,
         )
         print(
             f"Pass: {pass_type}\n"
@@ -170,11 +179,13 @@ class TestCommunication(FSDPTest):
     @parametrize("nested_model", [False, True])
     @parametrize("use_no_sync", [False, True])
     @parametrize("sharding_strategy", [ShardingStrategy.SHARD_GRAD_OP, None])
+    @parametrize("check_exec_order", [False, True])
     def test_communication(
         self,
         nested_model: bool,
         use_no_sync: bool,
         sharding_strategy: Optional[ShardingStrategy],
+        check_exec_order: bool,
     ):
         """
         Tests FSDP's communication cost in terms of calls to collective
@@ -193,7 +204,7 @@ class TestCommunication(FSDPTest):
         """
         # Initialize the model and inputs
         device = torch.device("cuda")
-        fsdp_model = self._init_model(nested_model, sharding_strategy, device)
+        fsdp_model = self._init_model(nested_model, sharding_strategy, device, check_exec_order)
         batch = fsdp_model.module.get_input(device)
 
         # Count the number of FSDP instances that manage parameters since the
@@ -222,7 +233,7 @@ class TestCommunication(FSDPTest):
                     num_reduce_scatters = mock_reduce_scatter.call_count
                     ref_num_all_gathers = self._get_ref_num_all_gathers(
                         num_fsdp, sharding_strategy, is_first_iter=i == 0,
-                        is_last_iter_no_sync=i > 0,
+                        is_last_iter_no_sync=i > 0, check_exec_order=check_exec_order,
                     )
                     ref_num_reduce_scatters = self._get_ref_num_reduce_scatters(
                         num_fsdp, in_no_sync=True,
@@ -239,6 +250,7 @@ class TestCommunication(FSDPTest):
                     num_fsdp, sharding_strategy,
                     is_first_iter=not use_no_sync and i == 0,
                     is_last_iter_no_sync=use_no_sync and i == 0,
+                    check_exec_order=check_exec_order,
                 )
                 ref_num_reduce_scatters = self._get_ref_num_reduce_scatters(
                     num_fsdp, in_no_sync=False,
