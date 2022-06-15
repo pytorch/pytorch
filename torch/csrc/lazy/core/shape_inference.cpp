@@ -471,11 +471,14 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
 }
 
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
-    const at::Tensor& input, const c10::optional<at::Tensor>& weight,
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
     const c10::optional<at::Tensor>& bias,
     const c10::optional<at::Tensor>& running_mean,
-    const c10::optional<at::Tensor>& running_var, bool training,
-    double momentum, double eps) {
+    const c10::optional<at::Tensor>& running_var,
+    bool training,
+    double momentum,
+    double eps) {
   std::vector<torch::lazy::Shape> shapes;
   shapes.reserve(3);
   shapes.emplace_back(input.scalar_type(), input.sizes().vec());
@@ -507,12 +510,15 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
 }
 
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
-    const at::Tensor& grad_out, const at::Tensor& input,
+    const at::Tensor& grad_out,
+    const at::Tensor& input,
     const c10::optional<at::Tensor>& weight,
     const c10::optional<at::Tensor>& running_mean,
     const c10::optional<at::Tensor>& running_var,
     const c10::optional<at::Tensor>& save_mean,
-    const c10::optional<at::Tensor>& save_invstd, bool train, double eps,
+    const c10::optional<at::Tensor>& save_invstd,
+    bool train,
+    double eps,
     ::std::array<bool, 3> output_mask) {
   std::vector<torch::lazy::Shape> shapes;
   shapes.reserve(3);
