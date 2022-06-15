@@ -20,7 +20,7 @@ Tensor& quantized_copy_from_float_(Tensor& self, const Tensor& src) {
   TORCH_CHECK(
       (self.is_contiguous() && src.is_contiguous()) ||
       (self.is_contiguous(at::MemoryFormat::ChannelsLast) && src.is_contiguous(at::MemoryFormat::ChannelsLast)),
-      "Quantized copy only works with contiguous Tensors");
+      "Quantized copy only works with contiguous and NHWC Tensors");
   TORCH_CHECK(
       self.sizes().equals(src.sizes()),
       "Quantized copy only works with Tensors with the same shape");
