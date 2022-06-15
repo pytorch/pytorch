@@ -420,7 +420,6 @@ lazy_tensor_core_sources = [
 lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/dynamic_ir.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
-    "torch/csrc/lazy/ts_backend/ops/batch_norm_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
     "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
