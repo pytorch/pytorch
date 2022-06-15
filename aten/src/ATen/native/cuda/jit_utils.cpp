@@ -198,7 +198,6 @@ const std::string jit_common_types = R"ESCAPE(
   constexpr int num_threads = CUDA_OR_ROCM_NUM_THREADS;
   constexpr int thread_work_size = 4; // TODO: make template substitution once we decide where those vars live
   constexpr int block_work_size = thread_work_size * num_threads;
-  #endif
 
   ${traits_string}
   ${cmath_string}
