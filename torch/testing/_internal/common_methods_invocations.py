@@ -20025,6 +20025,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.imag",
         torch_opinfo_name="imag",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.isfinite",
@@ -20114,6 +20115,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.real",
         torch_opinfo_name="real",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.reciprocal",
