@@ -31,6 +31,8 @@ class TestBaseDataSparsiferRunner(TestCase):
         The user is required to pass in the data that needs to sparsified and the
         runner will run some tests that needs to be passed in order for the data
         type to be supported.
+        TODO: Change the structure by creating a separate test case class for each
+              member function
     """
     def __init__(self, data_list, defaults, data_with_config):
         self.data_list = data_list
@@ -243,6 +245,8 @@ class TestNormDataSparsifierRunner(TestBaseDataSparsiferRunner):
     r"""This helper test class takes in any supported type of and runs some tests.
         This inherits the TestBaseDataSparsifierRuner wherein some functions are
         over-ridden to take accomodate the specific sparsifier.
+        TODO: Change the structure by creating a separate test case class for each
+              member function
     """
     def __init__(self, data_list, defaults, data_with_config, norm_type='L1'):
         super().__init__(data_list=data_list, defaults=defaults, data_with_config=data_with_config)

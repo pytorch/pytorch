@@ -25,5 +25,4 @@ SymIntTable& getSymIntTable() {
   static SymIntTable sit;
   return sit;
 }
-
 } // namespace c10
