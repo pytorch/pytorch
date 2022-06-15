@@ -341,9 +341,9 @@ autocast compatibility if any function
 In all cases, if you're importing the function and can't alter its definition, a safe fallback
 is to disable autocast and force execution in ``float32`` ( or ``dtype``) at any points of use where errors occur::
 
-    with autocast():
+    with autocast(device_type='cuda', dtype=torch.float16):
         ...
-        with autocast(enabled=False):
+        with autocast(device_type='cuda', dtype=torch.float16, enabled=False):
             output = imported_function(input1.float(), input2.float())
 
 If you're the function's author (or can alter its definition) a better solution is to use the
@@ -373,7 +373,7 @@ Now ``MyMM`` can be invoked anywhere, without disabling autocast or manually cas
 
     mymm = MyMM.apply
 
-    with autocast():
+    with autocast(device_type='cuda', dtype=torch.float16):
         output = mymm(input1, input2)
 
 Functions that need a particular ``dtype``
@@ -401,6 +401,6 @@ Now ``MyFloat32Func`` can be invoked anywhere, without manually disabling autoca
 
     func = MyFloat32Func.apply
 
-    with autocast():
+    with autocast(device_type='cuda', dtype=torch.float16):
         # func will run in float32, regardless of the surrounding autocast state
         output = func(input)
