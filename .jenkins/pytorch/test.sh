@@ -453,10 +453,15 @@ test_forward_backward_compatibility() {
   set -x
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
+  REPO_DIR=$(pwd)
   pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
+  # install the nightly before the base commit -- fallback to most recent nightly in case of error
+  VERSION=$(cat "${REPO_DIR}/version.txt")
+  DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
+  pip_install --pre "torch<${VERSION::-2}.dev${DATE_OF_BASE//-/}" -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html || \
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
