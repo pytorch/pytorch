@@ -201,6 +201,30 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::index_put,
+    aten_index_put,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& indices = p_node->Input(1).toOptionalTensorList();
+        const auto& values = p_node->Input(2).toTensor();
+        const auto accumulate = p_node->Input(3).toBool();
+        p_node->Output(0) =
+            at::native::index_put(self, indices, values, accumulate);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::item,
+    aten_item,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        p_node->Output(0) = at::native::item(self);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::GetAttr,
     prim_GetAttr,
     [](Node* n) -> SROperator {
@@ -693,6 +717,40 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       LogAndDumpSchema(n);
       return nullptr;
     });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::tensor_split, aten_tensor_split, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "tensor_split.indices(Tensor(a -> *) self, int[] indices, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto& b = pnode->Input(1).toIntVector();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto b = pnode->Input(1).toInt();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "tensor_split.tensor_indices_or_sections(Tensor(a -> *) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto& b = pnode->Input(1).toTensor();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+  LogAndDumpSchema(n);
+  return nullptr;
+});
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::Int,
