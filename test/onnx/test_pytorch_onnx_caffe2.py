@@ -14,9 +14,7 @@ import verify
 from debug_embed_params import run_embed_params
 from model_defs.lstm_flattening_result import LstmFlatteningResult
 from model_defs.mnist import MNIST
-from model_defs.rnn_model_with_packed_sequence import (
-    RnnModelWithPackedSequence,
-)
+from model_defs.rnn_model_with_packed_sequence import RnnModelWithPackedSequence
 from model_defs.squeezenet import SqueezeNet
 from model_defs.srresnet import SRResNet
 from model_defs.super_resolution import SuperResolutionNet
