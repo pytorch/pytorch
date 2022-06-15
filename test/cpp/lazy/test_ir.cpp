@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
@@ -132,6 +133,10 @@ TEST(IrTest, DimensionNodeTest) {
 
   ASSERT_EQ(DIM0, size0->getStaticValue());
   ASSERT_EQ(DIM1, size1->getStaticValue());
+
+  NodePtr size0_np = size0;
+  auto size0_dn = std::dynamic_pointer_cast<DimensionNode>(size0_np);
+  ASSERT_EQ(DIM0, size0_dn->getStaticValue());
 
   auto add_dim = std::dynamic_pointer_cast<SizeAdd>(
       MakeNode<SizeAdd>(Value{size0}, Value{size1}));
