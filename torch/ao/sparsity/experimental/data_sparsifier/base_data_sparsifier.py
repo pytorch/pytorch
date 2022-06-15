@@ -11,9 +11,15 @@ from torch.nn.utils import parametrize
 
 __all__ = ['BaseDataSparsifier']
 
+EMBEDDING_TYPES = {
+    nn.Embedding,
+    nn.EmbeddingBag,
+}
+
 SUPPORTED_TYPES = {
     torch.Tensor,
     nn.Parameter,
+    *EMBEDDING_TYPES,
 }
 
 
@@ -66,6 +72,8 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
             return data
         elif isinstance(data, nn.Parameter):
             return data.data
+        elif type(data) in EMBEDDING_TYPES:
+            return data.weight.data
 
     def add_data(self, name: str, data, **config):
         r""" Configures and parametrizes the internal container model with name and data
