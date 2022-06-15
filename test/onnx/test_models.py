@@ -152,6 +152,9 @@ class TestModels(TestCase):
         x = Variable(torch.randn(BATCH_SIZE, 3, 224, 224).fill_(1.0))
         self.exportTest(toC(resnet50()), toC(x), atol=1e-6)
 
+    @unittest.skip(
+        "This test has been flaky on trunk and PRs. See https://github.com/pytorch/pytorch/issues/79540"
+    )
     @skipScriptTest(min_opset_version=15)  # None type in outputs
     def test_inception(self):
         x = Variable(torch.randn(BATCH_SIZE, 3, 299, 299))
