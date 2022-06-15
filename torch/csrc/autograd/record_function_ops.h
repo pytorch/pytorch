@@ -23,7 +23,6 @@ TORCH_API c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
 
 // Legacy signature using cpp_custom_type_hack
 TORCH_API at::Tensor record_function_enter_legacy(
-    const at::Tensor& prev,
     const std::string& name,
     const c10::optional<std::string>& args);
 TORCH_API void record_function_exit_legacy(const at::Tensor& handle);

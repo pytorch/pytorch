@@ -2,7 +2,6 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/autograd/record_function_ops.h>
-#include <torch/csrc/profiler/execution_graph_observer.h>
 #include <torch/csrc/profiler/api.h>
 
 #include <torch/csrc/jit/runtime/operator.h>
@@ -36,17 +35,17 @@ void record_function_enter(
 
 // Legacy signature using cpp_custom_type_hack
 at::Tensor record_function_enter_legacy(
-    const at::Tensor& prev,
     const std::string& name,
     const c10::optional<std::string>& args) {
-  if (profilerEnabled() || torch::profiler::impl::isExecutionGraphObserverEnabled()) {
+  auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
     auto rec =
         std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     record_function_enter(name, args, *rec);
     return at::cpp_custom_type_hack::create(
         std::move(rec), at::TensorOptions());
   } else {
-    return prev;
+    return at::zeros({});
   }
 }
 
@@ -140,7 +139,7 @@ TORCH_LIBRARY_FRAGMENT(profiler, m) {
   m.class_<PythonRecordFunction>("_RecordFunction");
 
   m.def(
-      "_record_function_enter(Tensor prev, str name, str? args=None) -> Tensor",
+      "_record_function_enter(str name, str? args=None) -> Tensor",
       &record_function_enter_legacy);
   m.def(
       "_record_function_enter_new(str name, str? args=None) -> "

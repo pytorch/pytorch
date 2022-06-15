@@ -645,7 +645,7 @@ static PyObject* record_function_enter_fast(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_record_function_enter_fast(Tensor prev, std::string name, std::string? args=None)"});
+      {"_record_function_enter_fast(std::string name, std::string? args=None)"});
 
   ParsedArgs<3> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
@@ -658,7 +658,7 @@ static PyObject* record_function_enter_fast(
           .findSchemaOrThrow("profiler::_record_function_enter", "")
           .typed<decltype(torch::autograd::profiler::
                               record_function_enter_legacy)>();
-  auto res = op.call(_r.tensor(0), _r.string(1), _r.stringOptional(2));
+  auto res = op.call(_r.string(0), _r.stringOptional(1));
   return THPVariable_Wrap(std::move(res));
   END_HANDLE_TH_ERRORS
 }
