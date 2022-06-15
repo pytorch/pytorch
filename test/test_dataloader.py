@@ -233,6 +233,10 @@ class TestDatasetRandomSplit(TestCase):
             # should raise since the sum of fractions is not 1
             random_split([1, 2, 3, 4], [0.1])
 
+        with self.assertRaises(ValueError):
+            # should raise since fraction > 1
+            random_split([1, 2, 3, 4], [1.1])
+
     def test_splits_generator(self):
         # A random_split without a specific generator should affect the default one
         state = torch.get_rng_state()
