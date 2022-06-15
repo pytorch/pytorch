@@ -45,43 +45,42 @@ void sortKeyValueInplace(const TensorBase& key,
   // vectorized (key, value) sort by slice segment
   TORCH_INTERNAL_ASSERT(ceilPowerOf2 <= 2048, "sortKeyValueInplace only works for sizes <= 2048 at present");
 
-  // The grid is based on the number of independent slices that we
-  // have to sort; one block per slice
-  dim3 grid;
-  TORCH_INTERNAL_ASSERT(getGridFromTiles(keySlices, grid), "Too many slices to sort");
+  const auto stream = c10::cuda::getCurrentCUDAStream();
 
-#define HANDLE_CASE(TYPE, A, SIZE)                                      \
+#define HANDLE_CASE(TYPE, A, SIZE, BATCH)                               \
   do {                                                                  \
-    int blockSize = SIZE / 2;                                           \
-    if (blockSize < 1) {                                                \
-      blockSize = 1;                                                    \
-    }                                                                   \
+    constexpr int items_per_thread = 2;                                 \
+    static_assert(SIZE % items_per_thread == 0, "");                    \
+    constexpr int block_x = SIZE / items_per_thread;                    \
+    constexpr int block_y = BATCH;                                      \
+    dim3 block(block_x, block_y);                                       \
                                                                         \
-    dim3 block(blockSize);                                              \
+    dim3 grid;                                                          \
+    const int grid_count = (keySlices + BATCH - 1) / BATCH;             \
+    TORCH_INTERNAL_ASSERT(getGridFromTiles(grid_count, grid),           \
+                          "Too many slices to sort");                   \
                                                                         \
     if (dir) {                                                          \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
-          GTOp<scalar_t, true>, TYPE, SIZE>                           \
-        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
+      bitonicSortKVInPlace<A, -1, block_x, block_y>                     \
+        <<<grid, block, 0, stream>>>(                                   \
           keyInfo,                                                      \
-          keySlices,                                                    \
+          (TYPE) keySlices,                                             \
           (TYPE) keySliceSize,                                          \
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          GTOp<scalar_t, true>());                                    \
+          GTOp<scalar_t, true>());                                      \
       C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     } else {                                                            \
-      bitonicSortKVInPlace<scalar_t, int64_t, A, -1,                    \
-      LTOp<scalar_t, true>, TYPE, SIZE>                               \
-        <<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(        \
+      bitonicSortKVInPlace<A, -1, block_x, block_y>                     \
+        <<<grid, block, 0, stream>>>(                                   \
           keyInfo,                                                      \
-          keySlices,                                                    \
+          (TYPE) keySlices,                                             \
           (TYPE) keySliceSize,                                          \
           (TYPE) keyInfo.strides[collapseKeyDim],                       \
           valueInfo,                                                    \
           (TYPE) valueInfo.strides[collapseValueDim],                   \
-          LTOp<scalar_t, true>());                                    \
+          LTOp<scalar_t, true>());                                      \
       C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     }                                                                   \
   } while (0)
@@ -90,29 +89,29 @@ void sortKeyValueInplace(const TensorBase& key,
   {                                                     \
     switch (ceilPowerOf2) {                             \
       case 2048:                                        \
-      HANDLE_CASE(TYPE, A, 2048);                       \
-      break;                                            \
+        HANDLE_CASE(TYPE, A, 2048, 1);                  \
+        break;                                          \
       case 1024:                                        \
       case 512:                                         \
       case 256:                                         \
-      HANDLE_CASE(TYPE, A, 1024);                       \
-      break;                                            \
+        HANDLE_CASE(TYPE, A, 1024, 1);                  \
+        break;                                          \
       case 128:                                         \
       case 64:                                          \
-      HANDLE_CASE(TYPE, A, 128);                        \
-      break;                                            \
+        HANDLE_CASE(TYPE, A, 128, 4);                   \
+        break;                                          \
       case 32:                                          \
       case 16:                                          \
       case 8:                                           \
       case 4:                                           \
       case 2:                                           \
-      HANDLE_CASE(TYPE, A, 32);                         \
-      break;                                            \
+        HANDLE_CASE(TYPE, A, 32, 16);                   \
+        break;                                          \
       case 1:                                           \
-      /* Nothing to do, data already sorted */          \
-      break;                                            \
+        /* Nothing to do, data already sorted */        \
+        break;                                          \
       default:                                          \
-      TORCH_INTERNAL_ASSERT(false);                     \
+        TORCH_INTERNAL_ASSERT(false);                   \
     }                                                   \
   }
 
