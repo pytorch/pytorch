@@ -1149,7 +1149,7 @@ class TestFunctionalIterDataPipe(TestCase):
             for constr in (list, tuple):
                 datapipe = dp.iter.IterableWrapper([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
                 res_dp = datapipe.map(fn, input_col, output_col)
-                ref_dp = datapipe.map(ref_fn)
+                ref_dp = datapipe.map(ref_fn) if ref_fn is not None else datapipe
                 self.assertEqual(list(res_dp), list(ref_dp))
                 # Reset
                 self.assertEqual(list(res_dp), list(ref_dp))
@@ -1220,7 +1220,7 @@ class TestFunctionalIterDataPipe(TestCase):
                  {"x": 6, "y": 7, "z": 8}]
             )
             res_dp = datapipe.map(fn, input_col, output_col)
-            ref_dp = datapipe.map(ref_fn)
+            ref_dp = datapipe.map(ref_fn) if ref_fn is not None else datapipe
             self.assertEqual(list(res_dp), list(ref_dp))
             # Reset
             self.assertEqual(list(res_dp), list(ref_dp))
