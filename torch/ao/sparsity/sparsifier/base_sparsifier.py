@@ -1,6 +1,5 @@
 import abc
 import copy
-import warnings
 from collections import defaultdict
 from typing import Dict, Optional, Tuple
 
@@ -8,7 +7,7 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 
-from .utils import FakeSparsity, module_to_fqn, fqn_to_module, get_arg_info_from_tensor_fqn
+from .utils import FakeSparsity, module_to_fqn, get_arg_info_from_tensor_fqn
 
 SUPPORTED_MODULES = {
     nn.Linear
@@ -152,54 +151,36 @@ class BaseSparsifier(abc.ABC):
 
         # TODO: Remove the configuration by reference ('module')
         for module_config in self.config:
-            if isinstance(module_config, nn.Module):
-                warnings.warn("config elements should be dicts not modules")
-                module_config = {'module': module_config}
+            assert isinstance(module_config, dict) , (
+                "config elements should be dicts not modules i.e.:"
+                "[{`tensor_fqn`: `foo.bar.weight`}, {`tensor_fqn`: ... }, ...]"
+            )
+
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
-            # Make sure there is at least one way of handling the model
+
             tensor_fqn = local_args.get('tensor_fqn', None)
+            assert tensor_fqn is not None, (
+                "tensor_fqn is a required argument in the sparsity config which"
+                "replaces previous `module` and [module]`fqn` arguments"
+            )
 
-            if tensor_fqn is None:
-                warnings.warn("tensor_fqn is a required argument in the sparsity config and support for `module` and `module_fqn` will be deprecated")
-                module = local_args.get('module', None)
-                module_fqn = local_args.get('module_fqn', None)
+            # populate all information from tensor_fqn
+            info_from_tensor_fqn = get_arg_info_from_tensor_fqn(model, tensor_fqn)
 
-                if module is None and module_fqn is None:
-                    # No module given for this group
-                    raise ValueError('Either `tensor_fqn` or `module` or `module_fqn` must be specified!')
-                elif module is None:
-                    # FQN is given
-                    module = fqn_to_module(model, module_fqn)
-                elif module_fqn is None:
-                    # Module is given
-                    module_fqn = module_to_fqn(model, module)
-                else:
-                    # Both Module and FQN are given
-                    module_from_fqn = fqn_to_module(model, module_fqn)
-                    assert module is module_from_fqn, \
-                        'Given both `module` and `fqn`, it is expected them to ' \
-                        'refer to the same thing!'
-                if module_fqn and module_fqn[0] == '.':
-                    module_fqn = module_fqn[1:]
-                local_args['module_fqn'] = module_fqn
-                local_args['module'] = module
-                local_args['tensor_fqn'] = module_fqn + '.weight'
-                local_args['tensor_name'] = 'weight'
-            else:
-                info_from_tensor_fqn = get_arg_info_from_tensor_fqn(model, tensor_fqn)
-
-                # check that whatever was put into local_args agrees with what was obtained
-                # from tensor_fqn
-                for key in info_from_tensor_fqn.keys():
-                    if key in local_args:
+            # check that whatever was put into local_args agrees with what was obtained
+            # from tensor_fqn
+            for key in info_from_tensor_fqn.keys():
+                if key in local_args:
+                    assert (
+                        info_from_tensor_fqn[key] == local_args[key] or
+                        (key == 'tensor_fqn' and "." + info_from_tensor_fqn[key] == local_args[key])
                         # info_from_tensor_fqn will chop leading '.' from tensor_fqn so ignore that
-                        assert key == 'tensor_fqn' or info_from_tensor_fqn[key] == local_args[key], (
-                            "Given both `{}` and `tensor_fqn`, it is expected them to "
-                            "agree!".format(key)
-                        )
-                local_args.update(info_from_tensor_fqn)
-
+                    ), (
+                        "Given both `{}` and `tensor_fqn` in the config, it is expected them to "
+                        "agree!".format(key)
+                    )
+            local_args.update(info_from_tensor_fqn)
             self.tensor_groups.append(local_args)
         self._prepare()
 
@@ -284,6 +265,7 @@ class BaseSparsifier(abc.ABC):
                     per_layer_params = {k: config[k] for k in params}
                     sparse_params.update(per_layer_params)
             if sparse_params:
+                # TODO handle multiple tensor being quantized on a single module, where to store?
                 module.sparse_params = sparse_params
 
     def convert(self):
