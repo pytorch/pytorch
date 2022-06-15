@@ -230,7 +230,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 }
 
 
-static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, const c10::List<c10::optional<at::Tensor>>& orig, bool check_range) {
+static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -1164,7 +1164,8 @@ Tensor& index_select_out_cuda(
       index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf,
         at::ScalarType::Half,
         at::ScalarType::Bool,
         at::ScalarType::BFloat16,

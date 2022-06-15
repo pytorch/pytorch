@@ -611,6 +611,36 @@ class TORCH_CUDA_CU_API ViewOp : public Expr {
   TensorView* const in_ = nullptr;
 };
 
+//! This operator explicitly models data movement between
+//!   state spaces on GPU. Currently the modeled state spaces include
+//!   global memory, shared memory and register.
+//!
+//! The main usage of this op is to facilitate generation of hardware
+//!   accelerated memory ops, i.e. ldmatrix, cp.async and more to come.
+class TORCH_CUDA_CU_API LoadStoreOp : public Expr {
+ public:
+  LoadStoreOp(IrBuilderPasskey, LoadStoreOpType op_type, Val* out, Val* in);
+
+  LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner);
+
+  Val* out() const {
+    return out_;
+  }
+
+  Val* in() const {
+    return in_;
+  }
+
+  LoadStoreOpType opType() const {
+    return load_store_type_;
+  }
+
+ private:
+  LoadStoreOpType load_store_type_ = LoadStoreOpType::LdMatrix;
+  Val* const out_ = nullptr;
+  Val* const in_ = nullptr;
+};
+
 // Friends for direct access to split
 class TensorDomain;
 class ReplayTransformations;
