@@ -5,11 +5,11 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/BinaryOps.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/conv_serialization.h>
-#include <ATen/native/quantized/packed_params.h>
 #include <ATen/native/xnnpack/OpContext.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/TensorImpl.h>
