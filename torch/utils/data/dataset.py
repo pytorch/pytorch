@@ -329,11 +329,12 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
         # add 1 to all the lengths in round-robin fashion until the remainder is 0
         for i in range(remainder):
             idx_to_add_at = i % len(subset_lengths)
-            if subset_lengths[idx_to_add_at] == 0:
-                warnings.warn(f"Fraction at index {idx_to_add_at} is 0, "
-                              f"but the remainder is {remainder}")
             subset_lengths[idx_to_add_at] += 1
         lengths = subset_lengths
+        for i, length in enumerate(lengths):
+            if length == 0:
+                warnings.warn(f"Length of split at index {i} is 0. "
+                              f"This might result in an empty dataset.")
 
     # Cannot verify that dataset is Sized
     if sum(lengths) != len(dataset):    # type: ignore[arg-type]
