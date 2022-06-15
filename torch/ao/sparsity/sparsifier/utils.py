@@ -1,6 +1,7 @@
 from torch import nn
+from typing import Dict, Any
 
-def module_to_fqn(model, module, prefix=''):
+def module_to_fqn(model, module: nn.Module, prefix: str='') -> str:
     for name, child in model.named_children():
         new_name = prefix + '.' + name
         if child is module:
@@ -10,7 +11,7 @@ def module_to_fqn(model, module, prefix=''):
             return child_path
     return None
 
-def fqn_to_module(model, path):
+def fqn_to_module(model: nn.Module, path: str) -> nn.Module:
     path = path.split('.')
     for name in path:
         model = getattr(model, name, None)
@@ -18,7 +19,7 @@ def fqn_to_module(model, path):
             return None
     return model
 
-def get_arg_info_from_tensor_fqn(model, tensor_fqn):
+def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> Dict[str, Any]:
     # remove starting '.' from tensor_fqn if it exists
     if tensor_fqn[0] == '.':
         tensor_fqn = tensor_fqn[1:]
