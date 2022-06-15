@@ -146,7 +146,7 @@ class TestNestedTensor(TestCase):
             a1 = constructor([])
             self.assertRaisesRegex(
                 RuntimeError,
-                "Tensors of type NestedTensorImpl do not have sym sizes"
+                "Tensors of type NestedTensorImpl do not have sizes"
                 if IS_FBCODE
                 else "NestedTensorImpl doesn't support sizes",
                 lambda: a1.size(),
