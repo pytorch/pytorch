@@ -280,6 +280,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
         Tensor.to_padded_tensor,
+        Tensor.sym_size
     }
 
 
@@ -947,7 +948,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
-        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
+        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
@@ -1954,10 +1955,12 @@ class enable_reentrant_dispatch():
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._raii_guard
 
-def get_buffer(tensor_subclass, data):
+def get_buffer(tensor_subclass, data, prefix):
     import ctypes
-    if not hasattr(tensor_subclass, "_stride_buffer"):
+    assert prefix in {"stride", "size"}
+    buffer_name = f"_{prefix}_buffer"
+    if not hasattr(tensor_subclass, buffer_name):
         SizeType = ctypes.c_longlong * len(data)
-        tensor_subclass._stride_buffer = SizeType(*data)
-    ptr = ctypes.addressof(tensor_subclass._stride_buffer)
+        setattr(tensor_subclass, buffer_name, SizeType(*data))
+    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
     return (ptr, len(data))
