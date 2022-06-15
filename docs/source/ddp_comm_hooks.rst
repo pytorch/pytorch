@@ -116,7 +116,7 @@ To make a hook serializable, ``__setstate__`` and ``__getstate__`` should be def
     :noindex:
 
     .. automethod:: PowerSGDState.__getstate__
-    .. automethod:: PowerSGDState.__getstate__
+    .. automethod:: PowerSGDState.__setstate__
 
 Here is a simple, end-to-end example of saving and reloading PowerSGD state and hook.
 
@@ -156,8 +156,7 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
             demo_fn,
             args=(world_size,),
             nprocs=world_size,
-            join=True
-        )
+            join=True)
 
     def demo_serialization(rank, world_size):
         setup(rank, world_size)
@@ -167,14 +166,13 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
         model = SimpleModel().to(rank)
         ddp_model = DistributedDataParallel(
             model,
-            device_ids=[rank]
-        )
+            device_ids=[rank])
+
         powersgd_hook = powerSGD.powerSGD_hook
         powersgd_state = powerSGD.PowerSGDState(
                 process_group=None,
                 matrix_approximation_rank=1,
-                start_powerSGD_iter=4,
-        )
+                start_powerSGD_iter=4)
 
         optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
         ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
@@ -182,8 +180,7 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
         state = {
             'state_dict': ddp_model.state_dict(),
             'comm_hook': hook,
-            'comm_hook_state': hook_state
-        }
+            'comm_hook_state': hook_state}
 
         if rank == 0:
             torch.save(state, CHECKPOINT)
