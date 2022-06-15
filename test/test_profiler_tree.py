@@ -177,28 +177,16 @@ class TestProfilerTree(TestCase):
                 with torch.autograd.profiler.record_function("Third Annotation"):
                     y.backward()
 
-        # NB: The `aten::zeros` before the record function annotations are due to
-        # `at::cpp_custom_type_hack`. When we switch to `torch::CustomClassHolder`
-        # they will disappear.
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            aten::zeros
-              aten::empty
-              aten::zero_
             Top level Annotation
               aten::empty
-              aten::zeros
-                aten::empty
-                aten::zero_
               First Annotation
                 aten::empty
                 aten::ones
                   aten::empty
                   aten::fill_
-              aten::zeros
-                aten::empty
-                aten::zero_
               Second Annotation
                 aten::empty
                 aten::add
@@ -206,9 +194,6 @@ class TestProfilerTree(TestCase):
                     aten::_to_copy
                       aten::empty_strided
                       aten::copy_
-                aten::zeros
-                  aten::empty
-                  aten::zero_
                 Third Annotation
                   aten::empty
                   aten::ones_like
@@ -373,7 +358,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(367): test_profiler_experimental_tree_with_memory_and_stack
+            test_profiler_tree.py(355): test_profiler_experimental_tree_with_memory_and_stack
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -495,7 +480,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(491): test_profiler_experimental_tree_with_stack_and_modules
+            test_profiler_tree.py(479): test_profiler_experimental_tree_with_stack_and_modules
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -512,7 +497,7 @@ class TestProfilerTree(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(485): forward
+                test_profiler_tree.py(473): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -553,7 +538,7 @@ class TestProfilerTree(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(485): forward
+                test_profiler_tree.py(473): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
