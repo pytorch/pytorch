@@ -1,9 +1,8 @@
 # Owner(s): ["module: onnx"]
 
-import unittest
-
 import onnxruntime  # noqa: F401
 from test_models import TestModels
+from test_pytorch_common import TestCase, run_tests
 from test_pytorch_onnx_onnxruntime import run_model_test
 
 import torch
@@ -24,7 +23,7 @@ def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
 
 TestModels = type(
     "TestModels",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestModels.__dict__, is_script_test_enabled=False, exportTest=exportTest),
 )
 
@@ -32,7 +31,7 @@ TestModels = type(
 # model tests for scripting with new JIT APIs and shape inference
 TestModels_new_jit_API = type(
     "TestModels_new_jit_API",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(
         TestModels.__dict__,
         exportTest=exportTest,
@@ -43,4 +42,4 @@ TestModels_new_jit_API = type(
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

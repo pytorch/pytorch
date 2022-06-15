@@ -29,6 +29,8 @@ from test_pytorch_common import (
     skipIfTravis,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
+    TestCase,
+    run_tests,
 )
 
 # Import various models for testing
@@ -128,7 +130,7 @@ model_urls = {
 }
 
 
-class TestCaffe2Backend_opset9(unittest.TestCase):
+class TestCaffe2Backend_opset9(TestCase):
     opset_version = 9
     embed_params = False
 
@@ -3195,44 +3197,44 @@ setup_rnn_tests()
 # to embed_params=True
 TestCaffe2BackendEmbed_opset9 = type(
     "TestCaffe2BackendEmbed_opset9",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True),
 )
 
 # opset 7 tests
 TestCaffe2Backend_opset7 = type(
     "TestCaffe2Backend_opset7",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=7),
 )
 TestCaffe2BackendEmbed_opset7 = type(
     "TestCaffe2BackendEmbed_opset7",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=7),
 )
 
 # opset 8 tests
 TestCaffe2Backend_opset8 = type(
     "TestCaffe2Backend_opset8",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=8),
 )
 TestCaffe2BackendEmbed_opset8 = type(
     "TestCaffe2BackendEmbed_opset8",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=8),
 )
 
 # opset 10 tests
 TestCaffe2Backend_opset10 = type(
     "TestCaffe2Backend_opset10",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, opset_version=10),
 )
 
 TestCaffe2BackendEmbed_opset10 = type(
     "TestCaffe2BackendEmbed_opset10",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True, opset_version=10),
 )
 
@@ -3240,9 +3242,9 @@ TestCaffe2BackendEmbed_opset10 = type(
 # to embed_params=True
 TestCaffe2BackendEmbed_opset9_new_jit_API = type(
     "TestCaffe2BackendEmbed_opset9_new_jit_API",
-    (unittest.TestCase,),
+    (TestCase,),
     dict(TestCaffe2Backend_opset9.__dict__, embed_params=True),
 )
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

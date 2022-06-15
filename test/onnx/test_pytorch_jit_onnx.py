@@ -1,11 +1,10 @@
 # Owner(s): ["module: onnx"]
-import unittest
-
 import onnxruntime
 
 import torch
 from torch._C import parse_ir
 from torch.onnx import verification
+from test_pytorch_common import TestCase, run_tests
 
 
 def _jit_graph_to_onnx_model(graph, operator_export_type, opset_version):
@@ -85,7 +84,7 @@ def MakeTestCase(opset_version: int) -> type:
     name = f"TestJITIRToONNX_opset{opset_version}"
     return type(
         str(name),
-        (unittest.TestCase,),
+        (TestCase,),
         dict(_TestJITIRToONNX.__dict__, opset_version=opset_version),
     )
 
@@ -93,4 +92,4 @@ def MakeTestCase(opset_version: int) -> type:
 TestJITIRToONNX_opset14 = MakeTestCase(14)
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()
