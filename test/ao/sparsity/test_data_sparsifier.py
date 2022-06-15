@@ -29,6 +29,8 @@ class TestBaseDataSparsiferRunner(TestCase):
         The user is required to pass in the data that needs to sparsified and the
         runner will run some tests that needs to be passed in order for the data
         type to be supported.
+        TODO: Change the structure by creating a separate test case class for each
+              member function
     """
     def __init__(self, data_list, defaults, data_with_config):
         self.data_list = data_list
