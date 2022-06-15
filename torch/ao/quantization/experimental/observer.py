@@ -11,6 +11,7 @@ from torch.ao.quantization.observer import ObserverBase
 
 # TODO: Consider adding NonUniformQuantizationObserverBase class
 # when more than one non-uniform method is implemented
+
 class APoTObserver(ObserverBase):
     max_val: float
     b: int
