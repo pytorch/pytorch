@@ -1842,12 +1842,12 @@ def _normalize(
 
 @register_decomposition(torch.ops.aten.native_layer_norm)
 def native_layer_norm(
-    input: TensorLikeType,
+    input: Tensor,
     normalized_shape: ShapeType,
     weight: Optional[Tensor],
     bias: Optional[Tensor],
     eps: float,
-) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
+) -> Tuple[Tensor, Tensor, Tensor]:
     normalized_ndim = len(normalized_shape)
     utils.check(
         normalized_ndim >= 1,
