@@ -285,7 +285,7 @@ class C10_API _RemoveExcludeDispatchKeyGuard {
     key_ = k;
     // MLIR and XLA are using this API, so waiting to add this assert back
     // until after they're using the functionalization pass.
-    //TORCH_INTERNAL_ASSERT(c10::impl::tls_is_dispatch_key_excluded(key_));
+    // TORCH_INTERNAL_ASSERT(c10::impl::tls_is_dispatch_key_excluded(key_));
     c10::impl::tls_set_dispatch_key_excluded(key_, false);
   }
 
