@@ -33,7 +33,7 @@ def _generate_iterdatapipe_msg(datapipe):
 
 
 def _gen_invalid_iterdatapipe_msg(datapipe):
-    return ("This iterator has been invalidated because another iterator has been created"
+    return ("This iterator has been invalidated because another iterator has been created "
             f"from the same IterDataPipe: {_generate_iterdatapipe_msg(datapipe)}\n"
             "This may be caused multiple references to the same IterDataPipe. We recommend "
             "using `.fork()` if that is necessary.")
@@ -162,9 +162,13 @@ def hook_iterator(namespace, profile_name):
                 #       Part of https://github.com/pytorch/data/issues/284
                 datapipe = args[0]
                 msg = "thrown by __iter__ of"
-                full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
-                if len(e.args) >= 1 and msg not in e.args[0]:
-                    e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
+                single_iterator_msg = "single iterator per IterDataPipe constraint"
+                if hasattr(e.args, '__len__'):
+                    full_msg = f"{msg} {datapipe.__class__.__name__}({_generate_input_args_string(datapipe)})"
+                    if len(e.args) == 0:  # If an exception message doesn't exist
+                        e.args = (f'\nThis exception is {full_msg}',)
+                    elif msg not in e.args[0] and single_iterator_msg not in e.args[0]:
+                        e.args = (e.args[0] + f'\nThis exception is {full_msg}',) + e.args[1:]
                 raise
 
         namespace['__iter__'] = wrap_generator
