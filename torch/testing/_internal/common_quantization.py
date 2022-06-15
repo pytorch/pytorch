@@ -94,6 +94,9 @@ class NodeSpec:
     def __repr__(self):
         return repr(self.op) + " " + repr(self.target)
 
+def get_supported_device_types():
+    return ['cpu', 'cuda'] if torch.cuda.is_available() and not TEST_WITH_ROCM else ['cpu']
+
 def test_only_eval_fn(model, calib_data):
     r"""
     Default evaluation function takes a torch.utils.data.Dataset or a list of

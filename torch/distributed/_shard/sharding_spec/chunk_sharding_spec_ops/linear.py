@@ -198,7 +198,7 @@ def _handle_col_wise_sharding(input, world_size, weight, rank, local_shard_t, bi
     # allgather the inputs first.
     out_size = list(input.size())
     out_size[0] = input.size(0) * dist.get_world_size(pg)
-    output = torch.empty(out_size, device=input.device)
+    output = torch.empty(out_size, device=input.device, dtype=input.dtype)
     output = _all_gather_base(output, input, group=pg)
 
     # Adjust bias and perform local matmul.
@@ -290,7 +290,7 @@ def _handle_row_wise_sharding_tensor(
     gathered_input_size = [input_split_sizes[rank] * world_size] + list(
         input_t_size[1:]
     )
-    gathered_input = torch.empty(gathered_input_size, device=input_t.device)
+    gathered_input = torch.empty(gathered_input_size, device=input_t.device, dtype=input_t.dtype)
 
     # Perform autograd enabled alltoall
     all_to_all_single(
