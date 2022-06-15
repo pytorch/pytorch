@@ -277,7 +277,7 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
-        datapipe = dp.iter.FileLister(temp_dir, '')
+        datapipe: IterDataPipe = dp.iter.FileLister(temp_dir, '')
 
         count = 0
         for pathname in datapipe:
