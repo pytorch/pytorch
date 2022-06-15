@@ -1,7 +1,5 @@
 import torch
-import tensorflow as tf
 from torch import Tensor
-from torch.ao.quantization.experimental.observer import APoTObserver, apot_to_float
 
 # class to store APoT quantized tensor
 class TensorAPoT(torch.Tensor):
