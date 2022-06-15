@@ -31,20 +31,20 @@ def ensure_map_fn_works(fn: Callable, input_col: Optional[Union[int, tuple, list
         TypeError: If the function is not compatible with the input column.
     """
     sig = inspect.signature(fn)
+    try:
+        sz = len(input_col)
+    except TypeError:
+        sz = 1
 
-    if isinstance(input_col, int) or not input_col:
-        if len(sig.parameters) != 1:
+    if len(sig.parameters) >= sz:
+        non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
+        if len(non_default_params) != sz:
             raise TypeError(
-                f"The function {fn.__name__} takes {len(sig.parameters)} " f"arguments, "
-                f"" f"but 1 is required."
+                f"The function {fn.__name__} takes {len(non_default_params)} "
+                f"non-default parameters, "
+                f"but {sz} are required."
             )
-    elif isinstance(input_col, (list, tuple)):
-        if len(sig.parameters) != len(input_col):
-            raise TypeError(
-                f"The function {fn.__name__} takes {len(sig.parameters)} "
-                f"arguments, "
-                f"but {len(input_col)} are required."
-            )
+
 
 
 def _check_lambda_fn(fn):
