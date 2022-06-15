@@ -164,7 +164,7 @@ class FakeTensorTest(TestCase):
 
     def test_deepcopy(self):
         mod = torch.nn.BatchNorm2d(10)
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_non_fake_inputs=True)):
             mod_copied = copy.deepcopy(mod)
 
         for name, param in itertools.chain(mod.named_parameters(), mod.named_buffers()):
