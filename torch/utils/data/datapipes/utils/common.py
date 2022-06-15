@@ -41,8 +41,7 @@ def ensure_map_fn_works(fn: Callable, input_col: Optional[Union[int, tuple, list
         if len(non_default_params) != sz:
             raise TypeError(
                 f"The function {fn.__name__} takes {len(non_default_params)} "
-                f"non-default parameters, "
-                f"but {sz} are required."
+                f"non-default parameters, but {sz} are required."
             )
 
 
