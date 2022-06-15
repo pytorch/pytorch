@@ -319,7 +319,7 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
     """
     if math.isclose(sum(lengths), 1) and sum(lengths) <= 1:
         subset_lengths: List[int] = []
-        for i, frac in enumerate(subset_lengths):
+        for i, frac in enumerate(lengths):
             if frac < 0 or frac > 1:
                 raise ValueError(f"Fraction at index {i} is not between 0 and 1")
             n_items_in_split = int(
@@ -329,10 +329,11 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
         remainder = len(dataset) - sum(subset_lengths)  # type: ignore[arg-type]
         # add 1 to all the lengths in round-robin fashion until the remainder is 0
         for i in range(remainder):
-            if subset_lengths[i] == 0:
-                warnings.warn(f"Fraction at index {i} is 0, "
+            idx_to_add_at = i % len(subset_lengths)
+            if subset_lengths[idx_to_add_at] == 0:
+                warnings.warn(f"Fraction at index {idx_to_add_at} is 0, "
                               f"but the remainder is {remainder}")
-            subset_lengths[i % len(subset_lengths)] += 1
+            subset_lengths[idx_to_add_at] += 1
         lengths = subset_lengths
 
     # Cannot verify that dataset is Sized
