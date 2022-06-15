@@ -8,6 +8,7 @@ from test_pytorch_common import (
     skipIfNoCuda,
     skipIfUnsupportedMinOpsetVersion,
     skipScriptTest,
+    TestCase,
 )
 
 # TODO(justinchuby): Remove reference to other unit tests.
@@ -18,7 +19,7 @@ from torch.cuda.amp import autocast
 from torch.onnx._globals import GLOBALS
 
 
-class TestONNXRuntime_cuda(unittest.TestCase):
+class TestONNXRuntime_cuda(TestCase):
 
     opset_version = GLOBALS.export_onnx_opset_version
     keep_initializers_as_inputs = True
@@ -150,4 +151,5 @@ TestONNXRuntime_cuda.setUp = TestONNXRuntime.setUp
 TestONNXRuntime_cuda.run_test = TestONNXRuntime.run_test
 
 if __name__ == "__main__":
+    # TODO: convert this to use common_utils.run_tests()
     unittest.main(TestONNXRuntime_cuda())
