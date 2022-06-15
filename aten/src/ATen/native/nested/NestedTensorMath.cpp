@@ -643,5 +643,9 @@ Tensor clone_nested(
       get_buffer(self).clone(), get_nested_size_tensor(self).clone());
 }
 
+at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
+  return get_nested_size_tensor(self);
+}
+
 } // namespace native
 } // namespace at
