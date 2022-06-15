@@ -2,6 +2,7 @@
 
 import torch
 from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
+from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest
 
 class TestQuantizedTensor(unittest.TestCase):
