@@ -85,7 +85,7 @@ class WeightNormSparsifier(BaseSparsifier):
                 submask = new_mask[row:row + sparse_block_shape[0],
                                    col:col + sparse_block_shape[1]]
                 subweight = getattr(module, tensor_name)[row:row + sparse_block_shape[0],
-                                         col:col + sparse_block_shape[1]]
+                                                         col:col + sparse_block_shape[1]]
                 self._update_block(submask, subweight,
                                    zeros_per_block, values_per_block)
             mask.data = new_mask

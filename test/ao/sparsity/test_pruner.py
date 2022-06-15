@@ -178,18 +178,18 @@ class Conv2dBN(nn.Module):
 
 
 class SimplePruner(BasePruner):
-    def update_mask(self, layer, **kwargs):
-        layer.parametrizations.weight[0].pruned_outputs.add(1)
+    def update_mask(self, module, tensor_name, **kwargs):
+        getattr(module.parametrizations, tensor_name)[0].pruned_outputs.add(1)
 
 
 class MultiplePruner(BasePruner):
-    def update_mask(self, layer, **kwargs):
-        layer.parametrizations.weight[0].pruned_outputs.update([1, 2])
+    def update_mask(self, module, tensor_name, **kwargs):
+        getattr(module.parametrizations, tensor_name)[0].pruned_outputs.update([1, 2])
 
 
 class TestBasePruner(TestCase):
     def _check_pruner_prepared(self, model, pruner, device):
-        for config in pruner.module_groups:
+        for config in pruner.tensor_groups:
             modules = []
             if type(config['module']) is tuple:
                 for module in config['module']:
@@ -211,7 +211,7 @@ class TestBasePruner(TestCase):
                     assert type(module.parametrizations.weight[0]) == PruningParametrization
 
     def _check_pruner_mask_squashed(self, model, pruner, device):
-        for config in pruner.module_groups:
+        for config in pruner.tensor_groups:
             modules = []
             if type(config['module']) is tuple:
                 for module in config['module']:
@@ -225,7 +225,7 @@ class TestBasePruner(TestCase):
                 assert not hasattr(module, 'mask')
 
     def _check_pruner_valid_before_step(self, model, pruner, device):
-        for config in pruner.module_groups:
+        for config in pruner.tensor_groups:
             modules = []
             if type(config['module']) is tuple:
                 for module in config['module']:
@@ -238,7 +238,7 @@ class TestBasePruner(TestCase):
                 assert module.parametrizations.weight[0].pruned_outputs == set()
 
     def _check_pruner_valid_after_step(self, model, pruner, pruned_set, device):
-        for config in pruner.module_groups:
+        for config in pruner.tensor_groups:
             modules = []
             if type(config['module']) is tuple:
                 for module in config['module']:
@@ -256,19 +256,19 @@ class TestBasePruner(TestCase):
         model1 = copy.deepcopy(model).to(device)
         pruner = SimplePruner(None)
         pruner.prepare(model1, None)
-        for g in pruner.module_groups:
+        for g in pruner.tensor_groups:
             module = g['module']
             assert module.weight.device.type == device.type
-        assert len(pruner.module_groups) == 2
+        assert len(pruner.tensor_groups) == 2
         pruner.step()
         # Can instantiate the model with configs
         model2 = copy.deepcopy(model).to(device)
         pruner = SimplePruner({'test': 3})
         pruner.prepare(model2, [model2.linear])
-        assert len(pruner.module_groups) == 1
-        assert pruner.module_groups[0]['fqn'] == 'linear'
-        assert 'test' in pruner.module_groups[0]
-        assert pruner.module_groups[0]['test'] == 3
+        assert len(pruner.tensor_groups) == 1
+        assert pruner.tensor_groups[0]['module_fqn'] == 'linear'
+        assert 'test' in pruner.tensor_groups[0]
+        assert pruner.tensor_groups[0]['test'] == 3
 
     def test_constructor(self):
         model = Linear()

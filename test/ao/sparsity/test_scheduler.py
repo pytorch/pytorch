@@ -13,7 +13,7 @@ class ImplementedScheduler(BaseScheduler):
     def get_sl(self):
         if self.last_epoch > 0:
             return [group['sparsity_level'] * 0.5
-                    for group in self.sparsifier.module_groups]
+                    for group in self.sparsifier.tensor_groups]
         else:
             return list(self.base_sl)
 
@@ -29,7 +29,7 @@ class TestScheduler(TestCase):
 
         assert scheduler.sparsifier is sparsifier
         assert scheduler._step_count == 1
-        assert scheduler.base_sl == [sparsifier.module_groups[0]['sparsity_level']]
+        assert scheduler.base_sl == [sparsifier.tensor_groups[0]['sparsity_level']]
 
     def test_order_of_steps(self):
         """Checks if the warning is thrown if the scheduler step is called
@@ -63,13 +63,13 @@ class TestScheduler(TestCase):
         )
         sparsifier = WeightNormSparsifier()
         sparsifier.prepare(model, config=None)
-        assert sparsifier.module_groups[0]['sparsity_level'] == 0.5
+        assert sparsifier.tensor_groups[0]['sparsity_level'] == 0.5
         scheduler = ImplementedScheduler(sparsifier)
-        assert sparsifier.module_groups[0]['sparsity_level'] == 0.5
+        assert sparsifier.tensor_groups[0]['sparsity_level'] == 0.5
 
         sparsifier.step()
         scheduler.step()
-        assert sparsifier.module_groups[0]['sparsity_level'] == 0.25
+        assert sparsifier.tensor_groups[0]['sparsity_level'] == 0.25
 
     def test_lambda_scheduler(self):
         model = nn.Sequential(
@@ -77,8 +77,8 @@ class TestScheduler(TestCase):
         )
         sparsifier = WeightNormSparsifier()
         sparsifier.prepare(model, config=None)
-        assert sparsifier.module_groups[0]['sparsity_level'] == 0.5
+        assert sparsifier.tensor_groups[0]['sparsity_level'] == 0.5
         scheduler = LambdaSL(sparsifier, lambda epoch: epoch * 10)
-        assert sparsifier.module_groups[0]['sparsity_level'] == 0.0  # Epoch 0
+        assert sparsifier.tensor_groups[0]['sparsity_level'] == 0.0  # Epoch 0
         scheduler.step()
-        assert sparsifier.module_groups[0]['sparsity_level'] == 5.0  # Epoch 1
+        assert sparsifier.tensor_groups[0]['sparsity_level'] == 5.0  # Epoch 1

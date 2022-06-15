@@ -17,7 +17,7 @@ class BaseScheduler(object):
 
         # Initialize epoch and base sparsity levels
 
-        self.base_sl = [group['sparsity_level'] for group in sparsifier.module_groups]
+        self.base_sl = [group['sparsity_level'] for group in sparsifier.tensor_groups]
         self.last_epoch = last_epoch
 
         # Following https://github.com/pytorch/pytorch/issues/20124
@@ -141,10 +141,10 @@ class BaseScheduler(object):
             self.last_epoch += 1
             values = self.get_sl()
 
-        for i, data in enumerate(zip(self.sparsifier.module_groups, values)):
+        for i, data in enumerate(zip(self.sparsifier.tensor_groups, values)):
             param_group, sl = data
             param_group['sparsity_level'] = sl
             self.print_sl(self.verbose, i, sl, epoch)
 
-        self._last_sl = [group['sparsity_level'] for group in self.sparsifier.module_groups]
+        self._last_sl = [group['sparsity_level'] for group in self.sparsifier.tensor_groups]
         self.sparsifier.enable_mask_update = True

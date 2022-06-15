@@ -124,6 +124,17 @@ class BaseSparsifier(abc.ABC):
                     mg.update(arg_info)
         self.__setstate__({'state': states, 'tensor_groups': tensor_groups})
 
+    def make_config_from_model(self, model, SUPPORTED_MODULES=SUPPORTED_MODULES, NEEDS_ZEROS=None):
+        self.config = []
+        stack = [model]
+        while stack:
+            module = stack.pop()
+            for name, child in module.named_children():
+                if type(child) in SUPPORTED_MODULES:
+                    self.config.append({'tensor_fqn': module_to_fqn(model, child) + '.weight'})
+                else:
+                    stack.append(child)
+
     def prepare(self, model, config):
         r"""Prepares a model, by adding the parametrizations.
 
@@ -134,18 +145,10 @@ class BaseSparsifier(abc.ABC):
         """
         self.model = model  # TODO: Need to figure out how to load without this.
         self.config = config
+
         # If no config -- try getting all the supported layers
         if self.config is None:
-            # Add all models to the config
-            self.config = []
-            stack = [model]
-            while stack:
-                module = stack.pop()
-                for name, child in module.named_children():
-                    if type(child) in SUPPORTED_MODULES:
-                        self.config.append({'tensor_fqn': module_to_fqn(model, child) + '.weight'})
-                    else:
-                        stack.append(child)
+            self.make_config_from_model(model)
 
         # TODO: Remove the configuration by reference ('module')
         for module_config in self.config:
@@ -296,5 +299,5 @@ class BaseSparsifier(abc.ABC):
                 self.update_mask(**config)
 
     @abc.abstractmethod
-    def update_mask(self, module, **kwargs):
+    def update_mask(self, module, tensor_name, **kwargs):
         pass

@@ -5,6 +5,7 @@ from ._mappings import get_static_sparse_quantized_mapping
 # Sparsifier
 from .sparsifier.base_sparsifier import BaseSparsifier
 from .sparsifier.weight_norm_sparsifier import WeightNormSparsifier
+from .sparsifier.nearly_diagonal_sparsifier import NearlyDiagonalSparsifier
 
 # Scheduler
 from .scheduler.base_scheduler import BaseScheduler
@@ -14,6 +15,7 @@ from .scheduler.lambda_scheduler import LambdaSL
 from .sparsifier.utils import FakeSparsity
 from .sparsifier.utils import module_to_fqn
 from .sparsifier.utils import fqn_to_module
+# from .sparisifer.utils import get_arg_info_from_tensor_fqn
 
 # === Experimental ===
 

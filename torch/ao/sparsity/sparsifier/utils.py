@@ -31,7 +31,7 @@ def get_arg_info_from_tensor_fqn(model, tensor_fqn):
 
 
     module = fqn_to_module(model, module_fqn)
-    if module is None: # handling for module_fqn=''
+    if module is None:  # handling for module_fqn=''
         module = model
 
     return {
