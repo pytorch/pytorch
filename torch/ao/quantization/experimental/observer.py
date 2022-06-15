@@ -9,6 +9,8 @@ import math
 import matplotlib.pyplot as plt
 from torch.ao.quantization.observer import ObserverBase
 
+# TODO: Consider adding NonUniformQuantizationObserverBase class
+# when more than one non-uniform method is implemented
 class APoTObserver(ObserverBase):
     max_val: float
     b: int
@@ -151,4 +153,6 @@ based on quantization levels
 def apot_to_float(x_apot, levels, indices):
     x_apot = round(x_apot)
     idx = list(indices).index(x_apot)
+    print("i:", idx)
+    print("float:", levels[idx])
     return levels[idx]
