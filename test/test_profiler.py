@@ -23,7 +23,7 @@ from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
     DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
-    utils
+    _utils
 )
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
@@ -1117,7 +1117,7 @@ class TestProfiler(TestCase):
             loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
             loss.backward()
         metrics = dict()
-        utils.compute_self_time(prof.profiler, metrics)
+        _utils.compute_self_time(prof.profiler, metrics)
         self.assertTrue(len(metrics) > 0)
         for event_key, event_metrics in metrics.items():
             self.assertEqual(
