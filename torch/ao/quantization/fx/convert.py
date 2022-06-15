@@ -114,6 +114,8 @@ def run_weight_observers(observed: GraphModule) -> None:
             if i not in WEIGHT_INDEX_DICT[node.target]:
                 continue
             # node_arg is weight
+            if not isinstance(node_arg, Node):
+                continue
             weight_observer_nodes = collect_producer_nodes(node_arg)
             if weight_observer_nodes is None:
                 continue
@@ -338,6 +340,8 @@ def convert_standalone_module(
     for idx in range(len(args)):
         if idx in sm_input_quantized_idxs:
             arg = args[idx]
+            if not isinstance(arg, Node):
+                continue
             if arg.op == "call_method" and arg.target == "dequantize":  # type: ignore[union-attr]
                 quantize_node = get_all_args_as_positional_args(arg)[0]  # type: ignore[union-attr]
                 node.replace_input_with(arg, quantize_node)
