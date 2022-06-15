@@ -4,7 +4,7 @@ import itertools
 import os
 import unittest
 from collections import OrderedDict
-from typing import Any, List, Mapping, Tuple, Type
+from typing import List, Mapping, Tuple
 
 import parameterized
 import PIL

@@ -30,7 +30,6 @@ from test_pytorch_common import (
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
-    TestCase,
     run_tests,
     skipIfNoLapack,
     skipIfUnsupportedMaxOpsetVersion,
