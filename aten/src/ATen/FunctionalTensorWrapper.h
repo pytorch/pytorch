@@ -140,6 +140,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   int64_t dim_custom() const override;
   int64_t numel_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  c10::SymIntArrayRef sym_sizes() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
 
  private:
@@ -285,7 +286,7 @@ class C10_API _RemoveExcludeDispatchKeyGuard {
     key_ = k;
     // MLIR and XLA are using this API, so waiting to add this assert back
     // until after they're using the functionalization pass.
-    //TORCH_INTERNAL_ASSERT(c10::impl::tls_is_dispatch_key_excluded(key_));
+    // TORCH_INTERNAL_ASSERT(c10::impl::tls_is_dispatch_key_excluded(key_));
     c10::impl::tls_set_dispatch_key_excluded(key_, false);
   }
 

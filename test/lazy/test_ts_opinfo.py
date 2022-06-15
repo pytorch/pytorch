@@ -87,7 +87,7 @@ class TestLazyTensor(JitTestCase):
     def test_view_mark_step_preserved(self):
         test_device = get_test_device()
         inp = torch.rand(4, device=test_device)
-        inp_lazy = self.clone_move(inp)
+        inp_lazy = clone_move(inp)
 
         def foo(x, *, mark_step):
             y = x.view(2, 2)
@@ -112,13 +112,13 @@ class TestLazyTensor(JitTestCase):
     def testConvolutionBackward(self):
         test_device = get_test_device()
         inp = torch.rand(1, 3, 128, 128, device=test_device, requires_grad=True)
-        inp_copy = self.clone_move(inp)
+        inp_copy = clone_move(inp)
         grad = torch.rand(1, 32, 121, 121, device=test_device)  # no requires_grad
-        grad_copy = self.clone_move(grad)
+        grad_copy = clone_move(grad)
         weight = torch.rand(32, 3, 8, 8, device=test_device, requires_grad=True)
-        weight_copy = self.clone_move(weight)
+        weight_copy = clone_move(weight)
         bias = torch.rand(32, device=test_device, requires_grad=True)
-        bias_copy = self.clone_move(bias)
+        bias_copy = clone_move(bias)
 
         # run eager
         conv_out = torch.nn.functional.conv2d(inp, weight, bias)
