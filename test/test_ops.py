@@ -1412,19 +1412,25 @@ class TestMathBits(TestCase):
         _requires_grad = dtype in op.supported_backward_dtypes(
             torch.device(device).type
         )
-        samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
-        # Only test one sample
-        samples = itertools.islice(samples, 1)
-        self._test_math_view(
-            device,
-            dtype,
-            op,
-            samples,
-            math_op_physical,
-            math_op_view,
-            is_bit_set,
-            torch.is_complex,
-        )
+        try:
+            samples = op.sample_inputs(device, dtype, requires_grad=_requires_grad)
+            # Only test one sample
+            samples = itertools.islice(samples, 1)
+            self._test_math_view(
+                device,
+                dtype,
+                op,
+                samples,
+                math_op_physical,
+                math_op_view,
+                is_bit_set,
+                torch.is_complex,
+            )
+        # Some ops are not implemented for Meta but that information is not currently stored in the
+        # OpInfo so adding this hack until then
+        except NotImplementedError:
+            assert device == 'meta'
+            return
 
 # input strides and size may have been altered due to the result of an inplace op
 def test_inplace_view(func, input, rs, input_size, input_strides):
@@ -1616,7 +1622,7 @@ class TestFakeTensorNonErroring(TestCase):
 
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
-instantiate_device_type_tests(TestMathBits, globals())
+instantiate_device_type_tests(TestMathBits, globals(), with_meta=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensorNonErroring, globals())
 instantiate_device_type_tests(TestTags, globals())
