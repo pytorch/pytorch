@@ -1,6 +1,6 @@
 from collections import deque
+from typing import Dict
 from dataclasses import dataclass
-from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 
 
@@ -24,7 +24,7 @@ class EventMetrics:
     self_time_ns: int = 0
 
 
-def compute_self_time(prof: profile, metrics: dict[EventKey, EventMetrics]):
+def compute_self_time(prof: profile, metrics: Dict[EventKey, EventMetrics]):
     '''
     Computes event's self time(total time - time in child ops).
 
