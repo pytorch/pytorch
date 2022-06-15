@@ -14,7 +14,6 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import unittest
 import torch._prims as prims
 import copy
-import itertools
 
 class FakeTensorTest(TestCase):
     def checkType(self, t, device_str, size):

@@ -210,7 +210,7 @@ def clone(fake_mode, func, input, memory_format=None):
         out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
-@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags)
+@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags)  # type: ignore[attr-defined]
 def data_dep_op(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
@@ -243,6 +243,7 @@ class FakeTensor(torch.Tensor):
     def from_tensor(t, fake_mode):
         existing_device = t.device
         return FakeTensor(fake_mode, t.to(device="meta"), existing_device)
+
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
