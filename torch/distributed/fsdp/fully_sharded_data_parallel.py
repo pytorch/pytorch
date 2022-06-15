@@ -1652,13 +1652,14 @@ class FullyShardedDataParallel(nn.Module):
             if m is not self and isinstance(m, FullyShardedDataParallel):
                 m._streams = self._streams
                 m._fsdp_graph_order = self._fsdp_graph_order
+                # Prioritize the root's setting for `_check_exec_order`
+                m._check_exec_order = self._check_exec_order
                 if self._check_exec_order:
                     # Give each non-root FSDP module an alias to the root's
                     # execution order data structure and the root's ignored
                     # parameters and all buffer names since only the root's names
                     # are fully prefixed like the state dict keys
-                    m._check_exec_order = True
-                    m._exec_order_data = self._exec_order_data
+                    m._exec_order_data = self._exec_order_data                    
 
     def _wait_for_previous_optim_step(self) -> None:
         """
