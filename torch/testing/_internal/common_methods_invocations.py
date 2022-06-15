@@ -20372,6 +20372,7 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.copysign",
         torch_opinfo_name="copysign",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.div",
