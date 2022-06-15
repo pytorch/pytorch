@@ -433,6 +433,7 @@ class record_function(ContextDecorator):
         CUDA time total: 0.000us
 
     """
+
     def __init__(self, name: str, args: Optional[str] = None):
         self.name: str = name
         self.args: Optional[str] = args
@@ -440,7 +441,12 @@ class record_function(ContextDecorator):
         self.run_callbacks_on_exit: bool = True
         # Stores underlying RecordFunction as a tensor. TODO: move to custom
         # class (https://github.com/pytorch/pytorch/issues/35026).
-        self.handle: Optional[torch.Tensor] = None
+        if torch.jit.is_scripting():
+            # Torchscript doesn't read the type annotation well
+            # So fallback to creating an extra Tensor object
+            self.handle: Optional[torch.Tensor] = torch.zeros(())
+        else:
+            self.handle = None
 
     def __enter__(self):
         if torch.jit.is_scripting():
