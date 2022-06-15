@@ -54,8 +54,8 @@ class DispatchKey(Enum):
     CatchAll = Undefined
 
     Dense = auto()
-    DML = auto()
     FPGA = auto()
+    DML = auto()
     ORT = auto()
     MPS = auto()
     Vulkan = auto()
