@@ -2,10 +2,12 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Optional.h>
 
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/TensorInfo.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/cuda/Sort.h>
+#include <ATen/native/StridedRandomAccessor.h>
 
 namespace at { namespace native {
 
@@ -148,6 +150,109 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
       values.data[idx * valueSliceStride + valueStartOffset] = sharedValues[idx];
     }
   }
+}
+
+template <int KeyDims, int ValueDims,
+          int block_size, int items_per_thread,
+          typename K, typename V, typename IndexType>
+C10_LAUNCH_BOUNDS_1(block_size)
+__global__ void
+radixSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
+                   IndexType keySlices,
+                   IndexType keySliceSize,
+                   IndexType keySliceStride,
+                   at::cuda::detail::TensorInfo<V, IndexType> values,
+                   IndexType valueSliceStride,
+                   bool descending) {
+  // Find the slice of the tensor that we are sorting
+  const IndexType linearIndex = getLinearBlockId<IndexType>();
+  // Tiling the slices could have us be out of bounds, if there are a
+  // lot of slices to sort
+  if (linearIndex >= keySlices) {
+    return;
+  }
+
+  const IndexType keyStartOffset =
+    at::cuda::detail::IndexToOffset<K, IndexType, KeyDims>::get(linearIndex, keys);
+  const IndexType valueStartOffset =
+    at::cuda::detail::IndexToOffset<V, IndexType, ValueDims>::get(linearIndex, values);
+
+  K *keys_slice = &keys.data[keyStartOffset];
+  V *values_slice = &values.data[valueStartOffset];
+
+  StridedRandomAccessor<K, IndexType> keys_iter(keys_slice, keySliceStride);
+  StridedRandomAccessor<V, IndexType> values_iter(values_slice, valueSliceStride);
+
+  // If the sort size is 1, the data is already sorted
+  constexpr int Power2SortSize = block_size * items_per_thread;
+  if (Power2SortSize == 1) {
+    return;
+  }
+
+  // Otherwise, each thread is responsible for loading and storing 2
+  // elements. The sort size is guaranteed to be >= 2
+  namespace cub = NO_ROCM(at_cuda_detail)::cub;
+
+  using key_t = typename at::cuda::cub::detail::cuda_type<K>::type;
+  using LoadKeys = cub::BlockLoad<K, block_size, items_per_thread,
+                                  cub::BlockLoadAlgorithm::BLOCK_LOAD_TRANSPOSE>;
+  using LoadValues = cub::BlockLoad<V, block_size, items_per_thread,
+                                    cub::BlockLoadAlgorithm::BLOCK_LOAD_TRANSPOSE>;
+  using Sort = cub::BlockRadixSort<key_t, block_size, items_per_thread, V>;
+  using StoreKeys = cub::BlockStore<K, block_size, items_per_thread,
+                                    cub::BLOCK_STORE_TRANSPOSE>;
+  using StoreValues = cub::BlockStore<V, block_size, items_per_thread,
+                                      cub::BLOCK_STORE_TRANSPOSE>;
+
+  __shared__ union {
+    typename LoadKeys::TempStorage load_keys;
+    typename LoadValues::TempStorage load_values;
+    typename Sort::TempStorage sort;
+    typename StoreKeys::TempStorage store_keys;
+    typename StoreValues::TempStorage store_values;
+  } tmp_storage;
+
+  // cub's Block operations operate on a fixed number of items, but the
+  // actual slice we are sorting might be smaller. So, we need to make
+  // up the difference with keys that will always sort higher.
+  const K invalid_key = [descending] {
+    using radix_t = typename cub::Traits<key_t>::UnsignedBits;
+    union {
+      key_t key;
+      radix_t radix;
+    } tmp;
+    tmp.radix = descending ?
+        cub::Traits<key_t>::LOWEST_KEY :
+        cub::Traits<key_t>::MAX_KEY;
+    return tmp.key;
+  }();
+  const V invalid_value = static_cast<V>(0);
+
+  // Load inputs
+  K local_keys[items_per_thread];
+  V local_values[items_per_thread];
+
+  LoadKeys(tmp_storage.load_keys).Load(keys_iter, local_keys, keySliceSize, invalid_key);
+  __syncthreads();
+  LoadValues(tmp_storage.load_values).Load(values_iter, local_values, keySliceSize, invalid_value);
+  __syncthreads();
+
+  // Sort!
+  if (descending) {
+    Sort(tmp_storage.sort).SortDescending(
+        reinterpret_cast<key_t (&)[items_per_thread]>(local_keys),
+        local_values);
+  } else {
+    Sort(tmp_storage.sort).Sort(
+        reinterpret_cast<key_t (&)[items_per_thread]>(local_keys),
+        local_values);
+  }
+  __syncthreads();
+
+  // Store outputs
+  StoreKeys(tmp_storage.store_keys).Store(keys_iter, local_keys, keySliceSize);
+  __syncthreads();
+  StoreValues(tmp_storage.store_values).Store(values_iter, local_values, keySliceSize);
 }
 
 }} // at::native
