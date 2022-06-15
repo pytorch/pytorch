@@ -280,6 +280,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
         Tensor.to_padded_tensor,
+        Tensor.sym_size
     }
 
 
