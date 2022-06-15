@@ -12,3 +12,5 @@ class TensorAPoT(torch.Tensor):
 
     def q_apot_alpha(self) -> float:
         raise NotImplementedError
+
+# test
