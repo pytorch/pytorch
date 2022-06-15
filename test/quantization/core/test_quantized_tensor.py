@@ -1087,6 +1087,7 @@ class TestQuantizedTensor(TestCase):
             qx[indices] = values
 
             self.assertEqual(qx_ref, qx)
+
     # adapted from test_qtensor_fill_per_channel and test_qtensor_fill_per_tensor_nhwc
     def test_qtensor_fill_per_channel_nhwc(self):
         dims = torch.randint(low=1, high=10, size=(4, )).tolist()
