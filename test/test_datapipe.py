@@ -50,6 +50,9 @@ from torch.utils.data.datapipes.utils.common import StreamWrapper
 from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
 )
+from torch.utils.data.datapipes.utils.snapshot import (
+    simple_fast_forward_graph
+)
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
@@ -277,7 +280,7 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
-        datapipe = dp.iter.FileLister(temp_dir, '')
+        datapipe: IterDataPipe = dp.iter.FileLister(temp_dir, '')
 
         count = 0
         for pathname in datapipe:
@@ -2589,78 +2592,150 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         self.assertEqual(1, next(it3))
 
 
-class TestIterDataPipeFastForward(TestCase):
+# class TestIterDataPipeFastForward(TestCase):
+#
+#     def test_iterable_wrapper_fast_forward(self):
+#         datapipe = dp.iter.IterableWrapper(range(10))
+#         res = list(datapipe)
+#
+#         # Test Case: fast forward works with list
+#         n_elements = 5
+#         datapipe.fast_forward(n_elements)
+#         self.assertEqual(res[n_elements:], list(datapipe))
+#
+#         # Test Case: fast forward works with iterator
+#         datapipe.fast_forward(n_elements)
+#         it = iter(datapipe)
+#         self.assertEqual(res[n_elements:], list(it))
+#         with self.assertRaises(StopIteration):
+#             next(it)
+#
+#     def test_mapper_fast_forward(self):
+#         datapipe = dp.iter.IterableWrapper(range(10))
+#         datapipe = datapipe.map(lambda x: x + 1)
+#         res = list(datapipe)
+#
+#         # Test Case: fast forward works with list
+#         n_elements = 5
+#         datapipe.fast_forward(n_elements)
+#         print(res)
+#         print(list(datapipe))
+#         # self.assertEqual(res[n_elements:], list(datapipe))
+#
+#         # Test Case: fast forward works with iterator
+#         datapipe.fast_forward(n_elements)
+#         it = iter(datapipe)
+#         # self.assertEqual(res[n_elements:], list(it))
+#         # with self.assertRaises(StopIteration):
+#         #     next(it)
 
-    def test_iterable_wrapper_fast_forward(self):
-        datapipe = dp.iter.IterableWrapper(range(10))
+
+# class TestIterDataPipeFastForwardWithBuffer(TestCase):
+#
+#
+#     def test_shuffler_fast_forward(self):
+#         datapipe = dp.iter.IterableWrapper(range(10))
+#         datapipe = datapipe.shuffle()
+#         datapipe.set_seed(0)
+#         res = list(datapipe)
+#
+#         # Test Case: fast forward works with list
+#         n_elements = 5
+#         # TODO: Must set seed (or restore seed) before fast-forwarding, is this fine?
+#         #       In a real example, `self._rng` should be restored but what we want to save is the initial seed,
+#         #       because fast_forward is starting from the beginning again. We can potentially add an instance variable
+#         #       to remember the last initial seed, only for the purpose of fast-forwarding.
+#         datapipe.set_seed(0)
+#         datapipe.fast_forward(n_elements)
+#         self.assertEqual(res[n_elements:], list(datapipe))
+#
+#         # Test Case: fast forward works with iterator
+#         datapipe.set_seed(0)
+#         datapipe.fast_forward(n_elements)
+#         it = iter(datapipe)
+#         self.assertEqual(res[n_elements:], list(it))
+#         with self.assertRaises(StopIteration):
+#             next(it)
+#
+#         # TODO: Add more complicated examples where buffer is small (less than overall data size)?
+#
+#     def test_mux_fast_forward(self):
+#         pass
+#
+#     def test_grouper_fast_forward(self):
+#         pass
+
+
+class TestIterDataPipeGraphFastForward(TestCase):
+
+    @staticmethod
+    def _set_seed_graph(datapipe, seed):
+        r"""
+        Given a DataPipe, create a graph and traverse through the graph to `set_seed` for every
+        DataPipe that can be set.
+        """
+        to_do = [traverse(datapipe)]
+        while to_do:
+            curr = to_do.pop()
+            for node, children in curr.items():
+                if hasattr(node, "set_seed"):
+                    node.set_seed(seed)
+                to_do.append(children)
+
+    def _fast_forward_graph_test_helper(self, datapipe, fast_forward_fn, n_iterations=5, seed=None):
         res = list(datapipe)
 
+        # TODO: `Shuffler` needs to `set_seed` before fast-forwarding
+        #       This will not be necessary once shuffle restores buffer (as well as RNG)
+        if seed is not None:
+            self._set_seed_graph(datapipe, seed)
         # Test Case: fast forward works with list
-        n_elements = 5
-        datapipe.fast_forward(n_elements)
-        self.assertEqual(res[n_elements:], list(datapipe))
+        fast_forward_fn(datapipe, n_iterations)
+        print(f"Expected result: {res[n_iterations:]}")
+        self.assertEqual(res[n_iterations:], list(datapipe))
 
+        if seed is not None:
+            self._set_seed_graph(datapipe, seed)
         # Test Case: fast forward works with iterator
-        datapipe.fast_forward(n_elements)
+        fast_forward_fn(datapipe, n_iterations)
         it = iter(datapipe)
-        self.assertEqual(res[n_elements:], list(it))
+        print(f"Expected result: {res[n_iterations:]}")
+        self.assertEqual(res[n_iterations:], list(it))
         with self.assertRaises(StopIteration):
             next(it)
 
-    def test_mapper_fast_forward(self):
-        datapipe = dp.iter.IterableWrapper(range(10))
-        datapipe = datapipe.map(lambda x: x + 1)
-        res = list(datapipe)
+    def test_simple_fast_forward_graph(self):
+        seed = 0
+        graph1 = dp.iter.IterableWrapper(range(10))
+        self._fast_forward_graph_test_helper(graph1, simple_fast_forward_graph)
 
-        # Test Case: fast forward works with list
-        n_elements = 5
-        datapipe.fast_forward(n_elements)
-        print(res)
-        print(list(datapipe))
-        # self.assertEqual(res[n_elements:], list(datapipe))
+        graph2 = dp.iter.IterableWrapper(range(10)).map(lambda x: x + 1)
+        self._fast_forward_graph_test_helper(graph2, simple_fast_forward_graph)
 
-        # Test Case: fast forward works with iterator
-        datapipe.fast_forward(n_elements)
-        it = iter(datapipe)
-        # self.assertEqual(res[n_elements:], list(it))
-        # with self.assertRaises(StopIteration):
-        #     next(it)
+        graph3 = dp.iter.IterableWrapper(range(10)).map(lambda x: x + 1).shuffle()
+        self._set_seed_graph(graph3, seed)
+        self._fast_forward_graph_test_helper(graph3, simple_fast_forward_graph, seed=seed)
 
+        graph4 = dp.iter.IterableWrapper(range(10)).map(lambda x: x + 1).shuffle().map(lambda x: x + 1)
+        self._set_seed_graph(graph4, seed)
+        self._fast_forward_graph_test_helper(graph4, simple_fast_forward_graph, seed=seed)
 
-class TestIterDataPipeFastForwardWithBuffer(TestCase):
+    # def test_iterable_wrapper_fast_forward(self):
+    #     datapipe = dp.iter.IterableWrapper(range(10))
+    #     res = list(datapipe)
+    #
+    #     # Test Case: fast forward works with list
+    #     n_elements = 5
+    #     datapipe.fast_forward(n_elements)
+    #     self.assertEqual(res[n_elements:], list(datapipe))
+    #
+    #     # Test Case: fast forward works with iterator
+    #     datapipe.fast_forward(n_elements)
+    #     it = iter(datapipe)
+    #     self.assertEqual(res[n_elements:], list(it))
+    #     with self.assertRaises(StopIteration):
+    #         next(it)
 
-
-    def test_shuffler_fast_forward(self):
-        datapipe = dp.iter.IterableWrapper(range(10))
-        datapipe = datapipe.shuffle()
-        datapipe.set_seed(0)
-        res = list(datapipe)
-
-        # Test Case: fast forward works with list
-        n_elements = 5
-        # TODO: Must set seed (or restore seed) before fast-forwarding, is this fine?
-        #       In a real example, `self._rng` should be restored but what we want to save is the initial seed,
-        #       because fast_forward is starting from the beginning again. We can potentially add an instance variable
-        #       to remember the last initial seed, only for the purpose of fast-forwarding.
-        datapipe.set_seed(0)
-        datapipe.fast_forward(n_elements)
-        self.assertEqual(res[n_elements:], list(datapipe))
-
-        # Test Case: fast forward works with iterator
-        datapipe.set_seed(0)
-        datapipe.fast_forward(n_elements)
-        it = iter(datapipe)
-        self.assertEqual(res[n_elements:], list(it))
-        with self.assertRaises(StopIteration):
-            next(it)
-
-        # TODO: Add more complicated examples where buffer is small (less than overall data size)?
-
-    def test_mux_fast_forward(self):
-        pass
-
-    def test_grouper_fast_forward(self):
-        pass
 
 if __name__ == '__main__':
     run_tests()
