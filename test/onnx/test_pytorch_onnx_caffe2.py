@@ -135,7 +135,7 @@ class TestCaffe2Backend_opset9(TestCase):
     embed_params = False
 
     def setUp(self):
-        super().setUp()
+        TestCase.setUp()
         torch.manual_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
