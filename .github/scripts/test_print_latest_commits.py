@@ -92,11 +92,11 @@ class TestPrintCommits(TestCase):
 
     @mock.patch('print_latest_commits.get_commit_results', return_value={})
     def test_no_workflows(self, mock_get_commit_results: Any) -> None:
-        "Test with no workflows"
+        "Test with missing workflows"
         workflow_checks = mock_get_commit_results()
         result = isGreen("sha", workflow_checks)
         self.assertFalse(result[0])
-        self.assertEqual(result[1], "no workflows")
+        self.assertEqual(result[1], "missing required workflows")
 
 if __name__ == "__main__":
     main()
