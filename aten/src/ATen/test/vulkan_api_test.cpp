@@ -1385,6 +1385,28 @@ TEST_F(VulkanAPITest, hardswish) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, threshold) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto in_cpu = at::rand({17, 197, 302, 5}, at::device(at::kCPU).dtype(at::kFloat))*12 - 6;
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const float threshold = 2.0f;
+  const float value = 5.0f;
+
+  const auto out_cpu = at::threshold(in_cpu, threshold, value);
+  const auto out_vulkan = at::threshold(in_vulkan, threshold, value);
+
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
+  }
+
+  ASSERT_TRUE(check);
+}
+
 TEST_F(VulkanAPITest, hardswish_) {
   if (!at::is_vulkan_available()) {
     return;
@@ -1678,6 +1700,27 @@ TEST_F(VulkanAPITest, reflection_pad2d) {
 
   const auto out_cpu = at::reflection_pad2d(a_cpu, {9,8,5,12});
   const auto out_vulkan = at::reflection_pad2d(a_vulkan, {9,8,5,12}).cpu();
+
+  const auto check = almostEqual(out_cpu, out_vulkan);
+  if (!check) {
+    showRtol(out_cpu, out_vulkan);
+  }
+
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, replication_pad2d) {
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  const auto a_cpu = at::rand({2, 3, 47, 63}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto a_vulkan = a_cpu.vulkan();
+
+  constexpr std::array<int64_t, 4u> padding_params{9, 8, 5, 12};
+
+  const auto out_cpu = at::replication_pad2d(a_cpu, padding_params);
+  const auto out_vulkan = at::replication_pad2d(a_vulkan, padding_params).cpu();
 
   const auto check = almostEqual(out_cpu, out_vulkan);
   if (!check) {
