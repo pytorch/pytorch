@@ -625,7 +625,7 @@ $3 = torch._ops.aten.add.Tensor($2, 1)""")
         x1_not_functional = torch.ones(4)
         x2_functional = torch._to_functional_tensor(torch.ones(4))
 
-        # When dealing with mixed functional + nonfunctional tensors,
+        # When dealing with mixed functional + non functional tensors,
         # normal_tensor.add_(functional_tensor) is not valid
         # because normal_tensor would need to be "promoted" to a functional tensor.
         with self.assertRaises(RuntimeError):
