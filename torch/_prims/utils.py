@@ -70,8 +70,7 @@ TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 # We store a weakref, so that when all previous FakeTensors are
 # the present mode will also deallocate. FakeTensorMode holds onto
 # tensors that are converted to Meta so we don't want to persist it
-# longer than necessary.
-
+# longer than necessary.x
 prim_fake_mode_ref = None
 
 
@@ -125,7 +124,10 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    mode = get_prim_fake_mode()
+    if isinstance(tensorlike, FakeTensor):
+        mode = tensorlike.fake_mode
+    else:
+        mode = get_prim_fake_mode()
 
     if device.type == "meta":
         return torch.empty_strided(shape, strides, dtype=dtype, device="meta")

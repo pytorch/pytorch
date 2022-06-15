@@ -4,7 +4,12 @@ from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
 import itertools
 from torch.testing._internal.jit_utils import RUN_CUDA
-from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, FakeTensorConverter
+from torch._subclasses.fake_tensor import (
+    FakeTensor,
+    FakeTensorMode,
+    FakeTensorConverter,
+    DynamicOutputShapeException,
+)
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import unittest
 
@@ -22,7 +27,6 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
-
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
@@ -36,10 +40,10 @@ class FakeTensorTest(TestCase):
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_zero_dim(self):
         mode = FakeTensorMode(inner=None)
-        x = torch.tensor(0.)  # TODO: tensor() errors
         with enable_torch_dispatch_mode(mode):
+            x = torch.tensor(0.)
             y = torch.rand([4, 4], device="cuda")
-            out = mode.from_tensor(x) + y
+            out = x + y
             self.assertEqual(out.shape, (4, 4))
             self.assertEqual(out.device, y.device)
             self.assertTrue(isinstance(out, FakeTensor))
@@ -104,12 +108,13 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(z, FakeTensor))
             self.assertEqual(z.device.type, "cuda")
 
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cpu_fallback_returned_impl(self):
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=True)):
-            x = torch.randn([4, 4]).cuda()
-            with self.assertRaises(NotImplementedError):
-                out = torch.relu_(x)
+    def test_binary_op_type_promotion(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x = torch.empty([2, 2], dtype=torch.float)
+            y = torch.empty([2, 2], dtype=torch.int64)
+            out = x / y
+            self.assertEqual(out.dtype, torch.float)
+            self.assertEqual(out.device.type, "cpu")
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
@@ -134,11 +139,19 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cuda")
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
+    def test_data_dependent_operator(self):
+        with enable_torch_dispatch_mode(
+            FakeTensorMode(inner=None, allow_cpu_fallback=False)
+        ):
+            x = torch.rand([10, 10])
+            self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
+
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
         contains_type(e, maybe_contained_type) for e in type.containedTypes()
     )
+
 
 class FakeTensorConverterTest(TestCase):
     def test_memoized_conversion_to_meta(self):
@@ -147,7 +160,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertTrue(mode.from_tensor(x) is mode.from_tensor(x))
 
     def test_memoized_conversion_from_meta(self):
-        x = torch.rand(2, 2).to(device='meta')
+        x = torch.rand(2, 2).to(device="meta")
         mode = FakeTensorMode(inner=None)
         converter = mode.fake_tensor_converter
         self.assertTrue(converter(mode, x, "cpu") is converter(mode, x, "cpu"))
@@ -190,6 +203,17 @@ class FakeTensorConverterTest(TestCase):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
             y = torch.empty(2, 2, device="cpu")
         self.assertRaises(Exception, lambda: x, y)
+
+    def test_no_ref_cycle(self):
+        x = torch.rand([4])
+        mode = torch._prims.utils.get_prim_fake_mode()
+        y = mode.from_tensor(x)
+        assert mode is torch._prims.utils.get_prim_fake_mode()
+        self.assertEqual(len(mode.fake_tensor_converter.tensor_memo), 1)
+        del mode
+        del y
+        new_mode = torch._prims.utils.get_prim_fake_mode()
+        self.assertEqual(len(new_mode.fake_tensor_converter.tensor_memo), 0)
 
 
 class FakeTensorOperatorInvariants(TestCase):
@@ -248,6 +272,7 @@ class FakeTensorOperatorInvariants(TestCase):
             if "_like" == schema.name[-5:]:
                 op = self.get_aten_op(schema)
                 self.assertTrue(op in torch._subclasses.fake_tensor._like_tensor_constructors)
+
 
 if __name__ == "__main__":
     run_tests()
