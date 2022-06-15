@@ -2720,6 +2720,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         self._set_seed_graph(graph4, seed)
         self._fast_forward_graph_test_helper(graph4, simple_fast_forward_graph, seed=seed)
 
+    # TODO: Enable this after iteration count
     # def test_iterable_wrapper_fast_forward(self):
     #     datapipe = dp.iter.IterableWrapper(range(10))
     #     res = list(datapipe)
