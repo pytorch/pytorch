@@ -184,7 +184,7 @@ def export(
     f: Union[str, io.BytesIO],
     export_params: bool = True,
     verbose: bool = False,
-    training: Optional[_C_onnx.TrainingMode] = None,
+    training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
     input_names: Optional[Sequence[str]] = None,
     output_names: Optional[Sequence[str]] = None,
     operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX,
