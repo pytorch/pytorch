@@ -83,7 +83,7 @@ class Model(torch.nn.Module):
         model = Model()
         model.layer1 = FSDP(model.layer1, sharding_strategy=sharding_strategy)
         model.layer2 = FSDP(model.layer2, sharding_strategy=sharding_strategy)
-        fsdp_model = FSDP(model, sharding_strategy=sharding_strategy)
+        fsdp_model = FSDP(model, sharding_strategy=sharding_strategy, check_exec_order=True)
         return fsdp_model.to(device)
 
 
