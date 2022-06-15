@@ -890,9 +890,7 @@ Value* Value::setDebugName(const std::string& name) {
     // suffix is used.
     std::string replacement_name;
     do {
-      std::stringstream ss;
-      ss << name_base << "." << suffix++;
-      replacement_name = ss.str();
+      replacement_name = name_base + "." + std::to_string(suffix++);
     } while (names.count(replacement_name) > 0);
 
     names_suffixes[name_base] = suffix;
