@@ -14,7 +14,11 @@ c10::intrusive_ptr<c10::ivalue::Future> AllReduceCommHook::runHook(
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
   // Apply the division first to avoid overflow, especially for FP16.
   tensors[0] /= state_->getSize();
-  return ops::allreduce(c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(state_), tensors)->getFuture();
+  return ops::allreduce(
+             c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(
+                 state_),
+             tensors)
+      ->getFuture();
 }
 
 c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
@@ -24,7 +28,12 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
   compressed_tensor /= state_->getSize();
   std::vector<at::Tensor> tensors = {compressed_tensor};
 
-  auto allreduce_fut = ops::allreduce(c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(state_), tensors)->getFuture();
+  auto allreduce_fut =
+      ops::allreduce(
+          c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(
+              state_),
+          tensors)
+          ->getFuture();
   auto decompressed_tensor = bucket.getBufferRef();
   auto decompress = [decompressed_tensor](c10::ivalue::Future& allreduce_fut) {
     auto result = allreduce_fut.value();
@@ -47,7 +56,11 @@ c10::intrusive_ptr<c10::ivalue::Future> FP16CompressCommHook::runHook(
 c10::intrusive_ptr<c10::ivalue::Future> _AllReduceBySumCommHook::runHook(
     GradBucket& bucket) {
   std::vector<at::Tensor> tensors = {bucket.getBufferRef()};
-  return ops::allreduce(c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(state_), tensors)->getFuture();
+  return ops::allreduce(
+             c10::intrusive_ptr<ProcessGroup>::unsafe_reclaim_from_nonowning(
+                 state_),
+             tensors)
+      ->getFuture();
 }
 
 } // namespace c10d

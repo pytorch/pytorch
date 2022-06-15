@@ -1035,7 +1035,9 @@ Arguments:
 
           .def(
               "allreduce",
-              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg, at::Tensor& x, ::c10d::ReduceOp op) {
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+                 at::Tensor& x,
+                 ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
                 std::vector<at::Tensor> xs = {x};
