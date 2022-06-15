@@ -3346,6 +3346,7 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
         ((S, S), (1,), True),
         ((S, S), (1,), False),
         ((S, S), (-2,), False),
+        ((S, S), (0, 1), False),
     )
     samples = []
     # Test large inputs to check numerical stability
@@ -12397,6 +12398,8 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
+               # Could not run 'aten::linalg_eigh' with arguments from the 'AutogradMeta' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -12411,7 +12414,6 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -16075,9 +16077,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
-               # Pre-existing condition; Needs to be fixed
-               # fails due to non composite compliance of `linalg_eigvalsh`.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
@@ -17535,6 +17534,7 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           gradcheck_fast_mode=False,
            sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
@@ -19582,6 +19582,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19593,6 +19594,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19637,6 +19639,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19704,6 +19707,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19715,6 +19719,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19726,6 +19731,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19737,6 +19743,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -20066,6 +20073,22 @@ python_ref_db = [
         "_refs.log2",
         torch_opinfo_name="log2",
     ),
+    PythonRefInfo(
+        "_refs.logsumexp",
+        torch_opinfo_name="logsumexp",
+        skips=(
+            # SyntaxError: cannot assign to False
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.log_softmax",
+        torch_opinfo_name="log_softmax",
+        skips=(
+            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
         torch_opinfo_name="nan_to_num",
@@ -20123,6 +20146,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sinh",
         torch_opinfo_name="sinh",
+    ),
+    PythonRefInfo(
+        "_refs.softmax",
+        torch_opinfo_name="softmax",
+        skips=(
+            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sqrt",
