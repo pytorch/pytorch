@@ -73,6 +73,21 @@ static void BM_SharedPtrArray(benchmark::State& state) {
 }
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-magic-numbers)
 BENCHMARK(BM_SharedPtrArray)->RangeMultiplier(2)->Range(16, 4096);
+
+static void BM_IntrusivePtrExclusiveOwnership(benchmark::State& state) {
+  while (state.KeepRunning()) {
+    volatile auto var = make_intrusive<Foo>(0);
+  }
+}
+BENCHMARK(BM_IntrusivePtrExclusiveOwnership);
+
+static void BM_SharedPtrExclusiveOwnership(benchmark::State& state) {
+  while (state.KeepRunning()) {
+    volatile auto var = std::make_shared<Foo>(0);
+  }
+}
+BENCHMARK(BM_SharedPtrExclusiveOwnership);
+
 } // namespace
 
 BENCHMARK_MAIN();

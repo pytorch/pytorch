@@ -16,10 +16,12 @@ import torch.nn.modules.utils
 import torch.onnx
 from torch import _C
 
-# This import monkey-patches graph manipulation methods on Graph, used for the
-# ONNX symbolics
+# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
-from torch.onnx import _exporter_states, symbolic_helper
+from torch.onnx import symbolic_helper
+from torch.onnx._exporter_states import (
+    SymbolicContext,  # Special case class import for readability
+)
 from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -309,11 +311,13 @@ __all__ = [
     "hann_window",
     "mv",
     "dot",
+    "movedim",
     "fill",
     "index_add",
     "roll",
     "cross",
     "cdist",
+    "lerp",
     "broadcast_tensors",
     "Prim",
     "Onnx",
@@ -3926,7 +3930,11 @@ def randn(g, shapes, dtype, *options):
             shape_const,
             dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
         )
-    return g.op("RandomNormal", shape_i=shape)
+    return g.op(
+        "RandomNormal",
+        shape_i=shape,
+        dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+    )
 
 
 def rand(g, shapes, dtype, *options):
@@ -3947,7 +3955,11 @@ def rand(g, shapes, dtype, *options):
             shape_const,
             dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
         )
-    return g.op("RandomUniform", shape_i=shape)
+    return g.op(
+        "RandomUniform",
+        shape_i=shape,
+        dtype_i=symbolic_helper.scalar_type_to_onnx[dtype],
+    )
 
 
 def randn_like(
@@ -5024,6 +5036,38 @@ def dot(g, self, other):
     return matmul(g, self, other)
 
 
+@symbolic_helper.parse_args("v", "t", "t")
+def movedim(g, self, source, destination):
+    # This is a pythonic implementation mostly taken from aten/src/ATen/native/TensorShape.cpp::movedim
+    source = source.view(-1)
+    destination = destination.view(-1)
+
+    assert source.size() == destination.size()
+
+    if (source == destination).all():
+        return self
+
+    self_rank = symbolic_helper._get_tensor_rank(self)
+
+    perm = list(range(self_rank))
+
+    src_dims = perm.copy()
+    dst_dims = perm.copy()
+
+    for src, dst in zip(source.tolist(), destination.tolist()):
+        perm[dst] = src
+        src_dims[src] = -1
+        dst_dims[dst] = -1
+
+    src_dims = [dim for dim in src_dims if dim != -1]
+    dst_dims = [dim for dim in dst_dims if dim != -1]
+
+    for src, dst in zip(src_dims, dst_dims):
+        perm[dst] = src
+
+    return g.op("Transpose", self, perm_i=perm)
+
+
 @symbolic_helper.parse_args("v", "v")
 def fill(g, self, value):
     dtype = self.type().scalarType()
@@ -5292,9 +5336,7 @@ class Prim:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def device(
-        ctx: _exporter_states.SymbolicContext, g: _C.Graph, *inputs, **kwargs
-    ) -> None:
+    def device(ctx: SymbolicContext, g: _C.Graph, *inputs, **kwargs) -> None:
         output_type = ctx.cur_node.output().type()
         if isinstance(output_type, _C.DeviceObjType):
             return None
@@ -5305,7 +5347,7 @@ class Prim:
         )
 
     @staticmethod
-    def Loop(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
+    def Loop(ctx: SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         env = ctx.env
         params_dict = ctx.params_dict
@@ -5351,7 +5393,7 @@ class Prim:
         return new_op_outputs
 
     @staticmethod
-    def If(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
+    def If(ctx: SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         block = ctx.onnx_block
         env = ctx.env
@@ -5439,7 +5481,7 @@ class Prim:
             return new_op_outputs
 
     @staticmethod
-    def Constant(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
+    def Constant(ctx: SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
 
         if n.mustBeNone():
@@ -5470,7 +5512,7 @@ class Onnx:
     # Symbolic functions that need extra context
     # -----------------------------------------------------------------------------
     @staticmethod
-    def Placeholder(ctx: _exporter_states.SymbolicContext, g, *inputs, **attrs):
+    def Placeholder(ctx: SymbolicContext, g, *inputs, **attrs):
         n = ctx.cur_node
         block = ctx.onnx_block
         env = ctx.env

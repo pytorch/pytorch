@@ -64,7 +64,7 @@ __all__ = [
 
 
 def is_in_onnx_export() -> bool:
-    r"""Returns True iff :func:`export` is running in the current thread."""
+    """Returns whether it is in the middle of ONNX export."""
     return GLOBALS.in_onnx_export
 
 
