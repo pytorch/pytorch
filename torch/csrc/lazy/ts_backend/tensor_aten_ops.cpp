@@ -49,27 +49,6 @@ std::vector<int64_t> GetExpandDimensions(
   return dimensions;
 }
 
-// Returns a 1-D shape for batch norm weight or bias based on the input shape.
-torch::lazy::Shape BatchNormFeaturesShape(
-    const torch::lazy::LazyTensorPtr& input) {
-  CHECK(input);
-  auto input_shape = input->shape().Get();
-  return torch::lazy::Shape(input_shape.scalar_type(), input_shape.sizes()[1]);
-}
-
-// Returns the IR for the given input or the provided default value broadcasted
-// to the default shape, if the input is undefined.
-torch::lazy::Value GetIrValueOrDefault(
-    const torch::lazy::LazyTensorPtr& input,
-    const at::Scalar& default_value,
-    const torch::lazy::Shape& default_shape,
-    const torch::lazy::BackendDevice& device) {
-  return input
-      ? input->GetIrValue()
-      : torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-            default_value, default_shape, device);
-}
-
 torch::lazy::ViewInfo CreateAsStridedViewInfo(
     const torch::lazy::Shape& input_shape,
     std::vector<int64_t> size,
