@@ -159,3 +159,8 @@ class NormalizeOperators(AnnotateTypesWithSchema):
             )
 
         return super().call_function(target, args, kwargs)
+
+__all__ = [
+    "NormalizeArgs",
+    "NormalizeOperators",
+]

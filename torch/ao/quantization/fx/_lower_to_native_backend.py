@@ -1,6 +1,5 @@
 import torch
 from torch.fx import map_arg, Node
-from torch.fx.node import Argument
 from torch.fx.graph import Graph
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,17 +27,6 @@ from .utils import (
 )
 from typing import Dict, Tuple, Type, List, Callable, Any, Union, Set, Optional
 import operator
-
-# QOP_TO_ARG_INDEXES_TO_SKIP = {
-#     # inplace
-#     torch._ops.ops.quantized.hardswish: [1],
-#     # inplace
-#     torch._ops.ops.quantized.elu: [2],
-#     # inplace
-#     torch._ops.ops.quantized.dropout: [3],
-#     # ['running_mean', 'running_var', 'use_input_stats', 'momentum']
-#     torch._ops.ops.quantized.instance_norm: [1, 2, 5, 6],
-# }
 
 QOP_TO_ARG_NAMES_TO_SKIP = {
     torch._ops.ops.quantized.hardswish: ['inplace'],
@@ -966,15 +954,14 @@ def special_pattern_replacement(model: QuantizedGraphModule):
             # otherwise the OpOverloadPacket errors out
             # temporary fix for elu whose qparams are
             # TODO: move the output_scale and output_zero_point arg to the end?
-            if qop in QOP_QPARAM_START_INDEX:
-                qparam_start_index = QOP_QPARAM_START_INDEX[qop]
-                new_kwargs_list = list(new_kwargs.items())
-                new_kwargs_list.insert(qparam_start_index, ("output_scale", qnode_qparams[0]))
-                new_kwargs_list.insert(qparam_start_index + 1, ("output_zero_point", qnode_qparams[1]))
-                new_kwargs = dict(new_kwargs_list)
-            else:
-                new_kwargs["output_scale"] = qnode_qparams[0]
-                new_kwargs["output_zero_point"] = qnode_qparams[1]
+            # if qop in QOP_QPARAM_START_INDEX:
+            #     qparam_start_index = QOP_QPARAM_START_INDEX[qop]
+            #     new_kwargs_list = list(new_kwargs.items())
+            #     new_kwargs_list.insert(qparam_start_index, ("output_scale", qnode_qparams[0]))
+            #     new_kwargs_list.insert(qparam_start_index + 1, ("output_zero_point", qnode_qparams[1]))
+            #     new_kwargs = dict(new_kwargs_list)
+            new_kwargs["output_scale"] = qnode_qparams[0]
+            new_kwargs["output_zero_point"] = qnode_qparams[1]
 
             if qop == torch.ops.quantized.elu:
                 if "scale" not in new_kwargs:

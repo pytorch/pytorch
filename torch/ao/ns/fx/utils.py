@@ -17,6 +17,7 @@ from torch.ao.quantization import (
 )
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.ao.quantization.quantize import is_activation_post_process
+from torch.ao.quantization.fx.utils import get_all_args_as_positional_args
 
 from .ns_types import NSNodeTargetType, NSResultsType
 
@@ -60,7 +61,7 @@ def get_node_first_input_and_output_type(
         elif node.target in FUNS_IO_TYPE_INT8:
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
         elif node.target in FUNS_IO_TYPE_FP32_OR_INT8:
-            first_arg = node.args[0]
+            first_arg = get_all_args_as_positional_args(node)[0]
             assert isinstance(first_arg, Node)
             (
                 _prev_node_input_type,
@@ -85,7 +86,7 @@ def get_node_first_input_and_output_type(
         ):
             # A logger or observer's input and output type is the output
             # type of the preceding node.
-            first_arg = node.args[0]
+            first_arg = get_all_args_as_positional_args(node)[0]
             assert isinstance(first_arg, Node)
             (
                 _prev_node_input_type,
@@ -112,7 +113,7 @@ def get_node_first_input_and_output_type(
             # Dequantize is a special node because it allows multiple input types.
             # So, we look up the output type of the previous node and return that
             # as the input type of this node instance.
-            prev_node = node.args[0]
+            prev_node = get_all_args_as_positional_args(node)[0]
             assert isinstance(prev_node, Node)
             (
                 _prev_node_input_type,
@@ -127,7 +128,7 @@ def get_node_first_input_and_output_type(
             # So, we look up the output type of the previous node and return that
             # as the input type of this node instance. We also look up the target
             # of to and return the correct output type.
-            prev_node = node.args[0]
+            prev_node = get_all_args_as_positional_args(node)[0]
             assert isinstance(prev_node, Node)
             (
                 _prev_node_input_type,
@@ -136,7 +137,7 @@ def get_node_first_input_and_output_type(
                 prev_node, gm, logger_cls, node_type_to_io_type_map
             )
 
-            cur_node_dtype_target = node.args[1]
+            cur_node_dtype_target = get_all_args_as_positional_args(node)[1]
             assert (
                 cur_node_dtype_target is torch.float16
             ), f"{cur_node_dtype_target} handling needs to be added"
@@ -144,7 +145,7 @@ def get_node_first_input_and_output_type(
             return (prev_node_output_type, NodeInputOrOutputType.FP16)
 
         elif node.target in METHS_IO_TYPE_FP32_OR_INT8:
-            first_arg = node.args[0]
+            first_arg = get_all_args_as_positional_args(node)[0]
             assert isinstance(first_arg, Node)
             (
                 _prev_node_input_type,
@@ -168,7 +169,7 @@ def get_node_input_qparams(
     Returns the qparams (scale, zero_point) of the first input to `node`,
     if they can be inferred from the graph.
     """
-    prev_node = node.args[0]
+    prev_node = get_all_args_as_positional_args(node)[0]
 
     if not isinstance(prev_node, Node):
         return None
@@ -176,7 +177,8 @@ def get_node_input_qparams(
     MODS_IO_TYPE_FP32_OR_INT8 = node_type_to_io_type_map["mods_io_type_fp32_or_int8"]
 
     def _get_scale_zp_from_function_args(node, gm, scale_arg_idx, zp_arg_idx):
-        scale_node, zp_node = node.args[scale_arg_idx], node.args[zp_arg_idx]
+        all_node_args = get_all_args_as_positional_args(node)
+        scale_node, zp_node = all_node_args[scale_arg_idx], all_node_args[zp_arg_idx]
         assert isinstance(scale_node, Node) and isinstance(scale_node.target, str)
         assert isinstance(zp_node, Node) and isinstance(zp_node.target, str)
         scale_obj = getattr_from_fqn(gm, scale_node.target)
@@ -256,16 +258,18 @@ def return_first_non_observer_node(
     if node.op == "call_module":
         node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
         if is_activation_post_process(node_obj):
-            assert len(node.args) == 1
-            assert isinstance(node.args[0], Node)
-            node = node.args[0]
+            all_node_args = get_all_args_as_positional_args(node)
+            assert len(all_node_args) == 1
+            assert isinstance(all_node_args[0], Node)
+            node = all_node_args[0]
             # code duplication intended, not worth refactoring
             assert isinstance(node.target, str)
             node_obj = getattr_from_fqn(gm, node.target)
             if is_activation_post_process(node_obj):
-                assert len(node.args) == 1
-                assert isinstance(node.args[0], Node)
-                node = node.args[0]
+                all_node_args = get_all_args_as_positional_args(node)
+                assert len(all_node_args) == 1
+                assert isinstance(all_node_args[0], Node)
+                node = all_node_args[0]
     return node
 
 
@@ -307,7 +311,8 @@ def get_arg_indices_of_inputs_to_log(node: Node) -> List[int]:
     * for (linear(x, w, b)) returns [0]
     * by default, returns [0]
     """
-    if len(node.args) == 0:
+    all_node_args = get_all_args_as_positional_args(node)
+    if len(all_node_args) == 0:
         return []
     if node.op == "call_function" and (
         # TODO(future PR): use relationship map instead of hardcoding
@@ -316,7 +321,7 @@ def get_arg_indices_of_inputs_to_log(node: Node) -> List[int]:
     ):
         result = []
         for i in range(2):
-            if type(node.args[i]) == Node:
+            if type(all_node_args[i]) == Node:
                 result.append(i)
         return result
     return [0]

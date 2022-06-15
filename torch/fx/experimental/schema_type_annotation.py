@@ -109,3 +109,7 @@ class AnnotateTypesWithSchema(Transformer):
             return None
 
         return sig.return_annotation if sig.return_annotation is not inspect.Signature.empty else None
+
+__all__ = [
+    "AnnotateTypesWithSchema",
+]

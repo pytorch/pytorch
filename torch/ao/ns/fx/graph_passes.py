@@ -1,7 +1,10 @@
 import torch
 from torch.fx import GraphModule, map_arg
 from torch.fx.graph import Graph, Node
-from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
+from torch.ao.quantization.fx.utils import (
+    get_new_attr_name_with_prefix,
+    get_all_args_as_positional_args,
+)
 
 from .utils import (
     get_node_first_input_and_output_type,

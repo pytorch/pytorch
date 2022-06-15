@@ -490,45 +490,45 @@ def return_arg_list(arg_indices: List[int]) -> Callable[[Node], List[int]]:
         return [i for i in arg_indices if i < len(node.args)]
     return arg_indices_func
 
-NodeInfo = namedtuple("NodeInfo", "op target")
+_NodeInfo = namedtuple("_NodeInfo", "op target")
 
 # this dict identifies which indices of a node are non tensors
 # so that they can be propagated correctly since inserting observers
 # for them would cause errors
 
-NON_OBSERVABLE_ARG_DICT: Dict[NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]] = {
-    NodeInfo("call_method", "masked_fill") : {
+NON_OBSERVABLE_ARG_DICT: Dict[_NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]] = {
+    _NodeInfo("call_method", "masked_fill") : {
         torch.bool: return_arg_list([1]),
         float: return_arg_list([2])
     },
-    NodeInfo("call_method", "permute") : {
+    _NodeInfo("call_method", "permute") : {
         int: all_node_args_except_first
     },
-    NodeInfo("call_method", "repeat") : {
+    _NodeInfo("call_method", "repeat") : {
         int: all_node_args_except_first
     },
-    NodeInfo("call_method", "reshape") : {
+    _NodeInfo("call_method", "reshape") : {
         int: all_node_args_except_first
     },
-    NodeInfo("call_method", "size") : {
+    _NodeInfo("call_method", "size") : {
         int: return_arg_list([1])
     },
-    NodeInfo("call_method", "transpose") : {
+    _NodeInfo("call_method", "transpose") : {
         int: all_node_args_except_first
     },
-    NodeInfo("call_method", torch.transpose) : {
+    _NodeInfo("call_method", torch.transpose) : {
         int: all_node_args_except_first
     },
-    NodeInfo("call_method", "unsqueeze") : {
+    _NodeInfo("call_method", "unsqueeze") : {
         int: return_arg_list([1])
     },
-    NodeInfo("call_method", "unsqueeze_") : {
+    _NodeInfo("call_method", "unsqueeze_") : {
         int: return_arg_list([1])
     },
-    NodeInfo("call_method", torch.unsqueeze) : {
+    _NodeInfo("call_method", torch.unsqueeze) : {
         int: return_arg_list([1])
     },
-    NodeInfo("call_method", "view") : {
+    _NodeInfo("call_method", "view") : {
         int: all_node_args_except_first
     },
 }
@@ -540,7 +540,7 @@ def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[Union[type, tor
     Returns a dict with of non float tensor types as keys and values which correspond to a
     function to retrieve the list (which takes the node as an argument)
     """
-    info = NodeInfo(node.op, node.target)
+    info = _NodeInfo(node.op, node.target)
 
     return NON_OBSERVABLE_ARG_DICT.get(info, EMPTY_ARG_DICT)
 
@@ -603,3 +603,29 @@ def get_all_args_as_positional_args(node: Node) -> List[Argument]:
     all_args = list(node.args)
     all_args.extend(list(node.kwargs.values()))
     return all_args
+
+__all__ = [
+    "graph_pretty_str",
+    "get_per_tensor_qparams",
+    "get_quantize_node_info",
+    "quantize_node",
+    "get_custom_module_class_keys",
+    "get_linear_prepack_op_for_dtype",
+    "get_qconv_prepack_op",
+    "get_qconv_op",
+    "get_new_attr_name_with_prefix",
+    "collect_producer_nodes",
+    "graph_module_from_producer_nodes",
+    "assert_and_get_unique_device",
+    "create_getattr_from_value",
+    "create_qparam_nodes",
+    "all_node_args_have_no_tensors",
+    "all_node_args_except_first",
+    "return_arg_list",
+    "get_non_observable_arg_indexes_and_types",
+    "node_return_type_is_int",
+    "is_get_tensor_info_node",
+    "maybe_get_next_module",
+    "create_node_from_old_node_preserve_meta",
+    "get_all_args_as_positional_args",
+]

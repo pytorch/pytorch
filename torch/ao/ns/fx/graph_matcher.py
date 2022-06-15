@@ -8,6 +8,7 @@ from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 
 from torch.ao.quantization.utils import getattr_from_fqn
+from torch.ao.quantization.fx.utils import get_all_args_as_positional_args
 from .ns_types import NSSubgraph, NSNodeTargetType
 from .mappings import (
     get_base_name_to_sets_of_related_ops,
@@ -88,7 +89,8 @@ class _NSGraphMatchableSubgraphsIterator:
                         self.seen_nodes.add(cur_start_node)
                         # for now, assume that there are no other nodes
                         # which need to be added to the stack
-                        cur_start_node = cur_start_node.args[0]  # type: ignore[assignment]
+                        cur_start_node = \
+                            get_all_args_as_positional_args(cur_start_node)[0]  # type: ignore[assignment]
                         # if the base op index matches the current node, set it
                         rev_base_op_idx = \
                             len(_reverse_fusion_ops) - 2 - base_op_idx

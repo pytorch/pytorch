@@ -10,6 +10,7 @@ import torch.nn.intrinsic.quantized as nniq
 toq = torch.ops.quantized
 from torch.fx import GraphModule
 from torch.fx.graph import Node
+from torch.ao.quantization.fx.utils import get_all_args_as_positional_args
 
 from .utils import (
     get_target_type_str,
@@ -91,7 +92,7 @@ def get_lstm_mod_weights(mod: nn.Module) -> List[torch.Tensor]:
 
 def get_conv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     # traverse backwards from the weight arg, accounting for any observers
-    weight_arg_node = node.args[1]
+    weight_arg_node = get_all_args_as_positional_args(node)[1]
     assert isinstance(weight_arg_node, Node)
     weight_node = return_first_non_observer_node(weight_arg_node, gm)
     assert isinstance(weight_node, Node)
@@ -101,7 +102,7 @@ def get_conv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
 
 def get_qconv_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     # qconv state is arg 1
-    qconv_state_node = node.args[1]
+    qconv_state_node = get_all_args_as_positional_args(node)[1]
     assert isinstance(qconv_state_node, Node)
     assert qconv_state_node.op == 'get_attr'
     qconv_state_obj = getattr_from_fqn(gm, qconv_state_node.target)  # type: ignore[arg-type]
@@ -112,14 +113,14 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     # supported patterns:
     # weight -> obs -> linear
     # weight -> to(torch.float16) -> dequantize -> linear
-    linear_second_arg = node.args[1]
+    linear_second_arg = get_all_args_as_positional_args(node)[1]
     assert isinstance(linear_second_arg, Node)
 
     if linear_second_arg.op == 'call_module':
         # weight -> obs -> linear
-        weight_arg_node = node.args[1]
+        weight_arg_node = get_all_args_as_positional_args(node)[1]
         assert isinstance(weight_arg_node, Node)
-        weight_node = weight_arg_node.args[0]
+        weight_node = get_all_args_as_positional_args(weight_arg_node)[0]
         assert isinstance(weight_node, Node)
         assert weight_node.op == 'get_attr'
         weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore[arg-type]
@@ -127,13 +128,13 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     elif linear_second_arg.op == 'call_method':
         # weight -> to(torch.float16) -> dequantize -> linear
         assert linear_second_arg.op == 'call_method'
-        dequant_node = node.args[1]
+        dequant_node = get_all_args_as_positional_args(node)[1]
         assert isinstance(dequant_node, Node)
-        to_fp16_node = dequant_node.args[0]
+        to_fp16_node = get_all_args_as_positional_args(dequant_node)[0]
         assert isinstance(to_fp16_node, Node)
         # extract the dtype, so we can cast to it before returning
-        target_dtype = to_fp16_node.args[1]
-        weight_node = to_fp16_node.args[0]
+        target_dtype = get_all_args_as_positional_args(to_fp16_node)[1]
+        weight_node = get_all_args_as_positional_args(to_fp16_node)[0]
         assert isinstance(weight_node, Node)
         assert weight_node.op == 'get_attr'
         weight = getattr_from_fqn(gm, weight_node.target)  # type: ignore[arg-type]
@@ -146,7 +147,7 @@ def get_linear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
 
 def get_qlinear_fun_weight(node: Node, gm: GraphModule) -> torch.Tensor:
     # packed weight is arg 1
-    packed_weight_node = node.args[1]
+    packed_weight_node = get_all_args_as_positional_args(node)[1]
     assert isinstance(packed_weight_node, Node)
     assert packed_weight_node.op == 'get_attr'
     packed_weight = getattr_from_fqn(gm, packed_weight_node.target)  # type: ignore[arg-type]

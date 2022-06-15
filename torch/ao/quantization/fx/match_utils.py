@@ -224,3 +224,9 @@ def find_matches(
                 standalone_module_qconfig)
 
     return match_map
+
+__all__ = [
+    "MatchResult",
+    "is_match",
+    "find_matches",
+]

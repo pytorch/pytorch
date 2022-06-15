@@ -717,7 +717,7 @@ def maybe_insert_input_equalization_observers_for_node(
         return
 
     new_args = []
-    for arg in node.args:
+    for arg in get_all_args_as_positional_args(node):
         if not isinstance(arg, Node) or node_arg_is_bias(node, arg):
             new_args.append(arg)
             continue
@@ -735,6 +735,7 @@ def maybe_insert_input_equalization_observers_for_node(
 
     # assign the new args and kwargs to the node, inplace
     node.args = tuple(new_args)
+    node.kwargs = {}
 
 def maybe_insert_output_observer_for_node(
     node: Node,
@@ -1229,12 +1230,13 @@ def insert_observers_for_model(
                     # If this is the case, we will not apply equalization to the
                     # initial two layers.
                     is_quantized_branch = False
+                    all_node_args = get_all_args_as_positional_args(node)
                     if (
-                        len(node.args) > 0 and
-                        isinstance(node.args[0], Node) and
-                        len(node.args[0].users) > 1
+                        len(all_node_args) > 0 and
+                        isinstance(all_node_args[0], Node) and
+                        len(all_node_args[0].users) > 1
                     ):
-                        for user in node.args[0].users:
+                        for user in all_node_args[0].users:
                             # Checks if there exists another user being quantized
                             is_user_quantized = (
                                 qconfig_map.get(user.name, None) is not None or

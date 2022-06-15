@@ -9,6 +9,7 @@ from torch.fx.graph import Node
 from torch.ao.quantization.utils import getattr_from_fqn
 from .ns_types import NSNodeTargetType
 from torch.ao.quantization.fx.backend_config_utils import get_native_quant_patterns
+from torch.ao.quantization.fx.utils import get_all_args_as_positional_args
 from torch.ao.quantization import (
     ObserverBase,
     FakeQuantizeBase,
@@ -147,8 +148,10 @@ def end_node_matches_reversed_fusion(
             if fusion_el_is_fun:
                 if cur_node.target != cur_fusion_el:
                     return False
-                if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
-                    cur_node = cur_node.args[0]
+                all_cur_node_args = get_all_args_as_positional_args(cur_node)
+                if len(all_cur_node_args) > 0 and \
+                   isinstance(all_cur_node_args[0], Node):
+                    cur_node = all_cur_node_args[0]
                 else:
                     return False
             else:
@@ -163,8 +166,9 @@ def end_node_matches_reversed_fusion(
                     return False
                 if not isinstance(target_mod, cur_fusion_el):
                     return False
-                if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
-                    cur_node = cur_node.args[0]
+                all_cur_node_args = get_all_args_as_positional_args(cur_node)
+                if len(all_cur_node_args) > 0 and isinstance(all_cur_node_args[0], Node):
+                    cur_node = all_cur_node_args[0]
                 else:
                     return False
             else:
@@ -182,13 +186,14 @@ def end_node_matches_reversed_fusion(
                     assert isinstance(cur_fusion_el, tuple)
                     if cur_node.target != cur_fusion_el[0]:
                         return False
-                    elif len(cur_node.args) < 2:
+                    elif len(get_all_args_as_positional_args(cur_node)) < 2:
                         return False
-                    elif cur_node.args[1] != cur_fusion_el[1]:
+                    elif get_all_args_as_positional_args(cur_node)[1] != cur_fusion_el[1]:
                         return False
 
-                if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
-                    cur_node = cur_node.args[0]
+                all_cur_node_args = get_all_args_as_positional_args(cur_node)
+                if len(all_cur_node_args) > 0 and isinstance(all_cur_node_args[0], Node):
+                    cur_node = all_cur_node_args[0]
                 else:
                     return False
             else:
