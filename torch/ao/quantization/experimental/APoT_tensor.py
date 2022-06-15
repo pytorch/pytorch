@@ -8,6 +8,16 @@ class TensorAPoT(torch.Tensor):
     def quantize_APoT(tensor2quantize: Tensor) -> Tensor:
         raise NotImplementedError
 
+    """ Dequantizes integer Tensor to floating point representation
+    based on the calculated quantization levels from a specified APoT non-uniform observer.
+    The approach follows the method outlined in the APoT paper: https://arxiv.org/pdf/1909.13144.pdf.
+    Args:
+        tensor2dequantize: integer Tensor
+        b: total number of bits across all terms in non-uniform observer
+        k: base bitwidth, i.e. bitwidth of every term, in non-uniform observer
+    Returns:
+        result: floating point representation of input Tensor
+    """
     @staticmethod
     def dequantize(tensor2dequantize: Tensor, b: int, k: int) -> Tensor:  # type: ignore[override]
         tensor2dequantize = tensor2dequantize.float()
