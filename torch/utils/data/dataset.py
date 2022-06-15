@@ -299,11 +299,14 @@ def random_split(dataset: Dataset[T], lengths: Sequence[Union[int, float]],
                  generator: Optional[Generator] = default_generator) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
-    If a list of fractions is given, the lengths will be computed automatically as
-    floor(frac * len(dataset)).
-    If the sum of the list of the fractions is not equal to 1 or the split leaves a
-    remainder, a new entry will be appended to the end of the list with the
-    remaining fraction
+
+    If a list of fractions that sum up to 1 is given,
+    the lengths will be computed automatically as
+    floor(frac * len(dataset)) for each fraction provided.
+
+    After computing the lengths, if there are any remainders, 1 count will be
+    distributed in round-robin fashion to the lengths
+    until there are no remainders left.
 
     Optionally fix the generator for reproducible results, e.g.:
 
