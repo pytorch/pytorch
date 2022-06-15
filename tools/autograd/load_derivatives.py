@@ -339,10 +339,6 @@ def postprocess_forward_derivatives(
                     arg_name = arg_name + "_t"
                 new_args.append(arg_name)
 
-            # TODO we are trolling
-            if f.func.is_symint_fn():
-                defn_name += "_symint"
-
             # Call into the forward again. We need two cases here to handle both Tensor methods and at:: functions.
             if Variant.function in f.variants:
                 fw_formula = "at::{}({})".format(defn_name, ", ".join(new_args))
@@ -400,11 +396,7 @@ def create_differentiability_info(
         functions: Sequence[NativeFunction], name: str
     ) -> NativeFunction:
         for f in functions:
-            if (
-                not f.func.is_functional_fn()
-                and not f.func.is_out_fn()
-                and name == str(f.func.name.name)
-            ):
+            if cpp.name(f.func) == name:
                 return f
         # some functions only have in-place variants
         assert name + "_" == cpp.name(functions[0].func)
