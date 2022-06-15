@@ -4,13 +4,13 @@ import torch
 
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch._prims.utils import getnvFuserDtype
+from torch._prims.utils import Number, getnvFuserDtype
 from torch._prims.context import TorchRefsMode
 import torch.overrides
 from torch.utils._pytree import tree_map
 
 if torch.cuda.is_available():
-    from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
+    from torch._C._nvfuser import Fusion, FusionDefinition, TensorView, Val  # type: ignore[import]
 
 
 def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
@@ -38,33 +38,51 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                 def call_function(self, target, args, kwargs):
                     target = target.impl_nvfuser
                     args = (fd,) + args
-                    return target(*args, **kwargs)
+                    nv_args = [to_nv(x) for x in args]
+                    nv_kwargs = {k: to_nv(v) for k, v in kwargs.items()}
+                    return target(*nv_args, **nv_kwargs)
 
             def to_nv(arg):
                 if isinstance(arg, torch.Tensor):
                     x = fd.define_tensor(
                         arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
                     )
-                    fd.add_input(x)
                     return x
+                elif isinstance(arg, Number):
+                    return fd.define_constant(arg)
                 else:
                     return arg
 
+            def add_inputs(arg):
+                x = to_nv(arg)
+                if isinstance(x, TensorView):
+                    fd.add_input(x)
+                return x
+
             # Transforms graph to call nvfuser lowerings
-            nv_args = tree_map(to_nv, args)
-            nv_kwargs = tree_map(to_nv, kwargs)
+            nv_args = tree_map(add_inputs, args)
+            nv_kwargs = tree_map(add_inputs, kwargs)
 
             out = FusionInterpreter(gm).run(*nv_args, **nv_kwargs)
             flat_out, unflatten_spec = torch.utils._pytree.tree_flatten(out)
             for o in flat_out:
-                fd.add_output(o)
+                if isinstance(o, TensorView) or isinstance(o, Val):
+                    fd.add_output(o)
 
-            return torch.utils._pytree.tree_unflatten(
-                fusion.execute(
-                    tuple(arg for arg in args if isinstance(arg, torch.Tensor))
-                ),
-                unflatten_spec,
+            nv_results = fusion.execute(
+                tuple(arg for arg in args if isinstance(arg, torch.Tensor))
             )
+
+            results = []
+            i = 0
+            for o in flat_out:
+                if isinstance(o, TensorView) or isinstance(o, Val):
+                    results.append(nv_results[i])
+                    i += 1
+                else:
+                    results.append(o)
+
+            return torch.utils._pytree.tree_unflatten(results,  unflatten_spec)
 
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
         executor
