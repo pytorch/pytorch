@@ -36,6 +36,8 @@ from torchgen.model import (
 from torchgen.native_function_generation import (
     pre_group_native_functions,
     add_generated_native_functions,
+    gen_composite_functional_kernel,
+    gen_composite_out_kernel,
 )
 from torchgen.api.types import (
     Binding,
@@ -51,7 +53,6 @@ import torchgen.api.native as native
 import torchgen.api.meta as meta
 import torchgen.api.structured as structured
 from torchgen.api.translate import translate
-from torchgen.code_template import CodeTemplate
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import (
     Target,
@@ -76,7 +77,6 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
     gen_composite_view_copy_kernel,
-    gen_composite_functional_kernel,
 )
 
 T = TypeVar("T")
@@ -152,6 +152,7 @@ class LineLoader(YamlLoader):
 
 
 _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
+_GLOBAL_PARSE_TAGS_YAML_CACHE = {}
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
@@ -220,11 +221,13 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
 
 @functools.lru_cache(maxsize=None)
 def parse_tags_yaml(path: str) -> Set[str]:
-    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
-    with open(path, "r") as f:
-        es = yaml.load(f, Loader=LineLoader)
-        valid_tags = parse_tags_yaml_struct(es, path=path)
-    return valid_tags
+    global _GLOBAL_PARSE_TAGS_YAML_CACHE
+    if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
+        with open(path, "r") as f:
+            es = yaml.load(f, Loader=LineLoader)
+            _GLOBAL_PARSE_TAGS_YAML_CACHE[path] = parse_tags_yaml_struct(es, path=path)
+
+    return _GLOBAL_PARSE_TAGS_YAML_CACHE[path]
 
 
 def parse_native_yaml(
@@ -234,7 +237,6 @@ def parse_native_yaml(
     *,
     skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
-    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         valid_tags = parse_tags_yaml(tags_yaml_path)
@@ -500,7 +502,8 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        return f"m.def({cpp_string(str(f.func))});\n"
+        tags = "{" + ", ".join([f"at::Tag::{tag}" for tag in f.tags]) + "}"
+        return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
 # Generates Operators.h and Operators.cpp.
@@ -1491,7 +1494,6 @@ def gen_aggregated_headers(
                                 Target.NAMESPACED_DECLARATION,
                                 selector,
                                 rocm=rocm,
-                                cpp_namespace="at::native",
                                 class_method_name=None,
                                 skip_dispatcher_op_registration=False,
                             ),
@@ -1651,7 +1653,6 @@ def gen_per_operator_headers(
                         Target.NAMESPACED_DECLARATION,
                         selector,
                         rocm=rocm,
-                        cpp_namespace="at::native",
                         class_method_name=None,
                         skip_dispatcher_op_registration=False,
                     ),
@@ -1713,6 +1714,7 @@ def gen_per_operator_headers(
 def gen_headers(
     *,
     native_functions: Sequence[NativeFunction],
+    valid_tags: Set[str],
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     structured_native_functions: Sequence[NativeFunctionsGroup],
     static_dispatch_idx: List[BackendIndex],
@@ -1840,6 +1842,11 @@ def gen_headers(
 
     core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
 
+    def gen_tags_enum() -> Dict[str, str]:
+        return {"enum_of_valid_tags": (",\n".join([f"{tag}" for tag in valid_tags]))}
+
+    core_fm.write("enum_tag.h", gen_tags_enum)
+
 
 def gen_source_files(
     *,
@@ -1924,36 +1931,41 @@ def gen_source_files(
                 return headers
 
         backend_index = backend_indices[dispatch_key]
-        dispatch_registrations_body = (
-            ""
-            if skip_dispatcher_op_registration
-            else "\n".join(
-                list(
-                    concatMap(
-                        dest.RegisterDispatchKey(
-                            backend_index,
-                            Target.REGISTRATION,
-                            selector,
-                            rocm=rocm,
-                            cpp_namespace="at::native",
-                            class_method_name=None,
-                            skip_dispatcher_op_registration=skip_dispatcher_op_registration,
-                        ),
-                        grouped_native_functions,
+        ns_grouped_native_functions = defaultdict(list)
+        for grouped_native_function in grouped_native_functions:
+            namespace = (
+                grouped_native_function.namespace
+                if isinstance(grouped_native_function, NativeFunction)
+                else grouped_native_function.functional.namespace
+            )
+            ns_grouped_native_functions[namespace].append(grouped_native_function)
+
+        static_init_dispatch_registrations = ""
+        for namespace, functions in ns_grouped_native_functions.items():
+            dispatch_registrations_body = (
+                ""
+                if skip_dispatcher_op_registration
+                else "\n".join(
+                    list(
+                        concatMap(
+                            dest.RegisterDispatchKey(
+                                backend_index,
+                                Target.REGISTRATION,
+                                selector,
+                                rocm=rocm,
+                                class_method_name=None,
+                                skip_dispatcher_op_registration=skip_dispatcher_op_registration,
+                            ),
+                            functions,
+                        )
                     )
                 )
             )
-        )
-        static_template = CodeTemplate(
-            """\
-TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
-    $dispatch_registrations_body
-};"""
-        )
-        static_init_dispatch_registrations = static_template.substitute(
-            dispatch_key=dispatch_key,
-            dispatch_registrations_body=dispatch_registrations_body,
-        )
+
+            static_init_dispatch_registrations += f"""
+TORCH_LIBRARY_IMPL({namespace}, {dispatch_key}, m) {{
+    {dispatch_registrations_body}
+}};"""
         dispatch_namespace = str(dispatch_key).lower()
         fm.write_with_template(
             f"Register{dispatch_key}.cpp",
@@ -1977,7 +1989,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                             Target.NAMESPACED_DEFINITION,
                             selector,
                             rocm=rocm,
-                            cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
                         ),
@@ -1991,7 +2002,6 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                             Target.ANONYMOUS_DEFINITION,
                             selector,
                             rocm=rocm,
-                            cpp_namespace="at::native",
                             class_method_name=None,
                             skip_dispatcher_op_registration=skip_dispatcher_op_registration,
                         ),
@@ -2076,12 +2086,42 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
     schema_selector = selector
     if force_schema_registration:
         schema_selector = SelectiveBuilder.get_nop_selector()
+
+    ns_native_functions: Dict[str, List[NativeFunction]] = defaultdict(list)
+    for native_function in native_functions:
+        ns_native_functions[native_function.namespace].append(native_function)
+    schema_registrations = ""
+    aten_schema_registrations = []
+    custom_namespace = None
+    for namespace, funcs in ns_native_functions.items():
+
+        schema_registrations_body = list(
+            mapMaybe(RegisterSchema(schema_selector), funcs)
+        )
+        # NB: we have to separate aten namespace registration from other namespaces,
+        # because in the template we hardcoded an operator for ATen already.
+        if namespace == "aten":
+            aten_schema_registrations = schema_registrations_body
+        else:
+            assert custom_namespace is None or namespace == custom_namespace, (
+                "Only one custom namespace (other than 'aten') is currently supported, "
+                f" but getting {namespace} and {custom_namespace}"
+            )
+            custom_namespace = namespace
+            tab = "\t"
+            schema_registrations += f"""
+TORCH_LIBRARY({custom_namespace}, m) {{
+  {tab.join(schema_registrations_body)}
+}};"""
     cpu_fm.write(
         "RegisterSchema.cpp",
         lambda: {
+            "aten_schema_registrations": []
+            if skip_dispatcher_op_registration
+            else aten_schema_registrations,
             "schema_registrations": []
             if skip_dispatcher_op_registration
-            else list(mapMaybe(RegisterSchema(schema_selector), native_functions)),
+            else schema_registrations,
         },
     )
 
@@ -2277,6 +2317,12 @@ TORCH_LIBRARY_IMPL(aten, $dispatch_key, m) {
                     structured_native_functions,
                 )
             ),
+            "GeneratedCompositeOut_Definitions": list(
+                mapMaybe(
+                    gen_composite_out_kernel,
+                    structured_native_functions,
+                )
+            ),
         },
     )
 
@@ -2288,6 +2334,14 @@ def gen_declarations_yaml(
         "Declarations.yaml",
         lambda: format_yaml([compute_declaration_yaml(f) for f in native_functions]),
     )
+
+
+def get_torchgen_root() -> pathlib.Path:
+    """
+    If you're depending on torchgen out-of-tree, you can use the root to figure
+    out the path to native_functions.yaml
+    """
+    return pathlib.Path(__file__).parent.resolve()
 
 
 def main() -> None:
@@ -2396,6 +2450,7 @@ def main() -> None:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
+    valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
@@ -2501,6 +2556,7 @@ def main() -> None:
     if "headers" in options.generate:
         gen_headers(
             native_functions=native_functions,
+            valid_tags=valid_tags,
             grouped_native_functions=grouped_native_functions,
             structured_native_functions=structured_native_functions,
             static_dispatch_idx=static_dispatch_idx,
