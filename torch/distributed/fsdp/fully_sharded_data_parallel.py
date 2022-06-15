@@ -599,7 +599,6 @@ class FullyShardedDataParallel(nn.Module):
             If specified, resulting FSDP instances will reside on this device.
             Note that if ``device_id`` is specified but ``module`` is already
             on a different CUDA device, an error will be thrown. (Default: ``None``)
-
         sync_module_states (bool): If ``True``, each individually wrapped FSDP unit will broadcast
             module parameters from rank 0 to ensure they are the same across all ranks after
             initialization. This helps ensure model parameters are the same across ranks
@@ -608,7 +607,9 @@ class FullyShardedDataParallel(nn.Module):
             This can also help load checkpoints taken by ``state_dict`` and to be loaded by
             ``load_state_dict`` in a memory efficient way. See documentation for
             :class:`FullStateDictConfig` for an example of this. (Default: ``False``)
-
+        check_exec_order (bool): If ``True``, checks forward pass execution
+            order across ranks, erroring if it differs on the first iteration
+            and warning if it differs on subsequent iterations. (Default: ``False``)
     """
 
     def __init__(
@@ -624,6 +625,7 @@ class FullyShardedDataParallel(nn.Module):
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
+        check_exec_order: bool = False,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
@@ -889,7 +891,9 @@ class FullyShardedDataParallel(nn.Module):
                 self._offload_to_cpu(p)
 
         # For validating execution order across ranks
-        self._exec_order_data = _ExecOrderData()
+        self._check_exec_order = check_exec_order
+        if self._check_exec_order:
+            self._exec_order_data = _ExecOrderData()
 
     def _move_module_if_needed(self, module) -> None:
         """
@@ -1648,11 +1652,13 @@ class FullyShardedDataParallel(nn.Module):
             if m is not self and isinstance(m, FullyShardedDataParallel):
                 m._streams = self._streams
                 m._fsdp_graph_order = self._fsdp_graph_order
-                # Give each non-root FSDP module an alias to the root's
-                # execution order data structure and the root's ignored
-                # parameters and all buffer names since only the root's names
-                # are fully prefixed like the state dict keys
-                m._exec_order_data = self._exec_order_data
+                if self._check_exec_order:
+                    # Give each non-root FSDP module an alias to the root's
+                    # execution order data structure and the root's ignored
+                    # parameters and all buffer names since only the root's names
+                    # are fully prefixed like the state dict keys
+                    m._check_exec_order = True
+                    m._exec_order_data = self._exec_order_data
 
     def _wait_for_previous_optim_step(self) -> None:
         """
@@ -3181,7 +3187,7 @@ class FullyShardedDataParallel(nn.Module):
         # and skip the check (1) when in eval mode since then there is not a
         # safe point at which to reset the execution order data and (2) if
         # world size is 1 since then there is no chance of desynchronization
-        if self.training_state != TrainingState_.FORWARD or \
+        if not self._check_exec_order or self.training_state != TrainingState_.FORWARD or \
                 not self.training or self.world_size == 1:
             return
         eod = self._exec_order_data
