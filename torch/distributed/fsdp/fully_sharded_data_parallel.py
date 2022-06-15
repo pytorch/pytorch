@@ -926,6 +926,7 @@ class FullyShardedDataParallel(nn.Module):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
     ) -> None:
+        # The initial FSDP wrapping is done with auto_wrap_policy.initial_policy
         self.__init__(
             module=module,
             process_group=process_group,
@@ -2844,7 +2845,7 @@ class FullyShardedDataParallel(nn.Module):
 
             if (self.use_param_exec_order_policy() and self._param_exec_order_prep_stage):
                 # In self._fsdp_params_exec_order, the parameters are ordered based on
-                # the execution order in the backward pass.
+                # the execution order in the backward pass in the first iteration.
                 self._fsdp_params_exec_order.append(param)
 
             # Switch to local shard after backward. Note that
@@ -3115,10 +3116,13 @@ class FullyShardedDataParallel(nn.Module):
             self._fsdp_params_exec_order.reverse()
             for m in self.modules():
                 if m is not self and isinstance(m, FullyShardedDataParallel):
-                    if hasattr(m, "_use_param_exec_order_policy"):
-                        delattr(m, "_use_param_exec_order_policy")
-                    if hasattr(m, "_param_exec_order_prep_stage"):
-                        delattr(m, "_param_exec_order_prep_stage")
+                    assert hasattr(
+                        m, "_use_param_exec_order_policy"
+                    ), "Non-root FSDP modules should also have _use_param_exec_order_policy attribute"
+                    assert hasattr(
+                        m, "_param_exec_order_prep_stage"
+                    ), "Non-root FSDP modules should also have _param_exec_order_prep_stage attribute"
+                    m._param_exec_order_prep_stage = False
             # TODO (linjianma): Construct a fsdp_wrap_map whose keys are all children modules with a FSDP wrap,
             # and values are its FSDP wraps. These children FSDP wraps will be detached from the root FSDP module
             # and will be used to schedule the parameters (rebuild_full_params and reshard).
