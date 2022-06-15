@@ -741,7 +741,8 @@ void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
 
 void TensorImpl::FreeMemory() {
   // We'll detach from the old Storage and create a new one
-  if (storage_.use_count() != 1 || !storage_.resizable() || !storage_.allocator()) {
+  if (storage_.use_count() != 1 || !storage_.resizable() ||
+      !storage_.allocator()) {
     storage_ = Storage::create_legacy(storage_.device());
   } else {
     storage_.reset_legacy();
