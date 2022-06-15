@@ -93,7 +93,10 @@ class ProxyTensor(FakeSymbolicTensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        # print(func_overload)
+        if func_overload == aten.size.default:
+            return args[0].shape
+        if func_overload == aten.dim.default:
+            return len(args[0].shape)
         func = func_overload.overloadpacket
         if func_overload in CURRENT_DECOMPOSITION_TABLE:
             return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
@@ -122,7 +125,6 @@ class ProxyTensor(FakeSymbolicTensor):
         if func.__name__[-1] == "_" and func.__name__[0] != "_":
             args[0].proxy = proxy_out
             proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
-
         real_out = super().__torch_dispatch__(func_overload, types, pytree.tree_map(unwrap_fake, args), pytree.tree_map(unwrap_fake, kwargs))
 
         return wrap_output(real_out, proxy_out)

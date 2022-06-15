@@ -6,7 +6,7 @@ from torch.utils._pytree import tree_map
 import operator
 from contextlib import contextmanager
 from torch._meta_registrations import meta_funcs, register_meta
-# from torch.fx.experimental.proxy_tensor import PySymInt
+from torch.fx.experimental.proxy_tensor import make_fx
 aten = torch.ops.aten
 
 from torch._C import _disabled_torch_function_impl
@@ -36,11 +36,11 @@ def nop(x):
 def n_like(arg, **kwargs):
     return arg.new_empty(arg.shape)
 
-@register_meta([aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor])
+@register_meta([aten.add.Tensor, aten.sub.Tensor, aten.mul.Tensor], register_dispatcher=False)
 def binary_meta(a, b):
     return a.new_empty(a.shape)
 
-@register_meta(aten.cat.default)
+@register_meta(aten.cat.default, register_dispatcher=False)
 def cat_meta(tensors, dim=0):
     concat_length = 0
     shape = tensors[0].shape
@@ -55,15 +55,14 @@ def cat_meta(tensors, dim=0):
     return tensors[0].new_empty(new_shape)
 
 
-from functorch import make_fx
 
-x = torch.randn(3, 4, 5, requires_grad=True)
+x = torch.randn(3, 4, 5)
 
 def f(y):
     x = y * 2
     assert x.shape[0] > 1
-    x = x.sum()
-    return torch.autograd.grad(x, y)
+    # x = x.sum()
+    return x
 
 traced_graph = make_fx(f, decomposition_table={torch.ops.aten.detach.default: lambda x: x})(x)
 traced_graph.graph.eliminate_dead_code()

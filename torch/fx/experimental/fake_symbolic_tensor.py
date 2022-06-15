@@ -2,6 +2,10 @@ import torch
 import sympy
 from torch._C import _disabled_torch_function_impl
 from torch._meta_registrations import meta_funcs, register_meta
+from torch.utils._mode_utils import no_dispatch
+
+
+aten = torch.ops.aten
 
 def create_contiguous(shape):
     if len(shape) == 0:
@@ -34,6 +38,12 @@ class FakeSymbolicTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
+        print(func_overload)
+        if func_overload == aten.size.default:
+            return args[0].sym_size()
+        if func_overload == aten.dim.default:
+            return len(args[0].sym_size())
+
         if func_overload in meta_funcs:
             return meta_funcs[func_overload](*args, **kwargs)
 
@@ -57,7 +67,6 @@ class PySymInt(object):
         return f"PySymInt({self.expr})"
 
     def __int__(self):
-        # import pdb; pdb.set_trace()
         return self.shape_env.evaluate_expr(self.expr)
 
     def __bool__(self):

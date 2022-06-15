@@ -321,8 +321,8 @@ Tensor broadcast_to(const Tensor& self, IntArrayRef size) {
   return self.expand(size);
 }
 
-Tensor broadcast_to(const Tensor& self, c10::SymIntArrayRef sym_size) {
-  return self.expand(self.sym_sizes());
+Tensor broadcast_to_symint(const Tensor& self, c10::SymIntArrayRef sym_size) {
+  return self.expand_symint(self.sym_sizes());
 }
 
 std::vector<Tensor> broadcast_tensors(TensorList tensors) {
@@ -846,7 +846,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
   return result;
 }
 
-Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
+Tensor expand(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
   auto size = asIntArrayRefSlow(packed_size);
   return expand(self, size, implicit);
 }
@@ -3401,7 +3401,7 @@ at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t d
 
 
 at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit, at::Tensor & out) {
-  auto tmp = self.expand(size, implicit);
+  auto tmp = self.expand_symint(size, implicit);
   out.copy_(tmp);
   return out;
 }
