@@ -23,7 +23,18 @@ inline void call_once(Flag& flag, F&& f, Args&&... args) {
 
 class once_flag {
  public:
-  constexpr once_flag() noexcept = default;
+#ifndef _WIN32
+  // running into build error on MSVC. Can't seem to get a repro locally so I'm
+  // just avoiding constexpr
+  //
+  //   C:/actions-runner/_work/pytorch/pytorch\c10/util/CallOnce.h(26): error:
+  //   defaulted default constructor cannot be constexpr because the
+  //   corresponding implicitly declared default constructor would not be
+  //   constexpr 1 error detected in the compilation of
+  //   "C:/actions-runner/_work/pytorch/pytorch/aten/src/ATen/cuda/cub.cu".
+  constexpr
+#endif
+      once_flag() noexcept = default;
   once_flag(const once_flag&) = delete;
   once_flag& operator=(const once_flag&) = delete;
 
