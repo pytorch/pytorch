@@ -797,3 +797,9 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
         self.assertTrue("stationary" in data_dist_info)
         self.assertTrue("non-stationary" in data_dist_info)
         self.assertTrue(dynam_vs_stat_dict[linear_fqn]["dynamic_recommended"])
+
+
+class TestFxModelReportClass(QuantizationTestCase):
+
+    def test_simple_pass_case(self):
+        pass
