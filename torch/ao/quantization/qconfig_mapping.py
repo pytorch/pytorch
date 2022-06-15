@@ -2,10 +2,22 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Tuple, Union
 
-from .qconfig import QConfigAny
+import torch
+
+from .fake_quantize import default_weight_fake_quant
+from .observer import default_weight_observer
+from .qconfig import (
+    default_reuse_input_qconfig,
+    get_default_qconfig,
+    get_default_qat_qconfig,
+    QConfig,
+    QConfigAny
+)
 
 
 __all__ = [
+    "get_default_qconfig_mapping",
+    "get_default_qat_qconfig_mapping",
     "QConfigMapping",
 ]
 
@@ -16,6 +28,62 @@ OBJECT_TYPE_DICT_KEY = "object_type"
 MODULE_NAME_REGEX_DICT_KEY = "module_name_regex"
 MODULE_NAME_DICT_KEY = "module_name"
 MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
+
+
+def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int):
+    """
+    Return the default QConfigMapping for the given quantization type and backend.
+    """
+    if is_qat:
+        qconfig = get_default_qat_qconfig(backend, version)
+    else:
+        qconfig = get_default_qconfig(backend, version)
+
+    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
+    # so we have to modify the weight observer to default_weight_observer or another
+    # per tensor supported observer.
+    # see https://github.com/pytorch/pytorch/issues/47535
+    if backend == "fbgemm":
+        default_weight = default_weight_fake_quant if is_qat else default_weight_observer
+        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight)
+    else:
+        qconfig_transpose = qconfig
+
+    return QConfigMapping() \
+        .set_global(qconfig) \
+        .set_object_type("reshape", default_reuse_input_qconfig) \
+        .set_object_type(torch.nn.Conv1d, qconfig) \
+        .set_object_type(torch.nn.Conv2d, qconfig) \
+        .set_object_type(torch.nn.Conv3d, qconfig) \
+        .set_object_type(torch.nn.ConvTranspose1d, qconfig_transpose) \
+        .set_object_type(torch.nn.ConvTranspose2d, qconfig_transpose) \
+        .set_object_type(torch.nn.ConvTranspose3d, qconfig_transpose) \
+        .set_object_type(torch.nn.Linear, qconfig) \
+        .set_object_type(torch.nn.functional.conv1d, qconfig) \
+        .set_object_type(torch.nn.functional.conv2d, qconfig) \
+        .set_object_type(torch.nn.functional.conv3d, qconfig) \
+        .set_object_type(torch.nn.functional.conv_transpose1d, qconfig_transpose) \
+        .set_object_type(torch.nn.functional.conv_transpose2d, qconfig_transpose) \
+        .set_object_type(torch.nn.functional.conv_transpose3d, qconfig_transpose) \
+        .set_object_type(torch.nn.functional.linear, qconfig) \
+        .set_object_type(torch.nn.ReLU, qconfig) \
+        .set_object_type(torch.nn.functional.relu, qconfig) \
+        .set_object_type(torch.relu, qconfig) \
+        .set_object_type(torch.nn.BatchNorm1d, qconfig) \
+        .set_object_type(torch.nn.BatchNorm2d, qconfig) \
+        .set_object_type(torch.nn.BatchNorm3d, qconfig)
+
+def get_default_qconfig_mapping(backend="fbgemm", version=0):
+    """
+    Return the default QConfigMapping for post training quantization.
+    """
+    return _get_default_qconfig_mapping(False, backend, version)
+
+def get_default_qat_qconfig_mapping(backend="fbgemm", version=1):
+    """
+    Return the default QConfigMapping for quantization aware training.
+    """
+    return _get_default_qconfig_mapping(True, backend, version)
 
 
 class QConfigMapping:
