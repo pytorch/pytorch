@@ -5,18 +5,17 @@ the values observed during calibration (PTQ) or training (QAT).
 
 import torch
 import itertools
+import math
+import matplotlib.pyplot as plt
 from torch.ao.quantization.observer import ObserverBase
 
-# TODO: Consider adding NonUniformQuantizationObserverBase class
-# when more than one non-uniform method is implemented
-
 class APoTObserver(ObserverBase):
+    max_val: float
     b: int
     k: int
     n: int
     alpha: float
     gamma: float
-    max_val: float
     level_indices: torch.Tensor
 
     def __init__(
@@ -33,13 +32,14 @@ class APoTObserver(ObserverBase):
     def calculate_qparams(self, signed):
         return self._calculate_qparams(signed)
 
-    r""" Calculates nonuniform quantization parameters according to APoT paper:
-    https://arxiv.org/pdf/1909.13144.pdf.
-    Arg:
+    r""" Calculates nonuniform quantization parameters given min and max value tensors.
+    Parameters calculated according to APoT paper: https://arxiv.org/pdf/1909.13144.pdf
+    Args:
+        max_val: maximum values per channel
         signed: specifies whether to include signed values in quantization level calculations
     Returns:
         gamma: gamma quantization parameter, defined to ensure that alpha is the maximum of the range
-        quantization_levels: non-uniform quantization levels (fp representation)
+        quantization_levels: non-uniform quantization levels
         level_indices: int representation of quantization_levels indices
     """
     def _calculate_qparams(self, signed):
