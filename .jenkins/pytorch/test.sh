@@ -457,7 +457,8 @@ test_forward_backward_compatibility() {
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
-  pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
+  DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
+  pip_install --pre "torch<1.13.0.dev${DATE_OF_BASE//-/}" -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
   # FC: verify newmodel can be load with old code.
