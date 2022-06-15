@@ -7,6 +7,7 @@ import random
 import unittest
 import warnings
 import subprocess
+import tempfile
 import os
 import torch
 import torch.nn as nn
@@ -1458,6 +1459,14 @@ class TestMPS(TestCase):
                     self.assertEqual(t[1, 2], i)
                     self.assertEqual(t[2, 1], j)
                     self.assertEqual(t.sum(), 1 + i + j)
+
+    def test_stride_of_strides(self) -> None:
+        x = torch.rand(32, 1, device='mps')
+        y = x.as_strided(size=(32, 2), stride=(1, 0))
+        # Casting stride of strided tensor to CPU use to crash with "buffer is not large enough." assert
+        # See https://github.com/pytorch/pytorch/issues/79181#issuecomment-1154683435
+        z = y.as_strided(size=(32, 3), stride=(1, 0)).to("cpu")
+        self.assertEqual(x.to("cpu").as_strided(size=(32, 3), stride=(1, 0)), z)
 
 
 class TestSmoothL1Loss(TestCase):
@@ -4535,6 +4544,42 @@ class TestNoRegression(TestCase):
         a = torch.ones(2, device="mps")
 
         b = a.new(1)
+
+    def test_serialization_map_location(self):
+
+        # Ensures that cpu Tensor can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2)
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="mps")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
+        # Ensures that mps Tensors can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f)
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
+        # Ensures that mps Tensors can be loaded on cpu
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="cpu")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "cpu")
+
 
 
 
