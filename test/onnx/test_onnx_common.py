@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from typing import Any, Mapping, Type
 
 import numpy as np
 import onnxruntime
@@ -36,6 +37,11 @@ def _run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
     return verification.verify(*args, **kwargs)
+
+
+def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
+    suffix = "_".join(f"{k}_{v}" for k, v in input_dicts.items())
+    return f"{cls.__name__}_{suffix}"
 
 
 class _TestONNXRuntime(unittest.TestCase):
@@ -103,6 +109,8 @@ class _TestONNXRuntime(unittest.TestCase):
         is_model_script = isinstance(
             model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)
         )
+
+        print("=============is_script", self.is_script)
 
         if self.is_script_test_enabled and self.is_script:
             script_model = model if is_model_script else torch.jit.script(model)

@@ -11,8 +11,12 @@ import PIL
 import test_onnx_common
 import torchvision
 from test_models import TestModels
-from test_pytorch_common import TestCase, run_tests, skipIfUnsupportedMinOpsetVersion
-from test_pytorch_common import skipScriptTest_New as skipScriptTest
+from test_pytorch_common import (
+    TestCase,
+    run_tests,
+    skipIfUnsupportedMinOpsetVersion,
+    skipScriptTest,
+)
 from test_pytorch_onnx_onnxruntime import run_model_test
 from torchvision import ops
 from torchvision.models.detection import (
@@ -61,11 +65,6 @@ TestModels_new_jit_API = type(
         onnx_shape_inference=True,
     ),
 )
-
-
-def class_name_func(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
-    suffix = "_".join(f"{k}_{v}" for k, v in input_dicts.items())
-    return f"{cls.__name__}_{suffix}"
 
 
 def _get_image(rel_path: str, size: Tuple[int, int]) -> torch.Tensor:
@@ -179,7 +178,7 @@ def _init_test_roi_heads_faster_rcnn():
 @parameterized.parameterized_class(
     ("opset_version", "is_script"),
     itertools.product([_constants.onnx_default_opset], [True, False]),
-    class_name_func=class_name_func,
+    class_name_func=test_onnx_common.parameterize_class_name,
 )
 class TestModelsONNXRuntime(test_onnx_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(11)
