@@ -110,6 +110,49 @@ Val* newScalar(ValType vtype, DataType dtype) {
       " in newScalar.");
 }
 
+IterType promoteIterType(IterType type1, IterType type2) {
+  // Iteration: Default
+  // Reduction: Should not appear here
+  // Broadcast: Propagated only if type1 and type2 are Broadcast
+  // Gather: Converted to Iteration
+  // Stride: Shold not appear here
+  // VectorComponent: Converted to Iteration
+
+  TORCH_INTERNAL_ASSERT(
+      type1 != IterType::Reduction && type1 != IterType::Stride,
+      "Invalid IterType: ",
+      type1)
+  TORCH_INTERNAL_ASSERT(
+      type2 != IterType::Reduction && type2 != IterType::Stride,
+      "Invalid IterType: ",
+      type2);
+
+  // Do not propagate Gather and VectorComponent
+  if (type1 == IterType::Gather || type1 == IterType::VectorComponent) {
+    type1 = IterType::Iteration;
+  }
+  if (type2 == IterType::Gather || type2 == IterType::VectorComponent) {
+    type2 = IterType::Iteration;
+  }
+
+  // At this point, type1 and type2 must be either Iteration or
+  // Broadcast
+  TORCH_INTERNAL_ASSERT(
+      type1 == IterType::Iteration || type1 == IterType::Broadcast,
+      "Unexpected IterType: ",
+      type1);
+  TORCH_INTERNAL_ASSERT(
+      type2 == IterType::Iteration || type2 == IterType::Broadcast,
+      "Unexpected IterType: ",
+      type2);
+
+  if (type1 == IterType::Broadcast) {
+    return type2;
+  } else {
+    return type1;
+  }
+}
+
 TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
   std::vector<TensorView*> tvs;
   for (auto val : vals) {
@@ -155,12 +198,8 @@ TensorView* newOutputTV(const std::vector<Val*>& vals, DataType dtype) {
       }
       extent_vals[i] = promoteSize(extent_vals[i], dom[i]->extent());
       if (iter_types[i].has_value()) {
-        // TODO: Enable, see conv tests and gather promotion/gather broadcast
-        // behavior.
-        //
-        // TORCH_INTERNAL_ASSERT(
-        //     iter_types[i].value() == dom[i]->getIterType(),
-        //     "Invalid iter type promotion in newOutputTv for expression.");
+        iter_types[i] =
+            promoteIterType(iter_types[i].value(), dom[i]->getIterType());
       } else {
         iter_types[i] = dom[i]->getIterType();
       }

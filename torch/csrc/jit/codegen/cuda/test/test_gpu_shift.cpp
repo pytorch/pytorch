@@ -5384,6 +5384,46 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
   testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
 }
 
+// Test IterType promotion with gather
+TEST_F(NVFuserTest, FusionGatherIterTypePromotion_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  const int s1 = 11;
+  const int s2 = 3;
+
+  auto tv0 = makeConcreteTensor({s1});
+  fusion.addInput(tv0);
+  auto tv1 = makeConcreteTensor({s1, s2});
+  fusion.addInput(tv1);
+
+  const std::vector<int> window_shape = {3};
+  const std::vector<std::vector<int>> padding_width = {{1, 1}};
+
+  auto tv2 = gather(tv0, window_shape, padding_width);
+  auto tv3 = add(tv2, tv1);
+
+  fusion.addOutput(tv3);
+
+  TORCH_CHECK(
+      tv3->axis(1)->getIterType() == IterType::Iteration,
+      "Invalid IterType promotion: ",
+      tv3->axis(1)->toString());
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({s1}, options);
+  at::Tensor t1 = at::randn({s1, s2}, options);
+  std::vector<IValue> inputs = {t0, t1};
+
+  auto ref = gather(t0, window_shape, padding_width) + t1;
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, inputs);
+  auto outputs = fe.runFusion(inputs);
+
+  testValidate(&fusion, outputs, inputs, {ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)
