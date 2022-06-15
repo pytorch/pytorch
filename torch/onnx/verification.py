@@ -520,7 +520,7 @@ def verify(
     ort_providers: Sequence[str] = _ORT_PROVIDERS,
     rtol: float = 0.001,
     atol: float = 1e-7,
-    **kwargs,
+    **_,
 ):
     """Verify model export to ONNX with ONNX Runtime.
 
