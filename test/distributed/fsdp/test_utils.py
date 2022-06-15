@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch import distributed as dist
 from torch.distributed.fsdp._utils import (
     _apply_to_tensors,
+    _get_param_to_param_name,
 )
 from torch.distributed.utils import _replace_by_prefix
 from torch.testing._internal.common_utils import (
@@ -108,6 +109,45 @@ class TestUtils(TestCase):
         x = _apply_to_tensors(fill_fn, x)
         x, _ = nn.utils.rnn.pad_packed_sequence(x)
         self.assertEqual(torch.sum(x), 0)
+
+    def test_get_param_to_param_name(self):
+        """Tests that :meth:`_get_param_to_param_name` creates prefixed
+        parameter names matching those of :meth:`nn.Module.state_dict` with
+        ``prefix=""``."""
+        class Model(nn.Module):
+            # Use unique parameter shapes
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = nn.Linear(3, 3, bias=False)
+                self.layer1 = nn.Sequential(
+                    nn.Linear(3, 4, bias=False),
+                    nn.Sequential(
+                        nn.Linear(4, 4, bias=False),
+                    ),
+                    nn.Sequential(
+                        nn.Sequential(
+                            nn.Linear(4, 3, bias=False),
+                        )
+                    )
+                )
+        model = Model()
+        state_dict = model.state_dict()
+        # Use the parameter shape as a proxy for identifying each parameter
+        # since the state dict only saves a `Tensor`
+        param_shape_to_state_dict_key = {
+            p.shape: key for key, p in state_dict.items()
+        }
+        param_to_param_name = _get_param_to_param_name(model)
+        param_shape_to_param_name = {
+            p.shape: n for p, n in param_to_param_name.items()
+        }
+        self.assertEqual(
+            set(param_shape_to_state_dict_key.keys()),
+            set(param_shape_to_param_name.keys()),
+        )
+        for param_shape, param_name in param_shape_to_param_name.items():
+            state_dict_key = param_shape_to_state_dict_key[param_shape]
+            self.assertEqual(param_name, state_dict_key)
 
 
 instantiate_parametrized_tests(TestUtils)

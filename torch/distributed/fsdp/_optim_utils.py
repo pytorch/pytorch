@@ -8,6 +8,7 @@ from typing import (
     List,
     NamedTuple,
     Optional,
+    Sequence,
     Tuple,
     Union,
 )
@@ -16,7 +17,10 @@ import torch
 import torch.distributed as dist
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
-from torch.distributed.fsdp.flatten_params_wrapper import FlatParameter
+from torch.distributed.fsdp._flat_param import (
+    FlatParameter,
+    FlatParamHandle,
+)
 
 
 class _ConsolidatedOptimState:
@@ -146,7 +150,7 @@ def _communicate_optim_state(
             # If the parameter is not sharded (e.g. world size of 1), then
             # neither is the positive-dimension tensor state, so no need to
             # communicate it -- we take the target rank's value
-            if not flat_param._is_sharded:
+            if not flat_param._is_sharded:  # type: ignore[attr-defined]
                 tensor_state[state_name] = value.cpu()
                 continue
             if tensor_buffer is None:
@@ -192,7 +196,7 @@ def _unflatten_communicated_optim_state(
     """
     unflat_param_state: List[Dict[str, Any]] = []
     flat_param_views: Dict[str, Iterator] = {}
-    num_unflat_params = flat_param._num_unflattened_params
+    num_unflat_params = flat_param._num_params
     tensor_state, zero_dim_tensor_state, non_tensor_state = \
         state.tensor_state, state.zero_dim_tensor_state, state.non_tensor_state
 
@@ -202,11 +206,11 @@ def _unflatten_communicated_optim_state(
         for state_name, flat_tensor in tensor_state.items():
             views_generated = state_name in flat_param_views
             if not views_generated:
-                param_views = flat_param.get_param_views(flat_tensor)
-                flat_param_views[state_name] = param_views
+                views = FlatParamHandle._get_unflat_views(flat_param, flat_tensor)
+                flat_param_views[state_name] = views
             else:
-                param_views = flat_param_views[state_name]
-            unflat_state_param[state_name] = next(param_views)
+                views = flat_param_views[state_name]
+            unflat_state_param[state_name] = next(views)
         # Add zero-dimension tensor state: take the target rank's value
         for state_name, zero_dim_tensor in zero_dim_tensor_state.items():
             unflat_state_param[state_name] = zero_dim_tensor
@@ -306,7 +310,7 @@ def _flatten_optim_state(
     assert num_unflat_params > 0, \
         "Expects at least one unflattened parameter corresponding to the " \
         "flattened parameter"
-    unflat_param_shapes = flat_param._param_shapes
+    unflat_param_shapes = flat_param._shapes
     num_unflat_param_shapes = len(unflat_param_shapes)
     assert num_unflat_params == num_unflat_param_shapes, \
         f"Expects {num_unflat_params} shapes but got {num_unflat_param_shapes}"
@@ -394,7 +398,7 @@ def _flatten_tensor_optim_state(
     state_name: str,
     pos_dim_tensors: List[torch.Tensor],
     unflat_param_names: List[str],
-    unflat_param_shapes: List[torch.Size],
+    unflat_param_shapes: Sequence[torch.Size],
     flat_param: FlatParameter,
 ) -> torch.Tensor:
     """

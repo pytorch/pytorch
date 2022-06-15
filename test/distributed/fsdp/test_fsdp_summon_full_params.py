@@ -7,25 +7,27 @@ from copy import deepcopy
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp import CPUOffload, MixedPrecision
-from torch.distributed.fsdp import FlatParameter
+from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel
-from torch.distributed.fsdp.wrap import wrap, enable_wrap
+from torch.distributed.fsdp import MixedPrecision
+from torch.distributed.fsdp._flat_param import FlatParamHandle
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    FullyShardedDataParallel,
+)
+from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
+    DeterministicModel,
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
-    DeterministicModel,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
     instantiate_parametrized_tests,
     parametrize,
+    run_tests,
 )
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -146,7 +148,7 @@ class TestSummonFullParams(FSDPTest):
         with model.summon_full_params(model):
             self.assertEqual(raw_model_size, self.get_model_param_count(model))
             parameters = list(model.parameters())
-            all_shards = FlatParameter(parameters, requires_grad=False)
+            all_shards = FlatParamHandle.flatten_params(parameters, requires_grad=False)
             my_slice = torch.chunk(all_shards, self.world_size)[self.rank]
 
             # shards are padded but the full_param tensor is not
