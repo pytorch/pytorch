@@ -509,6 +509,18 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
         unopt_type->kind() == c10::TypeKind::StringType) &&
         arg.default_value().value().isString()) {
       printQuotedString(out, arg.default_value().value().toStringRef());
+    } else if (type->kind() == TypeKind::ListType && type->castRaw<ListType>()->getElementType()->kind() == c10::TypeKind::IntType) {
+      // We want to faithfully replicate JIT schema.
+      // in native_functions.yaml defaults for int arrays always look like
+      //   int[2] stride=1
+      // instead of
+      //   int[2] stride=[1, 1]
+      auto default_val = arg.default_value().value().toIntList();
+      if (default_val.size() > 1) {
+        out << default_val[0];
+      } else {
+        out << arg.default_value().value();
+      }
     } else {
       out << arg.default_value().value();
     }
