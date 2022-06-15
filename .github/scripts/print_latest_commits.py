@@ -5,15 +5,6 @@ import rockset  # type: ignore[import]
 import os
 import re
 
-regex = {
-    "^pull+": False,
-    "^trunk+": False,
-    "^lint+": False,
-    "^linux-binary+": False,
-    "^android-tests+": False,
-    "^windows-binary+": False,
-}
-
 class WorkflowCheck(NamedTuple):
     workflowName: str
     name: str
@@ -72,8 +63,14 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
 def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
     workflow_checks = get_commit_results(commit, results)
 
-    for required_check in regex:
-        regex[required_check] = False
+    regex = {
+        "^pull+": False,
+        "^trunk+": False,
+        "^lint+": False,
+        "^linux-binary+": False,
+        "^android-tests+": False,
+        "^windows-binary+": False,
+    }
 
     for check in workflow_checks:
         workflowName = check['workflowName']
@@ -92,7 +89,11 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
             return (False, workflowName + " checks were not successful")
 
     if not all(regex.values()):
-        return (False, "missing required workflows")
+        missing_workflows = ''
+        for required_check in regex:
+            if not regex[required_check]:
+                missing_workflows += required_check[1:-1] + ', '
+        return (False, "missing required workflows: " + missing_workflows[:-2])
 
     return (True, "")
 
