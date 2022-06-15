@@ -727,6 +727,7 @@ class Operator:
         exemptions = {
             # we have support (see OpInfo), testing artifact
             'nn.functional.dropout2d',
+            'nn.functional.dropout',
             # exception: we dont even support double backward for this
             'nn.functional.hardswish',
             'bernoulli',  # this isn't differentiable
