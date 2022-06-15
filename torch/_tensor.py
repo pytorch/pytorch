@@ -97,7 +97,10 @@ class Tensor(torch._C._TensorBase):
             # https://github.com/pytorch/pytorch/issues/47442
             # Update the test in test_serialization if you remove 'meta' from here
 
-            fake_tensor_dispatch = isinstance(torch._C._get_torch_dispatch_mode(), torch._subclasses.fake_tensor.FakeTensorMode)
+            fake_tensor_dispatch = isinstance(
+                torch._C._get_torch_dispatch_mode(),
+                torch._subclasses.fake_tensor.FakeTensorMode  # type: ignore[attr-defined]
+            )
             if fake_tensor_dispatch:
                 new_tensor = torch._C._get_torch_dispatch_mode().from_tensor(self)
             elif self.is_sparse or self.device.type in ['lazy', 'xla', 'mps', 'ort', 'meta', 'hpu'] or \

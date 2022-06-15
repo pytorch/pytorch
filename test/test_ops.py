@@ -1541,13 +1541,12 @@ fake_skips = (
     "segment_reduce.lengths",  # Could not run 'aten::segment_reduce' with arguments from the 'Meta' backend.
     "sparse.sampled.addmm",  # sparsity not supported
     # Can not infer total number of classes from meta. no way at present to throw DynamicOutputShapeException
-    # "nn.functional.one_hot",
+    "nn.functional.one_hot",
 )
 
 dynamic_output_op_tests = (
     "argwhere",
     "bincount",
-    "index_select",
     "combinations",
     "linalg.lstsq",
     "masked_select",
@@ -1560,6 +1559,7 @@ dynamic_output_op_tests = (
 # some inputs invoke dynamic output shape operators, some do not
 sometimes_dynamic_output_op_test = (
     "__getitem__",
+    "index_select",
 )
 
 class TestFakeTensorNonErroring(TestCase):
@@ -1604,7 +1604,7 @@ class TestFakeTensorNonErroring(TestCase):
                     prims.utils.compare_tensor_meta(fake_out, real_out)
                 self.assertTrue(name not in dynamic_output_op_tests)
 
-            except torch._subclasses.fake_tensor.ComplexInputException:
+            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
