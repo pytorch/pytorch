@@ -508,8 +508,7 @@ def verify(
     ] = None,
     input_names: Optional[Sequence[str]] = None,
     output_names: Optional[Sequence[str]] = None,
-    # TODO(justinchuby): Default training = torch.onnx.TrainingMode.EVAL after #78446 is checked in
-    training: Optional[torch.onnx.TrainingMode] = None,
+    training: torch.onnx.TrainingMode = torch.onnx.TrainingMode.EVAL,
     opset_version: Optional[int] = None,
     keep_initializers_as_inputs: bool = True,
     verbose: bool = False,
@@ -533,7 +532,7 @@ def verify(
         dynamic_axes (dict, optional): See :func:`torch.onnx.export`.
         input_names (list, optional): See :func:`torch.onnx.export`.
         output_names (list, optional): See :func:`torch.onnx.export`.
-        training (torch.onnx.TrainingMode, optional): See :func:`torch.onnx.export`.
+        training (torch.onnx.TrainingMode): See :func:`torch.onnx.export`.
         opset_version (int, optional): See :func:`torch.onnx.export`.
         keep_initializers_as_inputs (bool, optional): See :func:`torch.onnx.export`.
         verbose (bool, optional): See :func:`torch.onnx.export`.
@@ -559,22 +558,21 @@ def verify(
         AssertionError: if outputs from ONNX model and PyTorch model are not
             equal up to specified precision.
     """
-    if training is not None and training == torch.onnx.TrainingMode.TRAINING:
+    if training == torch.onnx.TrainingMode.TRAINING:
         model.train()
-    elif training is None or training == torch.onnx.TrainingMode.EVAL:
+    elif training == torch.onnx.TrainingMode.EVAL:
         model.eval()
-        training = torch.onnx.TrainingMode.EVAL
     with torch.no_grad(), contextlib.ExitStack() as stack:
         model_f: Union[str, io.BytesIO] = io.BytesIO()
         if use_external_data:
-            tmpdirname = stack.enter_context(tempfile.TemporaryDirectory())
-            model_f = os.path.join(tmpdirname, "model.onnx")
+            tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
+            model_f = os.path.join(tmpdir_path, "model.onnx")
 
         inputs_for_export = _prepare_input_for_export(input_args, input_kwargs)
 
         # TODO(#77679): remove this and treat mutating model separately.
         model_copy = _try_clone_model(model)
-        torch.onnx._export(
+        utils._export(
             model,
             inputs_for_export,
             model_f,
