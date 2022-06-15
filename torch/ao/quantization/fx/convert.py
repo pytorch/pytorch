@@ -157,7 +157,12 @@ def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraph
             if len(users) > 1:
                 for user in users:
                     with quantized.graph.inserting_before(node):
-                        new_node = quantized.graph.create_node("call_method", "dequantize", tuple(get_all_args_as_positional_args(node)), {})
+                        new_node = quantized.graph.create_node(
+                            "call_method",
+                            "dequantize",
+                            tuple(get_all_args_as_positional_args(node)),
+                            {}
+                        )
                     user.replace_input_with(node, new_node)
                 quantized.graph.erase_node(node)
 
@@ -177,7 +182,12 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
 
         if len(dequant_users) > 1:
             with quantized.graph.inserting_after(node):
-                unique_dq = quantized.graph.create_node("call_method", "dequantize", tuple(get_all_args_as_positional_args(users[0])), {})
+                unique_dq = quantized.graph.create_node(
+                    "call_method",
+                    "dequantize",
+                    tuple(get_all_args_as_positional_args(users[0])),
+                    {}
+                )
             for dequant in dequant_users:
                 dequant.replace_all_uses_with(unique_dq)
                 quantized.graph.erase_node(dequant)

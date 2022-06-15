@@ -567,7 +567,11 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             # qconfig_dict and backend_config_dict to support more general configurations
             # of dynamic quantization, e.g. dynamically quantizing second input, third
             # input etc.
-            (arg_as_input_target_compute_dtype in [torch.quint8, torch.int8, torch.float16]) and arg is get_all_args_as_positional_args(node)[0]
+            (arg_as_input_target_compute_dtype in [
+                torch.quint8,
+                torch.int8,
+                torch.float16]
+             ) and arg is get_all_args_as_positional_args(node)[0]
         )
 
     else:

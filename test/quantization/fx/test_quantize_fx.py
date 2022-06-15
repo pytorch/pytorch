@@ -159,7 +159,7 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional, List
+from typing import Callable, List
 
 
 
