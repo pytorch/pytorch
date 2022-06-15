@@ -161,7 +161,10 @@ class BaseSparsifier(abc.ABC):
             tensor_fqn = local_args.get('tensor_fqn', None)
 
             if tensor_fqn is None:
-                warnings.warn("tensor_fqn is a required argument in the sparsity config and support for `module` and `module_fqn` will be deprecated")
+                warnings.warn(
+                    "tensor_fqn is a required argument in the sparsity config"
+                    "and support for `module` and `module_fqn` will be deprecated"
+                )
                 module = local_args.get('module', None)
                 module_fqn = local_args.get('module_fqn', None)
 
