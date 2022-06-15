@@ -19921,6 +19921,16 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
         torch_opinfo_name="abs",
+        skips=(
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
@@ -20083,7 +20093,7 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
             ),
         ),
     ),
@@ -20323,7 +20333,7 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
             ),
         ),
     ),
@@ -20475,7 +20485,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128)
+            ),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
             ),
         )
     ),
@@ -20504,7 +20526,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+            ),
+            # Reference result was farther (inf) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (inf) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
@@ -20517,6 +20551,14 @@ python_ref_db = [
         skips=(
             # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.chalf,), device_type='cpu'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20530,7 +20572,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+            ),
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
@@ -21002,7 +21056,7 @@ python_ref_db = [
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.cfloat, torch.cdouble)),
+                         dtypes=(torch.chalf, torch.cfloat, torch.cdouble)),
             # TypeError: where(): incompatible function arguments.
             DecorateInfo(unittest.skip("Passes for aten executor but not nvfuser"), 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.float32, torch.int32)),
