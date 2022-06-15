@@ -164,15 +164,10 @@ Here is a simple, end-to-end example of saving and reloading PowerSGD state and 
         CHECKPOINT = tempfile.gettempdir() + "/checkpoint.pt"
 
         model = SimpleModel().to(rank)
-        ddp_model = DistributedDataParallel(
-            model,
-            device_ids=[rank])
+        ddp_model = DistributedDataParallel(model, device_ids=[rank])
 
         powersgd_hook = powerSGD.powerSGD_hook
-        powersgd_state = powerSGD.PowerSGDState(
-                process_group=None,
-                matrix_approximation_rank=1,
-                start_powerSGD_iter=4)
+        powersgd_state = powerSGD.PowerSGDState(process_group=None)
 
         optimizer = optim.SGD(ddp_model.parameters(), lr=0.001)
         ddp_model.register_comm_hook(powersgd_state, powersgd_hook)
