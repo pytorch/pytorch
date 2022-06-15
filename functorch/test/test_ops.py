@@ -874,6 +874,8 @@ class TestOperators(TestCase):
         xfail('lu_unpack'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
+        xfail('linalg.eigh'),  # _linalg_eigh doesn't have batching rule
+        xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
     }))
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
@@ -998,6 +1000,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('qr'),
+        xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
     }))
     def test_vmapvjp_has_batch_rule(self, device, dtype, op):
         if not op.supports_autograd:
