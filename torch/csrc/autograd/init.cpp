@@ -7,6 +7,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/ScalarType.h>
+#include <c10/util/variant.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
@@ -28,6 +29,14 @@
 
 #include <set>
 #include <unordered_set>
+
+namespace pybind11 {
+namespace detail {
+template <typename... Ts>
+struct VISIBILITY_HIDDEN type_caster<c10::variant<Ts...>>
+    : variant_caster<c10::variant<Ts...>> {};
+} // namespace detail
+} // namespace pybind11
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   using namespace torch::autograd::profiler;
@@ -256,8 +265,15 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
   {
     using torch::profiler::impl::Result;
+    py::class_<ExtraFields<EventType::TorchOp>>(m, "_ExtraFields_TorchOp");
+    py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
+    py::class_<ExtraFields<EventType::Allocation>>(m, "_ExtraFields_Allocation");
+    py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall");
+    py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall");
+
     py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
         .def("name", &Result::name)
+        .def_readonly("extra_fields", &Result::extra_fields_)
         .def_property_readonly(
             "id",
             [](const Result& r) {
