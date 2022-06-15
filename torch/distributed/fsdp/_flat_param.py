@@ -90,6 +90,8 @@ class FlatParameter(nn.Parameter):
         _is_sharded (bool): Whether the flattened parameter is *ever* sharded
             across ranks (not whether it is *currently* sharded).
         _unsharded_size (torch.Size): Unsharded flattened parameter's size.
+        _flat_param_name (str): Uniquely-identifying name for the flattened
+            parameter.
 
         _param_infos (Tuple[ParamInfo, ...]): Each parameter's parameter info
             entry; see :class:`ParamInfo`.
@@ -106,9 +108,6 @@ class FlatParameter(nn.Parameter):
         _shared_param_infos (Tuple[SharedParamInfo, ...]): Shared parameter
             info entries; see :class:`SharedParamInfo`.
 
-        _flat_param_name (str): Uniquely-identifying name for the flattened
-            parameter.
-
         _shard_param_offsets (List[Tuple[int, int])): [start, end] offsets (in
             units of numel) giving this rank's part of each flattened original
             module parameter; for any parameter ``p`` that is not sharded
@@ -122,13 +121,16 @@ class FlatParameter(nn.Parameter):
         _shard_numel_padded (int): Numel padded for this rank's sharded
             flattened parameter.
 
-        _local_shard (Tensor):
-        _full_param_padded (Tensor):
-        _shard_bwd_hook (Tuple[AccumulateGrad, RemovableHandle]):
-
-        _mp_shard (Tensor):
-        _cpu_grad (Tensor):
-        _saved_grad_shard (Tensor):
+        _local_shard (Tensor): Sharded flattened parameter with padding.
+        _full_param_padded (Tensor): Unsharded flattened parameter with
+            padding.
+        _shard_bwd_hook (Tuple[AccumulateGrad, RemovableHandle]): Flattened
+            parameter's :class:`AccumulateGrad` object and post-backward hook
+            handle.
+        _mp_shard (Tensor): Reduced-precision flattened parameter with padding.
+        _cpu_grad (Tensor): Sharded gradient with padding stored on CPU.
+        _saved_grad_shard (Tensor): Sharded gradient with padding from previous
+            iterations for gradient accumulation without :meth:`no_sync`.
     """
 
     def init_metadata(
