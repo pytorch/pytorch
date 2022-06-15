@@ -465,14 +465,14 @@ def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
     with no_dispatch():
         def to_cpu(e):
             if isinstance(e, FakeTensor):
-                return torch.ones_like(e, device="cpu")
+                return torch.zeros_like(e, device="cpu")
             return e
 
         try:
             args = tree_map(to_cpu, args)
             kwargs = tree_map(to_cpu, kwargs)
 
-            # TODO: full decomposition/fix
+            # TODO: full decomposition/fix. hack bc of lack of meta coverage
             if func == torch.ops.aten._embedding_bag.default:
                 args, kwargs = normalize_function(
                     func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
