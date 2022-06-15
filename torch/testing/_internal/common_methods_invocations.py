@@ -3368,6 +3368,7 @@ def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
         ((S, S), (1,), True),
         ((S, S), (1,), False),
         ((S, S), (-2,), False),
+        ((S, S), (0, 1), False),
     )
     samples = []
     # Test large inputs to check numerical stability
@@ -8404,19 +8405,9 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
         inp_shape, dim, lengths, unsafe = args
         lengths_t = torch.tensor(lengths, dtype=torch.long, device=device)
-        sample_input_kwargs = {'axis': dim, 'unsafe': unsafe, 'initial': initial}
-        if mode == 'lengths':
-            sample_input_kwargs['lengths'] = lengths_t
-        elif mode == 'offsets':
-            zeros_shape = list(lengths_t.shape)
-            zeros_shape[dim] = 1
-            offsets_t = torch.cat((lengths_t.new_zeros(zeros_shape), lengths_t), dim).cumsum_(dim)
-            sample_input_kwargs['offsets'] = offsets_t
-        else:
-            raise RuntimeError(f"mode most be one of 'offsets' or 'lengths' got '{mode}'.")
         yield SampleInput(_tensor(inp_shape),
                           args=(reduce,),
-                          kwargs=sample_input_kwargs)
+                          kwargs={'lengths': lengths_t, 'axis': dim, 'unsafe': unsafe, 'initial': initial})
 
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
@@ -11482,7 +11473,11 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_equal,
            supports_autograd=False,
-           ),
+           skips=(
+               DecorateInfo(unittest.skip("Doesn't support bool return"),
+                            'TestJit', 'test_variant_consistency_jit'),
+
+           )),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -11527,7 +11522,7 @@ op_db: List[OpInfo] = [
            ),
     OpInfo('diag',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diag,
@@ -12430,6 +12425,8 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
+               # Could not run 'aten::linalg_eigh' with arguments from the 'AutogradMeta' backend.
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -12444,7 +12441,6 @@ op_db: List[OpInfo] = [
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack],
            skips=(
                # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -16101,9 +16097,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_pinv_hermitian,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            skips=(
-               # Pre-existing condition; Needs to be fixed
-               # fails due to non composite compliance of `linalg_eigvalsh`.
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
@@ -17561,10 +17554,12 @@ op_db: List[OpInfo] = [
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           gradcheck_fast_mode=False,
            sample_inputs_func=sample_inputs_logsumexp),
     OpInfo('trace',
            dtypes=all_types_and_complex(),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
            supports_inplace_autograd=False,
            supports_out=False,
            supports_forward_ad=True,
@@ -17632,13 +17627,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_adjoint),
     OpInfo('tril',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
     OpInfo('triu',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half),
+           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_tril_triu),
@@ -19522,25 +19517,6 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
-    OpInfo(
-        'segment_reduce',
-        variant_test_name='offsets',
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        supports_out=False,
-        # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
-        supports_gradgrad=False,
-        sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
-        skips=(
-            # FIXME: CUDA driver API confirmed a leak in
-            # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                "TestJit",
-                "test_variant_consistency_jit",
-                device_type="cuda",
-            ),
-        ),
-    ),
     UnaryUfuncInfo(
         'special.bessel_j0',
         decorators=(
@@ -19624,6 +19600,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19635,6 +19612,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19679,6 +19657,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19746,6 +19725,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19757,6 +19737,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19768,6 +19749,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19779,6 +19761,7 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         promotes_int_to_float=True,
         skips=(
+            DecorateInfo(unittest.skip("Skipping - testing takes an unreasonably long time, #79528")),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
@@ -19964,6 +19947,16 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.abs",
         torch_opinfo_name="abs",
+        skips=(
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.chalf,), device_type='cpu', active_if=not (IS_MACOS or IS_WINDOWS)),
+        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.acos",
@@ -20090,6 +20083,22 @@ python_ref_db = [
         "_refs.log2",
         torch_opinfo_name="log2",
     ),
+    PythonRefInfo(
+        "_refs.logsumexp",
+        torch_opinfo_name="logsumexp",
+        skips=(
+            # SyntaxError: cannot assign to False
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.log_softmax",
+        torch_opinfo_name="log_softmax",
+        skips=(
+            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
         torch_opinfo_name="nan_to_num",
@@ -20126,7 +20135,7 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
             ),
         ),
     ),
@@ -20147,6 +20156,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.sinh",
         torch_opinfo_name="sinh",
+    ),
+    PythonRefInfo(
+        "_refs.softmax",
+        torch_opinfo_name="softmax",
+        skips=(
+            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sqrt",
@@ -20366,7 +20383,7 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
             ),
         ),
     ),
@@ -20518,7 +20535,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128)
+            ),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type='cuda', active_if=not TEST_WITH_ROCM
             ),
         )
     ),
@@ -20547,7 +20576,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+            ),
+            # Reference result was farther (inf) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (inf) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
@@ -20560,6 +20601,14 @@ python_ref_db = [
         skips=(
             # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.chalf,), device_type='cpu'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20573,7 +20622,19 @@ python_ref_db = [
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+            ),
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
         ),
     ),
@@ -21045,7 +21106,7 @@ python_ref_db = [
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.cfloat, torch.cdouble)),
+                         dtypes=(torch.chalf, torch.cfloat, torch.cdouble)),
             # TypeError: where(): incompatible function arguments.
             DecorateInfo(unittest.skip("Passes for aten executor but not nvfuser"), 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.float32, torch.int32)),
