@@ -32,14 +32,13 @@ class APoTObserver(ObserverBase):
     def calculate_qparams(self, signed):
         return self._calculate_qparams(signed)
 
-    r""" Calculates nonuniform quantization parameters given min and max value tensors.
-    Parameters calculated according to APoT paper: https://arxiv.org/pdf/1909.13144.pdf
-    Args:
-        max_val: maximum values per channel
+    r""" Calculates nonuniform quantization parameters according to APoT paper:
+    https://arxiv.org/pdf/1909.13144.pdf.
+    Arg:
         signed: specifies whether to include signed values in quantization level calculations
     Returns:
         gamma: gamma quantization parameter, defined to ensure that alpha is the maximum of the range
-        quantization_levels: non-uniform quantization levels
+        quantization_levels: non-uniform quantization levels (fp representation)
         level_indices: int representation of quantization_levels indices
     """
     def _calculate_qparams(self, signed):
