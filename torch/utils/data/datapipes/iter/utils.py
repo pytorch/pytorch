@@ -1,7 +1,6 @@
 import copy
 import warnings
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.snapshot import simple_fast_forward
 
 __all__ = ["IterableWrapperIterDataPipe", ]
 
@@ -49,6 +48,3 @@ class IterableWrapperIterDataPipe(IterDataPipe):
 
     def __len__(self):
         return len(self.iterable)
-
-    def fast_forward(self, n_iteration) -> None:
-        simple_fast_forward(self, n_iteration)
