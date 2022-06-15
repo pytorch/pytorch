@@ -1287,7 +1287,7 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-          is_int_or_symint(obj)) {
+        is_int_or_symint(obj)) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;
