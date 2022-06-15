@@ -2,10 +2,10 @@
 
 import torch
 from torch.onnx import _experimental, verification
-from test_pytorch_common import TestCase
+from torch.testing._internal import common_utils
 
 
-class TestVerification(TestCase):
+class TestVerification(common_utils.TestCase):
     def setUp(self) -> None:
         super().setUp()
         torch.manual_seed(0)
