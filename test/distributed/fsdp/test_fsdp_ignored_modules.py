@@ -10,6 +10,7 @@ from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
+    parametrize,
     run_tests,
 )
 
@@ -156,8 +157,18 @@ class TestFSDPIgnoredModules(FSDPTest):
             FSDP(model, ignored_modules=[model])
 
     @skip_if_lt_x_gpu(2)
-    def test_diff_ignored_modules_across_ranks(self):
-        """Tests ignoring different modules across ranks."""
+    @parametrize("pass_ignored_modules_to_root", [False, True])
+    def test_diff_ignored_modules_across_ranks(self, pass_ignored_modules_to_root: bool):
+        """
+        Tests ignoring different modules across ranks.
+
+        Args:
+            pass_ignored_modules_to_root (bool): If ``False``, does not pass
+                any ignored modules (including those already ignored in child
+                FSDP instances) to the root FSDP instance; if ``True``, passes
+                all ignored modules (representing a superset of the children's
+                ignored modules) to the root FSDP instance.
+        """
         # To exercise different `FlatParameter` enumerations across ranks,
         # we wrap `layer3` with FSDP, where `layer3` is registered as a module
         # after `layer1`, which has the variable number of ignored modules
@@ -169,7 +180,7 @@ class TestFSDPIgnoredModules(FSDPTest):
         model.layer3 = FSDP(model.layer3)
         model_ignored_modules = [
             m for m in model.modules() if isinstance(m, IgnoredModule)
-        ]
+        ] if pass_ignored_modules_to_root else []
         wrapped_model = FSDP(model, ignored_modules=model_ignored_modules)
         optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
         self._train_model(wrapped_model, optim, 3)
