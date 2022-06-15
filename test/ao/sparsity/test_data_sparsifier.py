@@ -8,6 +8,7 @@ from torch.nn.utils.parametrize import is_parametrized
 from torch.testing._internal.common_utils import TestCase
 from torch.ao.sparsity import BaseDataSparsifier
 from typing import Tuple
+from torch import nn
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -198,3 +199,21 @@ class TestBaseDataSparsifier(TestCase):
         tensor_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
                                                   data_with_config=data_with_config)
         tensor_test.run_tests()
+
+    def test_nn_parameters(self):
+        param1, param2, param3 = nn.Parameter(torch.randn(3, 3)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
+        param4, param5 = nn.Parameter(torch.randn(1, 1)), nn.Parameter(torch.randn(4, 4))
+        data_list = [('param1', param1), ('param2', param2), ('param3', param3)]
+        defaults = {'test': 3}
+
+        data_with_config = [
+            {
+                'name': 'param4', 'data': param4, 'config': {'test': 7}
+            },
+            {
+                'name': 'param5', 'data': param5, 'config': {'test': 8}
+            },
+        ]
+        param_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                                 data_with_config=data_with_config)
+        param_test.run_tests()

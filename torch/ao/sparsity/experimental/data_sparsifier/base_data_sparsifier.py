@@ -12,7 +12,8 @@ from torch.nn.utils import parametrize
 __all__ = ['BaseDataSparsifier']
 
 SUPPORTED_TYPES = {
-    torch.Tensor
+    torch.Tensor,
+    nn.Parameter,
 }
 
 
@@ -63,6 +64,8 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
     def _extract_weight(self, data):
         if isinstance(data, torch.Tensor):
             return data
+        elif isinstance(data, nn.Parameter):
+            return data.data
 
     def add_data(self, name: str, data, **config):
         r""" Configures and parametrizes the internal container model with name and data
