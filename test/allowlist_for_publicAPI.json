@@ -354,21 +354,6 @@
     "QuantType",
     "wrap_cpp_module"
   ],
-  "torch.ao.sparsity.experimental.pruner.base_pruner": [
-    "ActivationReconstruction",
-    "BaseSparsifier",
-    "BiasHook",
-    "ModuleDict",
-    "ModuleList",
-    "PruningParametrization",
-    "ZeroesParametrization",
-    "fqn_to_module",
-    "module_to_fqn"
-  ],
-  "torch.ao.sparsity.experimental.pruner.parametrization": [
-    "Any",
-    "List"
-  ],
   "torch.ao.sparsity.scheduler.base_scheduler": [
     "BaseSparsifier",
     "wraps"
