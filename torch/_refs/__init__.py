@@ -641,10 +641,10 @@ def tan(a):
 def tanh(a):
     return prims.tanh(a)
 
-trunc = _make_elementwise_unary_reference(
-    prims.trunc,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-)
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def trunc(a):
+    return prims.trunc(a)
 
 
 def _make_elementwise_binary_reference(

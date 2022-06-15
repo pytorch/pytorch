@@ -20349,15 +20349,27 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
         skips=(
-            # complex("-501.-501.j")/complex("-501.-infj")
-            # PyTorch jiterated Path : 0
-            # Python : 0
-            # PyTorch non-jiterated path : nan + nanj
-            # See also: https://github.com/pytorch/pytorch/issues/52332
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_reference_consistency',
-                         dtypes=(torch.chalf,), device_type='cuda',
-                         active_if=not TEST_WITH_ROCM),
+            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # NotImplementedError: argument of type: <class 'complex'>
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+            ),
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+            ),
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
+            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20367,6 +20379,11 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
+        skips=(
+            # TypeError: _traced() got an unexpected keyword argument 'rounding_mode'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.div",
@@ -20375,6 +20392,11 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
+        skips=(
+            # TypeError: _traced() got an unexpected keyword argument 'rounding_mode'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.eq",
@@ -20409,6 +20431,7 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+        supports_nvfuser=False,
         # bfloat16 floor_divide compared with a float32 reference works inconsistently
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
