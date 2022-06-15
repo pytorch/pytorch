@@ -271,6 +271,9 @@ class PowerSGDState(object):
         ``process_group`` is not serializable and excluded from
         a returned state.
         """
+        logger.warning(
+            "NOTE: Process group is not serializable and excluded from a saved state."
+        )
         return {
             slot: getattr(self, slot)
             for slot in self.__slots__ if slot != "process_group"
@@ -283,7 +286,8 @@ class PowerSGDState(object):
         """
         self.process_group = distributed_c10d._get_default_group()
         logger.warning(
-            "NOTE: Current process group is set to default."
+            "NOTE: Process group will be set to a default group (i.e. the world size).\
+                If a different group is desired, please set `self.process_group` after PowerSGD state is loaded."
         )
         for slot, value in state.items():
             setattr(self, slot, value)

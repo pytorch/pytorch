@@ -8822,26 +8822,30 @@ class DistributedTest:
             self.assertEqual(ddp_grads[1], local_model.fc.bias.grad)
 
         def _test_hook_pickling(self, hook, hook_state):
+            torch.manual_seed(0)
             learning_rate = 0.01
             chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
             rank = self.rank
 
-            input = torch.randn(1, 1, device=rank)
+            input = torch.randn(7, 1, device=rank)
+            target = torch.randn(7, 5, device=rank)
             net = torch.nn.Linear(1, 5).to(rank)
             ddp_model = DistributedDataParallel(
-                net,
+                copy.deepcopy(net),
                 device_ids=[rank]
             )
             dummy_ddp_model = DistributedDataParallel(
-                net,
+                copy.deepcopy(net),
                 device_ids=[rank]
             )
             optimizer = torch.optim.SGD(ddp_model.parameters(), lr=learning_rate)
             ddp_model.register_comm_hook(hook_state, hook)
+            ddp_model.train()
 
             for _ in range(10):
                 optimizer.zero_grad()
-                loss = ddp_model(input).sum()
+                out = ddp_model(input)
+                loss = F.mse_loss(out, target)
                 loss.backward()
                 optimizer.step()
 
@@ -8852,7 +8856,16 @@ class DistributedTest:
             }
 
             if rank == 0:
-                torch.save(state, chkpt_file)
+                with self.assertLogs() as captured:
+                    torch.save(state, chkpt_file)
+
+                # Check that the logger has only one entry
+                self.assertEqual(len(captured.records), 1)
+                # Check that the logger has an expected entry
+                self.assertEqual(
+                    captured.records[0].getMessage(),
+                    "NOTE: Process group is not serializable and excluded from a saved state."
+                )
 
             dist.barrier()
             map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
@@ -8864,12 +8877,14 @@ class DistributedTest:
             # Check that the logger has an expected entry
             self.assertEqual(
                 captured.records[0].getMessage(),
-                'NOTE: Current process group is set to default.'
+                "NOTE: Process group will be set to a default group (i.e. the world size).\
+                If a different group is desired, please set `self.process_group` after PowerSGD state is loaded."
             )
 
             dummy_ddp_model.load_state_dict(checkpoint['state_dict'])
             dummy_hook = checkpoint['comm_hook']
             dummy_hook_state = checkpoint['comm_hook_state']
+            dummy_optimizer = torch.optim.SGD(dummy_ddp_model.parameters(), lr=learning_rate)
 
             # Check that loaded function is correct
             self.assertEqual(dummy_hook.__qualname__, hook.__qualname__)
@@ -8897,6 +8912,27 @@ class DistributedTest:
             # To make sure random state was restored properly, all entries should equal the original
             for entry1, entry2 in zip(hook_state.rng.get_state(), dummy_hook_state.rng.get_state()):
                 np.testing.assert_array_equal(entry1, entry2)
+
+            dummy_ddp_model.register_comm_hook(dummy_hook_state, dummy_hook)
+            dummy_ddp_model.train()
+
+            for _ in range(10):
+                optimizer.zero_grad()
+                dummy_optimizer.zero_grad()
+                out_origin = ddp_model(input)
+                out_dummy = dummy_ddp_model(input)
+                loss_origin = F.mse_loss(out_origin, target)
+                loss_dummy = F.mse_loss(out_dummy, target)
+                loss_origin.backward()
+                loss_dummy.backward()
+                optimizer.step()
+                dummy_optimizer.step()
+
+            original_grads = [p.grad for p in ddp_model.parameters()]
+            dummy_grads = [p.grad for p in dummy_ddp_model.parameters()]
+
+            # Check that gradients after 10 epochs are the same
+            self.assertEqual(original_grads, dummy_grads)
 
             if rank == 0:
                 os.remove(chkpt_file)
