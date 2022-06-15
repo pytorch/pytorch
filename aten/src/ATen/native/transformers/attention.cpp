@@ -224,6 +224,51 @@ void debug_assert_shape(int line, const Tensor& t, c10::IntArrayRef shape) {
         t.sizes()[idx]);
   }
 }
+
+Tensor qkv_projection(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const int64_t embed_dim,
+    const Tensor& qkv_weight) {
+  // shape: [B, T, 3 x D]
+  Tensor qkv;
+
+  if (key.is_same(value)) {
+    if (query.is_same(key)) {
+      // self-attention
+      qkv = gemm_nt(query, qkv_weight);
+    } else {
+      // encoder-decoder attention
+      // TODO: is there a more efficient way to set this up?
+      // TODO: can we stay nested insted of using cat? Probably just make a
+      // NestedTensor out of the matmul results or something?
+      auto q_kv_weight_s =
+          at::native::split_with_sizes(qkv_weight, {embed_dim, embed_dim * 2}, 0);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          q_kv_weight_s.size() == 2,
+          "expected split to produce 2 tensors but it produced ",
+          q_kv_weight_s.size());
+      auto q = gemm_nt(query, q_kv_weight_s[0]);
+      auto kv = gemm_nt(key, q_kv_weight_s[1]);
+      qkv = at::cat({q, kv}, 2);
+    }
+  } else {
+    auto q_k_v_weight_s = at::native::chunk(qkv_weight, 3, 0);
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        q_k_v_weight_s.size() == 3,
+        "expected chunk to produce 3 tensors but it produced ",
+        q_k_v_weight_s.size());
+    // TODO: can we stay nested instead of using cat?
+    auto q = gemm_nt(query, q_k_v_weight_s[0]);
+    auto k = gemm_nt(key, q_k_v_weight_s[1]);
+    auto v = gemm_nt(value, q_k_v_weight_s[2]);
+    qkv = at::cat({q, k, v}, 2);
+  }
+
+  return qkv;
+}
+
 } // namespace
 
 // compute q = (q + q_bias) / sqrt(dim_per_head), k = k + k_bias, v = v + v_bias
@@ -357,39 +402,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
 #endif
 
   // shape: [B, T, 3 x D]
-  Tensor qkv;
-
-  if (key.is_same(value)) {
-    if (query.is_same(key)) {
-      // self-attention
-      qkv = gemm_nt(query, qkv_weight);
-    } else {
-      // encoder-decoder attention
-      // TODO: is there a more efficient way to set this up?
-      // TODO: can we stay nested insted of using cat? Probably just make a
-      // NestedTensor out of the matmul results or something?
-      auto q_kv_weight_s =
-          at::native::split_with_sizes(qkv_weight, {D, D * 2}, 0);
-      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-          q_kv_weight_s.size() == 2,
-          "expected split to produce 2 tensors but it produced ",
-          q_kv_weight_s.size());
-      auto q = gemm_nt(query, q_kv_weight_s[0]);
-      auto kv = gemm_nt(key, q_kv_weight_s[1]);
-      qkv = at::cat({q, kv}, 2);
-    }
-  } else {
-    auto q_k_v_weight_s = at::native::chunk(qkv_weight, 3, 0);
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        q_k_v_weight_s.size() == 3,
-        "expected chunk to produce 3 tensors but it produced ",
-        q_k_v_weight_s.size());
-    // TODO: can we stay nested instead of using cat?
-    auto q = gemm_nt(query, q_k_v_weight_s[0]);
-    auto k = gemm_nt(key, q_k_v_weight_s[1]);
-    auto v = gemm_nt(value, q_k_v_weight_s[2]);
-    qkv = at::cat({q, k, v}, 2);
-  }
+  auto qkv = qkv_projection(query, key, value, embed_dim, qkv_weight);
 
   if (!qkv.is_nested() && qkv.numel() == 0) {
     if (query.is_nested()) {
