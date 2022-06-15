@@ -290,13 +290,6 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.sym_size(1)), str(x.sym_size(0)))
         self.assertTrue(str(expand_x.sym_size(1)), str(result.sym_size(0)))
 
-    @skipIfNoSympy
-    def test_meta_symint(self):
-        shape_env = ShapeEnv()
-        a0 = shape_env.create_symint("a0", 2)
-        r = torch.empty(a0, device='meta')
-        self.assertIsInstance(r.sym_size(0), CPP_SYMINT_CLASS)
-
 
 if __name__ == '__main__':
     run_tests()

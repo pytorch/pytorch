@@ -87,14 +87,6 @@ TORCH_API TensorBase empty_meta(
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt);
 
-TORCH_API TensorBase empty_symint_meta(
-    SymIntArrayRef size,
-    c10::optional<ScalarType> dtype_opt,
-    c10::optional<Layout> layout_opt,
-    c10::optional<Device> device_opt,
-    c10::optional<bool> pin_memory_opt,
-    c10::optional<c10::MemoryFormat> memory_format_opt);
-
 TORCH_API TensorBase empty_meta(IntArrayRef size, const TensorOptions& options);
 
 TORCH_API TensorBase

@@ -39,11 +39,9 @@ SymInt SymInt::operator*(SymInt sci) const {
   // TODO: technically we need to check that the classes match
   if (!a) {
     a = common->wrap(data_);
-    toSymInt(a); //
   }
   if (!b) {
     b = common->wrap(sci.data_);
-    toSymInt(b);
   }
   return SymInt::toSymInt(a->add(b));
 }
