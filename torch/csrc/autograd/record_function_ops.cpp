@@ -2,6 +2,7 @@
 #include <ATen/cpp_custom_type_hack.h>
 #include <ATen/record_function.h>
 #include <torch/csrc/autograd/record_function_ops.h>
+#include <torch/csrc/profiler/execution_graph_observer.h>
 #include <torch/csrc/profiler/api.h>
 
 #include <torch/csrc/jit/runtime/operator.h>
@@ -38,7 +39,7 @@ at::Tensor record_function_enter_legacy(
     const at::Tensor& prev,
     const std::string& name,
     const c10::optional<std::string>& args) {
-  if (profilerEnabled()) {
+  if (profilerEnabled() || torch::profiler::impl::isExecutionGraphObserverEnabled()) {
     auto rec =
         std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
     record_function_enter(name, args, *rec);

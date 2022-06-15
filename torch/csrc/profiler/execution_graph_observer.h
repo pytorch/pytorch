@@ -16,6 +16,9 @@ void removeExecutionGraphObserver();
 // Enables execution graph observer.
 void enableExecutionGraphObserver();
 
+// Checks if the execution graph observer is enabled.
+bool isExecutionGraphObserverEnabled();
+
 // Disables execution graph observer.
 void disableExecutionGraphObserver();
 

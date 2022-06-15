@@ -627,6 +627,12 @@ void enableExecutionGraphObserver() {
   }
 }
 
+bool isExecutionGraphObserverEnabled() {
+  auto& ob = observer();
+  return (ob.getState() == ExecutionGraphObserver::RunState::enabled);
+}
+
+
 void disableExecutionGraphObserver() {
   VLOG(1) << "disableExecutionGraphObserver()";
   auto& ob = observer();
