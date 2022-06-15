@@ -480,7 +480,8 @@ Tensor computeMkldnnPrepackedConvRun(
     dtype = Dtype(*outputType);
   }
 
-  BufHandle ResultBuf("mkldnn_prepacked_conv_run", outputShape, dtype);
+  BufHandle ResultBuf(
+      "mkldnn_prepacked_conv_run", outputShape, outputStrides, dtype);
   const BufHandle& inp = c10::get<BufHandle>(inputs[0]);
   const BufHandle& prepacked = c10::get<BufHandle>(inputs[1]);
   StmtPtr s = ExternalCall::make(
