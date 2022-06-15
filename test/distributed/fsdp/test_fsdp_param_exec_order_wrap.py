@@ -66,9 +66,16 @@ class TestFSDPExecOrder(FSDPTest):
             output = fsdp_model(input)
             loss = fsdp_model.module.get_loss(input, output).to(self.device)
             loss.backward()
-        assert set(fsdp_model.flatten_named_params_exec_order()) == set(list(fsdp_model.named_parameters()))
+        params_list = list(fsdp_model.parameters())
+        assert set(fsdp_model.flatten_params_exec_order()) == set(params_list)
         # Since the forward execution order is NOT consistent with the model definition order,
         # the ordering in flatten_named_params_exec_order should be different from named_parameters
+        assert fsdp_model.flatten_params_exec_order() == [
+            params_list[0],
+            params_list[2],
+            params_list[3],
+            params_list[1]
+        ]
         assert fsdp_model.use_param_exec_order_policy()
         assert not fsdp_model.is_param_exec_order_prep_stage()
 
