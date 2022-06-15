@@ -358,7 +358,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(355): test_profiler_experimental_tree_with_memory_and_stack
+            test_profiler_tree.py(352): test_profiler_experimental_tree_with_memory_and_stack
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -480,7 +480,7 @@ class TestProfilerTree(TestCase):
         self.assertTreesMatch(
             ProfilerTree.format(p.profiler, 12),
             """\
-            test_profiler_tree.py(479): test_profiler_experimental_tree_with_stack_and_modules
+            test_profiler_tree.py(476): test_profiler_experimental_tree_with_stack_and_modules
               torch/profiler/profiler.py(...): __enter__
                 torch/profiler/profiler.py(...): start
                   torch/profiler/profiler.py(...): _transit_action
@@ -497,7 +497,7 @@ class TestProfilerTree(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(473): forward
+                test_profiler_tree.py(471): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
@@ -538,7 +538,7 @@ class TestProfilerTree(TestCase):
                   aten::fill_
               nn.Module: MyModule_0
                 <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(473): forward
+                test_profiler_tree.py(471): forward
                   nn.Module: ReLU_0
                     <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX>
                     torch/nn/modules/activation.py(...): forward
