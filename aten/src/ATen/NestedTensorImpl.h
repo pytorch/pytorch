@@ -1,11 +1,11 @@
 #pragma once
+#include <ATen/MemoryOverlap.h>
 #include <ATen/Tensor.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
-#include <ATen/MemoryOverlap.h>
-#include <c10/core/MemoryFormat.h>
 #include <c10/util/Metaprogramming.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -42,6 +42,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   int64_t numel_custom() const override;
   bool is_contiguous_custom(MemoryFormat) const override;
   IntArrayRef sizes_custom() const override;
+  c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_sizes() const override;
   IntArrayRef strides_custom() const override;
 
   // this one is real
@@ -58,22 +60,19 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   std::vector<int64_t> opt_sizes_;
 };
 
-inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor) {
+inline NestedTensorImpl* get_nested_tensor_impl_or_null(
+    const at::Tensor& tensor) {
   if (tensor.is_nested()) {
     return static_cast<NestedTensorImpl*>(tensor.unsafeGetTensorImpl());
   }
   return nullptr;
 }
 
-inline NestedTensorImpl* get_nested_tensor_impl(
-    const at::Tensor& tensor) {
+inline NestedTensorImpl* get_nested_tensor_impl(const at::Tensor& tensor) {
   TORCH_CHECK(
-      tensor.is_nested(),
-      "get_nested_tensor_impl requires a NestedTensor.");
-  return static_cast<NestedTensorImpl*>(
-      tensor.unsafeGetTensorImpl());
+      tensor.is_nested(), "get_nested_tensor_impl requires a NestedTensor.");
+  return static_cast<NestedTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
-
 
 // TODO: real implementation once we support strides.
 inline bool nested_tensor_impl_is_contiguous(

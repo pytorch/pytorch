@@ -5,25 +5,11 @@ the values observed during calibration (PTQ) or training (QAT).
 
 import torch
 from torch.ao.quantization.observer import ObserverBase
-from typing import Tuple
 
-class NonUniformQuantizationObserverBase(ObserverBase):
-    quant_min = None
-    quant_max = None
+# TODO: Consider adding NonUniformQuantizationObserverBase class
+# when more than one non-uniform method is implemented
 
-    def __init__(
-        self,
-        min_val: torch.Tensor,
-        max_val: torch.Tensor,
-        level_indices: torch.Tensor,
-            b: int,
-            k: int) -> None:
-        super().__init__
-
-    def _calculate_qparams(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        pass
-
-class APoTObserver(NonUniformQuantizationObserverBase):
+class APoTObserver(ObserverBase):
     alpha = 0
     gamma = 0
     level_indices = torch.Tensor()
@@ -35,7 +21,7 @@ class APoTObserver(NonUniformQuantizationObserverBase):
         level_indices: torch.Tensor,
             b: int,
             k: int) -> None:
-        super(APoTObserver, self).__init__(min_val, max_val, level_indices, b, k)
+        super().__init__
 
     def calculate_qparams(self):
         return self._calculate_qparams()
