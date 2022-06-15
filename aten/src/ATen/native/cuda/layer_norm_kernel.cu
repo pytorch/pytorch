@@ -850,6 +850,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
   auto acc_type = at::toAccumulateType(input.scalar_type(), /*is_cuda=*/true);
   Tensor mean = at::empty({M}, X->options().dtype(acc_type));
   Tensor rstd = at::empty({M}, X->options().dtype(acc_type));
+  // Calling the kernel for M==0 gives a CUDA error
+  // See: https://github.com/pytorch/pytorch/pull/28614
   if (M > 0) {
     LayerNormKernelImpl(*X, *gamma, *beta, M, N, eps, &Y, &mean, &rstd);
   }
