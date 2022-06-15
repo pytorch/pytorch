@@ -1437,10 +1437,10 @@
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
-- name: linalg_solve(Tensor input, Tensor other) -> Tensor
-  input: solve_backward_A(grad, other, input, result)
-  other: solve_backward_self(grad, other, input)
-  result: solve_jvp(result, input_p, input_t, other_t)
+- name: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+  A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
+  result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
+  output_differentiability: [True, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
@@ -1537,9 +1537,9 @@
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors_return, /*is_hermitian=*/true, /*symeig_eigenvector=*/eigenvectors)
 
-- name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/true)
-  eigenvalues, eigenvectors: linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/true)
+- name: _linalg_eigh(Tensor A, str UPLO="L", bool compute_v=True) -> (Tensor eigenvalues, Tensor eigenvectors)
+  A: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/true)
+  eigenvalues, eigenvectors: linalg_eig_jvp(A_t, eigenvalues, eigenvectors, /*is_hermitian=*/true)
 
 - name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: handle_r_to_c(self.scalar_type(), linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/false))
