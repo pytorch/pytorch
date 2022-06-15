@@ -619,12 +619,12 @@ class FullyShardedDataParallel(nn.Module):
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[Callable] = None,
         backward_prefetch: Optional[BackwardPrefetch] = None,
-        forward_prefetch: bool = False,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
+        forward_prefetch: bool = False,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
