@@ -21,7 +21,7 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
-    parametrize, instantiate_parametrized_tests
+    parametrize, instantiate_parametrized_tests, gradcheck
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2679,6 +2679,27 @@ class TestSWAUtils(TestCase):
         self.assertEqual(dnn.bn.momentum, 0.3)
 
 instantiate_parametrized_tests(TestLRScheduler)
+
+def _diff_fn(p, grad, opt_differentiable_state, opt):
+    p = p.clone()
+    p.grad = grad
+    opt.update_parameters([p])
+    opt.state.update(opt_differentiable_state)
+    opt.step()
+    return p
+
+
+class TestDifferentiableOptimizer(TestCase):
+
+    def test_sgd(self):
+        p = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        grad = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        mbuff = torch.rand(10, requires_grad=True, dtype=torch.float64)
+        state = {'momentum_buffer': mbuff}
+        opt = torch.optim.SGD([p], lr=0.9, differentiable=True)
+
+        gradcheck(_diff_fn, (p, grad, state, opt))
+
 
 if __name__ == '__main__':
     run_tests()

@@ -43,16 +43,7 @@ class Optimizer(object):
                             torch.typename(params))
 
         self.state = defaultdict(dict)
-        self.param_groups = []
-
-        param_groups = list(params)
-        if len(param_groups) == 0:
-            raise ValueError("optimizer got an empty parameter list")
-        if not isinstance(param_groups[0], dict):
-            param_groups = [{'params': param_groups}]
-
-        for param_group in param_groups:
-            self.add_param_group(param_group)
+        self.update_parameters(params)
 
         # Allows _cuda_graph_capture_health_check to rig a poor man's TORCH_WARN_ONCE in python,
         # which I don't think exists
@@ -293,7 +284,7 @@ class Optimizer(object):
             if not isinstance(param, torch.Tensor):
                 raise TypeError("optimizer can only optimize Tensors, "
                                 "but one of the params is " + torch.typename(param))
-            if not param.is_leaf:
+            if not self.defaults.get('differentiable', False) and not param.is_leaf:
                 raise ValueError("can't optimize a non-leaf Tensor")
 
         for name, default in self.defaults.items():
@@ -317,3 +308,20 @@ class Optimizer(object):
             raise ValueError("some parameters appear in more than one parameter group")
 
         self.param_groups.append(param_group)
+
+    def update_parameters(self, params):
+        r"""Replaces the internal parameters of the Optimizer.
+
+        Args:
+            params (iterable): an iterable of :class:`torch.Tensor` s or
+                :class:`dict` s. Specifies what Tensors should be optimized.
+        """
+        param_groups = list(params)
+        self.param_groups = []
+        if len(param_groups) == 0:
+            raise ValueError("optimizer got an empty parameter list")
+        if not isinstance(param_groups[0], dict):
+            param_groups = [{'params': param_groups}]
+
+        for param_group in param_groups:
+            self.add_param_group(param_group)

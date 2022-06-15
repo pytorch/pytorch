@@ -90,7 +90,8 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False, *, maximize=False, foreach: Optional[bool] = None):
+                 weight_decay=0, nesterov=False, *, maximize=False, foreach: Optional[bool] = None,
+                 differentiable=False):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -100,7 +101,8 @@ class SGD(Optimizer):
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
                         weight_decay=weight_decay, nesterov=nesterov,
-                        maximize=maximize, foreach=foreach)
+                        maximize=maximize, foreach=foreach,
+                        differentiable=differentiable)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
@@ -112,7 +114,6 @@ class SGD(Optimizer):
             group.setdefault('maximize', False)
             group.setdefault('foreach', None)
 
-    @torch.no_grad()
     def step(self, closure=None):
         """Performs a single optimization step.
 
@@ -120,6 +121,9 @@ class SGD(Optimizer):
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
         """
+        if not self.defaults['differentiable']:
+            prev_grad = torch.is_grad_enabled()
+            torch.set_grad_enabled(False)
         loss = None
         if closure is not None:
             with torch.enable_grad():
@@ -161,6 +165,8 @@ class SGD(Optimizer):
                 state = self.state[p]
                 state['momentum_buffer'] = momentum_buffer
 
+        if not self.defaults['differentiable']:
+            torch.set_grad_enabled(prev_grad)
         return loss
 
 
@@ -195,16 +201,17 @@ def sgd(params: List[Tensor],
     else:
         func = _single_tensor_sgd
 
-    func(params,
-         d_p_list,
-         momentum_buffer_list,
-         weight_decay=weight_decay,
-         momentum=momentum,
-         lr=lr,
-         dampening=dampening,
-         nesterov=nesterov,
-         has_sparse_grad=has_sparse_grad,
-         maximize=maximize)
+    func(
+        params,
+        d_p_list,
+        momentum_buffer_list,
+        weight_decay=weight_decay,
+        momentum=momentum,
+        lr=lr,
+        dampening=dampening,
+        nesterov=nesterov,
+        has_sparse_grad=has_sparse_grad,
+        maximize=maximize)
 
 def _single_tensor_sgd(params: List[Tensor],
                        d_p_list: List[Tensor],
