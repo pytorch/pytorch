@@ -452,9 +452,9 @@ class record_function(ContextDecorator):
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
+            assert self.handle is not None
             if torch.jit.is_scripting():
                 # Slow code when scripting
-                assert self.handle is not None
                 torch.ops.profiler._record_function_exit(self.handle)
             else:
                 torch._C._record_function_exit_fast(self.handle)

@@ -37,7 +37,8 @@ void record_function_enter(
 at::Tensor record_function_enter_legacy(
     const std::string& name,
     const c10::optional<std::string>& args) {
-  auto step_callbacks = at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
+  auto step_callbacks =
+      at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
   if (C10_UNLIKELY(step_callbacks.has_value())) {
     auto rec =
         std::make_unique<at::RecordFunction>(at::RecordScope::USER_SCOPE);
