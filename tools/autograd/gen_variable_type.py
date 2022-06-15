@@ -493,6 +493,8 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     "set_",
     "_cudnn_rnn_flatten_weight",
+    # Nested Tensors related functions
+    "_nested_tensor_size",
 }
 DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # These non-inplace, non-out functions return tensors with use_count > 1
