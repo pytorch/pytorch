@@ -346,7 +346,7 @@ class TestQuantizedTensor(TestCase):
                 qt1[:] = t2[:]
                 self.assertEqual(qt1[:], qt2[:])
                 # non-contiguous case **this should raise an exception**
-                with self.assertRaisesRegex(RuntimeError, "Quantized copy only works with contiguous Tensors"):
+                with self.assertRaisesRegex(RuntimeError, "Quantized copy only works with contiguous and NHWC Tensors"):
                     qt1[:, 0] = t2[:, 0]
 
     def test_qtensor_float_assignment(self):
