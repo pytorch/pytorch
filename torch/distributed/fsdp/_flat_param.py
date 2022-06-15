@@ -243,8 +243,6 @@ class FlatParamHandle:
                 else:
                     if isinstance(param, FlatParameter):
                         raise ValueError("`FlatParameter` does not support nesting")
-                    if not isinstance(param, torch.Tensor):
-                        raise ValueError("Elements of `params` must have type `Tensor`")
                     if dtype is not None and param.dtype != dtype:
                         raise ValueError(
                             "`FlatParameter` requires uniform dtype but got "
@@ -310,7 +308,7 @@ class FlatParamHandle:
             f"{tensor.numel()} numel"
         views = (
             tensor.view(shape) for (tensor, shape) in
-            zip(torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes)
+            zip(torch.split(tensor, flat_param._numels, dim=0), flat_param._shapes)  # type: ignore[arg-type]
         )
         return views
 
@@ -340,6 +338,7 @@ class FlatParamHandle:
             assert hasattr(prim_module, prim_param_name)
             param: Union[Tensor, nn.Parameter] = getattr(prim_module, prim_param_name)
             if as_params:
+                assert isinstance(param, nn.Parameter)
                 module.register_parameter(param_name, param)
             else:
                 setattr(module, param_name, param)
@@ -383,9 +382,10 @@ class FlatParamHandle:
             )
         start = sharded_flat_param_numel * rank
         end = sharded_flat_param_numel * (rank + 1) - 1  # inclusive
-        self.flat_param._shard_param_offsets, self.flat_param._shard_indices = \
+        self.flat_param._shard_param_offsets, self.flat_param._shard_indices = (  # type: ignore[attr-defined]
             self._get_shard_metadata(start, end)
-        self.flat_param._shard_numel_padded = numel_padded
+        )
+        self.flat_param._shard_numel_padded = numel_padded  # type: ignore[attr-defined]
 
     def _get_shard_metadata(
         self,
@@ -451,15 +451,18 @@ class FlatParamHandle:
     ) -> FlatParamShardMetadata:
         """Returns shard-related metadata specific to this rank's shard of the
         flattened parameter."""
-        shard_param_start_index = self.flat_param._shard_indices[0]
-        shard_param_end_index = self.flat_param._shard_indices[1]  # inclusive
+        assert hasattr(self.flat_param, "_shard_indices") and \
+            hasattr(self.flat_param, "_shard_param_offsets"), \
+            "Shard metadata has not been initialized"
+        shard_param_start_index = self.flat_param._shard_indices[0]  # type: ignore[attr-defined]
+        shard_param_end_index = self.flat_param._shard_indices[1]  # type: ignore[attr-defined]
         sl = slice(shard_param_start_index, shard_param_end_index + 1) \
             if shard_param_start_index <= shard_param_end_index else slice(0, 0)
         return FlatParamShardMetadata(
             self.flat_param._prefixed_param_names[sl],
             self.flat_param._shapes[sl],
             self.flat_param._numels[sl],
-            self.flat_param._shard_param_offsets[:],
+            self.flat_param._shard_param_offsets[:],  # type: ignore[attr-defined]
         )
 
     def _get_modules(self) -> Set[nn.Module]:

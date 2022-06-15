@@ -71,7 +71,7 @@ def _apply_to_modules(
 
 def _get_param_to_param_name(
     root_module: torch.nn.Module,
-) -> Dict[torch.nn.Parameter, List[str]]:
+) -> Dict[torch.nn.Parameter, str]:
     """
     Returns a mapping from parameter to prefixed parameter name for all
     parameters in the module hierarchy rooted at ``root_module`` assuming no
