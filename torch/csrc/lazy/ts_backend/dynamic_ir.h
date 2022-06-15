@@ -13,7 +13,6 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/Flags.h>
-#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/hash.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
@@ -44,20 +43,32 @@ namespace lazy {
  * burned into the Graph.
  */
 
+class TORCH_API DimensionNode : public lazy::TsNode {
+ public:
+  DimensionNode(OpKind op, OpList operands, hash_t hash_seed = kHashSeed);
+  virtual bool isDynamic() const = 0;
+  std::string ToString() const override;
+  virtual int64_t getStaticValue() const = 0;
+
+ protected:
+  // Only valid for ops which have DimensionNode operands.
+  const DimensionNode* getOpDimNode(size_t index) const;
+};
+
 // Represents the result of calling `size` on a Tensor
-class TORCH_API SizeNode : public TsNode, public DimensionNode {
+class TORCH_API SizeNode : public DimensionNode {
  public:
   SizeNode(Value input, size_t dim);
   int64_t getStaticValue() const override;
   bool isDynamic() const override;
   std::string ToString() const override;
   size_t dim_ = 0;
-  virtual torch::lazy::TSOpVector Lower(
+  virtual TSOpVector Lower(
       std::shared_ptr<torch::jit::GraphFunction> function,
       TSLoweringContext* loctx) const override;
 };
 
-class TORCH_API SizeAdd : public TsNode, public DimensionNode {
+class TORCH_API SizeAdd : public DimensionNode {
  public:
   SizeAdd(Value a, Value b);
   int64_t getStaticValue() const override;
@@ -65,7 +76,7 @@ class TORCH_API SizeAdd : public TsNode, public DimensionNode {
   std::string ToString() const override;
 };
 
-class TORCH_API SizeMul : public TsNode, public DimensionNode {
+class TORCH_API SizeMul : public DimensionNode {
  public:
   SizeMul(Value a, Value b);
   int64_t getStaticValue() const override;
@@ -73,7 +84,7 @@ class TORCH_API SizeMul : public TsNode, public DimensionNode {
   std::string ToString() const override;
 };
 
-class TORCH_API SizeDiv : public TsNode, public DimensionNode {
+class TORCH_API SizeDiv : public DimensionNode {
  public:
   SizeDiv(Value a, Value b);
   int64_t getStaticValue() const override;
