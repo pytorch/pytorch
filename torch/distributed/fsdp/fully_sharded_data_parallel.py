@@ -368,14 +368,18 @@ class _ExecOrderData():
     def init(self, root_module: "FullyShardedDataParallel"):
         assert root_module._is_root, "This data structure should only be " \
             "initialized on an FSDP root module"
-        # Save `root_modules.parameters()` to `_all_flat_params` instead of
-        # re-materializing each time to avoid the result depending on the
-        # calling context (e.g. when some parameters have been rebuilt)
-        self._all_flat_params = list(root_module.parameters())
+        # Save all `FlatParameter`s in `root_module`'s hierarchy to
+        # `_all_flat_params` instead of re-materializing each time to avoid the
+        # result depending on the calling context (e.g. when some parameters
+        # have been rebuilt)
+        self._all_flat_params = [
+            param for param in root_module.parameters()
+            if isinstance(param, FlatParameter)
+        ]
         self._param_to_unflat_param_names = cast(
             Dict[FlatParameter, List[str]],
             _get_param_to_unflat_param_names(root_module)
-        )  # `root_module.parameters()` should only contain `FlatParameter`s
+        )
 
     def get_param_index(self, param: FlatParameter) -> int:
         """Returns a unique non-negative parameter index for ``param`` if it is
@@ -1660,7 +1664,7 @@ class FullyShardedDataParallel(nn.Module):
                     # execution order data structure and the root's ignored
                     # parameters and all buffer names since only the root's names
                     # are fully prefixed like the state dict keys
-                    m._exec_order_data = self._exec_order_data                    
+                    m._exec_order_data = self._exec_order_data
 
     def _wait_for_previous_optim_step(self) -> None:
         """
