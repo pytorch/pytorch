@@ -2938,6 +2938,16 @@ class TestNLLLoss(TestCase):
 
         helper(3, 3)
 
+    def test_assert_topk(self):
+        # here the k > 16 raises an error as expected
+        with self.assertRaisesRegex(RuntimeError, "Currently topk on mps works only for k<=16"):
+            xs = torch.arange(30).to('mps')
+            xs.topk(30)
+        # for k <= 16 it works fine
+        ys_cpu = torch.arange(30)
+        ys_mps = ys_cpu.to('mps')
+        self.assertEqual(ys_cpu.topk(16), ys_mps.topk(16))
+
     def test_topk(self):
         def helper(shape):
             cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
