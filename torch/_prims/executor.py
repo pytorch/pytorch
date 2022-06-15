@@ -89,7 +89,7 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                 else:
                     results.append(o)
 
-            return torch.utils._pytree.tree_unflatten(results,  unflatten_spec)
+            return torch.utils._pytree.tree_unflatten(results, unflatten_spec)
 
     msg = "Received unexpected value for 'executor': {0}. Allowed values are: aten, nvfuser.".format(
         executor
