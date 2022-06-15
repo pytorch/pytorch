@@ -7,3 +7,4 @@ __all__ = ["make_fx", "ProxyTensor", "dispatch_trace", "PythonKeyTracer", "pytho
 from torch.fx.experimental.proxy_tensor import make_fx, ProxyTensor, dispatch_trace, PythonKeyTracer, decompose
 
 pythonkey_decompose = decompose
+PythonTensor = ProxyTensor
