@@ -36,7 +36,7 @@ class DataNormSparsifier(BaseDataSparsifier):
         if zeros_per_block is None:
             zeros_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
 
-        assert norm in ['L1'], "only L1 norm supported at the moment"
+        assert norm in ['L1', 'L2'], "only L1 and L2 norm supported at the moment"
 
         defaults = {'sparsity_level': sparsity_level, 'sparse_block_shape': sparse_block_shape,
                     'zeros_per_block': zeros_per_block}
@@ -124,6 +124,8 @@ class DataNormSparsifier(BaseDataSparsifier):
 
         if self.norm == 'L1':
             data_norm = torch.abs(data).squeeze()  # absolute value based (L1)
+        else:
+            data_norm = (data * data).squeeze()  # square every element for L2
 
         if len(data_norm.shape) != 2:  # only supports 2 dimenstional data at the moment
             raise ValueError("only supports 2-D at the moment")
