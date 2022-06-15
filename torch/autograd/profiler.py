@@ -440,7 +440,7 @@ class record_function(ContextDecorator):
         self.run_callbacks_on_exit: bool = True
         # Stores underlying RecordFunction as a tensor. TODO: move to custom
         # class (https://github.com/pytorch/pytorch/issues/35026).
-        self.handle: torch.Tensor = None
+        self.handle: Optional[torch.Tensor] = None
 
     def __enter__(self):
         if torch.jit.is_scripting():
@@ -454,6 +454,7 @@ class record_function(ContextDecorator):
         if self.run_callbacks_on_exit:
             if torch.jit.is_scripting():
                 # Slow code when scripting
+                assert self.handle is not None
                 torch.ops.profiler._record_function_exit(self.handle)
             else:
                 torch._C._record_function_exit_fast(self.handle)
