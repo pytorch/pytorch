@@ -288,8 +288,12 @@ class RETURN_TYPE(Enum):
 
 def _wrap_tensor_meta(f):
     def wrap(t):
-        if isinstance(t, torch.Tensor):
-            return FakeTensor.from_tensor(t)
+        if (
+            isinstance(t, torch.Tensor)
+            and not isinstance(t, FakeTensor)
+            and not t.device.type == "meta"
+        ):
+            return FakeTensor.from_tensor(t, utils.get_prim_fake_mode())
         else:
             return t
 
@@ -2175,12 +2179,13 @@ def _make_reduction_prim(name: str, impl_aten, doc, impl_nvfuser=None):
     )
 
 
-def _make_var_reduction_prim(name: str, impl_aten, doc):
+def _make_var_reduction_prim(name: str, impl_aten, doc, impl_nvfuser):
     """Creates a reduction prim."""
     return _make_prim(
         schema=f"{name}(Tensor inp, int[]? dims, *, int correction, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
+        impl_nvfuser=impl_nvfuser,
         return_type=RETURN_TYPE.NEW,
         doc=doc,
     )
@@ -2190,10 +2195,9 @@ def _sum_nvfuser(
     fd: Any,
     a: TensorLikeType,
     dims: DimsSequenceType,
-    *,
-    output_dtype: Optional[torch.dtype] = None,
 ):
     keep_dims = False
+    output_dtype = torch._C._nvfuser.DataType.Null
     return fd.Ops.sum(a, dims, keep_dims, output_dtype)
 
 
@@ -2226,9 +2230,22 @@ prod = _make_reduction_prim(
     doc=_prod_doc,
 )
 
+
+def _var_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+    *,
+    correction: int,
+):
+    keep_dims = False
+    return fd.Ops.var(a, dims, correction, keep_dims)
+
+
 var = _make_var_reduction_prim(
     name="var",
     impl_aten=torch.var,
+    impl_nvfuser=_var_nvfuser,
     doc=_var_doc,
 )
 

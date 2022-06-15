@@ -2,7 +2,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/quantized/affine_quantizer_base.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
 
 namespace at {
 namespace native {
