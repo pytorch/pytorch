@@ -526,6 +526,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    */
   void release_resources() override;
 
+ private:
+  void destroy_pyobj_if_needed();
+
+ public:
   /**
    * Return the DispatchKeySet corresponding to this Tensor, specifying
    * all of the DispatchKeys that this Tensor identifies as.  This is the
@@ -646,6 +650,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_default(memory_format);
   }
 
+  inline IntArrayRef strides_default() const {
+    return c10::IntArrayRef(
+        reinterpret_cast<const int64_t*>(sizes_and_strides_.strides_data()),
+        sizes_and_strides_.size());
+  }
+
+  inline IntArrayRef sizes_default() const {
+    return c10::IntArrayRef(
+        reinterpret_cast<const int64_t*>(sizes_and_strides_.sizes_data()),
+        sizes_and_strides_.size());
+  }
+
  protected:
   /**
    * Customization points for the functions above.  sizes_strides_policy_
@@ -667,11 +683,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // These are factored into separate functions in case subclasses
   // want to use them
-  inline IntArrayRef strides_default() const {
-    return c10::IntArrayRef(
-        reinterpret_cast<const int64_t*>(sizes_and_strides_.strides_data()),
-        sizes_and_strides_.size());
-  }
   inline bool is_contiguous_default(at::MemoryFormat memory_format) const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(compute_contiguous() == is_contiguous_);
     if (memory_format == at::MemoryFormat::ChannelsLast) {
@@ -680,11 +691,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return is_channels_last_3d_contiguous_;
     }
     return is_contiguous_;
-  }
-  inline IntArrayRef sizes_default() const {
-    return c10::IntArrayRef(
-        reinterpret_cast<const int64_t*>(sizes_and_strides_.sizes_data()),
-        sizes_and_strides_.size());
   }
   inline c10::SymIntArrayRef sym_sizes_default() const {
     return c10::SymIntArrayRef(

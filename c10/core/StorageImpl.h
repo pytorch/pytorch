@@ -85,6 +85,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(this->data_ptr_.get());
   }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
   }

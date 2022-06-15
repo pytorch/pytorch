@@ -24,3 +24,11 @@ jobs:
       branch: main
     secrets:
       MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+
+  update-vision-commit-hash:
+    uses: ./.github/workflows/_update-commit-hash.yml
+    with:
+      repo-name: vision
+      branch: main
+    secrets:
+      MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
