@@ -15,7 +15,6 @@ from .scheduler.lambda_scheduler import LambdaSL
 from .sparsifier.utils import FakeSparsity
 from .sparsifier.utils import module_to_fqn
 from .sparsifier.utils import fqn_to_module
-# from .sparisifer.utils import get_arg_info_from_tensor_fqn
 
 # === Experimental ===
 
