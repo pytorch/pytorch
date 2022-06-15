@@ -60,7 +60,6 @@ jobs:
           JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
           TORCH_CUDA_ARCH_LIST: 5.2
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         run: |
           set -e
@@ -83,7 +82,6 @@ jobs:
             -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e PR_LABELS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e BUILD_LITE_INTERPRETER \
