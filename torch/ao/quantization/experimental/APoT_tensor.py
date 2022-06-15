@@ -22,7 +22,8 @@ class TensorAPoT(torch.Tensor):
     def dequantize(tensor2dequantize: Tensor, b: int, k: int) -> Tensor:  # type: ignore[override]
         tensor2dequantize = tensor2dequantize.float()
 
-        max_val = torch.max(tensor2dequantize)
+        # by paper defn, max value of floating point tensor will be 1.0
+        max_val = 1.0
 
         # make observer
         obs = APoTObserver(max_val=max_val, b=b, k=k)
