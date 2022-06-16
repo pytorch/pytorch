@@ -1,5 +1,5 @@
 import torch
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.jit_utils import clone_inputs
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -30,6 +30,15 @@ class SchemaCheckMode(TorchDispatchMode):
         def is_aliasing(lhs_argument, rhs_argument):
             return bool(len(lhs_argument.before_set & rhs_argument.before_set))
 
+        def unwrap(e):
+            if isinstance(e, torch.Tensor) and not type(e) == torch.Tensor:
+                try:
+                    return e.elem
+                except AttributeError as t:
+                    return e
+            else:
+                return e
+
         self.ops.append(func._schema.name)
         arguments = normalize_function(
             func,
@@ -46,15 +55,17 @@ class SchemaCheckMode(TorchDispatchMode):
             if arguments.get(name) is not None:
                 before = tree_flatten(cloned_arguments.get(name))[0]
                 after = tree_flatten(arguments.get(name))[0]
+                u_values = tree_map(unwrap, after)
+                u_out = tree_map(unwrap, out)
                 if (any([has_mutated(i, j) for i, j in zip(before, after)]) and not argument.is_mutable):
                     raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
-                for b in before:
-                    if not isinstance(out, tuple):
-                        if (have_values_aliased(b, out) and not is_aliasing(argument, func._schema.returns[0])):
+                for value in u_values:
+                    if not isinstance(u_out, tuple):
+                        if (have_values_aliased(value, u_out) and not is_aliasing(argument, func._schema.returns[0])):
                             raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
                     else:
-                        for j in range(len(out)):
-                            if (have_values_aliased(b, out[j]) and not is_aliasing(argument, func._schema.returns[j])):
+                        for j in range(len(u_out)):
+                            if (have_values_aliased(value, u_out[j]) and not is_aliasing(argument, func._schema.returns[j])):
                                 raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
 
         return out
