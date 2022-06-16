@@ -51,10 +51,10 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 #include <ATen/InferSize.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/ExpandUtils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
