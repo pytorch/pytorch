@@ -151,6 +151,5 @@ r"""Converts int4 APoT2 input into floating point number
 based on quantization levels
 """
 def apot_to_float(x_apot, levels, indices):
-    x_apot = round(x_apot)
     idx = list(indices).index(x_apot)
     return levels[idx]
