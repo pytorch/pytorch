@@ -17,6 +17,9 @@ from typing import cast, Any, List, Optional
 from unittest import TestCase, main, mock
 from urllib.error import HTTPError
 
+if 'GIT_REMOTE_URL' not in os.environ:
+    os.environ['GIT_REMOTE_URL'] = "https://github.com/pytorch/pytorch"
+
 def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     gql_db_fname = os.path.join(os.path.dirname(__file__), "gql_mocks.json")
 
