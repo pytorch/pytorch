@@ -217,3 +217,23 @@ class TestBaseDataSparsifier(TestCase):
         param_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
                                                  data_with_config=data_with_config)
         param_test.run_tests()
+
+    def test_nn_embeddings(self):
+        emb1, emb2, = nn.Embedding(10, 3), nn.Embedding(20, 3)
+        emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
+
+        emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
+        data_list = [('emb1', emb1), ('emb1_bag', emb1_bag), ('emb2', emb2), ('emb2_bag', emb2_bag)]
+        defaults = {'test': 3}
+
+        data_with_config = [
+            {
+                'name': 'emb3', 'data': emb3, 'config': {'test': 7}
+            },
+            {
+                'name': 'emb3_bag', 'data': emb3_bag, 'config': {'test': 8}
+            },
+        ]
+        emb_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
+                                               data_with_config=data_with_config)
+        emb_test.run_tests()
