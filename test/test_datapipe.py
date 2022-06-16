@@ -2588,5 +2588,16 @@ class TestIterDataPipeSingletonConstraint(TestCase):
             next(it1)
         self.assertEqual(1, next(it3))
 
+class TestIterDataPipeCountSampleYielded(TestCase):
+
+    # TODO:
+    #  1. Preferably, test for all 3 types of IterDataPipe
+    #  2. Need to test that when a DataPipe reset, the count goes back to 0, then can resume counting as normal
+    
+    def test_iterdatapipe_count_sample_yielded(self):
+        pass
+
+
+
 if __name__ == '__main__':
     run_tests()
