@@ -481,10 +481,6 @@ at::Tensor softplus_double_backward(
     const at::Tensor& input,
     const at::Scalar& beta,
     const at::Scalar& threshold);
-at::Tensor logdet_backward(
-    const at::Tensor& grad,
-    const at::Tensor& self,
-    const at::Tensor& logdet);
 at::Tensor slogdet_backward(
     const at::Tensor& grad_logabsdet,
     const at::Tensor& self,

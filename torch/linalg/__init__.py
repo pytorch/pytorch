@@ -336,16 +336,10 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-""" + fr"""
-.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
-          {common_notes["sync_note"]}
-""" + r"""
-
 .. seealso::
 
         :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
-        absolute value (resp. modulus) of the determinant of real-valued (resp. complex)
-        square matrices.
+        absolute value of the determinant of real-valued (resp. complex) square matrices.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -372,18 +366,12 @@ Computes the sign and natural logarithm of the absolute value of the determinant
 For complex :attr:`A`, it returns the angle and the natural logarithm of the modulus of the
 determinant, that is, a logarithmic polar decomposition of the determinant.
 
+The determinant can be recovered as `sign * exp(logabsdet)`.
+When a matrix has a determinant of zero, it returns `(0, -inf)`.
+
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
-
-""" + fr"""
-.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
-          {common_notes["sync_note"]}
-""" + r"""
-
-.. note:: The determinant can be recovered as `sign * exp(logabsdet)`.
-
-.. note:: When a matrix has a determinant of zero, it returns `(0, -inf)`.
 
 .. seealso::
 
@@ -398,9 +386,9 @@ Keyword args:
 Returns:
     A named tuple `(sign, logabsdet)`.
 
-    `logabsdet` will always be real-valued, even when :attr:`A` is complex.
-
     `sign` will have the same dtype as :attr:`A`.
+
+    `logabsdet` will always be real-valued, even when :attr:`A` is complex.
 
 Examples::
 
@@ -411,7 +399,7 @@ Examples::
             [-1.6218, -0.9273, -0.0082]])
     >>> torch.linalg.det(A)
     tensor(-0.7576)
-    >>> torch.linalg.logdet(A)
+    >>> torch.logdet(A)
     tensor(nan)
     >>> torch.linalg.slogdet(A)
     torch.return_types.linalg_slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))

@@ -935,9 +935,6 @@
 - name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
   self: not_implemented("zeta")
 
-- name: logdet(Tensor self) -> Tensor
-  self: logdet_backward(grad, self, result)
-
 - name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
   result: self_t.zero_()
@@ -1430,13 +1427,9 @@
   src: grad.contiguous().as_strided(size, stride, storage_offset)
   result: auto_linear
 
-- name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  self: slogdet_backward(grad, self, sign, logabsdet)
-  output_differentiability: [false, true]
-
-- name: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  self: slogdet_backward(grad, self, sign, logabsdet)
-  output_differentiability: [false, true]
+- name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
+  A: slogdet_backward(grad, A, sign, logabsdet)
+  output_differentiability: [False, True, False, False]
 
 - name: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
   A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
