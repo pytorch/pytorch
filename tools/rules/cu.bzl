@@ -3,7 +3,6 @@ load("@rules_cuda//cuda:defs.bzl", "cuda_library")
 NVCC_COPTS = [
     "--expt-relaxed-constexpr",
     "--expt-extended-lambda",
-
     "--compiler-options=-Werror=all",
     # The following warnings come from -Wall. We downgrade them from
     # error to warnings here.
@@ -14,7 +13,6 @@ NVCC_COPTS = [
     "--compiler-options=-Wno-sign-compare",
     # We intentionally use #pragma unroll, which is compiler specific.
     "--compiler-options=-Wno-error=unknown-pragmas",
-
     "--compiler-options=-Werror=extra",
     # The following warnings come from -Wextra. We downgrade them from
     # error to warnings here.
