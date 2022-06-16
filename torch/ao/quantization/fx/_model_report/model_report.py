@@ -1,7 +1,7 @@
-from typing import Any, Dict, Set, Tuple
+from typing import Dict, Set, Tuple
 
 import torch
-from torch.ao.quantization.fx._model_report._detector import DynamicStaticDetector, DetectorBase
+from torch.ao.quantization.fx._model_report.detector import DetectorBase
 from torch.ao.quantization.fx.graph_module import GraphModule
 
 

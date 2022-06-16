@@ -5,7 +5,7 @@ import torch
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn.functional as F
 from torch.ao.quantization import QConfig, QConfigMapping
-from torch.ao.quantization.fx._model_report._detector import DynamicStaticDetector, PerChannelDetector
+from torch.ao.quantization.fx._model_report.detector import DynamicStaticDetector, PerChannelDetector
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.fx._model_report.model_report import ModelReport
 from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
