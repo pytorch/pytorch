@@ -138,6 +138,12 @@ __all__ = [
 # list of dtypes to not add observers to
 DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
+def _move_all_kwargs_to_args(model: GraphModule) -> GraphModule:
+    for n in model.graph.nodes:
+        n.args = get_all_args_as_positional_args(n)
+        n.kwargs = {}
+    return model
+
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
@@ -1490,6 +1496,7 @@ def prepare(
     # this depends on operator_schema from torchscript, we may want to replace
     # this with something more robust by using real example_inputs in the future
     model = NormalizeArgs(model).transform()
+    model = _move_all_kwargs_to_args(model)
 
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, equalization_config)
