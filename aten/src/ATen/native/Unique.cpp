@@ -4,7 +4,6 @@
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 
-#include <set>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -25,11 +24,18 @@ namespace native{
 namespace {
 
 template <typename scalar_t>
-std::unordered_set<scalar_t> unique_elements(const scalar_t* begin, const scalar_t* end) {
-  return std::unordered_set<scalar_t>(begin, end);
+Tensor unique_elements(const scalar_t* begin, const scalar_t* end, bool sorted) {
+  auto set = std::unordered_set<scalar_t>(begin, end);
+  Tensor output = at::empty({static_cast<int64_t>(set.size())}, input.options());
+  scalar_t *output_data = output.data_ptr<scalar_t>();
+  std::copy(set.begin(), set.end(), output_data);
+  if (sorted) {
+    std::sort_n(output_data, set.size());
+  }
+  return output;
 }
 
-std::unordered_set<bool> unique_elements(const bool* begin, const bool* end) {
+Tensor unique_elements(const bool* begin, const bool* end, bool /*sorted*/) {
   std::array<bool, 2> seen;
   for (; begin != end; ++begin) {
     seen[c10::load(begin)] = true;
@@ -38,14 +44,17 @@ std::unordered_set<bool> unique_elements(const bool* begin, const bool* end) {
     }
   }
 
-  std::unordered_set<bool> ret;
+  int64_t num_elem = seen[false] + seen[true];
+  Tensor output = at::empty({num_elem}, input.options());
+  scalar_t *output_data = output.data_ptr<scalar_t>();
+
   if (seen[false]) {
-    ret.insert(false);
+    *output_data++ = false;
   }
   if (seen[true]) {
-    ret.insert(true);
+    *output_data++ = true;
   }
-  return ret;
+  return output;
 }
 
 template <typename scalar_t>
@@ -60,16 +69,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   Tensor output;
   Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor counts = at::empty({0}, self.options().dtype(kLong));
-  auto set = unique_elements(input_data, input_data + numel);
-  output = at::empty({static_cast<int64_t>(set.size())}, input.options());
-  scalar_t *output_data = output.data_ptr<scalar_t>();
-  if (sorted) {
-    std::vector<scalar_t> vec(set.begin(), set.end());
-    std::sort(vec.begin(), vec.end());
-    std::copy(vec.begin(), vec.end(), output_data);
-  } else {
-    std::copy(set.begin(), set.end(), output_data);
-  }
+  auto output = unique_elements(input_data, input_data + numel, sorted);
 
   if (return_inverse || return_counts) {
     inverse_indices.resize_(input.sizes());
