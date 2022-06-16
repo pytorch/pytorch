@@ -125,7 +125,7 @@
 /* If MINIZ_NO_TIME is specified then the ZIP archive functions will not be able to get the current time, or */
 /* get/set file times, and the C run-time funcs that get/set times won't be called. */
 /* The current downside is the times written to your archives will be from 1979. */
-/*#define MINIZ_NO_TIME */
+#define MINIZ_NO_TIME
 
 /* Define MINIZ_NO_ARCHIVE_APIS to disable all ZIP archive API's. */
 /*#define MINIZ_NO_ARCHIVE_APIS */
@@ -137,7 +137,7 @@
 /*#define MINIZ_NO_ZLIB_APIS */
 
 /* Define MINIZ_NO_ZLIB_COMPATIBLE_NAME to disable zlib names, to prevent conflicts against stock zlib. */
-/*#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES */
+#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES
 
 /* Define MINIZ_NO_MALLOC to disable all calls to malloc, free, and realloc. 
    Note if MINIZ_NO_MALLOC is defined then the user must always provide custom user alloc/free/realloc
@@ -174,8 +174,10 @@
 #if !defined(MINIZ_USE_UNALIGNED_LOADS_AND_STORES)
 #if MINIZ_X86_OR_X64_CPU
 /* Set MINIZ_USE_UNALIGNED_LOADS_AND_STORES to 1 on CPU's that permit efficient integer loads and stores from unaligned addresses. */
-#define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 1
-#define MINIZ_UNALIGNED_USE_MEMCPY
+/* zdevito: ASAN doesn't like unligned loads and stores, and -O3 optimizes the unoptimized code pattern away anyawy */
+#define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 0
+/* zdevito: ASAN doesn't like unligned loads and stores, and -O3 optimizes the unoptimized code pattern away anyawy */
+/*#define MINIZ_UNALIGNED_USE_MEMCPY*/
 #else
 #define MINIZ_USE_UNALIGNED_LOADS_AND_STORES 0
 #endif
