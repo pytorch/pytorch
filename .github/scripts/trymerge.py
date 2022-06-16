@@ -917,18 +917,23 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
-def check_for_sev(org, project) -> None:
-    response = fetch_json(
-        "https://api.github.com/search/issues",
-        params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
+
+def check_for_sev(org: str, project: str) -> None:
+    response = cast(
+        Dict[str, Any],
+        fetch_json(
+            "https://api.github.com/search/issues",
+            params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
+        ),
     )
     if response["total_count"] != 0:
         for item in response["items"]:
             if "merge blocking" in item["body"].lower():
                 raise RuntimeError(
-                    "Not merging any PRs at the moment because there is a " + 
-                    f"merge blocking ci: sev issue open at {item['html_url']}"
+                    "Not merging any PRs at the moment because there is a "
+                    + f"merge blocking ci: sev issue open at {item['html_url']}"
                 )
+
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
