@@ -1450,6 +1450,20 @@ class TestFunctionalIterDataPipe(TestCase):
         input_col_2_dp = tuple_input_ds.filter(_mul_filter_fn, input_col=[0, 2])
         self.assertEqual(list(input_col_2_dp), [(d - 1, d, d + 1) for d in range(5)])
 
+        # invalid input col
+        with self.assertRaises(TypeError):
+            tuple_input_ds.filter(_mul_filter_fn, input_col=0)
+
+        p_mul_filter_fn = partial(_mul_filter_fn, b=1)
+        out = tuple_input_ds.filter(p_mul_filter_fn, input_col=0)
+        self.assertEqual(list(out), [(d - 1, d, d+1) for d in range(10)])
+
+        def _mul_filter_fn_with_defaults(a, b=1):
+            return a + b < 10
+
+        out = tuple_input_ds.filter(_mul_filter_fn_with_defaults, input_col=0)
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(10)])
+
         # __len__ Test: DataPipe has no valid len
         with self.assertRaisesRegex(TypeError, r"has no len"):
             len(filter_dp)
