@@ -24,20 +24,35 @@ import torch.serialization
 from torch import _C
 from torch.onnx import (  # noqa: F401
     _constants,
+    _exporter_states,
     _patch_torch,
+    errors,
     symbolic_caffe2,
     symbolic_helper,
     symbolic_registry,
 )
 from torch.onnx._globals import GLOBALS
 
-# the flag to tell the user whether it's in the middle of ONNX export or not
-__IN_ONNX_EXPORT = False
+__all__ = [
+    "is_in_onnx_export",
+    "select_model_mode_for_export",
+    "disable_apex_o2_state_dict_hook",
+    "setup_onnx_logging",
+    "exporter_context",
+    "export",
+    "warn_on_static_input_change",
+    "unpack_quantized_tensor",
+    "export_to_pretty_string",
+    "unconvertible_ops",
+    "get_ns_op_name_from_custom_op",
+    "register_custom_op_symbolic",
+    "unregister_custom_op_symbolic",
+]
 
 
-def is_in_onnx_export():
-    global __IN_ONNX_EXPORT
-    return __IN_ONNX_EXPORT
+def is_in_onnx_export() -> bool:
+    """Returns whether it is in the middle of ONNX export."""
+    return GLOBALS.in_onnx_export
 
 
 # TODO(justinchuby): Remove dependency to this global variable from constant_fold.cpp
@@ -46,31 +61,22 @@ _params_dict = {}  # type: ignore[var-annotated]
 
 
 @contextlib.contextmanager
-def select_model_mode_for_export(model, mode):
+def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
+    """Adjusts the model training mode to the specified mode for export."""
+    if not isinstance(mode, _C_onnx.TrainingMode):
+        raise TypeError(
+            f"'mode' should be a torch.onnx.TrainingMode enum, but got '{type(mode)}'."
+        )
+    originally_training: bool = False
     if not isinstance(model, torch.jit.ScriptFunction):
-        is_originally_training = model.training
+        originally_training = model.training
 
-        if mode is None:
-            mode = _C_onnx.TrainingMode.EVAL
-            # if the model is in training mode but the user did not specify
-            # to export the model in training mode, export the model in inference
-            # mode (default) and warn them
-            if is_originally_training:
-                warnings.warn(
-                    "You are exporting the model to ONNX while in training mode with "
-                    "'train' parameter not specified. The model will default to inference mode export. "
-                    "If you wish to export a training amenable ONNX model, specify training=TrainingMode.TRAINING or "
-                    "training=TrainingMode.PRESERVE (to preserve the original model state) in torch.onnx.export()."
-                )
-
-        # if mode == TrainingMode.EVAL or (mode == TrainingMode.PRESERVE and not is_originally_training) => is_training = False
-        is_export_training = False
         # ONNX opset 12 has better support for training amenable models, with updated
         # versions of the dropout and batch_norm operators
         if mode == _C_onnx.TrainingMode.TRAINING or (
-            mode == _C_onnx.TrainingMode.PRESERVE and is_originally_training
+            mode == _C_onnx.TrainingMode.PRESERVE and originally_training
         ):
-
+            GLOBALS.export_training = True
             if GLOBALS.export_onnx_opset_version < 12:
                 warnings.warn(
                     "You are exporting the model in training mode with onnx opset "
@@ -78,16 +84,24 @@ def select_model_mode_for_export(model, mode):
                     "Opset versions lower than opset 12 will not be able to export "
                     "nodes such as Dropout and BatchNorm correctly."
                 )
-            is_export_training = True
+        else:
+            GLOBALS.export_training = False
 
-        symbolic_helper._set_training_mode(is_export_training)
-        model.train(is_export_training)
+        GLOBALS.training_mode = mode
+        if mode == _C_onnx.TrainingMode.TRAINING:
+            model.train(True)
+        elif mode == _C_onnx.TrainingMode.EVAL:
+            model.train(False)
+        # else mode == _C_onnx.TrainingMode.PRESERVE, do nothing
+
     try:
         yield
     finally:
-        if not isinstance(model, torch.jit.ScriptFunction):
-            # FIXME(justinchuby): is_originally_training is possibly unbound
-            model.train(is_originally_training)
+        if not (
+            isinstance(model, torch.jit.ScriptFunction)
+            or mode == _C_onnx.TrainingMode.PRESERVE
+        ):
+            model.train(originally_training)
 
 
 @contextlib.contextmanager
@@ -147,7 +161,7 @@ def export(
     f,
     export_params=True,
     verbose=False,
-    training=None,
+    training=_C_onnx.TrainingMode.EVAL,
     input_names=None,
     output_names=None,
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
@@ -698,7 +712,7 @@ def _model_to_graph(
     do_constant_folding=True,
     _disable_torch_constant_prop=False,
     fixed_batch_size=False,
-    training=None,
+    training=_C_onnx.TrainingMode.EVAL,
     dynamic_axes=None,
 ) -> Tuple[
     _C.Graph,
@@ -813,7 +827,7 @@ def export_to_pretty_string(
     args,
     export_params=True,
     verbose=False,
-    training=None,
+    training=_C_onnx.TrainingMode.EVAL,
     input_names=None,
     output_names=None,
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
@@ -988,7 +1002,7 @@ def _export(
     f,
     export_params=True,
     verbose=False,
-    training=None,
+    training=_C_onnx.TrainingMode.EVAL,
     input_names=None,
     output_names=None,
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
@@ -1004,7 +1018,7 @@ def _export(
     export_modules_as_functions=False,
 ):
     if export_type is None:
-        export_type = torch.onnx.ExportTypes.PROTOBUF_FILE
+        export_type = _exporter_states.ExportTypes.PROTOBUF_FILE
 
     if isinstance(model, torch.nn.DataParallel):
         raise ValueError(
@@ -1013,9 +1027,8 @@ def _export(
             "unwrap model from torch.nn.DataParallel. Try "
             "torch.onnx.export(model.module, ...)"
         )
-    global __IN_ONNX_EXPORT
-    assert __IN_ONNX_EXPORT is False
-    __IN_ONNX_EXPORT = True
+    assert GLOBALS.in_onnx_export is False
+    GLOBALS.in_onnx_export = True
     try:
 
         symbolic_helper._set_onnx_shape_inference(onnx_shape_inference)
@@ -1039,7 +1052,7 @@ def _export(
             else:
                 operator_export_type = _C_onnx.OperatorExportTypes.ONNX
 
-        # By default, training=None, (which defaults to TrainingMode.EVAL),
+        # By default, training=TrainingMode.EVAL,
         # which is good because running a model in training mode could result in
         # internal buffers getting updated, dropout getting applied, etc.
         # If you really know what you're doing, you can turn
@@ -1083,7 +1096,7 @@ def _export(
 
             # TODO: Don't allocate a in-memory string for the protobuf
             defer_weight_export = (
-                export_type is not torch.onnx.ExportTypes.PROTOBUF_FILE
+                export_type is not _exporter_states.ExportTypes.PROTOBUF_FILE
             )
             if custom_opsets is None:
                 custom_opsets = {}
@@ -1140,31 +1153,32 @@ def _export(
                 torch.onnx.log(
                     "Exported graph: ", _assign_onnx_node_name(graph, node_names)
                 )
-            if export_type == torch.onnx.ExportTypes.PROTOBUF_FILE:
+            if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
                 assert len(export_map) == 0
                 with torch.serialization._open_file_like(f, "wb") as opened_file:
                     opened_file.write(proto)
             elif export_type in [
-                torch.onnx.ExportTypes.ZIP_ARCHIVE,
-                torch.onnx.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
+                _exporter_states.ExportTypes.ZIP_ARCHIVE,
+                _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE,
             ]:
                 compression = (
                     zipfile.ZIP_DEFLATED
-                    if export_type == torch.onnx.ExportTypes.COMPRESSED_ZIP_ARCHIVE
+                    if export_type
+                    == _exporter_states.ExportTypes.COMPRESSED_ZIP_ARCHIVE
                     else zipfile.ZIP_STORED
                 )
                 with zipfile.ZipFile(f, "w", compression=compression) as z:
-                    z.writestr(torch.onnx.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
+                    z.writestr(_constants.ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
                     for k, v in export_map.items():
                         z.writestr(k, v)
-            elif export_type == torch.onnx.ExportTypes.DIRECTORY:
+            elif export_type == _exporter_states.ExportTypes.DIRECTORY:
                 if os.path.exists(f):
                     assert os.path.isdir(f)
                 else:
                     os.makedirs(f)
 
                 model_proto_file = os.path.join(
-                    f, torch.onnx.ONNX_ARCHIVE_MODEL_PROTO_NAME
+                    f, _constants.ONNX_ARCHIVE_MODEL_PROTO_NAME
                 )
                 with torch.serialization._open_file_like(
                     model_proto_file, "wb"
@@ -1191,10 +1205,10 @@ def _export(
                 try:
                     _C._check_onnx_proto(proto, full_check=True)
                 except RuntimeError as e:
-                    raise torch.onnx.CheckerError(e)
+                    raise errors.CheckerError(e)
     finally:
-        assert __IN_ONNX_EXPORT
-        __IN_ONNX_EXPORT = False
+        assert GLOBALS.in_onnx_export
+        GLOBALS.in_onnx_export = False
         _reset_trace_module_map()
 
     return torch_out
@@ -1331,7 +1345,7 @@ def _need_symbolic_context(symbolic_fn) -> bool:
     if first_param_name not in type_hints:
         return False
     param_type = type_hints[first_param_name]
-    return issubclass(param_type, torch.onnx.SymbolicContext)
+    return issubclass(param_type, _exporter_states.SymbolicContext)
 
 
 def _get_aten_op_overload_name(n: _C.Node) -> str:
@@ -1394,7 +1408,7 @@ def _run_symbolic_function(
 
             attrs = {k: n[k] for k in n.attributeNames()}  # type: ignore[attr-defined]
             if _need_symbolic_context(symbolic_fn):
-                ctx = torch.onnx.SymbolicContext(_params_dict, env, n, block)
+                ctx = _exporter_states.SymbolicContext(_params_dict, env, n, block)
                 return symbolic_fn(ctx, g, *inputs, **attrs)
             # PythonOp symbolic need access to the node to resolve the name conflict,
             # this is inconsistent with regular op symbolic.
@@ -1415,8 +1429,13 @@ def _run_symbolic_function(
                 op_name, *inputs, overload_name=_get_aten_op_overload_name(n), **attrs
             )
         else:
-            raise symbolic_registry.UnsupportedOperatorError(
-                domain, op_name, opset_version
+            raise errors.UnsupportedOperatorError(
+                domain,
+                op_name,
+                opset_version,
+                symbolic_registry.get_op_supported_version(
+                    op_name, domain, opset_version
+                ),
             )
     except RuntimeError:
         if operator_export_type == _C_onnx.OperatorExportTypes.ONNX_FALLTHROUGH:
