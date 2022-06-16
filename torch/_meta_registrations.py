@@ -539,3 +539,8 @@ def meta_nan_to_num(self, nan=None, posinf=None, neginf=None):
 @torch.library.impl(meta_lib, "remainder.Scalar_Tensor")
 def meta_remainder_scalar(scalar, other):
     return other % scalar
+
+
+@torch.ibrary.impl(meta_lib, "logical_not_")
+def meta_logical_not_(self):
+    return self
