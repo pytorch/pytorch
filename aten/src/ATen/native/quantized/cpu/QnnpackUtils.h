@@ -99,7 +99,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       int64_t output_zero_point);
 
   template <bool ReluFused>
-  at::Tensor apply_dynamic_impl(at::Tensor input);
+  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range);
 };
 
 template <int kSpatialDim = 2>
