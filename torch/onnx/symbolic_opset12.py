@@ -1,5 +1,4 @@
 import sys
-import warnings
 
 import torch
 from torch.onnx import symbolic_helper
@@ -51,15 +50,11 @@ def outer(g, input, other):
 @symbolic_helper.parse_args("v", "f", "i")
 def dropout(g, input, p, train):
     symbolic_helper.check_training_mode(train, "dropout")
-    # in eval mode, dropout is non-op - if the node's train param is set to False, dropout is non-op
+    # if train is False, dropout is no-op
     if not train:
         return input
-    warnings.warn(
-        "Dropout is a training op and should not be exported in inference mode. "
-        "For inference, make sure to call eval() on the model and to export it with param training=False."
-    )
     p = g.op("Constant", value_t=torch.tensor(p))
-    t = g.op("Constant", value_t=torch.tensor(True))
+    t = g.op("Constant", value_t=torch.tensor(train, dtype=torch.bool))
     r, _ = g.op("Dropout", input, p, t, outputs=2)
     return r
 

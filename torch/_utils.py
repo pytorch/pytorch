@@ -79,6 +79,13 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
 
 
 def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
+    """ Return the non-blocking flag given the function name and kwargs.
+
+    Args:
+        function_name (str): the name of the function being used.
+        non_blocking (bool): the default value.
+        **kwargs (dict): the kwargs passed to the function.
+    """
     if not kwargs:
         return non_blocking
     if len(kwargs) != 1 or 'async' not in kwargs:
@@ -175,6 +182,13 @@ def _validate_loaded_sparse_tensors():
         _sparse_tensors_to_validate.clear()
 
 def _rebuild_sparse_tensor(layout, data):
+    """
+    Rebuilds a sparse tensor from its sparse storage representation.
+
+    Args:
+        layout (str): The sparse storage layout of the tensor.
+        data (tuple): The tensor's sparse storage representation.
+    """
     if layout == torch.sparse_coo:
         indices, values, size = data
         result = torch._sparse_coo_tensor_unsafe(indices, values, size)
@@ -464,6 +478,8 @@ class ExceptionWrapper(object):
 def _get_available_device_type():
     if torch.cuda.is_available():
         return "cuda"
+    if hasattr(torch, "xpu") and torch.xpu.is_available():  # type: ignore[attr-defined]
+        return "xpu"
     # add more available device types here
     return None
 
@@ -472,6 +488,8 @@ def _get_device_attr(get_member):
     device_type = _get_available_device_type()
     if device_type and device_type.lower() == "cuda":
         return get_member(torch.cuda)
+    if device_type and device_type.lower() == "xpu":
+        return get_member(torch.xpu)  # type: ignore[attr-defined]
     # add more available device types here
     return None
 

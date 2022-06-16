@@ -2,23 +2,14 @@ import torch
 from torch import Tensor
 import contextlib
 import itertools
-from typing import Iterator
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch.autograd.forward_ad as fwAD
 from torch.overrides import enable_reentrant_dispatch
 import re
 
-
-# TODO: move this into library proper
-@contextlib.contextmanager
-def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
 
 def check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor):
     elem = wrapper_tensor.elem
