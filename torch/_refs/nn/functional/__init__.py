@@ -228,10 +228,12 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def rrelu(a: TensorLikeType,
-          lower: float = 1. / 8.,
-          upper: float = 1. / 3.,
-          inplace: bool = False) -> TensorLikeType:
+def rrelu(
+    a: TensorLikeType,
+    lower: float = 1.0 / 8.0,
+    upper: float = 1.0 / 3.0,
+    inplace: bool = False,
+) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.rrelu
     """
@@ -324,6 +326,7 @@ def softsign(a: TensorLikeType) -> TensorLikeType:
     """
 
     return torch.true_divide(a, torch.abs(a) + 1)
+
 
 # Losses
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
