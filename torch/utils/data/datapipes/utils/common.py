@@ -31,14 +31,14 @@ def ensure_map_fn_works(fn: Callable, input_col: Optional[Union[int, tuple, list
         TypeError: If the function is not compatible with the input column.
     """
     sig = inspect.signature(fn)
-    try:
+    if isinstance(input_col, (list, tuple)):
         sz = len(input_col)
-    except TypeError:
+    else:
         sz = 1
 
     if len(sig.parameters) >= sz:
         non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
-        if len(non_default_params) != sz:
+        if len(non_default_params) > sz:
             raise TypeError(
                 f"The function {fn.__name__} takes {len(non_default_params)} "
                 f"non-default parameters, but {sz} are required."
