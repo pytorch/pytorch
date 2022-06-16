@@ -146,12 +146,12 @@ at::Tensor rad2deg_backward(const at::Tensor& grad);
 at::Tensor deg2rad_backward(const at::Tensor& grad);
 at::Tensor unsqueeze_multiple(
     const at::Tensor& t,
-    at::IntArrayRef dim,
+    at::OptionalIntArrayRef opt_dim,
     size_t n_dims);
 at::Tensor sum_backward(
     const at::Tensor& grad,
     at::IntArrayRef sizes,
-    at::IntArrayRef dims,
+    at::OptionalIntArrayRef opt_dims,
     bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
@@ -441,18 +441,6 @@ at::Tensor binary_cross_entropy_double_backward_grad_output(
     const at::Tensor& input,
     const at::Tensor& target,
     const c10::optional<at::Tensor>& weight,
-    int64_t reduction);
-at::Tensor l1_loss_double_backward(
-    const at::Tensor& grad,
-    const at::Tensor& grad_output,
-    const at::Tensor& input,
-    const at::Tensor& target,
-    int64_t reduction);
-at::Tensor l1_loss_double_backward_grad_output(
-    const at::Tensor& grad,
-    const at::Tensor& grad_output,
-    const at::Tensor& input,
-    const at::Tensor& target,
     int64_t reduction);
 at::Tensor smooth_l1_loss_double_backward(
     const at::Tensor& grad,
