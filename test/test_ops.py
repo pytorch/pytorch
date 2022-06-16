@@ -361,9 +361,6 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        if dtype is torch.chalf:
-            self.skipTest("Skipping chalf until it has more operator support")
-
         mode = torch._prims.utils.get_prim_fake_mode()
 
         def _to_tensormeta(x):
@@ -373,7 +370,6 @@ class TestCommon(TestCase):
             return x
 
         # TODO: iterate over requires_grad true/false
-        inps = tuple(op.reference_inputs(device, dtype, requires_grad=False))
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
@@ -394,9 +390,6 @@ class TestCommon(TestCase):
                         prims.utils.compare_tensor_meta(a, b)
 
     def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False):
-        if dtype is torch.chalf:
-            self.skipTest("Skipping chalf until it has more operator support")
-
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
