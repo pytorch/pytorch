@@ -1691,10 +1691,10 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
     };
   }
   if (n->matches(torch::schema(
-          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
+          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
       const at::Tensor& self = p_node->Input(0).toTensor();
-      auto dim = p_node->Input(1).toIntList().vec();
+      auto dim = p_node->Input(1).toDimVector();
       auto keepdim = p_node->Input(2).toBool();
       auto dtype = p_node->Input(3).toOptional<at::ScalarType>();
       if (p_node->Output(0).isNone()) {

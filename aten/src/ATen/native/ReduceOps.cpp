@@ -52,8 +52,6 @@ namespace meta {
 
 static ScalarType infer_dtype_from_optional(
     const Tensor& self,
-    IntArrayRef dim,
-    bool keepdim,
     const optional<ScalarType>& opt_dtype,
     const Tensor& result) {
   // 'opt_dtype' has the priority for both cases.
@@ -187,9 +185,9 @@ TORCH_META_FUNC(cumprod)
 }
 
 TORCH_META_FUNC2(sum, dim_IntList)
-(const Tensor& self, IntArrayRef dim, bool keepdim, optional<ScalarType> opt_dtype) {
-  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+(const Tensor& self, OptionalIntArrayRef opt_dim, bool keepdim, optional<ScalarType> opt_dtype) {
+  auto out_dtype = infer_dtype_from_optional(self, opt_dtype, maybe_get_output());
+  resize_reduction(*this, self, opt_dim, keepdim, out_dtype);
 }
 
 TORCH_META_FUNC2(prod, dim_int)
@@ -197,7 +195,7 @@ TORCH_META_FUNC2(prod, dim_int)
  int64_t dim,
  bool keepdim,
  c10::optional<ScalarType> dtype) {
-  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, dtype, maybe_get_output());
+  auto out_dtype = infer_dtype_from_optional(self, dtype, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
@@ -221,7 +219,7 @@ TORCH_META_FUNC2(mean, dim)
         "Got: ", dtype);
   }
 
-  auto out_dtype = infer_dtype_from_optional(self, dim, keepdim, opt_dtype, maybe_get_output());
+  auto out_dtype = infer_dtype_from_optional(self, opt_dtype, maybe_get_output());
   resize_reduction(*this, self, dim, keepdim, out_dtype);
 }
 
@@ -1061,11 +1059,11 @@ inline ScalarType get_dtype_from_result(Tensor& result, optional<ScalarType> dty
 
 TORCH_IMPL_FUNC(sum_out)
 (const Tensor& self,
- IntArrayRef dim,
+ OptionalIntArrayRef opt_dim,
  bool keepdim,
  optional<ScalarType> opt_dtype,
  const Tensor& result) {
-  auto iter = meta::make_reduction_from_out_ty(self, result, dim, keepdim, result.scalar_type());
+  auto iter = meta::make_reduction_from_out_ty(self, result, opt_dim, keepdim, result.scalar_type());
   if (iter.numel() == 0) {
     result.zero_();
   } else {
