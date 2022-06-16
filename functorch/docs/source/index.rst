@@ -63,6 +63,7 @@ Check out our `whirlwind tour <whirlwind_tour>`_ or some of our tutorials mentio
    :caption: API Reference and Notes
 
    functorch
+   experimental
    aot_autograd
 
 .. toctree::
