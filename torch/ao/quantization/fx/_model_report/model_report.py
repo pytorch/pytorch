@@ -1,7 +1,7 @@
-from typing import Any, Dict, Set
+from typing import Any, Dict, Set, Tuple
 
 import torch
-from _detector import _detect_dynamic_vs_static
+from torch.ao.quantization.fx._model_report._detector import DynamicStaticDetector, DetectorBase
 from torch.ao.quantization.fx.graph_module import GraphModule
 
 
@@ -17,11 +17,11 @@ class ModelReport:
     Currently supports generating reports on:
     - Suggestions for dynamic vs static quantization for linear layers (Graph Modules)
 
-    * :attr:`valid_reports` The set of strings representing currently supported reports for the ModelReport class
-    * :attr:`desired_reports` The set of strings representing desired reports grabbed from the ModelReport class
+    * :attr:`desired_report_detectors` The set of Detectors representing desired reports from the ModelReport class
+        Make sure that these are all unique types of detectors [do not have more than 1 of the same class]
 
     Proper Use:
-    1.) Initialize ModelReport object with reports of interest chosen from ModelReport.valid_reports
+    1.) Initialize ModelReport object with reports of interest by passing in initialized detector objects
     2.) Prepare your model with prepare_fx
     3.) Call model_report.prepare_detailed_calibration on your model to add relavent observers
     4.) Callibrate your model with data
@@ -29,31 +29,14 @@ class ModelReport:
 
     """
 
-    # mapping from valid reports to corresponding report generator
-    valid_reports_to_detector = {
-        "dynamic_vs_static": _detect_dynamic_vs_static,
-    }
+    def __init__(self, desired_report_detectors: Set[DetectorBase]):
 
-    # keep a accessible set of valid reports the user can request
-    valid_reports: Set[str] = set(valid_reports_to_detector.keys())
-
-    def __init__(self, desired_reports: Set[str]):
-        # initialize a private mapping of possible reports to the functions to insert them
-        self.__report_to_insert_method = {
-            "dynamic_vs_static": self.__insert_dynamic_static_observers,
-        }
-
-        self.__report_to_supported_modules = {
-            "dynamic_vs_static": set(["linear"]),
-        }
-
-        # make sure desired report strings are all valid
-        for desired_report in desired_reports:
-            if desired_report not in self.valid_reports:
-                raise ValueError("Only select reports found in ModelReport.valid_reports")
+        if len(desired_report_detectors) == 0:
+            raise ValueError("Should include at least 1 desired report")
 
         # keep the reports private so they can't be modified
-        self.__desired_reports = desired_reports
+        self.__desired_report_detectors = desired_report_detectors
+        self.__desired_reports = set([detector.get_detector_name() for detector in desired_report_detectors])
 
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set
@@ -64,7 +47,15 @@ class ModelReport:
         for desired_report in self.__desired_reports:
             self.__report_to_observers_of_interest[desired_report] = set([])
 
-    def prepare_detailed_calibration(self, prepared_fx_model: GraphModule):
+    def get_desired_reports(self) -> Set[str]:
+        """ Returns a copy of the desired reports for viewing """
+        return self.__desired_reports.copy()
+
+    def get_observers_of_interest(self) -> Dict[str, Set[str]]:
+        """ Returns a copy of the observers of interest for viewing """
+        return self.__report_to_observers_of_interest.copy()
+
+    def prepare_detailed_calibration(self, prepared_fx_model: GraphModule) -> GraphModule:
         r"""
         Takes in a prepared fx graph model and inserts the following observers:
         - ModelReportObserver
@@ -82,46 +73,7 @@ class ModelReport:
         """
         pass
 
-    def __insert_dynamic_static_observers(
-        self, prepared_fx_model: GraphModule, modules_to_observe: Set[str]
-    ):
-        r"""
-        Helper function for prepare_detailed_calibration
-
-        Inserts observers for dynamic versus static quantization report and returns the model with inserted observers
-
-        Currently inserts observers for:
-            linear layers
-
-        Args:
-            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
-            modules_to_observe (Set[str]): The set of module types to insert observers around
-
-        Returns the set of fqns of the observers of interest either added to or exisiting in the prepared_fx_model
-        """
-        pass
-
-    def __insert_observer_around_module(
-        self,
-        prepared_fx_model: GraphModule,
-        node_fqn: str,
-        target_node: torch.fx.node.Node,
-        obs_to_insert: Any,
-    ):
-        r"""
-        Helper function that inserts the observer into both the graph structure and the module of the model
-
-        Args
-            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
-            node_fqn (str): The fully qualified name of the node we want to insert observers around
-            target_node (torch.fx.node.Node): The node in prepared_fx_module we are inserting observers around
-            obs_to_insert (ObserverBase): The observer we are inserting around target_node
-
-        Returns a set of fqns of the observers inserted by this function
-        """
-        pass
-
-    def __get_node_from_fqn(self, fx_model: GraphModule, node_fqn: str) -> Any:
+    def __get_node_from_fqn(self, fx_model: GraphModule, node_fqn: str) -> torch.fx.node.Node:
         r"""
         Takes in a graph model and returns the node based on the fqn
 
@@ -135,7 +87,7 @@ class ModelReport:
 
     def generate_model_report(
         self, calibrated_fx_model: GraphModule, remove_inserted_observers: bool
-    ):
+    ) -> Dict[str, Tuple[str, Dict]]:
         r"""
         Takes in a callibrated fx graph model and generates all the requested reports.
         The reports generated are specified by the desired_reports specified in desired_reports

@@ -5,8 +5,9 @@ import torch
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn.functional as F
 from torch.ao.quantization import QConfig, QConfigMapping
-from torch.ao.quantization.fx._model_report._detector import _detect_dynamic_vs_static, _detect_per_channel
+from torch.ao.quantization.fx._model_report._detector import DynamicStaticDetector, PerChannelDetector
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
+from torch.ao.quantization.fx._model_report.model_report import ModelReport
 from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
 from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
 from torch.testing._internal.common_quantization import (
@@ -97,7 +98,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
         prepared_model = self._prepare_model_and_run_input(ConvModel(), q_config_mapping, input)
 
         # run the detector
-        optims_str, per_channel_info = _detect_per_channel(prepared_model)
+        per_channel_detector = PerChannelDetector()
+        optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # no optims possible and there should be nothing in per_channel_status
         self.assertEqual(
@@ -136,7 +138,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        optims_str, per_channel_info = _detect_per_channel(prepared_model)
+        per_channel_detector = PerChannelDetector()
+        optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # there should be optims possible
         self.assertNotEqual(
@@ -202,7 +205,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        optims_str, per_channel_info = _detect_per_channel(prepared_model)
+        per_channel_detector = PerChannelDetector()
+        optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # the only suggestions should be to linear layers
 
@@ -251,7 +255,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        optims_str, per_channel_info = _detect_per_channel(prepared_model)
+        per_channel_detector = PerChannelDetector()
+        optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # there should be optims possible
         self.assertNotEqual(
@@ -292,7 +297,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        optims_str, per_channel_info = _detect_per_channel(prepared_model)
+        per_channel_detector = PerChannelDetector()
+        optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # there should be optims possible
         self.assertNotEqual(
@@ -333,7 +339,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        optims_str, per_channel_info = _detect_per_channel(prepared_model)
+        per_channel_detector = PerChannelDetector()
+        optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # no optims possible and there should be nothing in per_channel_status
         self.assertEqual(
@@ -398,7 +405,8 @@ class TestFxModelReportDetector(QuantizationTestCase):
         model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused)
 
         # run the detector
-        optims_str, per_channel_info = _detect_per_channel(model_fp32_prepared)
+        per_channel_detector = PerChannelDetector()
+        optims_str, per_channel_info = per_channel_detector.generate_detector_report(model_fp32_prepared)
 
         # there should be optims possible
         self.assertNotEqual(
@@ -785,7 +793,8 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
             model_prep(example_input)
 
         # run it through the dynamic vs static detector
-        dynam_vs_stat_str, dynam_vs_stat_dict = _detect_dynamic_vs_static(model_prep, tolerance=0.5)
+        dynamic_vs_static_detector = DynamicStaticDetector()
+        dynam_vs_stat_str, dynam_vs_stat_dict = dynamic_vs_static_detector.generate_detector_report(model_prep)
 
         # one of the stats should be stationary, and the other non-stationary
         # as a result, dynamic should be recommended
@@ -801,5 +810,30 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
 
 class TestFxModelReportClass(QuantizationTestCase):
 
-    def test_simple_pass_case(self):
-        pass
+    def test_constructor(self):
+        """
+        Tests the constructor of the ModelReport class.
+
+        Specifically looks at:
+        - The desired reports
+        - Ensures that the observers of interest are properly initialized
+        """
+
+        # make an example set of detectors
+        test_detector_set = set([DynamicStaticDetector(), PerChannelDetector()])
+        # initialize with an empty detector
+        model_report = ModelReport(test_detector_set)
+
+        # make sure internal valid reports matches
+        self.assertEqual(model_report.get_desired_reports(), set([detector.get_detector_name() for detector in test_detector_set]))
+
+        # now attempt with no valid reports, should raise error
+        with self.assertRaises(ValueError):
+            model_report = ModelReport(set([]))
+
+        # number of expected obs of interest entries
+        num_expected_entries = len(test_detector_set)
+        self.assertEqual(len(model_report.get_observers_of_interest()), num_expected_entries)
+
+        for value in model_report.get_observers_of_interest().values():
+            self.assertEqual(len(value), 0)
