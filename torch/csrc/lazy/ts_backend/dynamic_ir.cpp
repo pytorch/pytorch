@@ -10,6 +10,10 @@ DimensionNode::DimensionNode(OpKind op, OpList operands, hash_t hash_seed)
           /*num_outputs=*/1,
           /* hash_seed */ HashCombine(op.hash(), hash_seed)) {}
 
+const DimensionNode* DimensionNode::getOpDimNode(size_t index) const {
+  return dynamic_cast<const DimensionNode*>(operand(index).node);
+}
+
 std::string DimensionNode::ToString() const {
   return "DimensionNode";
 }
@@ -48,8 +52,7 @@ SizeAdd::SizeAdd(Value a, Value b)
     : DimensionNode(OpKind{c10::Symbol::fromQualString("aten::add")}, {a, b}){};
 
 int64_t SizeAdd::getStaticValue() const {
-  return dynamic_cast<const DimensionNode*>(operand(0).node)->getStaticValue() +
-      dynamic_cast<const DimensionNode*>(operand(1).node)->getStaticValue();
+  return getOpDimNode(0)->getStaticValue() + getOpDimNode(1)->getStaticValue();
 }
 
 std::string SizeAdd::ToString() const {
@@ -60,8 +63,7 @@ SizeMul::SizeMul(Value a, Value b)
     : DimensionNode(OpKind{c10::Symbol::fromQualString("aten::mul")}, {a, b}){};
 
 int64_t SizeMul::getStaticValue() const {
-  return dynamic_cast<const DimensionNode*>(operand(0).node)->getStaticValue() *
-      dynamic_cast<const DimensionNode*>(operand(1).node)->getStaticValue();
+  return getOpDimNode(0)->getStaticValue() * getOpDimNode(1)->getStaticValue();
 }
 
 std::string SizeMul::ToString() const {
@@ -73,11 +75,9 @@ SizeDiv::SizeDiv(Value a, Value b)
 
 int64_t SizeDiv::getStaticValue() const {
   TORCH_CHECK(
-      dynamic_cast<const DimensionNode*>(operand(1).node)->getStaticValue() !=
-          0,
+      getOpDimNode(1)->getStaticValue() != 0,
       "Can't divide a dimension by zero");
-  return dynamic_cast<const DimensionNode*>(operand(0).node)->getStaticValue() /
-      dynamic_cast<const DimensionNode*>(operand(1).node)->getStaticValue();
+  return getOpDimNode(0)->getStaticValue() / getOpDimNode(1)->getStaticValue();
 }
 
 std::string SizeDiv::ToString() const {
