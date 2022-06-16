@@ -509,14 +509,17 @@ class FakeCopyMode(TorchFunctionMode):
     def __torch_function__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}
 
-        if func is not torch.Tensor.__deepcopy__:
+        # clone will get called in Parameter deepcopy
+        if func == torch._C._TensorBase.clone:
+            return func(self.fake_mode.from_tensor(args[0]), **kwargs)
+        elif func == torch.Tensor.__deepcopy__:
+            assert len(args) == 2 and len(kwargs) == 0
+            tensor, memo = args
+
+            if id(tensor) in memo:
+                return memo[id(tensor)]
+
+            return self.fake_mode.from_tensor(tensor)
+        else:
             with torch._C.DisableTorchFunction():
                 return func(*args, **kwargs)
-
-        assert len(args) == 2 and len(kwargs) == 0
-        tensor, memo = args
-
-        if id(tensor) in memo:
-            return memo[id(tensor)]
-
-        return self.fake_mode.from_tensor(tensor)
