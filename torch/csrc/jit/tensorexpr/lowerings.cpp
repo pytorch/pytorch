@@ -1767,7 +1767,7 @@ int nnc_lowerings_lazy_registration() {
 
   RegisterNNCLoweringsFunction aten_sum(
       {"aten::sum(Tensor self, *, int? dtype=None) -> (Tensor)",
-       "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
+       "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)"},
       computeSum);
 
   RegisterNNCLoweringsFunction aten_softmax(

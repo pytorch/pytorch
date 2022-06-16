@@ -2478,7 +2478,7 @@ class IrParser {
 
     {
       auto ptr_op = getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
+          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)");
       REGISTER_PARSE_RULE(
           ptr_op,
           {
@@ -3855,7 +3855,7 @@ bool insertProfileIValue(ProfilingRecord* pr, Node* node, size_t offset) {
 
   static auto reduction_operator_schema =
       getOperatorForLiteral(
-          "aten::sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
+          "aten::sum.dim_IntList(Tensor self, int[1] dim, bool keepdim=False, *, int? dtype=None) -> (Tensor)")
           ->schema();
   if (node->matches(reduction_operator_schema)) {
     switch (offset) {

@@ -1980,7 +1980,7 @@ class ShapePropagator : public PropertyPropBase {
       return true;
     } else if (
         node->matches(
-            "aten::sum(Tensor self, int[]? dim, bool keepdim, *, int? dtype) -> Tensor",
+            "aten::sum(Tensor self, int[] dim, bool keepdim, *, int? dtype) -> Tensor",
             /*const_inputs=*/{attr::dim, attr::keepdim})) {
       auto& tp = tensor_types.at(0);
       auto sizes = tp->sizes().concrete_sizes().value();

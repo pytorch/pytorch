@@ -110,27 +110,12 @@ static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dty
 
 using DimMask = TensorIterator::DimMask;
 
-static DimVector make_dim_vector(OptionalIntArrayRef opt_dims, int64_t ndim) {
-  if (opt_dims.has_value()) {
-    return DimVector(opt_dims.value());
-  } else {
-    std::vector<int64_t> all_dims(ndim);
-    std::iota(all_dims.begin(), all_dims.end(), 0);
-    return DimVector(all_dims);
-  }
-}
-
-static DimMask make_dim_mask(OptionalIntArrayRef opt_dims, int64_t ndim) {
+static DimMask make_dim_mask(IntArrayRef dims, int64_t ndim) {
   DimMask mask;
-  if (opt_dims.has_value()) {
-    auto dims = opt_dims.value();
-    if (dims.empty()) {
-      mask = DimMask().flip();
-    } else {
-      mask = at::dim_list_to_bitset(dims, ndim);
-    }
-  } else {
+  if (dims.empty()) {
     mask = DimMask().flip();
+  } else {
+    mask = at::dim_list_to_bitset(dims, ndim);
   }
   return mask;
 }
@@ -335,10 +320,10 @@ static C10_UNUSED DimVector get_reduction_shape(
 static void resize_reduction(
     impl::MetaBase& meta,
     const Tensor& self,
-    OptionalIntArrayRef opt_dims,
+    IntArrayRef dims,
     bool keepdim,
     ScalarType out_dtype) {
-  DimVector dims_ = at::native::make_dim_vector(opt_dims, self.dim());
+  DimVector dims_(dims);
   maybe_wrap_dims(dims_, self.dim());
   auto shape = get_reduction_shape(self, dims_, keepdim);
   meta.set_output_raw_strided(0, shape, {}, self.options().dtype(out_dtype));
@@ -366,11 +351,11 @@ static void resize_reduction_with_indices(
 static TensorIterator make_reduction(
     const Tensor& self,
     const Tensor& result,
-    OptionalIntArrayRef opt_dims,
+    IntArrayRef dims,
     bool keepdim,
     ScalarType in_dtype) {
   int64_t ndim = self.dim();
-  auto mask = at::native::make_dim_mask(opt_dims, ndim);
+  auto mask = at::native::make_dim_mask(dims, ndim);
   auto viewed_result =
       at::native::review_reduce_result(result, ndim, mask, keepdim);
   if (self.scalar_type() == in_dtype) {
@@ -404,7 +389,7 @@ static TensorIterator make_reduction(
 static C10_UNUSED TensorIterator make_reduction_from_out_ty(
     const Tensor& self,
     const Tensor& result,
-    OptionalIntArrayRef opt_dims,
+    IntArrayRef dims,
     bool keepdim,
     ScalarType out_dtype) {
   // special case for type promotion in mixed precision, improves computational
@@ -416,7 +401,7 @@ static C10_UNUSED TensorIterator make_reduction_from_out_ty(
        (self.scalar_type() == kHalf || self.scalar_type() == kBFloat16) &&
        out_dtype == kFloat);
   auto in_dtype = gpu_lowp_to_f32 ? self.scalar_type() : out_dtype;
-  return make_reduction(self, result, opt_dims, keepdim, in_dtype);
+  return make_reduction(self, result, dims, keepdim, in_dtype);
 }
 
 } // namespace meta

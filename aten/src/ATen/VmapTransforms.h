@@ -131,7 +131,7 @@ struct TORCH_API VmapPhysicalView {
   // This is because the size of levels tell us that the first two dimensions
   // of `tensor_` are batch dimensions, so a logical dim of `n` is actually
   // a physical dim of `n + 2`.
-  VmapDimVector getPhysicalDims(OptionalIntArrayRef logical_dims) const;
+  VmapDimVector getPhysicalDims(IntArrayRef logical_dims) const;
   int64_t getPhysicalDim(int64_t logical_dim) const;
 
   // Returns a VmapPhysicalToLogicalMap object. This can be used for
