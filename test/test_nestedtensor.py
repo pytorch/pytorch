@@ -9,7 +9,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipMeta,
 )
-from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests
+from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state
 from torch import nested_tensor
 
 # Tests are ported from pytorch/nestedtensor.
@@ -525,14 +525,11 @@ class TestNestedTensorDeviceType(TestCase):
                 else:
                     expect_tensor[j] /= 1.0 - p
         self.nt_equal(y, expect)
-        seed = torch.randint(0, 32767, (1,)).item()
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        dropouter = torch.nn.Dropout(p)
-        y0 = dropouter(nt)
-        torch.manual_seed(seed)
-        torch.cuda.manual_seed_all(seed)
-        y1 = torch.nn.functional.dropout(nt, p)
+        with freeze_rng_state():
+            dropouter = torch.nn.Dropout(p)
+            y0 = dropouter(nt)
+        with freeze_rng_state():
+            y1 = torch.nn.functional.dropout(nt, p)
         self.nt_equal(y0, y1)
         # inplace
         # in principle, since we have established the correctness of functional, we could simply compare inplace vs functional
