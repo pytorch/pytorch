@@ -4,10 +4,11 @@ import torch
 import random
 import itertools
 import unittest
+import functools
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
-    (TEST_WITH_ROCM, TEST_SCIPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, parametrize,
+    (TEST_WITH_ROCM, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase, run_tests, load_tests, coalescedonoff, parametrize,
      subtest)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoCusparseGeneric,
@@ -24,6 +25,8 @@ from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
 if TEST_SCIPY:
     import scipy.sparse as sp
 
+if TEST_NUMPY:
+    import numpy as np
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2298,9 +2301,11 @@ class TestSparseCSR(TestCase):
         shapes = [(6, 10), (0, 10), (6, 0), (0, 0)]
 
         blocksizes = [(2, 2)]
+        batch_sizes = [(3, )]
 
         if layout is torch.sparse_bsr:
             blocksizes += [(3, 5), (6, 10)]
+            batch_sizes += [(2, 3), (1, 1, 1, 2)]
 
         def _test_matrix(pt_matrix, dense, layout, blocksize):
             sp_matrix = self._construct_sp_matrix(dense, layout, blocksize=blocksize)
@@ -2325,44 +2330,63 @@ class TestSparseCSR(TestCase):
             # TODO: Remove this once support has been enabled
             return
 
-        # Test batch shapes (3D inputs)
+        # Test batch shapes (ND inputs)
 
         # Case 1: Same sparsity pattern across matrices
-        for shape, blocksize in itertools.product(shapes, blocksizes):
-            shape = (3,) + shape
-            dense = make_tensor(shape, dtype=torch.float, device=device)
-            mask = dense[0].relu().bool()
-            dense = dense * mask.unsqueeze(0)
+        for shape, blocksize, batch_shape in itertools.product(shapes, blocksizes, batch_sizes):
+            full_shape = batch_shape + shape
+            batch_len = functools.reduce(lambda x, y: x * y, batch_shape, 1)
+            dense = make_tensor(full_shape, dtype=torch.float, device=device)
+            # select the first batch to create the mask
+            mask = dense[tuple(np.unravel_index(0, batch_shape))].relu().bool()
+            dense = dense * mask
             pt_tensor = self._convert_to_layout(dense, layout, blocksize=blocksize)
-            for i in range(shape[0]):
-                _test_matrix(pt_tensor[i], dense[i], layout, blocksize)
-            self.assertEqual(dense, pt_tensor.to_dense())
+            for i in range(batch_len):
+                batch_idx = tuple(np.unravel_index(i, batch_shape))
+                _test_matrix(pt_tensor[batch_idx], dense[batch_idx], layout, blocksize)
+            # todo: check whole conversion once to_dense impl for n-d batched-bsr
+            # take 3d slices of dense/sparse to convert/compare for now
+            if dense.dim() > 3:
+                part_dim = dense.dim() - 3
+                part_shape = batch_shape[:part_dim]
+                len_partition = functools.reduce(lambda x, y: x * y, part_shape, 1)
+                for i in range(len_partition):
+                    part_idx = tuple(np.unravel_index(i, part_shape))
+                    self.assertEqual(dense[part_idx], pt_tensor[part_idx].to_dense())
+            else:
+                self.assertEqual(dense, pt_tensor.to_dense())
 
         # Verify exception when given 0 sized batch
         for shape, blocksize in itertools.product(shapes, blocksizes):
             dense = make_tensor((0,) + shape, dtype=torch.float, device=device)
             # TODO: Support zero sized batch dimensions
-            with self.assertRaisesRegex(RuntimeError, "to_sparse_bsr: Expected batch dimension 0 to be non-zero."):
+            with self.assertRaisesRegex(RuntimeError, "to_sparse_bsr: Expected product of batch dimensions to be non-zero."):
                 self._convert_to_layout(dense, layout, blocksize=blocksize)
 
         # TODO: Case 2: Different sparsity pattern across matrices, but same number of zeros
-        # NOTE: For blocksparse formats this applies at a per-block level
-        shape = (2,) + shape
+        # NOTE: For blocksparse formats this applies at a per-block level,
         dense = make_tensor((2, 4, 4), dtype=torch.float, device=device)
         blocksize = (2, 2)
-        mask = torch.tensor(
-            [[[True, True], [False, True]],
-             [[True, False], [True, True]]],
+        mask = torch.tensor([
+            [[True, True], [False, True]],
+            [[True, False], [True, True]]],
             device=device).view((2, 2, 2, 1, 1))
         mask = mask.expand((2, 2, 2, 2, 2))
         mask = mask.transpose(2, 3)
         mask = mask.reshape_as(dense)
         dense = dense * mask
-        with self.assertRaisesRegex(RuntimeError, "Expect the same sparsity pattern across matrices for 3D input."):
-            self._convert_to_layout(dense, layout, blocksize=blocksize)
+        if layout == torch.sparse_bsr:
+            # this is not an error as long as the nse is equal for bsr
+            pt_tensor = self._convert_to_layout(dense, layout, blocksize=blocksize)
+            for i in range(2):
+                _test_matrix(pt_tensor[i], dense[i], layout, blocksize)
+            # TODO: enable once to_dense supports this pattern
+            # self.assertEqual(dense, pt_tensor.to_dense())
+        else:
+            with self.assertRaisesRegex(RuntimeError, "Expect the same sparsity pattern across matrices for ND input."):
+                self._convert_to_layout(dense, layout, blocksize=blocksize)
 
         # TODO: Case 3: Different sparsity pattern across matrices, but different number of zeros
-        shape = (2,) + shape
         dense = make_tensor((2, 4, 4), dtype=torch.float, device=device)
         blocksize = (2, 2)
         mask = torch.tensor(
@@ -2373,7 +2397,11 @@ class TestSparseCSR(TestCase):
         mask = mask.transpose(2, 3)
         mask = mask.reshape_as(dense)
         dense = dense * mask
-        with self.assertRaisesRegex(RuntimeError, "Expect the same sparsity pattern across matrices for 3D input."):
+        if layout == torch.sparse_bsr:
+            msg = "Expect the same number of specified elements per batch."
+        else:
+            msg = "Expect the same sparsity pattern across matrices for ND input."
+        with self.assertRaisesRegex(RuntimeError, msg):
             self._convert_to_layout(dense, layout, blocksize=blocksize)
 
     @skipMeta
