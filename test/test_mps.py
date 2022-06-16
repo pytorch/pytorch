@@ -4278,9 +4278,8 @@ class TestNLLLoss(TestCase):
         helper(np.array([[0., 0., 0., 0.5, 0.5]]), (3 + 4)/2, (12.5 - 3.5 ** 2), 100000)
         helper(np.array([[.2, .2, .2, .2, .2]]), (0 + 1 + 2 + 3 + 4)/5, (6 - 2 * 2), 10000)
         helper(np.array([[1, 1, 1, 1, 1]]), (0 + 1 + 2 + 3 + 4)/5, (6 - 2 * 2), 10000)
+        helper(np.array([1, 1, 1, 1, 1]), (0 + 1 + 2 + 3 + 4)/5, (6 - 2 * 2), 10000)
         helper(np.array([[1, 1, 1, 1, 1, 1, 1]]), 0, 0, 7, False)
-        # TODO: This test aborts because of absurd shape values
-        # helper(np.array([[1,1,1,1,1]]), 0, 0, 5, True)
 
 class TestNNMPS(NNTestCase):
 

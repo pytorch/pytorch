@@ -667,7 +667,6 @@ Tensor& multinomial_with_replacement_mps_kernel(
     runMPSGraph(stream, mpsGraph, feeds, results);
   }
 
-  // TODO: If I change the view, does the original get altered? I should think so
   return result;
 
 }
