@@ -13523,6 +13523,8 @@ op_db: List[OpInfo] = [
            skips=(
                # IndexError: tuple index out of range
                DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', 'test_forward_mode_AD'),
+               # https://github.com/pytorch/pytorch/issues/79705
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
            )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
