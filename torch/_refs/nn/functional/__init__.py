@@ -31,9 +31,11 @@ __all__ = [
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "leaky_relu",
+    "logsigmoid",
     "mish",
     "rrelu",
     "selu",
+    "silu",
     "softplus",
     "softsign",
     "tanhshrink",
@@ -162,9 +164,12 @@ def hardsigmoid(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     if inplace:
         raise NotImplementedError
 
-    rhs = refs.add(refs.true_divide(a, 6), 0.5)
-
-    return refs.where(refs.le(a, -3), 0, refs.where(refs.ge(a, 3), 1, rhs))
+    le_neg3 = a <= -3
+    ge_3 = a >= 3
+    zeros = torch.zeros_like(a)
+    ones = torch.ones_like(a)
+    other = torch.true_divide(a, 6) + 0.5
+    return torch.where(le_neg3, zeros, torch.where(ge_3, ones, other))
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
@@ -187,6 +192,21 @@ def leaky_relu(
         msg = f"negative_slope argument of type {type(negative_slope)} cannot be safely cast to type {python_type}!"
         raise ValueError(msg)
     return torch.where(torch.gt(a, 0), a, torch.mul(a, negative_slope))
+
+
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def logsigmoid(a: TensorLikeType) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.logsigmoid
+    """
+
+    lt_0 = a - torch.log1p(torch.exp(a))
+    ge_0 = torch.neg(torch.log1p(torch.exp(-a)))
+    return torch.where(torch.lt(a, 0), lt_0, ge_0)
 
 
 @register_decomposition(torch.ops.aten.mish)
@@ -242,6 +262,20 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     return scale * torch.where(a > 0, a, rhs)
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def silu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.silu
+    """
+    if inplace:
+        raise NotImplementedError
+
+    return a * torch.sigmoid(a)
+
+
 # softplus is implemented specially because it has beta and threshold arguments
 @register_decomposition(torch.ops.aten.softplus)
 @out_wrapper
@@ -289,8 +323,7 @@ def softsign(a: TensorLikeType) -> TensorLikeType:
     Reference implementation of torch.nn.functional.softsign
     """
 
-    rhs = refs.add(refs.abs(a), 1)
-    return refs.true_divide(a, rhs)
+    return torch.true_divide(a, torch.abs(a) + 1)
 
 # Losses
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:

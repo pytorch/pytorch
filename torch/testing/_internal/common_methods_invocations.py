@@ -20258,6 +20258,10 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.hardsigmoid",
         torch_opinfo_name="nn.functional.hardsigmoid",
+        skips=(
+            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
@@ -20270,6 +20274,10 @@ python_ref_db = [
             # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.logsigmoid",
+        torch_opinfo_name="nn.functional.logsigmoid",
     ),
     PythonRefInfo(
         "_refs.nn.functional.margin_ranking_loss",
@@ -20296,7 +20304,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.rrelu",
         torch_opinfo_name="nn.functional.rrelu",
-        decorators=(
+        skips=(
             # The errors are from uniform not being tested and likely not having a seed reset
             # AssertionError: tensor(False) is not true : Reference result
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
@@ -20311,6 +20319,14 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.selu",
         torch_opinfo_name="nn.functional.selu",
+        skips=(
+            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.silu",
+        torch_opinfo_name="nn.functional.silu",
         skips=(
             # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
