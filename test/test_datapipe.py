@@ -300,6 +300,14 @@ class TestIterableDataPipeBasic(TestCase):
             self.assertTrue(pathname in self.temp_files)
         self.assertEqual(count, 2 * len(self.temp_files))
 
+        # test functional API
+        datapipe = datapipe.list_files()
+        count = 0
+        for pathname in datapipe:
+            count += 1
+            self.assertTrue(pathname in self.temp_files)
+        self.assertEqual(count, 2 * len(self.temp_files))
+
     def test_listdirfilesdeterministic_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
 
@@ -1491,14 +1499,18 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(sorted(res), exp)
 
             # Test Deterministic
-            for num_workers in (0, 1, 2):
+            for num_workers, pw in itertools.product((0, 1, 2), (True, False)):
+                if num_workers == 0 and pw:
+                    continue
+
                 mp_ctx = "spawn" if num_workers > 0 else None
                 dl = DataLoader(
                     shuffle_dp,
                     num_workers=num_workers,
                     shuffle=True,
                     multiprocessing_context=mp_ctx,
-                    worker_init_fn=_worker_init_fn
+                    worker_init_fn=_worker_init_fn,
+                    persistent_workers=pw
                 )
 
                 # No seed
@@ -1520,46 +1532,6 @@ class TestFunctionalIterDataPipe(TestCase):
                 self.assertEqual(len(dl_res[0]), len(dl_res[2]))
                 self.assertNotEqual(dl_res[0], dl_res[2])
                 self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
-
-                if num_workers == 0:
-                    continue
-
-                # Persistent workers
-                ps_dl_res = []
-                for _ in range(2):
-                    dl = DataLoader(
-                        shuffle_dp,
-                        num_workers=num_workers,
-                        shuffle=True,
-                        multiprocessing_context="spawn",
-                        worker_init_fn=_worker_init_fn,
-                        persistent_workers=True
-                    )
-                    ps_res = []
-                    torch.manual_seed(123)
-                    for epoch in range(2):
-                        ps_res.extend(list(dl))
-                    ps_dl_res.append(ps_res)
-                self.assertEqual(ps_dl_res[0], ps_dl_res[1])
-
-                # Different Seeds
-                dl = DataLoader(
-                    shuffle_dp,
-                    num_workers=num_workers,
-                    shuffle=True,
-                    multiprocessing_context="spawn",
-                    worker_init_fn=_worker_init_fn,
-                    persistent_workers=True
-                )
-                ps_res = []
-                torch.manual_seed(321)
-                for epoch in range(2):
-                    ps_res.extend(list(dl))
-                ps_dl_res.append(ps_res)
-
-                self.assertEqual(len(ps_dl_res[0]), len(ps_dl_res[2]))
-                self.assertNotEqual(ps_dl_res[0], ps_dl_res[2])
-                self.assertEqual(sorted(ps_dl_res[0]), sorted(ps_dl_res[2]))
 
 
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
