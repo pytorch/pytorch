@@ -108,6 +108,10 @@ class TORCH_API BackendImplInterface {
   // Query all available backend devices
   virtual std::vector<BackendDevice> GetBackendDevices() const = 0;
 
+  virtual std::string CreateMetricReport() const {
+    return "";
+  }
+
   // Map a particular c10:: device to a concrete backend device
   // Note:: c10:: devices may be virtual or concrete.  xla:: and lazy:: are
   // virtual devices, meaning they may map to a gpu, tpu, etc. behind the
