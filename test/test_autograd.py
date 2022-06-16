@@ -6469,7 +6469,6 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertFalse(view_tangent._is_view())  # Optimization to share the same tensor!
         self.assertIs(view_tangent, base_tangent)
         self.assertIs(x_tangent, tangent)
-        self.assertIs(view_tangent, tangent)
 
     def test_inplace_on_view_not_same_layout(self):
         input = torch.zeros([2, 2])
