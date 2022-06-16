@@ -73,7 +73,7 @@ void sortKeyValueInplace(const TensorBase& key,
             A, -1, block_x, max_block_y,                                \
             scalar_t, int64_t, LTOp<scalar_t, true>, TYPE>,             \
         block_x * max_block_y);                                         \
-    const auto max_batch = (keySlices + min_grid - 1) / min_grid;       \
+    const auto max_batch = std::max(int64_t{1}, keySlices / min_grid);  \
     const int block_y = std::min(int64_t{max_block_y}, max_batch);      \
     dim3 block(block_x, block_y);                                       \
                                                                         \
