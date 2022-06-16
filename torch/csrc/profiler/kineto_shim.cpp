@@ -92,9 +92,8 @@ void TraceWrapper::addCPUActivity(
 #ifdef USE_KINETO
   TORCH_CHECK((bool)(*this), "Cannot add event to non-existent trace.");
   auto type = toActivityType(kineto_type);
-  cpu_trace_->activities.emplace_back(
-      libkineto::GenericTraceActivity(cpu_trace_->span, type, name));
-  auto& act = cpu_trace_->activities.back();
+  cpu_trace_->emplace_activity(cpu_trace_->span, type, name);
+  auto& act = libkineto::CpuTraceBuffer::toRef(cpu_trace_->activities.back());
   act.device = device_and_resource.device;
   act.resource = device_and_resource.resource;
   act.id = correlation_id;
