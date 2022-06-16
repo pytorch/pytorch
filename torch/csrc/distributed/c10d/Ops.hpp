@@ -29,6 +29,10 @@ TORCH_API c10::intrusive_ptr<ProcessGroup::Work> scatter(const c10::intrusive_pt
       const std::vector<at::Tensor>& output_tensors,
       const std::vector<std::vector<at::Tensor>>& input_tensors,
       const ScatterOptions& opts ={});
+TORCH_API c10::intrusive_ptr<ProcessGroup::Work> alltoall(const c10::intrusive_ptr<ProcessGroup>& process_group,
+      at::TensorList output_tensors,
+      at::TensorList input_tensors,
+      const AllToAllOptions& opts = {});
 
 } // namespace ops
 } // namespace c10d
