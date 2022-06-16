@@ -22,8 +22,8 @@ from typing import Any, Dict, List, Callable, Optional, Tuple, Set
 
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler]
 
-MatchResultWithQConfig = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
-                               QConfigAny]
+_MatchResultWithQConfig = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
+                                QConfigAny]
 
 # Note: The order of patterns is important! match function will take whatever is matched first, so we'll
 # need to put the fusion patterns before single patterns. For example, add_relu should be registered come before relu.

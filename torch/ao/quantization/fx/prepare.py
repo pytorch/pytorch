@@ -53,7 +53,7 @@ from .pattern_utils import (
 )
 
 from .match_utils import (
-    MatchResultWithQConfig,
+    _MatchResultWithQConfig,
     find_matches,
 )
 
@@ -734,7 +734,7 @@ def maybe_insert_output_observer_for_node(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    matches: Dict[str, MatchResultWithQConfig],
+    matches: Dict[str, _MatchResultWithQConfig],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
@@ -887,7 +887,7 @@ def maybe_propagate_dtype_for_node(
     node: Node,
     target_dtype: Union[torch.dtype, type],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    matches: Dict[str, MatchResultWithQConfig],
+    matches: Dict[str, _MatchResultWithQConfig],
 ) -> None:
     """
     Assigns `target_dtype` to `node`. If `node` is a general tensor shape op
@@ -909,7 +909,7 @@ def maybe_propagate_dtype_for_node(
 def propagate_dtypes_for_known_nodes(
     graph: Graph,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    matches: Dict[str, MatchResultWithQConfig],
+    matches: Dict[str, _MatchResultWithQConfig],
 ) -> None:
     """
     Currently we assume that inputs to the graph are either `torch.float` or
@@ -1065,7 +1065,7 @@ def swap_custom_module_to_observed(
 def insert_observers_for_model(
     model: GraphModule,
     modules: Dict[str, torch.nn.Module],
-    matches: Dict[str, MatchResultWithQConfig],
+    matches: Dict[str, _MatchResultWithQConfig],
     qconfig_map: Dict[str, QConfigAny],
     graph: Graph,
     prepare_custom_config_dict: Dict[str, Any],
