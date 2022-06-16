@@ -17,7 +17,6 @@ import itertools
 import yaml
 import os
 import pathlib
-from unittest import skip
 
 torch._lazy.ts_backend.init()
 
@@ -67,9 +66,6 @@ def clone_move(t):
     return copy_t
 
 class TestLazyTensor(JitTestCase):
-
-
-    @skip("Disable until autograd supports symints")
     def testConvolutionBackward(self):
         test_device = get_test_device()
         inp = torch.rand(1, 3, 128, 128, device=test_device, requires_grad=True)
@@ -224,9 +220,8 @@ class TestLazyDynamicOps(TestCase):
         x1 = torch.tensor([[0, 1.0, 2.0], [3.0, 0, 0]], device=test_device, requires_grad=True)
         x1_lazy = clone_move(x1)
         x2_lazy = torch.nonzero(x1_lazy)
-
-        # FIXME: Add bindings to get upper bounds
-        # self.assertEqual(tuple(x2_lazy.size()), (6, 2))
+        print(x2_lazy.size())
+        self.assertEqual(tuple(x2_lazy.size()), (6, 2))
 
         # We should still be able to instantiate it and get the actual result
         x2_eager = x2_lazy.cpu()
