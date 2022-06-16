@@ -534,3 +534,7 @@ def meta_embedding_bag_forward_only(weight, indices, offsets, *args):
 @torch.library.impl(meta_lib, "nan_to_num")
 def meta_nan_to_num(self, nan=None, posinf=None, neginf=None):
     return self.new_empty(self.shape)
+
+@torch.library.impl(meta_lib, "remainder.Scalar_Tensor")
+def meta_nan_to_num(scalar, other):
+    return other % scalar
