@@ -147,10 +147,11 @@ def float_to_apot(x, levels, indices):
 
     return best_idx
 
-r"""Converts int4 APoT2 input into floating point number
+r"""Converts int4 APoT2 tensor input into floating point number
 based on quantization levels
 """
 def apot_to_float(x_apot, levels, indices):
-    x_apot = round(x_apot)
     idx = list(indices).index(x_apot)
+    print("i:", idx)
+    print("float:", levels[idx])
     return levels[idx]
