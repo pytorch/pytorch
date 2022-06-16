@@ -632,3 +632,40 @@ class TestWith(JitTestCase):
         # Nested record function should have child "aten::add"
         nested_child_events = nested_function_event.cpu_children
         self.assertTrue("aten::add" in (child.name for child in nested_child_events))
+
+    def test_with_and_continue(self) -> int:
+        def fn(a: int):
+            ans = 0
+            ans2 = 0
+            for i in range(10):
+                with torch.no_grad():
+                    if (a + i) % 2 == 0:
+                        continue
+                    r = i * i
+                ans += r
+                ans2 += r * i // 2
+
+            return ans, ans2
+
+        fn_s = torch.jit.script(fn)
+        self.assertEqual(165, fn_s(0)[0])
+        self.assertEqual(165, fn_s(2)[0])
+        self.assertEqual(120, fn_s(1)[0])
+
+    def test_with_and_continue_2(self) -> int:
+        def fn(a: int):
+            ans = 0
+            ans2 = 0
+            for i in range(10):
+                with torch.no_grad():
+                    if (a + i) % 2 == 0:
+                        continue
+                    r = i * i
+                    ans += r
+                ans2 += r
+            return ans, ans2
+
+        fn_s = torch.jit.script(fn)
+        self.assertEqual(fn(0), fn_s(0))
+        self.assertEqual(fn(1), fn_s(1))
+        self.assertEqual(fn(2), fn_s(2))

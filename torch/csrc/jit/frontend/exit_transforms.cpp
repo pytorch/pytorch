@@ -686,12 +686,42 @@ static void convertEnterExitNodesToWithBlocks(std::shared_ptr<Graph>& graph) {
     Node* cur = enter->next();
     Node* insert_point = body_block->param_node();
 
+    // Record all the uses that occur after the Exit node.
+    std::vector<Value*> leaving_scope;
+
     // Move all of the nodes between the Enter and Exit into the body block.
     while (cur != exit) {
       auto* next = cur->next();
+      for (auto& output : cur->outputs()) {
+        for (auto& use : output->uses()) {
+          if (use.user->isAfter(exit)) {
+            leaving_scope.emplace_back(output);
+            break;
+          }
+        }
+      }
       cur->moveAfter(insert_point);
       insert_point = insert_point->next();
       cur = next;
+    }
+
+    // For all the uses that occur after the Exit node: add an output from the
+    // with block, and replace the use with the output from the exit node.
+    // Otherwise, we have values defined inside the block which are used
+    // outside of the block, which causes failures during inlineConsecutiveIfs.
+    for (Value* output : leaving_scope) {
+      std::vector<Use> uses = output->uses();
+      body_block->registerOutput(output);
+      Node* uninit = graph->createNone();
+      uninit->insertBefore(exit_block->return_node());
+      exit_block->registerOutput(uninit->output());
+      Value* with_output = with->addOutput();
+      for (auto& use : uses) {
+        if (use.user->owningBlock() == exit->owningBlock() &&
+            use.user->isAfter(exit)) {
+          use.user->replaceInput(use.offset, with_output);
+        }
+      }
     }
 
     // Move the Exit node into the exit block.
@@ -757,6 +787,11 @@ static void convertWithBlocksToEnterExitNodes(std::shared_ptr<Graph>& graph) {
       node->moveAfter(cur);
       cur = node;
     }
+
+    for (auto i : c10::irange(node->outputs().size())) {
+      node->output(i)->replaceAllUsesWith(body_block->outputs()[i]);
+    }
+
     node->destroy();
   }
 }
