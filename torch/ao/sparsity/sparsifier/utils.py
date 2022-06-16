@@ -1,7 +1,7 @@
 from torch import nn
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-def module_to_fqn(model, module: nn.Module, prefix: str='') -> str:
+def module_to_fqn(model, module: nn.Module, prefix: str = '') -> Any:
     for name, child in model.named_children():
         new_name = prefix + '.' + name
         if child is module:
@@ -11,9 +11,8 @@ def module_to_fqn(model, module: nn.Module, prefix: str='') -> str:
             return child_path
     return None
 
-def fqn_to_module(model: nn.Module, path: str) -> nn.Module:
-    path = path.split('.')
-    for name in path:
+def fqn_to_module(model: Optional[nn.Module], path: str) -> Optional[nn.Module]:
+    for name in path.split('.'):
         model = getattr(model, name, None)
         if model is None:
             return None

@@ -31,7 +31,7 @@ class BasePruner(BaseSparsifier):
     Abstract methods that need to be implemented:
 
     - update_mask: Function to compute a new mask for all keys in the
-        `tensor_groups`.
+        `groups` attribute.
 
     Args:
         - defaults [dict]: default configurations will be attached to the
@@ -78,7 +78,7 @@ class BasePruner(BaseSparsifier):
         self.activation_handles = []  # store removable hook handles
         self.bias_handles = []
 
-        for config in self.tensor_groups:
+        for config in self.groups:
             modules, tensor_names = self._get_modules_and_tensor_names(config, use_path)
 
             for module, tensor_name in zip(modules, tensor_names):
@@ -199,12 +199,12 @@ class BasePruner(BaseSparsifier):
                     local_args['module_fqn'] = module_fqn
                     local_args['tensor_name'] = "weight"
                     local_args['tensor_fqn'] = module_fqn + ".weight"
-            self.tensor_groups.append(local_args)
+            self.groups.append(local_args)
 
         self._prepare()
 
     def squash_mask(self, use_path=False, *args, **kwargs):
-        for config in self.tensor_groups:
+        for config in self.groups:
             modules, tensor_names = self._get_modules_and_tensor_names(config, use_path)
 
             for module, tensor_name in zip(modules, tensor_names):
@@ -225,7 +225,7 @@ class BasePruner(BaseSparsifier):
         if not self.enable_mask_update:
             return
         with torch.no_grad():
-            for config in self.tensor_groups:
+            for config in self.groups:
                 modules, tensor_names = self._get_modules_and_tensor_names(config, use_path)
 
                 untupled_args: dict = {}
