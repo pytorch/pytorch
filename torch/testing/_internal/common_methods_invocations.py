@@ -13520,7 +13520,6 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            sample_inputs_func=sample_inputs_native_layer_norm,
            error_inputs_func=error_inputs_native_layer_norm,
-           supports_expanded_weight=True,
            skips=(
                # IndexError: tuple index out of range
                DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', 'test_forward_mode_AD'),
