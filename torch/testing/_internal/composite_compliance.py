@@ -402,7 +402,7 @@ def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
         assert len(leaf_tensors) > 0
 
         try:
-            results = op.gradcheck_wrapper(op, *new_args, **new_kwargs)
+            results = op.gradcheck_wrapper(op.get_op(), *new_args, **new_kwargs)
             if output_process_fn_grad is not None:
                 results = output_process_fn_grad(results)
         # see NOTE: [What errors are Composite Compiance trying to catch?]
