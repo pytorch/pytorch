@@ -1,9 +1,9 @@
 #pragma once
 
-#include <functional>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/core/stack.h>
+#include <functional>
 
 namespace torch {
 namespace lazy {
