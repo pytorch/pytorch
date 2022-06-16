@@ -202,7 +202,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
-        if any(tuple(isinstance(arg, ProxyTensor) for arg in args)):
+        if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
         else:
             proxy_out = self.tracer.create_proxy('call_function', func, args, kwargs,
@@ -214,7 +214,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             return wrap_output(real_out, proxy_out)
 
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=False):
+def make_fx(f, decomposition_table=None, trace_factory_functions=True):
     if decomposition_table is None:
         decomposition_table = {}
 
