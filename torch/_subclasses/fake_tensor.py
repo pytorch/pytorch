@@ -27,6 +27,9 @@ class SparseInputException(Exception):
 class DynamicOutputShapeException(Exception):
     func: OpOverload
 
+class CPUFallbackException(Exception):
+    pass
+
 
 # TODO: use tags when available
 # operators whose output shape depends on input tensor data
@@ -256,7 +259,6 @@ class FakeTensor(torch.Tensor):
         # elem does not need to be recorded, because FakeTensor *is a* elem
         assert elem.device.type == "meta"
         device = device if isinstance(device, torch.device) else torch.device(device)
-        print(device.type)
         assert device.type != "meta"
         self.fake_device = device
         self.fake_mode = fake_mode
@@ -438,6 +440,7 @@ class FakeTensorMode(TorchDispatchMode):
 
             self.in_kernel_invocation = True
             try:
+                # print(func, args, kwargs)
                 r = func(*args, **kwargs)
             except NotImplementedError as not_implemented_error:
                 if not self.allow_cpu_fallback:
@@ -475,7 +478,7 @@ def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
             kwargs = tree_map(to_cpu, kwargs)
             r = func(*args, **kwargs)
         except Exception as new_exception:
-            raise orig_not_implemented_exception from new_exception
+            raise CPUFallbackException(orig_not_implemented_exception)
 
         tensor_impls = set()
         storages = set()
