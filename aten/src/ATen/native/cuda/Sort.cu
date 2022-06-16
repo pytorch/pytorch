@@ -19,12 +19,12 @@ template <typename T>
 static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
   int minGridSize;
   int blockSize;
-  cudaOccupancyMaxPotentialBlockSize(
+  C10_CUDA_CHECK(cudaOccupancyMaxPotentialBlockSize(
       &minGridSize,
       &blockSize,
       kernel,
       /*dynamicSMemSize=*/0,
-      max_block_size);
+      max_block_size));
   return minGridSize;
 }
 
