@@ -450,7 +450,7 @@ def nll_loss_forward(
         result = result * ignore_index_mask
 
     if reduction == Reduction.NONE.value and n_dims > 1:
-        total_weight = torch.tensor(0.0, dtype=self.dtype, device=self.device)
+        total_weight = self.new_full((), 0.0)
         return result, total_weight
 
     if weight is not None:
@@ -462,7 +462,7 @@ def nll_loss_forward(
     elif ignore_index_mask is not None:
         total_weight = ignore_index_mask.sum().to(self)
     else:
-        total_weight = torch.tensor(1.0 * result.numel(), dtype=self.dtype, device=self.device)
+        total_weight = self.new_full((), 1.0 * result.numel())
 
     if result.dim() > 0:
         if reduction == Reduction.SUM.value:
