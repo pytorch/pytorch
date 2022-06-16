@@ -50,8 +50,8 @@ from torch.ao.quantization import (
     float_qparams_weight_only_qconfig_4bit,
     get_default_qconfig,
     get_default_qat_qconfig,
-    get_default_qconfig_dict,
-    get_default_qat_qconfig_dict,
+    get_default_qconfig_mapping,
+    get_default_qat_qconfig_mapping,
     fuse_modules,
     fuse_modules_qat,
     prepare,
@@ -1854,7 +1854,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for model in [LinearReLUModel, ConvReLUModel, ConvBnReLUModel]:
             for relu in [torch.nn.ReLU(), torch.nn.functional.relu, torch.relu]:
                 m = model(relu).eval()
-                qconfig_dict = torch.ao.quantization.get_default_qconfig_dict("fbgemm")
+                qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping("fbgemm")
                 # should not crash as in https://github.com/pytorch/pytorch/issues/75825
                 prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 3, 3, 3),))
 
@@ -4388,7 +4388,7 @@ class TestQuantizeFx(QuantizationTestCase):
         for M, is_qat in options:
             m = M1().eval()
             example_inputs = (torch.randn(1, 3, 3, 3),)
-            m = prepare_fx(m, get_default_qconfig_dict(), example_inputs=example_inputs)
+            m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
             m = convert_fx(m)
             node_list = [
                 ns.call_function(torch.quantize_per_tensor),
@@ -4401,7 +4401,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 expected_node_list=node_list)
 
             m = M2().eval()
-            m = prepare_fx(m, get_default_qconfig_dict(), example_inputs=example_inputs)
+            m = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=example_inputs)
             m = convert_fx(m)
             node_occurrence = {
                 ns.call_function(torch.quantize_per_tensor): 0,
@@ -4426,7 +4426,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         m = M().eval()
-        mp = prepare_fx(m, get_default_qconfig_dict(), example_inputs=(torch.randn(1, 1),))
+        mp = prepare_fx(m, get_default_qconfig_mapping(), example_inputs=(torch.randn(1, 1),))
 
         found_stack_trace = False
         for n in mp.graph.nodes:
@@ -4541,7 +4541,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 return x
 
         backends = ["qnnpack", "fbgemm"]
-        for func in [get_default_qconfig_dict, get_default_qat_qconfig_dict]:
+        for func in [get_default_qconfig_mapping, get_default_qat_qconfig_mapping]:
             for backend in backends:
                 m = M().eval()
                 qconfig_dict = func(backend)
@@ -4581,8 +4581,8 @@ class TestQuantizeFx(QuantizationTestCase):
             prepare_fn(m2, qconfig_dict, example_inputs=example_inputs)
 
         # Ensure prepare_fx and prepare_qat_fx work in both training and eval modes
-        _test(prepare_fx, get_default_qconfig_dict())
-        _test(prepare_qat_fx, get_default_qat_qconfig_dict())
+        _test(prepare_fx, get_default_qconfig_mapping())
+        _test(prepare_qat_fx, get_default_qat_qconfig_mapping())
 
 @skipIfNoFBGEMM
 class TestQuantizeFxOps(QuantizationTestCase):

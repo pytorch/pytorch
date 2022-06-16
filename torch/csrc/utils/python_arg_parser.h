@@ -39,6 +39,7 @@
 //      Scalar and Tensor, UNLESS they require grad (in which case
 //      they only bind to Tensor).
 
+#include <pybind11/pytypes.h>
 #include <torch/csrc/python_headers.h>
 
 #include <torch/csrc/Device.h>
@@ -67,6 +68,7 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
+#include <c10/core/SymbolicIntNode.h>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -470,9 +472,80 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
+inline bool is_symint_node(py::handle obj) {
+  auto static tp_symn = py::type::of<c10::SymbolicIntNode>();
+  // TODO: switch this to `isinstance`
+  if (obj.get_type().equal(tp_symn)) {
+    TORCH_CHECK(
+        !jit::tracer::isTracing(), "JIT tracing of SymInts isn't supported!");
+    return true;
+  }
+  return false;
+}
+
+inline PyObject* toPyObject(c10::SymInt symint) {
+  if (symint.is_symbolic()) {
+    return py::cast(symint.toSymbolicIntNode()).release().ptr();
+  } else {
+    return THPUtils_packInt64(symint.data());
+  }
+}
+
 inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
-  auto intlist = intlistWithDefault(i, signature.params[i].default_intlist);
-  return c10::fmap(intlist, [](int64_t n) { return c10::SymInt(n); });
+  if (!args[i]) {
+    return c10::fmap(signature.params[i].default_intlist, [](int64_t di) {
+      return c10::SymInt(di);
+    });
+  }
+
+  const auto size1 = signature.params[i].size;
+  if (size1 > 0 && THPUtils_checkLong(args[i])) {
+    return std::vector<c10::SymInt>(
+        size1, c10::SymInt(THPUtils_unpackIndex(args[i])));
+  }
+
+  if (size1 > 0 && torch::is_symint_node(py::handle(args[i]))) {
+    auto si = py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
+    return std::vector<c10::SymInt>(size1, si);
+  }
+
+  PyObject* arg = args[i];
+  auto tuple = PyTuple_Check(arg);
+  // NOLINTNEXTLINE(bugprone-branch-clone)
+  const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+  std::vector<c10::SymInt> res;
+  res.reserve(size2);
+  for (const auto idx : c10::irange(size2)) {
+    PyObject* obj =
+        tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
+    try {
+      if (is_symint_node(py::handle(obj))) {
+        res.push_back(
+            py::handle(obj).cast<c10::SymbolicIntNode*>()->toSymInt());
+      } else {
+        // Elements of torch.Size are tensors during tracing, and we need to
+        // record extra information before they are turned into an IntArrayRef
+        if (traceable && jit::tracer::isTracing() && THPVariable_Check(obj)) {
+          auto& var = THPVariable_Unpack(obj);
+          jit::tracer::ArgumentStash::stashIntArrayRefElem(
+              signature.params[i].name, size2, idx, var);
+          res.push_back(var.item<int64_t>());
+          continue;
+        }
+        res.push_back(c10::SymInt(THPUtils_unpackIndex(obj)));
+      }
+    } catch (const std::exception& e) {
+      auto te = TypeError(
+          "%s(): argument '%s' must be %s, but found element of type %s at pos %ld",
+          signature.name.c_str(),
+          signature.params[i].name.c_str(),
+          signature.params[i].type_name().c_str(),
+          Py_TYPE(obj)->tp_name,
+          idx + 1);
+    }
+  }
+
+  return res;
 }
 
 inline std::vector<int64_t> PythonArgs::intlistWithDefault(
@@ -773,6 +846,9 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
+  }
+  if (torch::is_symint_node(py::handle(args[i]))) {
+    return py::handle(args[i]).cast<c10::SymbolicIntNode*>()->toSymInt();
   }
   return c10::SymInt(THPUtils_unpackLong(args[i]));
 }
