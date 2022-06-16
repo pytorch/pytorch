@@ -203,7 +203,7 @@ __all__ = [
     "reshape",
     "roll",
     "rot90",
-    "rsqrt"
+    "rsqrt",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
