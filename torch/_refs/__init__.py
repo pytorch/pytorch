@@ -1102,7 +1102,7 @@ def clamp(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
-@register_decomposition(torch.ops.aten.where)
+@register_decomposition(torch.ops.aten.where, disable_meta=True)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
