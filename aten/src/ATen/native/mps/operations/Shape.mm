@@ -300,6 +300,8 @@ TORCH_IMPL_FUNC(topk_out_mps)
     k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
     "selected index k out of range");
 
+  TORCH_CHECK( k <= 16 , "Currently topk on mps works only for k<=16 ");
+
   if (self.dim() == 0 && self.numel() == 1)
   {
       values.copy_(self);
