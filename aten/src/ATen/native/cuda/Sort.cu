@@ -15,6 +15,19 @@
 
 namespace at { namespace native {
 
+template <typename T>
+static int minimum_grid_for_occupancy(T kernel, int max_block_size) {
+  int minGridSize;
+  int blockSize;
+  cudaOccupancyMaxPotentialBlockSize(
+      &minGridSize,
+      &blockSize,
+      kernel,
+      /*dynamicSMemSize=*/0,
+      max_block_size);
+  return minGridSize;
+}
+
 // In alignment with default sort on a c++ map, this function
 // will permute key and value tensors identically, and
 // in such a way that the 'key' tensor is ordered numerically
@@ -52,16 +65,25 @@ void sortKeyValueInplace(const TensorBase& key,
     constexpr int items_per_thread = 2;                                 \
     static_assert(SIZE % items_per_thread == 0, "");                    \
     constexpr int block_x = SIZE / items_per_thread;                    \
-    constexpr int block_y = BATCH;                                      \
+    constexpr int max_block_y = BATCH;                                  \
+                                                                        \
+    /* Scale batch size down if the grid would be too small */          \
+    const auto min_grid = minimum_grid_for_occupancy(                   \
+        bitonicSortKVInPlace<                                           \
+            A, -1, block_x, max_block_y,                                \
+            scalar_t, int64_t, LTOp<scalar_t, true>, TYPE>,             \
+        block_x * max_block_y);                                         \
+    const auto max_batch = (keySlices + min_grid - 1) / min_grid;       \
+    const int block_y = std::min(int64_t{max_block_y}, max_batch);      \
     dim3 block(block_x, block_y);                                       \
                                                                         \
     dim3 grid;                                                          \
-    const int grid_count = (keySlices + BATCH - 1) / BATCH;             \
+    const int grid_count = (keySlices + block_y - 1) / block_y;         \
     TORCH_INTERNAL_ASSERT(getGridFromTiles(grid_count, grid),           \
                           "Too many slices to sort");                   \
                                                                         \
     if (dir) {                                                          \
-      bitonicSortKVInPlace<A, -1, block_x, block_y>                     \
+      bitonicSortKVInPlace<A, -1, block_x, max_block_y>                 \
         <<<grid, block, 0, stream>>>(                                   \
           keyInfo,                                                      \
           (TYPE) keySlices,                                             \
@@ -72,7 +94,7 @@ void sortKeyValueInplace(const TensorBase& key,
           GTOp<scalar_t, true>());                                      \
       C10_CUDA_KERNEL_LAUNCH_CHECK();                                   \
     } else {                                                            \
-      bitonicSortKVInPlace<A, -1, block_x, block_y>                     \
+      bitonicSortKVInPlace<A, -1, block_x, max_block_y>                 \
         <<<grid, block, 0, stream>>>(                                   \
           keyInfo,                                                      \
           (TYPE) keySlices,                                             \
