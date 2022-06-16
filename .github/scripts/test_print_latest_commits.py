@@ -90,5 +90,13 @@ class TestPrintCommits(TestCase):
         self.assertFalse(result[0])
         self.assertEqual(result[1], "docker-release-builds checks were not successful")
 
+    @mock.patch('print_latest_commits.get_commit_results', return_value={})
+    def test_no_workflows(self, mock_get_commit_results: Any) -> None:
+        "Test with missing workflows"
+        workflow_checks = mock_get_commit_results()
+        result = isGreen("sha", workflow_checks)
+        self.assertFalse(result[0])
+        self.assertEqual(result[1], "missing required workflows: pull, trunk, lint, linux-binary, android-tests, windows-binary")
+
 if __name__ == "__main__":
     main()
