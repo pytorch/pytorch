@@ -3,8 +3,9 @@ from typing import Callable, Iterator, Sized, TypeVar
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import (_check_lambda_fn,
-                                                     ensure_map_fn_works)
+from torch.utils.data.datapipes.utils.common import (
+    _check_lambda_fn,
+    ensure_map_fn_works)
 
 __all__ = [
     "CollatorIterDataPipe",
