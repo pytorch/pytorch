@@ -47,6 +47,7 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
+    "get_buffer",
 ]
 
 @functools.lru_cache(None)
@@ -279,6 +280,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
         Tensor.to_padded_tensor,
+        Tensor.sym_size
     }
 
 
@@ -751,6 +753,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.ctc_loss: (lambda log_probs, targets, input_lengths, target_lengths, blank=0,
                                        reduction='mean', zero_infinity=False: -1),
         torch.nn.functional.dropout: lambda input, p=0.5, training=True, inplace=False: -1,
+        torch.nn.functional.dropout1d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.dropout2d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.dropout3d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.elu: lambda input, alpha=1.0, inplace=False: -1,
@@ -963,7 +966,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.smm: lambda input, mat2: -1,
         torch.spmm: lambda input, mat2: -1,
         torch.softmax: lambda input, dim, dtype=None: -1,
-        torch.linalg.solve: lambda input, other, out=None: -1,
+        torch.linalg.solve: lambda A, B, left=True, out=None: -1,
         torch.sort: lambda input, dim=-1, descending=False, *, stable=False, out=None: -1,
         torch.split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
@@ -1266,6 +1269,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.narrow_copy: lambda self, dimension, start, length: -1,
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
+        Tensor._nested_tensor_size: lambda self: -1,
         Tensor.normal_: lambda self: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim: -1,
@@ -1952,3 +1956,13 @@ class enable_reentrant_dispatch():
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._raii_guard
+
+def get_buffer(tensor_subclass, data, prefix):
+    import ctypes
+    assert prefix in {"stride", "size"}
+    buffer_name = f"_{prefix}_buffer"
+    if not hasattr(tensor_subclass, buffer_name):
+        SizeType = ctypes.c_longlong * len(data)
+        setattr(tensor_subclass, buffer_name, SizeType(*data))
+    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
+    return (ptr, len(data))
