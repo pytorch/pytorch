@@ -39,8 +39,7 @@ c10::intrusive_ptr<ProcessGroup::Work> allgather_(
   return process_group->allgather(
       const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
       const_cast<std::vector<at::Tensor>&>(input_tensors),
-      AllgatherOptions{
-          std::chrono::milliseconds(timeout)});
+      AllgatherOptions{std::chrono::milliseconds(timeout)});
 }
 
 TORCH_LIBRARY(c10d, m) {
@@ -106,8 +105,10 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce(
       opts.timeout.count());
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> allgather(const c10::intrusive_ptr<ProcessGroup>& process_group,
-    const std::vector<std::vector<at::Tensor>>& output_tensors, const std::vector<at::Tensor>& input_tensors,
+c10::intrusive_ptr<ProcessGroup::Work> allgather(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<std::vector<at::Tensor>>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
     const AllgatherOptions& opts) {
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("c10d::allgather_", "")
@@ -117,10 +118,7 @@ c10::intrusive_ptr<ProcessGroup::Work> allgather(const c10::intrusive_ptr<Proces
                            const std::vector<at::Tensor>&,
                            int64_t)>();
   return op.call(
-      output_tensors,
-      process_group,
-      input_tensors,
-      opts.timeout.count());
+      output_tensors, process_group, input_tensors, opts.timeout.count());
 }
 
 } // namespace ops

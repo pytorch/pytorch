@@ -1088,7 +1088,8 @@ Arguments:
                  const std::vector<std::vector<at::Tensor>>& output_tensors,
                  const std::vector<at::Tensor>& input_tensor,
                  ::c10d::AllgatherOptions opts) {
-                return ::c10d::ops::allgather(self, output_tensors, input_tensor, opts);
+                return ::c10d::ops::allgather(
+                    self, output_tensors, input_tensor, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensors"),
@@ -1110,8 +1111,8 @@ Arguments:
                  at::Tensor& input) {
                 std::vector<std::vector<at::Tensor>> outputs = {output};
                 std::vector<at::Tensor> inputs = {input};
-                return ::c10d::ops::allgather(pg,
-                    outputs, inputs, ::c10d::AllgatherOptions());
+                return ::c10d::ops::allgather(
+                    pg, outputs, inputs, ::c10d::AllgatherOptions());
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
