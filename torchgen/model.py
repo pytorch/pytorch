@@ -1303,8 +1303,12 @@ class FunctionSchema:
         # we can probably manually write code for them instead of forcing the codegen to handle them.
         if is_inplace:
             return SchemaKind.inplace
+        elif is_scratch:
+            assert is_out, "invariant: all scratch operators are expected to be out= operators too"
+            return SchemaKind.scratch
         elif is_out:
-            return SchemaKind.scratch if is_scratch else SchemaKind.out
+            assert not is_scratch, "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
+            return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
         else:
