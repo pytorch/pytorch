@@ -138,7 +138,8 @@ c10::intrusive_ptr<ProcessGroup::Work> allgather(
       output_tensors, process_group, input_tensors, opts.timeout.count());
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(const c10::intrusive_ptr<ProcessGroup>& process_group,
+c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& output_tensors,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
     const ReduceScatterOptions& opts) {
@@ -151,7 +152,11 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(const c10::intrusive_ptr<P
                            int64_t,
                            int64_t)>();
   return op.call(
-      output_tensors, process_group, input_tensors, static_cast<uint64_t>(opts.reduceOp), opts.timeout.count());
+      output_tensors,
+      process_group,
+      input_tensors,
+      static_cast<uint64_t>(opts.reduceOp),
+      opts.timeout.count());
 }
 
 } // namespace ops

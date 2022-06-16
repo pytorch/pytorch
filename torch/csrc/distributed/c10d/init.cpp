@@ -1182,7 +1182,8 @@ Arguments:
                  const std::vector<at::Tensor>& output_tensors,
                  const std::vector<std::vector<at::Tensor>>& input_tensors,
                  const ::c10d::ReduceScatterOptions& opts) {
-                return ::c10d::ops::reduce_scatter(self, output_tensors, input_tensors, opts);
+                return ::c10d::ops::reduce_scatter(
+                    self, output_tensors, input_tensors, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensors"),
