@@ -297,25 +297,27 @@ class TestSummonFullParams(FSDPTest):
         )
         local_model = DeterministicModel(wrap_fsdp=False)
 
-        dev = (
-            torch.device("cpu")
-            if offload_to_cpu
-            else torch.device("cuda", torch.cuda.current_device())
-        )
-
         params_to_compare = (
             [p.clone() for p in model.parameters()]
             if rank0_only and self.rank != 0
             else list(local_model.parameters())
         )
 
+        writeback = not rank0_only
+
         with model.summon_full_params(
             model,
             recurse=True,
             rank0_only=rank0_only,
-            writeback=not rank0_only,
+            writeback=writeback,
             offload_to_cpu=offload_to_cpu,
         ):
+            if writeback:
+                with torch.no_grad():
+                    for p in model.parameters():
+                        p.add_(1)
+                    for p in params_to_compare:
+                        p.add_(1)
             # Below sleep causes failures without stream synchronization in
             # summon_full_params fix.
             torch.cuda._sleep(1000000)
@@ -323,6 +325,10 @@ class TestSummonFullParams(FSDPTest):
             fsdp_params = [p.clone() for p in model.parameters()]
 
         self.assertEqual(fsdp_params, params_to_compare)
+
+        # CPU offload is enabled for main API, so we should point back to CPU
+        for param in model.parameters():
+            self.assertEqual(param.device, torch.device("cpu"))
 
     @skip_if_lt_x_gpu(2)
     def test_summon_from_non_fsdp(self):
