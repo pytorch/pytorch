@@ -1154,15 +1154,25 @@ class TestFunctionalIterDataPipe(TestCase):
                 # Reset
                 self.assertEqual(list(res_dp), list(ref_dp))
 
+        p_fn_n1 = partial(fn_n1, d1=1)
+
+
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
         _helper(lambda data: (data[0], (-data[1], data[1]), data[2]), fn_1n, 1)
+
+        _helper(lambda data: (data[0], data[1], data[0] + data[1]),
+                lambda d0, d1: d0 + d1, (0, 1), 2)
+        _helper(lambda data: (data[0], data[1], 1 + data[1]), p_fn_n1, 1, 2)
         # The index of input column is out of range
         with self.assertRaises(IndexError):
             _helper(None, fn_1n, 3)
+
         # Unmatched input columns with fn arguments
         with self.assertRaises(TypeError):
             _helper(None, fn_n1, 1)
+            _helper(None, lambda d0, d1: d0 + d1, 0)
+            _helper(None, p_fn_n1, (0, 1))
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
         _helper(lambda data: (data[0], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
