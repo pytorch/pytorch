@@ -322,6 +322,9 @@ _state_dict_type_to_config = {
 }
 
 class OptimStateKeyType(Enum):
+    """
+    Whether to key optimizer states by parameter name or parameter ID.
+    """
     PARAM_NAME = auto()
     PARAM_ID = auto()
 
