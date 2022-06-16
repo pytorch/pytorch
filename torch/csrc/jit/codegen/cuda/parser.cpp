@@ -744,6 +744,13 @@ class IrParser {
                   aten_to_data_type(*tensor_type->scalarType()), out)
                   ->as<TensorView>();
       }
+
+      if (out->isFusionOutput()) {
+        // TODO: This is wasted memory bandwidth, we need to copy since we can't
+        // output a tensor twice.
+        out = set(out);
+      }
+
       fusion->addOutput(out);
 
       // mark output tensor as permuted;
