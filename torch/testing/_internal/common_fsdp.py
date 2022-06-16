@@ -273,7 +273,6 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
         fsdp_init_mode=FSDPInitMode.CUDA_AFTER,
         cpu_offload=None,
         backward_prefetch=None,
-        forward_prefetch=False,
         sharding_strategy=None,
         mixed_precision=None,
         **kwargs
@@ -285,7 +284,6 @@ class NestedWrappedModuleWithDelay(ModuleWithDelay):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mixed_precision,
             ),
@@ -394,9 +392,6 @@ class FSDPTest(MultiProcessTestCase):
 
     def _check_backward_prefetch(self, fsdp_model, backward_prefetch):
         self.assertEqual(backward_prefetch, fsdp_model.backward_prefetch)
-
-    def _check_forward_prefetch(self, fsdp_model, forward_prefetch):
-        self.assertEqual(forward_prefetch, fsdp_model.forward_prefetch)
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):
@@ -536,7 +531,6 @@ class FSDPTest(MultiProcessTestCase):
         lr=0.01,
         cpu_offload=CPUOffload(),
         backward_prefetch=None,
-        forward_prefetch=False,
         sharding_strategy=None,
         mixed_precision=None,
         save_model=True,
@@ -572,7 +566,6 @@ class FSDPTest(MultiProcessTestCase):
                 fsdp_init_mode=fsdp_init_mode,
                 cpu_offload=cpu_offload,
                 backward_prefetch=backward_prefetch,
-                forward_prefetch=forward_prefetch,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mixed_precision,
             )
@@ -584,7 +577,6 @@ class FSDPTest(MultiProcessTestCase):
             model,
             cpu_offload=cpu_offload,
             backward_prefetch=backward_prefetch,
-            forward_prefetch=forward_prefetch,
             sharding_strategy=sharding_strategy,
             mixed_precision=mixed_precision,
         )
