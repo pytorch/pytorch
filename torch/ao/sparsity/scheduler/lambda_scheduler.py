@@ -28,11 +28,11 @@ class LambdaSL(BaseScheduler):
         self.sparsifier = sparsifier
 
         if not isinstance(sl_lambda, list) and not isinstance(sl_lambda, tuple):
-            self.sl_lambdas = [sl_lambda] * len(sparsifier.tensor_groups)
+            self.sl_lambdas = [sl_lambda] * len(sparsifier.groups)
         else:
-            if len(sl_lambda) != len(sparsifier.tensor_groups):
+            if len(sl_lambda) != len(sparsifier.groups):
                 raise ValueError("Expected {} lr_lambdas, but got {}".format(
-                    len(sparsifier.tensor_groups), len(sl_lambda)))
+                    len(sparsifier.groups), len(sl_lambda)))
             self.sl_lambdas = list(sl_lambda)
         super(LambdaSL, self).__init__(sparsifier, last_epoch, verbose)
 

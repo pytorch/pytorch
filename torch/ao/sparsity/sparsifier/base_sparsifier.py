@@ -22,7 +22,7 @@ class BaseSparsifier(abc.ABC):
     Abstract methods that need to be implemented:
 
     - update_mask: Function to compute a new mask for all keys in the
-        `tensor_groups`.
+        `groups`.
 
     Args:
         - model [nn.Module]: model to configure. The model itself is not saved
@@ -47,14 +47,14 @@ class BaseSparsifier(abc.ABC):
             self.defaults = dict()
 
         self.state: Dict[str, Dict] = defaultdict(dict)
-        self.tensor_groups = []
+        self.groups = []
         self.enable_mask_update = True
 
     def __getstate__(self):
         return {
             'defaults': self.defaults,
             'state': self.state,
-            'tensor_groups': self.tensor_groups,
+            'groups': self.groups,
         }
 
     def __setstate__(self, state):
@@ -62,7 +62,7 @@ class BaseSparsifier(abc.ABC):
 
     def __repr__(self):
         format_string = self.__class__.__name__ + ' ('
-        for i, sparse_args in enumerate(self.tensor_groups):
+        for i, sparse_args in enumerate(self.groups):
             module = sparse_args['module']
             format_string += '\n'
             format_string += f'\tModule Group {i}\n'
@@ -79,25 +79,25 @@ class BaseSparsifier(abc.ABC):
 
         It contains:
         * state - current state of the sparsification.
-        * tensor_groups - a list containing all sparsity configuration groups
+        * groups - a list containing all sparsity configuration groups
             with the key 'tensor_fqn' specifying the path to the sparsified tensor within a model
 
         TODO: Need a clean way of loading the state of the "prepared" module
         """
 
 
-        tensor_groups = [
+        groups = [
             dict(filter(lambda key_value: key_value[0] not in KEYS_NOT_IN_STATE_DICT , mg.items()))
-            for mg in self.tensor_groups
+            for mg in self.groups
         ]
 
         return {
             'state': self.state,
-            'tensor_groups': tensor_groups,
+            'groups': groups,
         }
 
     def load_state_dict(self, state_dict, strict=True):
-        tensor_groups = copy.deepcopy(state_dict['tensor_groups'])
+        groups = copy.deepcopy(state_dict['groups'])
         states = state_dict['state']
         for tensor_fqn, s in states.items():
             arg_info = get_arg_info_from_tensor_fqn(self.model, tensor_fqn)
@@ -118,10 +118,10 @@ class BaseSparsifier(abc.ABC):
                 mask = s.pop('mask')
                 p.mask = mask
 
-            for mg in tensor_groups:
+            for mg in groups:
                 if mg['tensor_fqn'] == tensor_fqn:
                     mg.update(arg_info)
-        self.__setstate__({'state': states, 'tensor_groups': tensor_groups})
+        self.__setstate__({'state': states, 'groups': groups})
 
     def make_config_from_model(self, model, SUPPORTED_MODULES=SUPPORTED_MODULES, NEEDS_ZEROS=None):
         self.config = []
@@ -181,13 +181,13 @@ class BaseSparsifier(abc.ABC):
                         "agree!".format(key)
                     )
             local_args.update(info_from_tensor_fqn)
-            self.tensor_groups.append(local_args)
+            self.groups.append(local_args)
         self._prepare()
 
     def _prepare(self, *args, **kwargs):
         r"""Adds mask parametrization to the layer weight
         """
-        for config in self.tensor_groups:
+        for config in self.groups:
             module = config['module']
             tensor_name = config['tensor_name']
             parametrization = config.get('parametrization', FakeSparsity)
@@ -250,7 +250,7 @@ class BaseSparsifier(abc.ABC):
             >>> print(model.submodule2.linear42.sparse_params)
             {'foo': 42, 'bar': 24, 'baz': 0.1}
         """
-        for config in self.tensor_groups:
+        for config in self.groups:
             module = config['module']
             tensor_name = config['tensor_name']
             parametrize.remove_parametrizations(module, tensor_name,
@@ -277,7 +277,7 @@ class BaseSparsifier(abc.ABC):
         if not self.enable_mask_update:
             return
         with torch.no_grad():
-            for config in self.tensor_groups:
+            for config in self.groups:
                 self.update_mask(**config)
 
     @abc.abstractmethod
