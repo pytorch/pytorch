@@ -18315,6 +18315,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_embedding,
         error_inputs_func=error_inputs_embedding,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -18699,9 +18700,6 @@ op_db: List[OpInfo] = [
             # FIXME: sum reduces all dimensions when dim=[]
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
-            # FIXME: sum does not support passing None to dim
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none'),
-            DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_none_keepdim'),
             # FIXME: improve precision
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                          dtypes=[torch.float16]),
