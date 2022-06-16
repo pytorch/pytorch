@@ -1228,12 +1228,19 @@ class TestFunctionalIterDataPipe(TestCase):
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
         _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
+
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}),
+                lambda x, y: x + y, input_col=("x", "y"), output_col="z")
+        p_fn_n1 = partial(fn_n1, d1=1)
+        _helper(lambda data: _dict_update(data, {"x": 1 + data["y"]}), p_fn_n1,
+                input_col="y", output_col="x")
         # The key of input column is not in dict
         with self.assertRaises(KeyError):
             _helper(None, fn_1n, "a")
         # Unmatched input columns with fn arguments
         with self.assertRaises(TypeError):
             _helper(None, fn_n1, "y")
+            _helper(None, lambda x, y: x + y, input_col="x")
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
