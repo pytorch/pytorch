@@ -14,6 +14,8 @@ from torch.distributed._shard.sharding_spec import (
 from torch.distributed._shard.sharding_spec._internals import (
     _check_shard_metadata_pair_overlap,
 )
+from torch.distributed._shard.sharded_tensor.shard import Shard
+
 
 from .metadata import (
     BytesStorageMetadata,
@@ -122,7 +124,6 @@ def _compute_sharded_tensor_md(
         one_smd = ShardStorageMetadata(
             shard_metadata=shard_md,
             storage_key=shard_storage_key,
-            length=storage_size,
         )
         smd.append(one_smd)
 
@@ -207,11 +208,18 @@ def _prepare_sharded_tensor_read(
         `sharded_tensor_out`'s local shards load from the persisted sharded
         tensor.
     """
+    return _prepare_generic_tensor_read(
+        metadata.storage_metadata,
+        sharded_tensor_out.local_shards())
+
+def _prepare_generic_tensor_read(
+    checkpoint_shards: List[ShardStorageMetadata], local_shards: List[Shard]
+) -> List[TensorReadRequest]:
     read_reqs = []
     # this is a naive quadratic algo that can be optimized later
-    for shard in sharded_tensor_out.local_shards():
+    for shard in local_shards:
         # scan all mds looking for chunks
-        for storage_md in metadata.storage_metadata:
+        for storage_md in checkpoint_shards:
             shard_md_from_storage = storage_md.shard_metadata
 
             # do they overlap?

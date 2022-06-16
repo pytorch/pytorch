@@ -16,8 +16,6 @@ class ShardStorageMetadata:
     shard_metadata: ShardMetadata
     # storage key used for this particular Shard
     storage_key: str
-    # Length in bytes for this shard
-    length: int
 
 
 # Metadata for each param.
