@@ -2659,6 +2659,9 @@ Tensor &frobenius_norm_out(const Tensor& self,
     bool keepdim,
     Tensor& result) {
   auto result_ = frobenius_norm_impl(self, dim, keepdim);
+  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out in frobenius_norm_impl.
+  //    However, norm_out and sqrt_out do not support automatic differentiation.
+  //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
   at::native::resize_output(result, result_.sizes());
   result.copy_(result_);
   return result;
