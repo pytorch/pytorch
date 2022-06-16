@@ -1060,14 +1060,18 @@ Arguments:
 
           .def(
               "reduce",
-              &::c10d::ProcessGroup::reduce,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 const ::c10d::ReduceOptions& opts) {
+                return ::c10d::ops::reduce(self, tensors, opts);
+              },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::ReduceOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "reduce",
-              [](::c10d::ProcessGroup& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                  at::Tensor& x,
                  int rootRank,
                  ::c10d::ReduceOp op) {
@@ -1075,7 +1079,7 @@ Arguments:
                 opts.reduceOp = op;
                 opts.rootRank = rootRank;
                 std::vector<at::Tensor> xs = {x};
-                return pg.reduce(xs, opts);
+                return ::c10d::ops::reduce(pg, xs, opts);
               },
               py::arg("tensor"),
               py::arg("root"),
