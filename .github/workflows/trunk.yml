@@ -260,5 +260,4 @@ jobs:
 
   buck-build-test:
     name: buck-build-test
-    if: ${{ false }}
     uses: ./.github/workflows/_buck-build-test.yml
