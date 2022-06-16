@@ -167,6 +167,8 @@ make_fx_failures = {
     xfail('tensor_split'),
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
+    # segfaults
+    skip('block_diag'),
 }
 
 

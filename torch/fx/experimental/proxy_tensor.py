@@ -41,7 +41,7 @@ def enable_strict(val):
 
 def wrap_output(real_out, proxy_out):
     def wrap_with_proxy(e, proxy):
-        if type(e) == torch.Tensor:
+        if isinstance(e, torch.Tensor):
             with no_dispatch():
                 return ProxyTensor(e, proxy)
         else:
@@ -72,6 +72,12 @@ def proxy_call(func_overload, args, kwargs=None):
     def unwrap_proxy(e):
         return e.proxy if isinstance(e, ProxyTensor) else e
 
+    def unwrap_fake(e):
+        if isinstance(e, ProxyTensor):
+            with no_dispatch():
+                return FakeTensor(e.fake_mode, create_meta(e), e.device)
+        return e
+
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
 
@@ -82,9 +88,7 @@ def proxy_call(func_overload, args, kwargs=None):
         args[0].proxy = proxy_out
         proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
-    with no_dispatch():
-        real_out = func_overload(*args, **kwargs)
-
+    real_out = func_overload(*pytree.tree_map(unwrap_fake, args), **pytree.tree_map(unwrap_fake, kwargs))
     return wrap_output(real_out, proxy_out)
 
 class ProxyTensor(torch.Tensor):
@@ -119,6 +123,8 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
+        if func_overload == torch.ops.prim.device.default:
+            return args[0].fake_device
         return proxy_call(func_overload, args, kwargs)
 
 
