@@ -699,7 +699,7 @@ def run_tests(argv=UNITTEST_ARGS):
 
         pr.disable()
         stats = Stats(pr)
-        stats.sort_stats('tottime').print_stats(30)
+        stats.sort_stats('cumtime').print_stats(100)
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
