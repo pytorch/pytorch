@@ -56,10 +56,10 @@ TensorFloat-32(TF32) on Nvidia Ampere devices
 
 On Ampere Nvidia GPUs, PyTorch can use TensorFloat32 (TF32) to speed up mathematically intensive operations, in particular matrix multiplications and convolutions.
 When an operation is performed using TF32 tensor cores, only the first 10 bits of the input mantissa are read.
-This elision leads to less accurate results, and surprising results (e.g., multiplying a matrix by the identity matrix produces results that are different from the input).
-By default, this option is disabled for matrix multiplications and enabled for convolutions, although most neural network workloads have the same convergence behavior when using TF32 as they have with fp32.
-However, if better throughput is desired for matrix multiplications, TF32 can be turned on with ``torch.backends.cuda.matmul.allow_tf32 = True``.
-Conversely, if better accuracy is desired for convolutions, TF32 can be turned off with ``torch.backends.cudnn.allow_tf32 = False``.
+This may reduce accuracy and produce surprising results (e.g., multiplying a matrix by the identity matrix may produce results that are different from the input).
+By default, TF32 tensor cores are disabled for matrix multiplications and enabled for convolutions, although most neural network workloads have the same convergence behavior when using TF32 as they have with fp32.
+We recommend enabling TF32 tensor cores for matrix multiplications with ``torch.backends.cuda.matmul.allow_tf32 = True`` if your network does not need full float32 precision.
+If your network needs full float32 precision for both matrix multiplications and convolutions, then TF32 tensor cores can also be disabled for convolutions with ``torch.backends.cudnn.allow_tf32 = False``.
 
 For more information see :ref:`TensorFloat32<tf32_on_ampere>`.
 
