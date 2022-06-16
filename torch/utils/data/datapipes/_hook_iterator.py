@@ -171,7 +171,8 @@ def hook_iterator(namespace, profile_name):
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
                 if torch.autograd._profiler_enabled():
-                    return next_func(*args, **kwargs)
+                    with profiler_record_fn_context():
+                        return next_func(*args, **kwargs)
                 else:
                     return next_func(*args, **kwargs)
 
