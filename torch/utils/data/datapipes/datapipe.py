@@ -110,8 +110,9 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     str_hook: Optional[Callable] = None
     repr_hook: Optional[Callable] = None
     _valid_iterator_id: Optional[int] = None
+    _number_of_samples_yielded: int = 0
     _restored: bool = False
-    _fast_forward_iterator = None
+    _fast_forward_iterator: Optional[Iterator] = None
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
