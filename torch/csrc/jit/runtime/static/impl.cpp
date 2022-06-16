@@ -1350,19 +1350,10 @@ void BlockRunner::benchmark(
                 << planner_->total_reused_tensors() << std::endl;
     }
   }
-
-  auto unsupported_nodes_count = results.total_nodes_count -
-      results.out_nodes_count - results.native_nodes.size();
   std::cout << "Total number of 'out' variant nodes/total number of nodes: "
             << results.out_nodes_count << "/" << results.total_nodes_count
             << " ("
             << 100.0 * (results.out_nodes_count) /
-          static_cast<float>(results.total_nodes_count)
-            << "%)" << std::endl;
-  std::cout << "Total number of nodes not covered by SR/total number of nodes: "
-            << unsupported_nodes_count << "/" << results.total_nodes_count
-            << " ("
-            << 100.0 * (unsupported_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << std::endl;
 

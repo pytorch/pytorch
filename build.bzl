@@ -46,7 +46,7 @@ def define_targets(rules):
     ] + rules.glob(["aten/src/ATen/templates/*"])
 
     gen_aten_cmd = " ".join([
-        "$(execpath //torchgen:gen)",
+        "$(location //torchgen:gen)",
         "--install_dir=$(RULEDIR)",
         "--source-path aten/src/ATen",
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
@@ -99,7 +99,7 @@ def define_targets(rules):
         ],
         tools = ["//tools/setup_helpers:generate_code"],
         outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
-        cmd = "$(execpath //tools/setup_helpers:generate_code) " +
+        cmd = "$(location //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
@@ -119,7 +119,7 @@ def define_targets(rules):
             ":version.txt",
         ],
         outs = ["torch/csrc/api/include/torch/version.h"],
-        cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
+        cmd = "$(location //tools/setup_helpers:gen_version_header) " +
               "--template-path $(location :torch/csrc/api/include/torch/version.h.in) " +
               "--version-path $(location :version.txt) --output-path $@ ",
         tools = ["//tools/setup_helpers:gen_version_header"],
@@ -155,8 +155,6 @@ GENERATED_H_CORE = [
     "CPUFunctions_inl.h",
     "CompositeExplicitAutogradFunctions.h",
     "CompositeExplicitAutogradFunctions_inl.h",
-    "CompositeExplicitAutogradNonFunctionalFunctions.h",
-    "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "CompositeImplicitAutogradFunctions.h",
     "CompositeImplicitAutogradFunctions_inl.h",
     "MetaFunctions.h",
@@ -193,7 +191,6 @@ GENERATED_CPP = [
     "RegisterZeroTensor.cpp",
     "RegisterMeta.cpp",
     "RegisterCompositeExplicitAutograd.cpp",
-    "RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "CompositeViewCopyKernels.cpp",
     "RegisterSchema.cpp",
     "RegisterFunctionalization_0.cpp",

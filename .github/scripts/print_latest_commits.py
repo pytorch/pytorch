@@ -5,6 +5,15 @@ import rockset  # type: ignore[import]
 import os
 import re
 
+regex = {
+    "^pull+": False,
+    "^trunk+": False,
+    "^lint+": False,
+    "^linux-binary+": False,
+    "^android-tests+": False,
+    "^windows-binary+": False,
+}
+
 class WorkflowCheck(NamedTuple):
     workflowName: str
     name: str
@@ -63,20 +72,14 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
 def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
     workflow_checks = get_commit_results(commit, results)
 
-    regex = {
-        "pull": False,
-        "trunk": False,
-        "lint": False,
-        "linux-binary": False,
-        "android-tests": False,
-        "windows-binary": False,
-    }
+    for required_check in regex:
+        regex[required_check] = False
 
     for check in workflow_checks:
         workflowName = check['workflowName']
         conclusion = check['conclusion']
         for required_check in regex:
-            if re.match(required_check, workflowName, flags=re.IGNORECASE):
+            if re.search(required_check, workflowName, flags=re.IGNORECASE):
                 if conclusion != 'success':
                     if check['name'] == "pull / win-vs2019-cuda11.3-py3" and conclusion == 'skipped':
                         pass
@@ -88,9 +91,8 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
         if workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
             return (False, workflowName + " checks were not successful")
 
-    missing_workflows = [x for x in regex.keys() if not regex[x]]
-    if len(missing_workflows) > 0:
-        return (False, "missing required workflows: " + ", ".join(missing_workflows))
+    if not all(regex.values()):
+        return (False, "missing required workflows")
 
     return (True, "")
 

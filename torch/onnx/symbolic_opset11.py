@@ -1,5 +1,3 @@
-"""This file exports ONNX ops for opset 11."""
-
 import sys
 import warnings
 
@@ -12,6 +10,8 @@ from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
+
+# This file exports ONNX ops for opset 11
 
 
 @symbolic_helper.parse_args("v", "f", "f")
@@ -1089,7 +1089,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.export_training:
+    if scale_grad_by_freq and GLOBALS.training_mode:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )

@@ -7705,8 +7705,7 @@ TEST(StaticRuntime, autogen_outer) {
       /*check_resize=*/true);
 }
 
-// Disabling the test because JIT alias analysis does not support linalg_svdvals at this point.
-TEST(StaticRuntime, DISABLED_autogen_linalg_svdvals) {
+TEST(StaticRuntime, autogen_linalg_svdvals) {
   const std::string script = R"IR(
     graph(%A: Tensor):
         %bias: None = prim::Constant()

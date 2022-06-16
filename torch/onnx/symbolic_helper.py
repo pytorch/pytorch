@@ -1331,6 +1331,10 @@ def _set_operator_export_type(operator_export_type):
     GLOBALS.operator_export_type = operator_export_type
 
 
+def _set_training_mode(training_mode):
+    GLOBALS.training_mode = training_mode
+
+
 # This function is for debug use only.
 # onnx_shape_inference = False by default.
 def _set_onnx_shape_inference(onnx_shape_inference: bool):
