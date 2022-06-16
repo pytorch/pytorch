@@ -45,12 +45,6 @@ namespace autograd {
 namespace profiler {
 
 namespace {
-// TODO: consider TLS (tid + tls counter)
-uint64_t next_correlation_id() {
-  static std::atomic<uint64_t> corr_id_{1};
-  return corr_id_++;
-}
-
 inline int64_t getTimeUs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
@@ -386,7 +380,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     // reenable the forward/backward correlation when kineto fix the following
     // raw pointer
     //    GenericTraceActivity.flow.linkedActivity
-
     /*
     std::unordered_map<uint64_t, libkineto::GenericTraceActivity*>
         tidSeq2activity;
@@ -538,13 +531,7 @@ std::unique_ptr<at::ObserverContext> onFunctionEnter(
   if (!state_ptr) {
     return nullptr;
   }
-  auto corr_id = next_correlation_id();
-  if (fn.scope() == at::RecordScope::USER_SCOPE) {
-    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
-  } else {
-    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
-  }
-  return state_ptr->record_queue_.getSubqueue()->begin_op(fn, corr_id);
+  return state_ptr->record_queue_.getSubqueue()->begin_op(fn);
 }
 
 // @lint-ignore CLANGTIDY clang-diagnostic-unused-parameter
