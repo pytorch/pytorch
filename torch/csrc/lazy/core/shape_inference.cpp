@@ -446,11 +446,15 @@ std::vector<Shape> compute_shape_expand(const at::Tensor & self, c10::SymIntArra
                      self.sizes().end());
   std::vector<int64_t> target_size(_sizes.size());
   for (const auto idx : c10::irange(_sizes.size())) {
-    std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode = _sizes[idx].toSymbolicIntNode();
-    auto lazySymIntNode = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(symbolicIntNode);
-    auto size_node = lazySymIntNode->node_;
-    auto static_value = std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)->getStaticValue();
-    target_size[idx] = static_value == -1 ? padded_self[idx] : static_value;
+    if (_sizes[idx].is_symbolic()) {
+      std::shared_ptr<c10::SymbolicIntNode> symbolicIntNode = _sizes[idx].toSymbolicIntNode();
+      auto lazySymIntNode = std::dynamic_pointer_cast<torch::lazy::SymbolicIntNode>(symbolicIntNode);
+      auto size_node = lazySymIntNode->node_;
+      auto static_value = std::dynamic_pointer_cast<torch::lazy::DimensionNode>(size_node)->getStaticValue();
+      target_size[idx] = static_value;
+    } else {
+      target_size[idx] = _sizes[idx].data();
+    }
   }
   return {Shape(self.scalar_type(), target_size)};
 }
