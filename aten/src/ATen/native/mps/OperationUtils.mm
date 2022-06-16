@@ -253,19 +253,18 @@ void printTensorNDArray(const Tensor& t) {
 Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSShape *mpsShape) : _tensor(src)
 {
   TORCH_CHECK(src.is_mps(), "Placeholder storage has not been allocated on MPS device!");
-    // extract the pointer to MTLBuffer from the Tensor's storage
+  // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
-  if (src.is_view()) {
+  // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
+  if (src.is_view() || !src.is_contiguous()) {
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
     _tensor = gatherViewTensor(src);
-    if (_tensor.has_storage()) {
-      srcBuf = getMTLBufferStorage(_tensor);
-    } else {
-      // keep the contiguous src in placeholder to be able to retrieve the implicitly
-      // created "_tensor" when we return from constructor
+    if (!_tensor.has_storage()) {
+      // if we cannot gather, we make the the tensor contiguous implicitly, and keep
+      // it in placeholder to be able to retrieve it when we return from constructor
       _tensor = src.contiguous();
-      srcBuf = getMTLBufferStorage(_tensor);
     }
+    srcBuf = getMTLBufferStorage(_tensor);
   }
   // tensor.numel() could be zero, but tensor is valid as long as the buffer size is non-zero.
   // if buffer size is zero in here, it's not a user error. It could be a missing check for
