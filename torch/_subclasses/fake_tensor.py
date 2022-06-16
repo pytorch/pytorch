@@ -7,6 +7,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch._subclasses.meta_utils import MetaConverter
 from typing import Union, Callable
 from torch._ops import OpOverload
+from torch.overrides import TorchFunctionMode
 from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatch_mode
 import weakref
 import functools
@@ -18,11 +19,11 @@ aten = torch.ops.aten
 
 
 @dataclass
-class UnsupportedFakeTensorException(Exception):
+class UnsupportedFakeTensorException(RuntimeError):
     reason: str
 
 @dataclass
-class DynamicOutputShapeException(Exception):
+class DynamicOutputShapeException(RuntimeError):
     func: OpOverload
 
 
@@ -113,7 +114,10 @@ class FakeTensorConverter(object):
             raise UnsupportedFakeTensorException("sparse nyi in meta tensors")
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
-        out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
+        with no_dispatch():
+            out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
+        if type(t) is torch.nn.Parameter:
+            out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
         self.tensor_memo[t] = out
         return out
 
@@ -335,9 +339,8 @@ class FakeTensor(torch.Tensor):
 
 
 class FakeTensorMode(TorchDispatchMode):
-    def __init__(self, allow_cpu_fallback=True, allow_non_fake_inputs=False):
+    def __init__(self, allow_cpu_fallback=True):
         self.allow_cpu_fallback = allow_cpu_fallback
-        self.allow_non_fake_inputs = allow_non_fake_inputs
         self.fake_tensor_converter = FakeTensorConverter()
 
         # [in_kernel_invocation]
@@ -395,18 +398,16 @@ class FakeTensorMode(TorchDispatchMode):
             # and just support constructors. TODO: extend more broadly
             conversion_made = False
 
-            def convert_non_fake_tensor(x):
+            def check_non_fake_tensor(x):
                 nonlocal conversion_made
-                if isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor):
-                    conversion_made = True
-                    return self.from_tensor(x)
-                else:
-                    return x
+                conversion_made = conversion_made or (
+                    isinstance(x, torch.Tensor) and not isinstance(x, FakeTensor)
+                )
 
-            args = tree_map(convert_non_fake_tensor, args)
-            kwargs = tree_map(convert_non_fake_tensor, kwargs)
+            tree_map(check_non_fake_tensor, args)
+            tree_map(check_non_fake_tensor, kwargs)
 
-            if conversion_made and not self.allow_non_fake_inputs:
+            if conversion_made:
                 raise Exception(
                     "Invoking operators with non-Fake Tensor inputs in FakeTensorMode is not yet supported. "
                     f"Please convert all Tensors to FakeTensors first. Found in {func}"
@@ -439,8 +440,7 @@ class FakeTensorMode(TorchDispatchMode):
             return tree_map(partial(wrap, device=common_device), r)
 
     def from_tensor(self, tensor):
-        with no_dispatch():
-            return self.fake_tensor_converter(self, tensor)
+        return self.fake_tensor_converter(self, tensor)
 
 
 def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
@@ -479,3 +479,25 @@ def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
     # and the cpu inputs should be temporary. just convert outputs to meta
     # and continue
     return tree_map(MetaConverter(), r)
+
+
+# Just for use to allow copying a module to fake tensors,
+# does not apply elsewhere
+class FakeCopyMode(TorchFunctionMode):
+    def __init__(self, fake_mode):
+        self.fake_mode = fake_mode
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs if kwargs else {}
+
+        if func is not torch.Tensor.__deepcopy__:
+            with torch._C.DisableTorchFunction():
+                return func(*args, **kwargs)
+
+        assert len(args) == 2 and len(kwargs) == 0
+        tensor, memo = args
+
+        if id(tensor) in memo:
+            return memo[id(tensor)]
+
+        return self.fake_mode.from_tensor(tensor)
