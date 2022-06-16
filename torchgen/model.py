@@ -1188,7 +1188,13 @@ class FunctionSchema:
             else:
                 # mutable keyward arguments whose name has _scratch_ prefix are
                 # scratch tensors for memory planning and should not be returned
-                assert len([arg for arg in self.arguments.out if not arg.name.startswith("_scratch_")]) == len(
+                assert len(
+                    [
+                        arg
+                        for arg in self.arguments.out
+                        if not arg.name.startswith("_scratch_")
+                    ]
+                ) == len(
                     self.returns
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
@@ -1264,7 +1270,9 @@ class FunctionSchema:
         the result into an explicitly provided out argument.
         """
         is_out = bool(self.arguments.out)
-        is_scratch = bool([arg for arg in self.arguments.out if arg.name.startswith("_scratch_")])
+        is_scratch = bool(
+            [arg for arg in self.arguments.out if arg.name.startswith("_scratch_")]
+        )
         is_inplace = self.name.name.inplace
         is_mutable = any(
             a.annotation is not None and a.annotation.is_write

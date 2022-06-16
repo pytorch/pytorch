@@ -611,9 +611,9 @@ check_inplace(out, sizes, options);
 const auto& out = outputs_[output_idx].get();
 resize_out(out, sizes, strides, options);
 {create_proxy}"""
-        elif k is SchemaKind.mutable:
+        elif k in [SchemaKind.mutable, SchemaKind.scratch]:
             raise AssertionError(
-                "SchemaKind.mutable structured operators are currently not supported"
+                f"{k} structured operators are currently not supported"
             )
         else:
             assert_never(k)
