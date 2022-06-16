@@ -37,6 +37,7 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
     init_from_local_shards,
 )
+import torch.distributed.algorithms._checkpoint.checkpoint_wrapper as cw
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.utils import (
     _replace_by_prefix,
@@ -1795,9 +1796,13 @@ class FullyShardedDataParallel(nn.Module):
 
         offload_to_cpu = self._state_dict_config.offload_to_cpu
         cpu_device = torch.device("cpu")
+        clean_prefix = clean_tensor_name(prefix)
+        prefixed_param_names = set(
+            clean_tensor_name(n.replace(cw._CHECKPOINT_PREFIX + ".", ""))
+            for n in self.params[0]._param_names
+        ) if self.params else None
         for key in state_dict:
             clean_key = clean_tensor_name(key)
-            clean_prefix = clean_tensor_name(prefix)
             # Strip prefix out of key if needed as buffer names and param names
             # do not have prefix considered as they are not computed in `state_dict`
             # call.
@@ -1813,11 +1818,17 @@ class FullyShardedDataParallel(nn.Module):
                 if offload_to_cpu and state_dict[key].device != cpu_device:
                     state_dict[key] = state_dict[key].to(cpu_device)
                 continue
+            if not self.params:
+                continue
             # Clone non-ignored parameters before exiting the
             # `_summon_full_params()` context
-            if clean_key not in self._ignored_param_names and \
-                    not getattr(state_dict[key], "_has_been_cloned", False):
+            if clean_key in prefixed_param_names:
                 try:
+                    if getattr(state_dict[key], "_has_been_cloned", False):
+                        warnings.warn(
+                            f"[Rank {self.rank}] cloning tensor that is "
+                            f"already cloned!\nkey={key}\nclean_key={key}\n"
+                            f"prefix={prefix}\nclean_prefix={clean_prefix}")
                     state_dict[key] = state_dict[key].clone().detach()
                     state_dict[key]._has_been_cloned = True  # type: ignore[attr-defined]
                 except BaseException as e:

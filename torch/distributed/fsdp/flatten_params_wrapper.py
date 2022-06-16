@@ -23,9 +23,7 @@ from typing import (
 import torch
 import torch.nn as nn
 from torch import Tensor
-
 from torch.distributed.utils import _replace_by_prefix
-
 
 ParamOffset = Tuple[int, int]
 SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
