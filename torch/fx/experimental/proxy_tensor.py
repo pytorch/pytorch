@@ -214,7 +214,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             return wrap_output(real_out, proxy_out)
 
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=False):
+def make_fx(f, decomposition_table=None, trace_factory_functions=True):
     if decomposition_table is None:
         decomposition_table = {}
 
