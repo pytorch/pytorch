@@ -11474,9 +11474,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_equal,
            supports_autograd=False,
            skips=(
-               DecorateInfo(unittest.skip("Doesn't support bool return"),
+               DecorateInfo(unittest.skip("Tracer doesn't support bool return"),
                             'TestJit', 'test_variant_consistency_jit'),
-
            )),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
