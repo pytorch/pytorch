@@ -318,32 +318,6 @@ def to_real_dtype(dtype: torch.dtype):
 # perform the pointwise portion in opmath, but don't maintain it between the
 # pointwise portion and the reduction
 
-@register_decomposition(aten.l1_loss)
-def l1_loss(
-    self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
-) -> Tensor:
-    loss = (self - target).abs()
-    # PyTorch semantics result in the output of l1_loss having the corresponding
-    # real dtype to self.  This may not happen without explicit casting if say
-    # self: complex64 and target: float64, which results in loss: float64
-    float_type = to_real_dtype(self.dtype)
-    return apply_loss_reduction(loss, reduction).to(float_type)
-
-
-@register_decomposition(aten.l1_loss_backward)
-@pw_cast_for_opmath
-def l1_loss_backward(
-    grad_output: Tensor,
-    self: Tensor,
-    target: Tensor,
-    reduction: int = Reduction.MEAN.value,
-):
-    sign = torch.sign(self - target)
-
-    norm = sign / self.numel() if reduction == Reduction.MEAN.value else sign
-    return grad_output * norm
-
-
 @register_decomposition(aten.mse_loss)
 @pw_cast_for_opmath
 def mse_loss(
