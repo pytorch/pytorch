@@ -8902,12 +8902,12 @@ class DistributedTest:
             self.assertEqual(dummy_hook_state.process_group, _get_default_group())
 
             # Check that a random state was restored properly:
-            # :met:`np.random.RandomState.get_state` returns a tuple with entries:
-            # `bit_generator` - str,
-            # `state.key` - ndarray dtype[uint32],
-            # `state.pos` - int,
-            # `has_gauss` - int,
-            # `gauss` - float
+            # ``np.random.RandomState.get_state`` returns a tuple with entries:
+            # ``bit_generator`` - str,
+            # ``state.key`` - ndarray dtype[uint32],
+            # ``state.pos`` - int,
+            # ``has_gauss`` - int,
+            # ``gauss`` - float
             #  (refer to https://github.com/numpy/numpy/blob/266aad7478bc7fbcc55eea7f942a0d373b838396/numpy/random/mtrand.pyi)
             # To make sure random state was restored properly, all entries should equal the original
             for entry1, entry2 in zip(hook_state.rng.get_state(), dummy_hook_state.rng.get_state()):
@@ -8928,11 +8928,9 @@ class DistributedTest:
                 optimizer.step()
                 dummy_optimizer.step()
 
-            original_grads = [p.grad for p in ddp_model.parameters()]
-            dummy_grads = [p.grad for p in dummy_ddp_model.parameters()]
-
             # Check that gradients after 10 epochs are the same
-            self.assertEqual(original_grads, dummy_grads)
+            for orig_param, dummy_param in zip(ddp_model.parameters(), dummy_ddp_model.parameters()):
+                self.assertEqual(orig_param.grad, dummy_param.grad)
 
             if rank == 0:
                 os.remove(chkpt_file)
