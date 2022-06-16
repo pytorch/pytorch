@@ -1163,7 +1163,13 @@ Arguments:
 
           .def(
               "scatter",
-              &::c10d::ProcessGroup::scatter,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& output_tensors,
+                 const std::vector<std::vector<at::Tensor>>& input_tensors,
+                 const ::c10d::ScatterOptions& opts) {
+                return ::c10d::ops::scatter(
+                    self, output_tensors, input_tensors, opts);
+              },
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::ScatterOptions(),
@@ -1171,7 +1177,7 @@ Arguments:
 
           .def(
               "scatter",
-              [](::c10d::ProcessGroup& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                  at::Tensor& output,
                  std::vector<at::Tensor>& input,
                  int rootRank) {
@@ -1179,7 +1185,7 @@ Arguments:
                 opts.rootRank = rootRank;
                 std::vector<std::vector<at::Tensor>> inputs = {input};
                 std::vector<at::Tensor> outputs = {output};
-                return pg.scatter(outputs, inputs, opts);
+                return ::c10d::ops::scatter(pg, outputs, inputs, opts);
               },
               py::arg("output_tensor"),
               py::arg("input_tensors"),
