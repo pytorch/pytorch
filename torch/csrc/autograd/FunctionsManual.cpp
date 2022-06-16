@@ -3647,7 +3647,11 @@ Tensor linalg_eig_backward(
     auto ret = std::move(VhgV).div_(std::move(Econj));
 
     if (gL.defined()) {
-      ret.diagonal(0, -2, -1).copy_(gL);
+      if (at::isTensorSubclassLike(gL)) {
+        ret = ret.diagonal_scatter(gL, 0, -2, -1);
+      } else {
+        ret.diagonal(0, -2, -1).copy_(gL);
+      }
     }
     return ret;
   }();
