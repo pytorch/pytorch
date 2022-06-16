@@ -17,6 +17,8 @@ from ._flat_param import FlatParamHandle
 FLAT_PARAM = "flat_param"
 FPW_MODULE = "_fpw_module"
 
+__all__ = ["FlattenParamsWrapper"]
+
 
 def _post_state_dict_hook(
     module: nn.Module, state_dict: Dict[str, Any], prefix: str, *args: Any
