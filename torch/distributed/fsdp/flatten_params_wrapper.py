@@ -238,6 +238,13 @@ class FlatParameter(nn.Parameter):
         return self._param_infos
 
     @property
+    def module(self) -> torch.nn.Module:
+        assert (
+            len(self.param_info) == 1
+            ), "The flatparameter has to wrap only one parameter."
+        return self.param_info[0].module
+
+    @property
     def _param_names(self):
         return [".".join([m, n]) if m else n for (m, _, n) in self._param_infos]
 

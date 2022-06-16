@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+import copy
+from torch.optim import SGD
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.distributed.fsdp.wrap import ParamExecOrderWrapPolicy, always_wrap_policy
@@ -40,10 +42,17 @@ class Model(torch.nn.Module):
         return (output - input).sum()
 
     @staticmethod
-    def wrap(sharding_strategy: ShardingStrategy, device: torch.device, init_policy=always_wrap_policy):
-        model = Model()
-        wrap_policy = ParamExecOrderWrapPolicy(init_policy=init_policy)
-        fsdp_model = FSDP(model, auto_wrap_policy=wrap_policy, sharding_strategy=sharding_strategy)
+    def wrap(
+        model,
+        sharding_strategy: ShardingStrategy,
+        device: torch.device,
+        wrap_policy=always_wrap_policy,
+    ):
+        fsdp_model = FSDP(
+            model,
+            auto_wrap_policy=wrap_policy,
+            sharding_strategy=sharding_strategy
+        )
         return fsdp_model.to(device)
 
 
@@ -58,9 +67,22 @@ class TestFSDPExecOrder(FSDPTest):
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     @parametrize("iters", [1, 3])
-    def test_fsdp_flatten_params_exec_order(self, sharding_strategy: ShardingStrategy, iters: int):
+    def test_fsdp_flatten_params_exec_order(
+        self,
+        sharding_strategy: ShardingStrategy,
+        iters: int
+    ):
         """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
-        fsdp_model = Model.wrap(sharding_strategy, self.device)
+        model = Model()
+        policy_exec_order = ParamExecOrderWrapPolicy(
+            init_policy=always_wrap_policy
+        )
+        fsdp_model = Model.wrap(
+            model,
+            sharding_strategy,
+            self.device,
+            policy_exec_order
+        )
         for _ in range(iters):
             input = fsdp_model.module.get_input(self.device)
             output = fsdp_model(input)
@@ -78,6 +100,53 @@ class TestFSDPExecOrder(FSDPTest):
         ]
         assert fsdp_model.use_param_exec_order_policy()
         assert not fsdp_model.is_param_exec_order_prep_stage()
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "sharding_strategy",
+        [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
+    )
+    @parametrize("iters", [1, 10])
+    def test_fsdp_accuracy(
+        self,
+        sharding_strategy: ShardingStrategy,
+        iters: int
+    ):
+        """Tests the accuracy with ParamExecOrderWrapPolicy"""
+        model = Model()
+        model_copy = copy.deepcopy(model)
+        policy_exec_order = ParamExecOrderWrapPolicy(
+            init_policy=always_wrap_policy
+        )
+        fsdp_model_1 = Model.wrap(
+            model,
+            sharding_strategy,
+            self.device,
+            policy_exec_order
+        )
+        fsdp_model_2 = Model.wrap(
+            model_copy,
+            sharding_strategy,
+            self.device,
+            always_wrap_policy
+        )
+        optim_1 = SGD(fsdp_model_1.parameters(), lr=0.1)
+        optim_2 = SGD(fsdp_model_2.parameters(), lr=0.1)
+
+        input = fsdp_model_1.module.get_input(self.device)
+        for _ in range(iters):
+            output_1 = fsdp_model_1(input)
+            loss_1 = fsdp_model_1.module.get_loss(input, output_1).to(self.device)
+            loss_1.backward()
+            optim_1.step()
+            optim_1.zero_grad()
+        for _ in range(iters):
+            output_2 = fsdp_model_2(input)
+            loss_2 = fsdp_model_2.module.get_loss(input, output_2).to(self.device)
+            loss_2.backward()
+            optim_2.step()
+            optim_2.zero_grad()
+        self.assertEqual(loss_1, loss_2)
 
 
 instantiate_parametrized_tests(TestFSDPExecOrder)
