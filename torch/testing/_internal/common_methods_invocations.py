@@ -11098,7 +11098,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_symeig,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
