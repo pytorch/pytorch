@@ -12,7 +12,7 @@ void launch_stable_sort_kernel(const TensorBase &self, int64_t dim, bool descend
                                const TensorBase &values, const TensorBase &indices);
 
 inline bool should_use_small_sort(const TensorBase &self, int64_t dim) {
-  return self.size(dim) <= 4096
+  return self.size(dim) <= 4096;
 }
 
 void sortKeyValueInplace(

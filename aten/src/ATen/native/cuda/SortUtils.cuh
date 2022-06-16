@@ -80,9 +80,9 @@ __device__ inline void bitonicSort(K *keys,
 // at::cuda::detail::TensorInfo version
 // Sorts (key, value) pairs (in different tensors) in-place; i.e.,
 // modifies the input `keys` and `values`
-template <int KeyDims, int ValueDims, int block_dim_x, int block_dim_y,
+template <int KeyDims, int ValueDims, int block_dim_x, int max_block_dim_y,
           typename K, typename V, typename Comparator, typename IndexType>
-C10_LAUNCH_BOUNDS_1(block_dim_x * block_dim_y)
+C10_LAUNCH_BOUNDS_1(block_dim_x * max_block_dim_y)
 __global__ void
 bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
                      IndexType keySlices,
@@ -92,11 +92,12 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
                      IndexType valueSliceStride,
                      Comparator comp) {
   // Find the slice of the tensor that we are sorting
+  // NOTE: blockDim.y may be less max_block_dim_y
   const IndexType blockIndex = getLinearBlockId<IndexType>();
-  const IndexType linearIndex = blockIndex * block_dim_y + threadIdx.y;
+  const IndexType linearIndex = blockIndex * blockDim.y + threadIdx.y;
 
   // If the entire block is out of bounds exit early
-  if (blockIndex * block_dim_y >= keySlices) {
+  if (blockIndex * blockDim.y >= keySlices) {
     return;
   }
   // It's also possible for some rows of a block to be out of bounds
@@ -106,10 +107,10 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   constexpr int items_per_thread = 2;
   constexpr int Power2SortSize = block_dim_x * items_per_thread;
 
-  // Storage for block_dim_y sorts performed in parallel
-  __shared__ K blockSharedKeys[block_dim_y][Power2SortSize];
-  __shared__ V blockSharedValues[block_dim_y][Power2SortSize];
-  __shared__ bool blockSharedValid[block_dim_y][Power2SortSize];
+  // Storage for max_block_dim_y sorts performed in parallel
+  __shared__ K blockSharedKeys[max_block_dim_y][Power2SortSize];
+  __shared__ V blockSharedValues[max_block_dim_y][Power2SortSize];
+  __shared__ bool blockSharedValid[max_block_dim_y][Power2SortSize];
 
   auto sharedKeys = blockSharedKeys[threadIdx.y];
   auto sharedValues = blockSharedValues[threadIdx.y];
