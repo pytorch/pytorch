@@ -1728,7 +1728,7 @@ class TestNLLLoss(TestCase):
         # verify if changes in shape would cause cached graph lookup problems
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
-        helper([1,1,32,32], 'mean')
+        helper([1, 1, 32, 32], 'mean')
 
     def test_bce_loss_always_nonnegative(self):
         target = torch.ones(5, device='mps')
