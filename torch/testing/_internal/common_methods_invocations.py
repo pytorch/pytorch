@@ -1448,7 +1448,7 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_input((S, S, S)), args=args)
 
 
-def sample_inputs_linalg_det_logdet(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_linalg_det_logdet_slogdet(op_info, device, dtype, requires_grad, **kwargs):
     make_fullrank = make_fullrank_matrices_with_distinct_singular_values
     make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
     batches = [(), (0, ), (3, )]
@@ -6715,16 +6715,6 @@ def sample_inputs_linalg_eigh(op_info, device, dtype, requires_grad=False, **kwa
     samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
     for sample in samples:
         sample.kwargs = {"UPLO": np.random.choice(["L", "U"])}
-        sample.output_process_fn_grad = out_fn
-        yield sample
-
-
-def sample_inputs_linalg_slogdet(op_info, device, dtype, requires_grad=False, **kwargs):
-    def out_fn(output):
-        return output[1]
-
-    samples = sample_inputs_linalg_invertible(op_info, device, dtype, requires_grad)
-    for sample in samples:
         sample.output_process_fn_grad = out_fn
         yield sample
 
@@ -12198,11 +12188,10 @@ op_db: List[OpInfo] = [
            op=torch.linalg.det,
            aliases=('det',),
            dtypes=floating_and_complex_types(),
-           backward_dtypes=floating_and_complex_types(),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            aten_name='linalg_det',
-           sample_inputs_func=sample_inputs_linalg_det_logdet,
+           sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack,
                        DecorateInfo(toleranceOverride({torch.complex64: tol(atol=1e-3, rtol=1e-3)}))],
            check_batched_gradgrad=False,
@@ -12336,8 +12325,6 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # Could not run 'aten::linalg_eigh' with arguments from the 'AutogradMeta' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -12539,7 +12526,9 @@ op_db: List[OpInfo] = [
            aten_name='linalg_slogdet',
            op=torch.linalg.slogdet,
            dtypes=floating_and_complex_types(),
-           sample_inputs_func=sample_inputs_linalg_slogdet,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack]),
     OpInfo('linalg.vander',
            aten_name='linalg_vander',
@@ -17811,11 +17800,10 @@ op_db: List[OpInfo] = [
         'logdet',
         dtypes=floating_and_complex_types(),
         supports_out=False,
-        sample_inputs_func=sample_inputs_linalg_det_logdet,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         skips=(
-            # Small regression just for complex inputs. Will fix in the next PR of this stack
-            # to make it easier to review
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad', dtypes=[torch.complex128]),
             # Could not run 'aten::where' with arguments from the 'AutogradMeta' backend.
             DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
