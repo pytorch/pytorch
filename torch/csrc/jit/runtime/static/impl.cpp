@@ -107,6 +107,20 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   return can_support;
 }
 
+namespace {
+
+// CustomClass extending torch::CustomClassHolder can be typecasted
+// to IValue StaticRuntimeMetadata is created so that we can attach
+// SR metadata to IR's prim::fork nodes. These CustomClass needs to be
+// registered first in order to be used as IValue.below is an
+// UNUSED VARIABLE but NEEDED to invoke the class_ constructor necessary
+// for class registration.
+auto sr_metadata_registerer = torch::class_<StaticRuntimeMetadata>(
+    "StaticRuntime",
+    "StaticRuntimeMetadata");
+
+} // namespace
+
 std::string dumpValueSet(
     const FastSet<const Value*>& value_set,
     const char* set_name) {
@@ -513,6 +527,10 @@ StaticModule::StaticModule(
       graph_(std::move(graph_and_module.first)),
       module_(std::move(graph_and_module.second)),
       num_inputs_(graph_->inputs().size()) {
+  sr_metadata_ = c10::make_intrusive<jit::StaticRuntimeMetadata>(opts_);
+  // recursively attach metadata to prim::fork nodes
+  attachNodeMetadata(graph_->block());
+
   // check opt flags
   if (opts.manage_output_tensors) {
     TORCH_CHECK(
@@ -620,6 +638,17 @@ size_t StaticModule::prepareBlockInfo(
 
   block_infos_.at(block).set_output_indices(std::move(output_indices));
   return cur_idx - start_idx;
+}
+
+void StaticModule::attachNodeMetadata(Block* block) {
+  for (auto* node : block->nodes()) {
+    if (node->kind() == prim::fork) {
+      node->ival_(getStaticRuntimeMetadataSymbol(), IValue(sr_metadata_));
+    }
+    for (auto* sub_block : node->blocks()) {
+      attachNodeMetadata(sub_block);
+    }
+  }
 }
 
 void StaticModule::prepareFunctionsAndConstants(

@@ -952,9 +952,10 @@ c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
 /*
   prim::fork forks the execution of a subgraph. It returns a future on which
   the corresponding aten::wait op waits until future is marked complete
-  Current implementation creates a separate instance of StaticModule and
-  corresponding StaticRuntime to handle the execution of forked subgraph.
-  Async execution is handled by aten::ParallelThreadPoolNative threadpool
+  Current implementation creates a instance of StaticModule uses it to
+  create StaticRuntime instances on the fly during runtime to handle the
+  execution of forked subgraph. Async execution is handled by
+  aten::ParallelThreadPoolNative threadpool.
 */
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::fork,
@@ -962,9 +963,10 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     [](Node* node) -> SROperator {
       auto forkedGraph = node->g(attr::Subgraph);
       Inline(*forkedGraph);
-      StaticModuleOptions opts;
-      opts.manage_output_tensors = true;
-      auto smodule = std::make_shared<StaticModule>(forkedGraph, opts);
+      auto sr_metadata = node->ival(getStaticRuntimeMetadataSymbol())
+                             .toCustomClass<StaticRuntimeMetadata>();
+      auto smodule =
+          std::make_shared<StaticModule>(forkedGraph, sr_metadata->get_opts());
 
       return [forkedGraph = std::move(forkedGraph),
               smodule = std::move(smodule)](ProcessedNode* p_node) {
