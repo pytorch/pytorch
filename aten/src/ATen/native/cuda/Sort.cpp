@@ -70,8 +70,7 @@ void sort_cuda_kernel(
     "Sort currently does not support complex dtypes on CUDA.");
 
   // use inplace algorithm for smaller input sizes without stable=True
-  const auto nsort = self.size(dim);
-  if (should_use_small_sort(nsort)) {
+  if (should_use_small_sort(self, dim)) {
     // from thc: sorted->values, indices->indices, input->self
     fillSliceWithIndex(indices, dim);
 

@@ -164,6 +164,8 @@ radixSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
                    at::cuda::detail::TensorInfo<V, IndexType> values,
                    IndexType valueSliceStride,
                    bool descending) {
+  static_assert(block_size > 0, "");
+
   // Find the slice of the tensor that we are sorting
   const IndexType linearIndex = getLinearBlockId<IndexType>();
   // Tiling the slices could have us be out of bounds, if there are a
@@ -183,14 +185,6 @@ radixSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   StridedRandomAccessor<K, IndexType> keys_iter(keys_slice, keySliceStride);
   StridedRandomAccessor<V, IndexType> values_iter(values_slice, valueSliceStride);
 
-  // If the sort size is 1, the data is already sorted
-  constexpr int Power2SortSize = block_size * items_per_thread;
-  if (Power2SortSize == 1) {
-    return;
-  }
-
-  // Otherwise, each thread is responsible for loading and storing 2
-  // elements. The sort size is guaranteed to be >= 2
   namespace cub = NO_ROCM(at_cuda_detail)::cub;
 
   using key_t = typename at::cuda::cub::detail::cuda_type<K>::type;

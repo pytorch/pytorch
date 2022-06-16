@@ -11,12 +11,8 @@ namespace native {
 void launch_stable_sort_kernel(const TensorBase &self, int64_t dim, bool descending,
                                const TensorBase &values, const TensorBase &indices);
 
-inline bool should_use_small_sort(int64_t nsort) {
-  return nsort <= 4096;
-}
-
 inline bool should_use_small_sort(const TensorBase &self, int64_t dim) {
-  return should_use_small_sort(self.size(dim));
+  return self.size(dim) <= 4096
 }
 
 void sortKeyValueInplace(
