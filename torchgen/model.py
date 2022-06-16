@@ -1304,10 +1304,14 @@ class FunctionSchema:
         if is_inplace:
             return SchemaKind.inplace
         elif is_scratch:
-            assert is_out, "invariant: all scratch operators are expected to be out= operators too"
+            assert (
+                is_out
+            ), "invariant: all scratch operators are expected to be out= operators too"
             return SchemaKind.scratch
         elif is_out:
-            assert not is_scratch, "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
+            assert (
+                not is_scratch
+            ), "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
