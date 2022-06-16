@@ -26,13 +26,13 @@
 // multiple arguments to the macro.
 #define jiterator_code(...) __VA_ARGS__
 #if defined(__CUDACC__)
-    // CPU and CUDA case
-    #define stringify_code(...) #__VA_ARGS__
-    #define jiterator_also_stringify_as(code, str_name)                    \
-        code /* define the function */                                  \
-        const std::string str_name = std::string(stringify_code(code));
+// CPU and CUDA case
+#define stringify_code(...) #__VA_ARGS__
+#define jiterator_also_stringify_as(code, str_name) \
+  code /* define the function */                    \
+      const std::string str_name = std::string(stringify_code(code));
 #else
-    // CPU only or CPU and ROCm case
-    // Only needs the function
-    #define jiterator_also_stringify_as(code, str_name) code
+// CPU only or CPU and ROCm case
+// Only needs the function
+#define jiterator_also_stringify_as(code, str_name) code
 #endif

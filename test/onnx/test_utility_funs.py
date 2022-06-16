@@ -13,7 +13,6 @@ from test_pytorch_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
-from unittest import skip
 from verify import verify
 
 import torch
@@ -37,6 +36,7 @@ from torch.onnx.symbolic_helper import (
 
 class _BaseTestCase(TestCase):
     def setUp(self):
+        super().setUp()
         torch.manual_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
@@ -1006,7 +1006,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         iter = graph.nodes()
         self.assertEqual(next(iter).kind(), "aten::erfc")
 
-    @skip("Test is flaky on trunk, see https://github.com/pytorch/pytorch/issues/78844")
     def test_custom_op_fallthrough(self):
         # Test custom op
         op_source = """
