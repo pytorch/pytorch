@@ -167,6 +167,8 @@ make_fx_failures = {
     xfail('tensor_split'),
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
+    # segfaults
+    skip('block_diag'),
 }
 
 
@@ -184,7 +186,7 @@ class TestProxyTensorOpInfo(TestCase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            new_f = make_fx(f)(args, kwargs)
+            new_f = make_fx(f, trace_factory_functions=True)(args, kwargs)
             for arg in args:
                 if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
                     arg.uniform_(0, 1)

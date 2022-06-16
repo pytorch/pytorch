@@ -79,7 +79,8 @@ def proxy_call(func_overload, args, kwargs=None):
 
     def unwrap_fake(e):
         if isinstance(e, ProxyTensor):
-            return FakeTensor(e.fake_mode, create_meta(e), e.device)
+            with no_dispatch():
+                return FakeTensor(e.fake_mode, create_meta(e), e.device)
         return e
 
     proxy_args = pytree.tree_map(unwrap_proxy, args)
@@ -93,7 +94,6 @@ def proxy_call(func_overload, args, kwargs=None):
         proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
     real_out = func_overload(*pytree.tree_map(unwrap_fake, args), **pytree.tree_map(unwrap_fake, kwargs))
-
     return wrap_output(real_out, proxy_out)
 
 fake_tensor_mode = FakeTensorMode()
@@ -135,7 +135,6 @@ class ProxyTensor(FakeTensor):
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
         if func_overload == torch.ops.prim.device.default:
             return args[0].fake_device
-        print(func_overload)
         return proxy_call(func_overload, args, kwargs)
 
 
@@ -219,7 +218,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
-        if any(tuple(isinstance(arg, ProxyTensor) for arg in args)):
+        if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
         else:
             proxy_out = self.tracer.create_proxy('call_function', func, args, kwargs,
@@ -231,7 +230,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             return wrap_output(real_out, proxy_out)
 
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=False):
+def make_fx(f, decomposition_table=None, trace_factory_functions=True):
     if decomposition_table is None:
         decomposition_table = {}
 
