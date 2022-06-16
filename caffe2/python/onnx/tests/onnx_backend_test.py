@@ -171,12 +171,19 @@ backend_test.exclude('(test_bernoulli_.*'
                      ')')
 
 # Unsupported ops in opset 16
-backend_test.exclude('(test_spacetodepth_.*'
+backend_test.exclude('(test_gridsample_.*'
+                     '|test_spacetodepth_.*'
                      ')')
 
 # Unsupported ops in opset 17
 backend_test.exclude('(test_layer_normalization_.*'
-                     '|test_sequence_map_.*'
+                     '|test_blackmanwindow_.*'
+                     '|test_dft_.*'
+                     '|test_hammingwindow_.*'
+                     '|test_hannwindow_.*'
+                     '|test_melweightmatrix_.*'
+                     '|test_stft_.*'
+                     '|test_sequencemap_.*'
                      ')')
 
 # Skip vgg to speed up CI
