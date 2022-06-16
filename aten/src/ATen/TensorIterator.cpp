@@ -745,7 +745,7 @@ void TensorIteratorBase::for_each(loop2d_t loop, int64_t grain_size) {
   int64_t numel = this->numel();
   if (numel == 0) {
     return;
-  } else if (numel < grain_size || at::get_num_threads() == 1) {
+  } else if (numel < internal::GRAIN_SIZE || at::get_num_threads() == 1) {
     return serial_for_each(loop, {0, numel});
   } else {
     at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
