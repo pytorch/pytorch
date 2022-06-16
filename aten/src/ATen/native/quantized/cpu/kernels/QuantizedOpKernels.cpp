@@ -2751,14 +2751,16 @@ void quantized_normalize_kernel(
               qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
                 .store(Y_ptr + vecStartIdx);
             }
+
             // Remainder
             if (kNonVecRemInChannel > 0) {
-              std::cout << "\nquantized_normalize_kernel kNonVecRemInChannel = " << kNonVecRemInChannel << std::endl;
               int64_t remIdx = chEndIdx - kNonVecRemInChannel;
               auto qXVec = qVec::loadu(X_ptr + remIdx, kNonVecRemInChannel);
               auto dqXVec = qXVec.dequantize(x_fake_scale_vec, x_zp_vec,
                     x_fake_scale_zp_neg_premul_vec);
-              for (auto &dq : dqXVec) {
+              int validDqvecLen = (kNonVecRemInChannel - 1) / fVec::size() + 1;
+              for (int i = 0; i < validDqvecLen; ++i) {
+                auto &dq = dqXVec[i];
                 dq =
                   (dq - layer_mean_div_scale_xVec) *
                     gamma_p_vec + beta_vec;
@@ -2766,17 +2768,6 @@ void quantized_normalize_kernel(
               qVec::quantize(dqXVec, y_scale, y_zp, y_inv_scale)
                 .store(Y_ptr + remIdx, kNonVecRemInChannel);
             }
-
-            // Old impl of remainder
-            // for (int64_t remIdx = chEndIdx - kNonVecRemInChannel;
-                 // remIdx < chEndIdx;
-                 // remIdx++) {
-              // auto qXVal = X_ptr[remIdx];
-              // float dqXVal = at::native::dequantize_val(x_fake_scale, x_zp, qXVal);
-              // float dqY =
-                // (dqXVal - layer_mean_div_scale_x) * gamma_p + beta;
-              // Y_ptr[remIdx] = at::native::quantize_val<scalar_t>(y_scale, y_zp, dqY);
-            // }
           } // chIdx
 
         } else {
