@@ -1,8 +1,8 @@
-#include <aten/src/ATen/Context.h>
+#include <ATen/Context.h>
 #include <torch/library.h>
 
+#include <ATen/ExpandUtils.h>
 #include <ATen/core/jit_type.h>
-#include <aten/src/ATen/ExpandUtils.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/api/include/torch/utils.h>
@@ -11,7 +11,7 @@
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
-#include <aten/src/ATen/InitialTensorOptions.h>
+#include <ATen/InitialTensorOptions.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 
