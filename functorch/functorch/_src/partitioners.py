@@ -369,6 +369,9 @@ def min_cut_rematerialization_partition(
         node_name = node_in[:-3]
         cut_nodes.add(node_name)
 
+    # To make this stuff deterministic
+    node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
+    saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
     saved_values = [name_to_node[node] for node in cut_nodes]
 
     return _extract_fwd_bwd_modules(joint_module, saved_values)
