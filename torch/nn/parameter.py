@@ -1,7 +1,7 @@
 import torch
-from torch._C import _disabled_torch_function_impl
+from torch._C import _disabled_torch_function_impl, _get_torch_function_mode
 from collections import OrderedDict
-
+from torch.overrides import handle_torch_function
 
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
@@ -52,10 +52,15 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
     def __deepcopy__(self, memo):
         if id(self) in memo:
             return memo[id(self)]
+
+        if _get_torch_function_mode():
+            tensor = handle_torch_function(torch.Tensor.__deepcopy__, (self,), self, memo)
         else:
-            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
-            memo[id(self)] = result
-            return result
+            tensor = self.data.clone(memory_format=torch.preserve_format), self.requires_grad
+
+        result = type(self)(tensor)
+        memo[id(self)] = result
+        return result
 
     def __repr__(self):
         return 'Parameter containing:\n' + super(Parameter, self).__repr__()

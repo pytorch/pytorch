@@ -163,14 +163,34 @@ class FakeTensorTest(TestCase):
         prims.utils.compare_tensor_meta(t1, t2)
 
     def test_deepcopy(self):
+        mode = FakeTensorMode(inner=None)
         mod = torch.nn.BatchNorm2d(10)
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_non_fake_inputs=True)):
+        with torch._subclasses.fake_tensor.FakeCopyMode(mode):
             mod_copied = copy.deepcopy(mod)
 
-        for name, param in itertools.chain(mod.named_parameters(), mod.named_buffers()):
-            param_copied = getattr(mod_copied, name)
-            self.checkMetaProps(param, param_copied)
-            self.assertEqual(isinstance(param, torch.nn.Parameter), isinstance(param_copied, torch.nn.Parameter))
+        def check_copy(mod, mod_copied):
+            for name, param in itertools.chain(mod.named_parameters(), mod.named_buffers()):
+                param_copied = getattr(mod_copied, name)
+                self.checkMetaProps(param, param_copied)
+                self.assertTrue(isinstance(param_copied, FakeTensor))
+                self.assertEqual(isinstance(param, torch.nn.Parameter), isinstance(param_copied, torch.nn.Parameter))
+                self.assertEqual(param.requires_grad, param_copied.requires_grad)
+
+        check_copy(mod, mod_copied)
+
+        class ModuleNew(torch.nn.Module):
+            def __init__(self):
+                super(ModuleNew, self).__init__()
+                self.a = torch.rand([10, 2])
+                self.b = self.a
+                self.c = self.a[0]
+
+        mod = ModuleNew()
+        with torch._subclasses.fake_tensor.FakeCopyMode(mode):
+            mod_copied = copy.deepcopy(mod)
+
+        self.assertIs(mod_copied.a, mod_copied.b)
+        self.assertEqual(mod_copied.b.storage()._cdata, mod_copied.a.storage()._cdata)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_new(self):
@@ -179,13 +199,6 @@ class FakeTensorTest(TestCase):
             self.checkType(a.new(10, 10), "cpu", [10, 10])
             self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
             self.checkType(a.new(device='cuda'), "cuda", [0])
-
-    def test_non_fake_inputs(self):
-        x = torch.rand([1])
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_non_fake_inputs=True)):
-            out = x + torch.rand([16])
-
-        self.checkType(out, "cpu", [16])
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
