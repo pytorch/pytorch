@@ -1,6 +1,6 @@
 # Owner(s): ["module: meta tensors"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef
 import torch
 import itertools
 from torch.testing._internal.jit_utils import RUN_CUDA
@@ -162,6 +162,7 @@ class FakeTensorTest(TestCase):
     def checkMetaProps(self, t1, t2):
         prims.utils.compare_tensor_meta(t1, t2)
 
+    @skipIfCrossRef
     def test_deepcopy(self):
         mode = FakeTensorMode(inner=None)
         mod = torch.nn.BatchNorm2d(10)
