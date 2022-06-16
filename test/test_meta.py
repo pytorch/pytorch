@@ -401,9 +401,7 @@ meta_function_expected_failures = {
     torch.multinomial: {bf16, f32, f64},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense, aten::mvlgamma.out
     torch.nanmean: {bf16, f16, f32, f64},
-    torch.nanmedian: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::nanmedian, aten::nanmedian.dim_values
     torch.nanquantile: {f32, f64},
-    torch.nansum: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nansum, aten::nansum.out
     torch.nn.functional.conv1d: {bf16, f32, f64, i64},
     torch.nn.functional.conv2d: {bf16, f32, f64, i64},
     torch.nn.functional.conv_transpose1d: {f32, f64, i64},
@@ -516,7 +514,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nanmedian: {f16},  # aten::nanmedian, aten::nanmedian.dim_values
     torch.nn.functional.conv1d: {f16, c32},
     torch.nn.functional.conv2d: {f16, c32},
     torch.nn.functional.conv_transpose1d: {bf16, f16},
@@ -648,10 +645,6 @@ meta_dispatch_expected_failures = {
     aten.multinomial.out: {bf16, f64, f32},
     aten.mvlgamma.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.mvlgamma.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.nanmedian.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.nanmedian.dim: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.nansum.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.nansum.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nll_loss2d_forward.default: {bf16, f64, f32},
     aten.nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
@@ -743,8 +736,6 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.multinomial.out: {f16},  # aten::multinomial.out
     aten.mvlgamma.default: {f16},  # aten::_local_scalar_dense
     aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
-    aten.nanmedian.default: {f16},  # aten::nanmedian
-    aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
     aten.native_group_norm.default: {bf16, f16},
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
