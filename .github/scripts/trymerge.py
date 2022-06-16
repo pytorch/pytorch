@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
@@ -337,7 +338,7 @@ def fetch_json(url: str,
                data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={val}" for name, val in params.items())
+        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
     return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
 
@@ -916,6 +917,18 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
+def check_for_sev(org, project) -> None:
+    response = fetch_json(
+        "https://api.github.com/search/issues",
+        params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
+    )
+    if response["total_count"] != 0:
+        for item in response["items"]:
+            if "merge blocking" in item["body"].lower():
+                raise RuntimeError(
+                    "Not merging any PRs at the moment because there is a " + 
+                    f"merge blocking ci: sev issue open at {item['html_url']}"
+                )
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
@@ -927,6 +940,8 @@ def merge(pr_num: int, repo: GitRepo,
           stale_pr_days: int = 3) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
+    if not force:
+        check_for_sev(org, project)
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
     if force or can_skip_internal_checks(pr, comment_id):
@@ -939,6 +954,8 @@ def merge(pr_num: int, repo: GitRepo,
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
+        if not force:
+            check_for_sev(org, project)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
