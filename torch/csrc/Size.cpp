@@ -1,7 +1,9 @@
 #include <c10/util/irange.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Size.h>
 
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_tuples.h>
@@ -42,6 +44,36 @@ PyObject* THPSize_NewFromSizes(int dim, const int64_t* sizes) {
   return self.release();
 }
 
+PyObject* THPSize_NewFromSymSizes(const at::Tensor& self_) {
+  auto sym_sizes = self_.sym_sizes();
+
+  auto ret = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, sym_sizes.size()));
+  if (!ret)
+    throw python_error();
+
+  for (auto i : c10::irange(sym_sizes.size())) {
+    auto si = sym_sizes[i];
+    if (si.is_symbolic()) {
+      TORCH_CHECK(
+          !torch::jit::tracer::isTracing(),
+          "JIT Tracing of SymInts isn't supported");
+      auto py_symint = py::cast(si.toSymbolicIntNode()).release().ptr();
+      PyTuple_SET_ITEM(ret.get(), i, py_symint);
+    } else {
+      if (torch::jit::tracer::isTracing()) {
+        PyObject* py_size_tensor =
+            THPVariable_Wrap(torch::jit::tracer::getSizeOf(self_, i));
+        if (!py_size_tensor)
+          throw python_error();
+        PyTuple_SET_ITEM(ret.get(), i, py_size_tensor);
+      } else {
+        PyTuple_SET_ITEM(ret.get(), i, THPUtils_packInt64(si.data()));
+      }
+    }
+  }
+  return ret.release();
+}
+
 static bool isTracedZeroDimVar(PyObject* item) {
   if (!THPVariable_Check(item))
     return false;
@@ -59,6 +91,9 @@ static PyObject* THPSize_pynew(
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject* item = PyTuple_GET_ITEM(self.get(), i);
       if (THPUtils_checkLong(item)) {
+        continue;
+      }
+      if (torch::is_symint_node(item)) {
         continue;
       }
       if (torch::jit::tracer::isTracing() && isTracedZeroDimVar(item)) {
@@ -92,7 +127,12 @@ static PyObject* THPSize_repr(THPSize* self) {
     if (i != 0) {
       repr += ", ";
     }
-    repr += std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
+    auto item = PyTuple_GET_ITEM(self, i);
+    auto ih = py::handle(item);
+
+    repr += torch::is_symint_node(ih)
+        ? std::string(py::str(ih))
+        : std::to_string(THPUtils_unpackLong(PyTuple_GET_ITEM(self, i)));
   }
   repr += "])";
   return THPUtils_packString(repr);
