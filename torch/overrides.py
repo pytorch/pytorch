@@ -280,6 +280,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
         Tensor.to_padded_tensor,
+        Tensor.sym_size
     }
 
 
@@ -1268,6 +1269,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.narrow_copy: lambda self, dimension, start, length: -1,
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
+        Tensor._nested_tensor_size: lambda self: -1,
         Tensor.normal_: lambda self: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim: -1,
