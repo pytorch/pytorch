@@ -493,8 +493,6 @@ DONT_ENFORCE_SAME_TENSOR_IMPL_OR_STORAGE = {
     # These functions are expected to change impl or storage of input tensors
     "set_",
     "_cudnn_rnn_flatten_weight",
-    # Nested Tensors related functions
-    "_nested_tensor_size",
 }
 DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     # These non-inplace, non-out functions return tensors with use_count > 1
@@ -512,6 +510,9 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    # Nested Tensors related functions
+    # _nested_tensor_size() should never actually be called with requires_grad=True tensor
+    "_nested_tensor_size",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -519,8 +520,6 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     "_slow_conv2d_forward",
     "slow_conv3d_forward",
     "channel_shuffle",
-    # lift() should never actually be called with a requires_grad=True tensor,
-    "lift",
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
     *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,

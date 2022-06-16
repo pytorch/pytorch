@@ -502,12 +502,12 @@ class TestNestedTensorAutograd(TestCase):
         mask = torch.ones_like(data[:, :, 0]).bool()
         return torch._nested_tensor_from_mask(data, mask)
 
-    def test_set_requires_grad(self):
+    def test_set_requires_grad_from_list(self):
         nt = self._create_nested_tensor_from_list()
         nt.requires_grad_()
         assert nt.requires_grad
 
-    def test_requires_grad_from_mask(self):
+    def test_set_requires_grad_from_mask(self):
         nt = self._create_nested_tensor_from_mask()
         nt.requires_grad_()
         assert nt.requires_grad
@@ -521,12 +521,12 @@ class TestNestedTensorAutograd(TestCase):
 
         assert nt_1.requires_grad
         assert c.requires_grad
-        upward_grad = self._create_nested_tensor_from_mask()
-        c.backward(upward_grad)
+        grad_output = self._create_nested_tensor_from_mask()
+        c.backward(grad_output)
 
         #  Grad check doesn't work with nested yet.
-        # d/dnt_1 (nt + nt_1) = 1*upward_grad
-        self.nt_equal(nt_1.grad, upward_grad)
+        # d/dnt_1 (nt + nt_1) = 1*grad_output
+        self.nt_equal(nt_1.grad, grad_output)
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
