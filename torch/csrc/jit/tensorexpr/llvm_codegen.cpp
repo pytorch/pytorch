@@ -2,7 +2,7 @@
 
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 
-#include <aten/src/ATen/Parallel.h>
+#include <ATen/Parallel.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/tensorexpr/analysis.h>
