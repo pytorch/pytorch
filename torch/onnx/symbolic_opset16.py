@@ -61,7 +61,7 @@ def scatter_add(g, self, dim, index, src):
     if src_sizes != index_sizes:
         return symbolic_helper._unimplemented(
             "scatter_add",
-            f"index {index_sizes} should have the same dimensionality as src {src_sizes}",
+            f"`index` ({index_sizes}) should have the same dimensionality as `src` ({src_sizes})",
         )
 
     src = symbolic_helper._maybe_get_scalar(src)
