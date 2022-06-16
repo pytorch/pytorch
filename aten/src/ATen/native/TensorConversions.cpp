@@ -385,68 +385,55 @@ Tensor sparse_compressed_to_dense(
     return dst_transposed.transpose(batch_ndim, batch_ndim + 1);
   }
   if (self.layout() == kSparseBsr) {
-    TORCH_CHECK(
-        self.dim() == 2 || self.dim() == 3,
-        "Can only convert 2D or 3D SparseBsr to Strided.");
     auto crow_indices = self.crow_indices();
     auto col_indices = self.col_indices();
-    if (self.dim() == 3) {
-      // This conversion function currently assumes the indices are the same
-      // across all batch dimensions. We don't have metadata or such to
-      // enforce this invariant yet. This means we need to perform this very
-      // expensive check to verify this condition.
-      TORCH_CHECK(
-          crow_indices[0].expand_as(crow_indices).equal(crow_indices),
-          "Expected sparsity pattern to match across batch entries.");
-      TORCH_CHECK(
-          col_indices[0].expand_as(col_indices).equal(col_indices),
-          "Expected sparsity pattern to match across batch entries.");
-      crow_indices = crow_indices.select(0, 0);
-      col_indices = col_indices.select(0, 0);
-    }
-    Tensor indices = at::_convert_indices_from_csr_to_coo(
-        crow_indices, col_indices, false, false);
     auto values = self.values();
-    int64_t blocksize[2] = {values.size(-2), values.size(-1)};
-    // We make use of COO dense dimensions here to use the COO to dense format
-    // conversion.
+    Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
     if (self.dim() == 2) {
-      DimVector expanded_size(
-          {self.size(-2) / blocksize[0],
-           self.size(-1) / blocksize[1],
-           blocksize[0],
-           blocksize[1]});
-      auto self_coo =
-          at::native::_sparse_coo_tensor_unsafe(indices, values, expanded_size)
-              .coalesce();
-      // Here we are untiling the result.
-      return self_coo.to_dense().transpose(1, 2).reshape(
-          {self.size(0), self.size(1)});
+      // Pad shape so we can treat 2-d like batched, we will squeeze out the
+      // phantom batch dim at the end
+      crow_indices = crow_indices.unsqueeze(0);
+      col_indices = col_indices.unsqueeze(0);
+      values = values.unsqueeze(0);
+      dense = dense.unsqueeze(0);
     }
-    if (self.dim() == 3) {
-      Tensor dense = at::zeros(self.sizes(), self.options().layout(kStrided));
-      // Lazy way of calculating the maximum number of blocks. Also won't
-      // work with 0-sized batches, which we currently disallow.
-      dense =
-          dense.reshape({self.size(0), -1, values.size(-2), values.size(-1)});
-      auto row_indices = indices.select(0, 0);
-      auto col_indices = indices.select(0, 1);
-      auto offsets = col_indices + row_indices * (self.size(-1) / blocksize[1]);
-      // NOTE: This only works because we're using the same indices
-      // per matrix entry. Generally BSR only supports 2 sparse dimensions,
-      // so this isn't likely to need to change any time soon.
-      dense.index_add_(1, offsets, values);
-      dense = dense.reshape(
-          {self.size(0),
-           self.size(-2) / blocksize[0],
-           self.size(-1) / blocksize[1],
-           blocksize[0],
-           blocksize[1]});
-      // Here we are untiling the result.
-      dense = dense.transpose(2, 3);
-      dense = dense.reshape({self.size(0), self.size(1), self.size(2)});
-      return dense;
+    if (self.dim() > 3) {
+      // Flatten batch dims
+      auto n_batch_dim = self.dim() - 2;
+      crow_indices = crow_indices.flatten(0, n_batch_dim);
+      col_indices = col_indices.flatten(0, n_batch_dim);
+      values = values.flatten(0, n_batch_dim);
+      dense = dense.flatten(0, n_batch_dim);
     }
+
+    // At this point everything has 3d shape either the batch dim was inserted,
+    // existed already or was flattened from multiple batch dims
+    std::array<int64_t, 2> blocksize = {values.size(-2), values.size(-1)};
+    auto n_batch = values.size(0);
+    // If we already had batch dim(s) and any of them were zero we can take the
+    // early exit.
+    if (n_batch == 0) {
+      return dense.reshape(self.sizes());
+    }
+    // Due to early exit above this reshape should always be valid
+    dense = dense.reshape({n_batch, -1, values.size(-2), values.size(-1)});
+    for (auto batch : c10::irange(n_batch)) {
+      Tensor batch_indices = at::_convert_indices_from_csr_to_coo(
+          crow_indices[batch], col_indices[batch], false, false);
+      auto batch_row_indices = batch_indices.select(0, 0);
+      auto batch_col_indices = batch_indices.select(0, 1);
+      auto offsets = batch_col_indices +
+          batch_row_indices * (self.size(-1) / blocksize[1]);
+      dense[batch].index_add_(0, offsets, values[batch]);
+    }
+
+    // untile the result, NOTE: The final reshape uses the original self.sizes()
+    // which will squeeze out the extra batch dim if we put one in
+    return dense
+        .unflatten(
+            1, {self.size(-2) / blocksize[0], self.size(-1) / blocksize[1]})
+        .transpose(2, 3)
+        .reshape(self.sizes());
   }
   return self.to_sparse().to_dense();
 }

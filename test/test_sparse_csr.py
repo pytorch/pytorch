@@ -2380,8 +2380,7 @@ class TestSparseCSR(TestCase):
             pt_tensor = self._convert_to_layout(dense, layout, blocksize=blocksize)
             for i in range(2):
                 _test_matrix(pt_tensor[i], dense[i], layout, blocksize)
-            # TODO: enable once to_dense supports this pattern
-            # self.assertEqual(dense, pt_tensor.to_dense())
+            self.assertEqual(dense, pt_tensor.to_dense())
         else:
             with self.assertRaisesRegex(RuntimeError, "Expect the same sparsity pattern across matrices for ND input."):
                 self._convert_to_layout(dense, layout, blocksize=blocksize)
