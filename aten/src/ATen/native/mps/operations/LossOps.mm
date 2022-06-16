@@ -277,7 +277,7 @@ Tensor& bce_loss_out_impl(const Tensor& input, const Tensor& target,
                             newCachedGraph->gradInputTensor = bceLoss;
                         }
                     } else {
-                        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input.sizes().size());
+                        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input_squeezed.sizes().size());
                     }
                 }
                 return newCachedGraph;
