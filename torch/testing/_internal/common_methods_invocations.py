@@ -13523,8 +13523,11 @@ op_db: List[OpInfo] = [
            skips=(
                # IndexError: tuple index out of range
                DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', 'test_forward_mode_AD'),
+               # Tests fail when weight=None and bias is defined
                # https://github.com/pytorch/pytorch/issues/79705
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
+               # JIT test also tries to compute double backward, which fails
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
