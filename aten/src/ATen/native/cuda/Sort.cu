@@ -58,7 +58,7 @@ struct SmallBitonicSort {
             A, -1, block_x, max_block_y,
             K, V, LTOp<K, true>, IndexType>,
         block_x * max_block_y);
-    const auto max_batch = (keySlices + min_grid - 1) / min_grid;
+    const auto max_batch = std::max(IndexType{1}, keySlices / min_grid);
     const int block_y = std::min(IndexType(max_block_y), max_batch);
     dim3 block(block_x, block_y);
 
