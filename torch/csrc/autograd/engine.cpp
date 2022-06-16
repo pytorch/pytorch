@@ -724,7 +724,7 @@ void validate_outputs(
 
     if (!metadata.is_same_shape(grad)) {
       if (metadata.is_expandable_to_shape(grad)) {
-        grad = at::sum_to(std::move(grad), metadata.shape());
+        grad = metadata.reduce_grad(grad);
       } else {
         const auto message = metadata.incompatible_shape_error_message(i, grad);
         AT_ERROR(format_error(message.str()));
