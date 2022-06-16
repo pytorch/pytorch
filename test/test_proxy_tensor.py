@@ -184,7 +184,7 @@ class TestProxyTensorOpInfo(TestCase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            new_f = make_fx(f)(args, kwargs)
+            new_f = make_fx(f, trace_factory_functions=True)(args, kwargs)
             for arg in args:
                 if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
                     arg.uniform_(0, 1)
