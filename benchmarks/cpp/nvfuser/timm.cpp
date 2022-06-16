@@ -692,7 +692,7 @@ static void nhwc_seresnet152d_transpose65(Fusion* fusion, void* null) {
   auto t17 = set(t16);
   auto t29 = castOp(DataType::Half, t17);
   auto t18 = mul(t17, t3);
-  auto t19 = transpose(t18, {{0, 0}, {1, 3}, {2, 1}, {3, 2}});
+  auto t19 = permute(t18, {0, 2, 3, 1});
   auto t30 = castOp(DataType::Half, t19);
 
   fusion->addOutput(t29);
