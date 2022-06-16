@@ -422,6 +422,18 @@ class _ExecOrderData():
             self.warn_status = _ExecOrderWarnStatus.WARNED
 
 
+class GroupModule(nn.Module):
+    def __init__(self, modules : List[nn.Module]):
+        super().__init__()
+        for (i, module) in enumerate(modules):
+            setattr(self, f"module_{i}", module)
+
+    def forward(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError(
+            f"Forward of GroupModule should not be called."
+        )
+
+
 class FullyShardedDataParallel(nn.Module):
     """
     A wrapper for sharding Module parameters across data parallel workers. This
@@ -651,6 +663,8 @@ class FullyShardedDataParallel(nn.Module):
         # Validate the ignored modules and derive the ignored parameters/buffers
         ignored_modules = self._get_ignored_modules(module, ignored_modules)
         self._ignored_modules = ignored_modules
+        self.param_init_fn = param_init_fn
+        self.sync_module_states = sync_module_states
         ignored_params, ignored_param_names = \
             self._get_ignored_params(module, ignored_modules)
         buffer_names = self._get_buffer_names(module)
@@ -1171,6 +1185,51 @@ class FullyShardedDataParallel(nn.Module):
                     not hasattr(p, "_params_exec_order_hook_handle")
                 ), "When not in execution order prep stage, all _params_exec_order_hook_handle should be removed."
         return is_prep_stage
+
+    @staticmethod
+    def group_fsdp_modules(fsdp_modules: List["FullyShardedDataParallel"]):
+        group_module = GroupModule([m.module for m in fsdp_modules])
+
+        process_group = fsdp_modules[0].process_group
+        sharding_strategy = fsdp_modules[0].sharding_strategy
+        cpu_offload = fsdp_modules[0].cpu_offload
+        backward_prefetch = fsdp_modules[0].backward_prefetch
+        mixed_precision = fsdp_modules[0].mixed_precision
+        ignored_modules = fsdp_modules[0]._ignored_modules
+        param_init_fn = fsdp_modules[0].param_init_fn
+        device_id = fsdp_modules[0].device_id
+        sync_module_states = fsdp_modules[0].sync_module_states
+
+        for fsdp_module in fsdp_modules:
+            fsdp_module._lazy_init()
+            fsdp_module._rebuild_full_params()
+            fsdp_module._fsdp_wrapped_module._unflatten_params()
+            assert (
+                process_group == fsdp_module.process_group
+                and sharding_strategy == fsdp_module.sharding_strategy
+                and cpu_offload == fsdp_module.cpu_offload
+                and backward_prefetch == fsdp_module.backward_prefetch
+                and mixed_precision == fsdp_module.mixed_precision
+                and ignored_modules == fsdp_module._ignored_modules
+                and param_init_fn == fsdp_module.param_init_fn
+                and device_id == fsdp_module.device_id
+                and sync_module_states == fsdp_module.sync_module_states
+            ), "input parameters for all FSDP modules need to be the same"
+
+        output_module = FullyShardedDataParallel(
+            module=group_module,
+            process_group=process_group,
+            sharding_strategy=sharding_strategy,
+            cpu_offload=cpu_offload,
+            auto_wrap_policy=None,
+            backward_prefetch=backward_prefetch,
+            mixed_precision=mixed_precision,
+            ignored_modules=ignored_modules,
+            param_init_fn=param_init_fn,
+            device_id=device_id,
+            sync_module_states=sync_module_states,
+        )
+        return output_module
 
     @staticmethod
     def fsdp_modules(

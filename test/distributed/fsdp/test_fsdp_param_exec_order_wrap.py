@@ -61,6 +61,9 @@ class TestFSDPExecOrder(FSDPTest):
     def device(self):
         return torch.device("cuda")
 
+    def get_model_param_count(self, m):
+        return sum([p.numel() for p in m.parameters()])
+
     @skip_if_lt_x_gpu(2)
     @parametrize(
         "sharding_strategy",
@@ -147,6 +150,27 @@ class TestFSDPExecOrder(FSDPTest):
             optim_2.step()
             optim_2.zero_grad()
         self.assertEqual(loss_1, loss_2)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "sharding_strategy",
+        [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
+    )
+    def test_group_fsdp_wraps(self, sharding_strategy: ShardingStrategy):
+        model1, model2 = Model(), Model()
+        num_params_model1 = len(list(model1.parameters()))
+        num_params_model2 = len(list(model2.parameters()))
+        raw_model_size = self.get_model_param_count(model1) + self.get_model_param_count(model2)
+
+        fsdp_model1 = Model.wrap(model1, sharding_strategy, self.device, None)
+        fsdp_model2 = Model.wrap(model2, sharding_strategy, self.device, None)
+        out_module = FSDP.group_fsdp_modules([fsdp_model1, fsdp_model2])
+        # out_module should only contain one FlatParameter
+        assert len(list(out_module.parameters())) == 1
+
+        with out_module.summon_full_params(out_module):
+            assert len(list(out_module.parameters())) == num_params_model1 + num_params_model2
+            self.assertEqual(raw_model_size, self.get_model_param_count(out_module))
 
 
 instantiate_parametrized_tests(TestFSDPExecOrder)
