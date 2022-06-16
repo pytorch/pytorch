@@ -33,6 +33,7 @@ class TestPublicBindings(TestCase):
         torch_C_allowlist_superset = {
             "AggregationType",
             "AliasDb",
+            "AliasInfo"
             "AnyType",
             "Argument",
             "ArgumentSpec",
