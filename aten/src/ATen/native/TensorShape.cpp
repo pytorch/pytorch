@@ -1092,6 +1092,77 @@ Tensor permute(const Tensor& self, IntArrayRef dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
+Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim == static_cast<int64_t>(dims.size()),
+      "permute(sparse_coo): number of dimensions in the tensor input ",
+      "does not match the length of the desired ordering of dimensions ",
+      "i.e. input.dim() = ", ndim, " is not equal to len(dims) = ", dims.size());
+
+  const auto sparse_ndim = self.sparse_dim();
+  const auto dense_ndim = self.dense_dim();
+
+  const auto old_sizes = self.sizes();
+  auto new_sizes = old_sizes.vec();
+  auto wrapped_dims_vec = dims.vec();
+  auto seen_dims = std::vector<bool>(ndim);
+  for (const auto i : c10::irange(ndim)) {
+    const auto d = maybe_wrap_dim(dims[i], ndim);
+    TORCH_CHECK(!seen_dims[d],
+        "permute(sparse_coo): duplicate dims are not allowed.");
+    seen_dims[d] = true;
+    wrapped_dims_vec[i] = d;
+    new_sizes[i] = old_sizes[d];
+  }
+  const auto wrapped_dims = IntArrayRef(wrapped_dims_vec);
+
+  const auto ndim_arange = at::arange(ndim);
+  auto dims_id_perm = IntArrayRef(ndim_arange.data_ptr<int64_t>(),
+      ndim_arange.data_ptr<int64_t>() + ndim);
+  auto dims_sparse_dense_id_perm = std::vector<int64_t>(wrapped_dims_vec);
+  std::sort(dims_sparse_dense_id_perm.begin(), dims_sparse_dense_id_perm.begin() + sparse_ndim);
+  std::sort(dims_sparse_dense_id_perm.begin() + sparse_ndim, dims_sparse_dense_id_perm.end());
+  TORCH_CHECK(IntArrayRef(dims_sparse_dense_id_perm) == dims_id_perm,
+      "permute(sparse_coo): transpositions between sparse and dense dimensions are not allowed.",
+      "Only transpositions within sparse and dense dimensions are supported.");
+
+  const auto old_sparse_dims = dims_id_perm.slice(0, sparse_ndim);
+  const auto old_dense_dims = dims_id_perm.slice(sparse_ndim, ndim - sparse_ndim);
+  const auto new_sparse_dims = wrapped_dims.slice(0, sparse_ndim);
+  const auto new_dense_dims = wrapped_dims.slice(sparse_ndim, ndim - sparse_ndim);
+
+  auto old_indices = self._indices();
+  auto old_values = self._values();
+
+  const auto new_indices = (new_sparse_dims == old_sparse_dims)
+    ? old_indices
+    : [&]() -> Tensor {
+      auto sparse_perm = new_sparse_dims.vec();
+      auto sparse_perm_tensor = at::from_blob(reinterpret_cast<void*>(sparse_perm.data()),
+          {sparse_ndim}, old_indices.options().device(at::kCPU));
+      if (self.device().type() == at::kCUDA) {
+        sparse_perm_tensor = sparse_perm_tensor.to(at::kCUDA);
+      }
+      // creates new indices. It is possible to avoid that if COO
+      // is allowed to store a permutation vector.
+      return old_indices.index_select(0, sparse_perm_tensor);
+    }();
+  const auto new_values = (new_dense_dims == old_dense_dims)
+    ? old_values
+    : [&]() -> Tensor {
+      auto values_perm = std::vector<int64_t>(dense_ndim + 1);
+      for (const auto i : c10::irange(dense_ndim)) {
+        values_perm[i + 1] = new_dense_dims[i] - sparse_ndim + 1;
+      }
+      return old_values.permute(values_perm);
+    }();
+
+  const auto is_coalesced = self.is_coalesced() && (dims[0] == 0);
+  return _sparse_coo_tensor_with_dims_and_tensors(
+      sparse_ndim, dense_ndim, new_sizes, new_indices, new_values, self.options())
+    ._coalesced_(is_coalesced);
+}
+
 Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   TORCH_CHECK(repeats.size() >= (size_t)self.dim(),
            "Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
