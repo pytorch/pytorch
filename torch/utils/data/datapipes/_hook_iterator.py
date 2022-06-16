@@ -107,13 +107,16 @@ def hook_iterator(namespace, profile_name):
         def __next__(self):
             # TODO: Add try-except to in-place reduce traceback from the Exception
             # See: https://github.com/pytorch/data/issues/284
-            if self._profiler_enabled:
-                with profiler_record_fn_context():
+            try:
+                if self._profiler_enabled:
+                    with profiler_record_fn_context():
+                        _check_iterator_valid(self.source_dp, self.iterator_id)
+                        return next(self.iterator)
+                else:  # Decided against using `contextlib.nullcontext` for performance reasons
                     _check_iterator_valid(self.source_dp, self.iterator_id)
                     return next(self.iterator)
-            else:  # Decided against using `contextlib.nullcontext` for performance reasons
-                _check_iterator_valid(self.source_dp, self.iterator_id)
-                return next(self.iterator)
+            finally:
+                self.source_dp._number_of_samples_yielded += 1
 
         def __getattr__(self, name):
             return getattr(self.iterator, name)
@@ -146,7 +149,10 @@ def hook_iterator(namespace, profile_name):
                     response = gen.send(None)
 
                 while True:
-                    request = yield response
+                    try:
+                        request = yield response
+                    finally:
+                        datapipe._number_of_samples_yielded += 1
                     # Pass through here every time `__next__` is called
                     if _profiler_enabled:
                         with profiler_record_fn_context():
@@ -156,7 +162,7 @@ def hook_iterator(namespace, profile_name):
                         _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
             except StopIteration as e:
-                return e.value
+                return e.value  # noqa: B901
             except Exception as e:
                 # TODO: Simplify the traceback message to skip over `response = gen.send(None)`
                 #       Part of https://github.com/pytorch/data/issues/284
@@ -180,10 +186,15 @@ def hook_iterator(namespace, profile_name):
 
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
-                if torch.autograd._profiler_enabled():
-                    return next_func(*args, **kwargs)
-                else:
-                    return next_func(*args, **kwargs)
+                try:
+                    if torch.autograd._profiler_enabled():
+                        with profiler_record_fn_context():
+                            return next_func(*args, **kwargs)
+                    else:
+                        return next_func(*args, **kwargs)
+                finally:
+                    datapipe = args[0]
+                    datapipe._number_of_samples_yielded += 1
 
             namespace['__next__'] = wrap_next
 

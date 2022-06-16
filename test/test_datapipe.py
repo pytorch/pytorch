@@ -2591,6 +2591,14 @@ class TestIterDataPipeSingletonConstraint(TestCase):
             next(it1)
         self.assertEqual(1, next(it3))
 
+class TestIterDataPipeCountSampleYielded(TestCase):
+
+    # TODO:
+    #  1. Preferably, test for all 3 types of IterDataPipe
+    #  2. Need to test that when a DataPipe reset, the count goes back to 0, then can resume counting as normal
+    
+    def test_iterdatapipe_count_sample_yielded(self):
+        pass
 
 # class TestIterDataPipeFastForward(TestCase):
 #
@@ -2709,14 +2717,14 @@ class TestIterDataPipeGraphFastForward(TestCase):
         graph1 = dp.iter.IterableWrapper(range(10))
         self._fast_forward_graph_test_helper(graph1, simple_fast_forward_graph)
 
-        graph2 = dp.iter.IterableWrapper(range(10)).map(lambda x: x + 1)
+        graph2 = dp.iter.IterableWrapper(range(10)).map(_mul_10)
         self._fast_forward_graph_test_helper(graph2, simple_fast_forward_graph)
 
-        graph3 = dp.iter.IterableWrapper(range(10)).map(lambda x: x + 1).shuffle()
+        graph3 = dp.iter.IterableWrapper(range(10)).map(_mul_10).shuffle()
         self._set_seed_graph(graph3, seed)
         self._fast_forward_graph_test_helper(graph3, simple_fast_forward_graph, seed=seed)
 
-        graph4 = dp.iter.IterableWrapper(range(10)).map(lambda x: x + 1).shuffle().map(lambda x: x + 1)
+        graph4 = dp.iter.IterableWrapper(range(10)).map(_mul_10).shuffle().map(_mul_10)
         self._set_seed_graph(graph4, seed)
         self._fast_forward_graph_test_helper(graph4, simple_fast_forward_graph, seed=seed)
 
