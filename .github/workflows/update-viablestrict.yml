@@ -19,8 +19,11 @@ jobs:
           python-version: 3.8
           architecture: x64
 
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
 
       - name: Install Python Packages
         run: |
