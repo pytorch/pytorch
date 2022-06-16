@@ -24,19 +24,23 @@ namespace native{
 namespace {
 
 template <typename scalar_t>
-Tensor unique_elements(const scalar_t* begin, const scalar_t* end, bool sorted) {
+Tensor unique_elements(const scalar_t* begin, const scalar_t* end,
+                       bool sorted, const TensorOptions &options) {
   auto set = std::unordered_set<scalar_t>(begin, end);
-  Tensor output = at::empty({static_cast<int64_t>(set.size())}, input.options());
+  Tensor output = at::empty({static_cast<int64_t>(set.size())}, options);
   scalar_t *output_data = output.data_ptr<scalar_t>();
   std::copy(set.begin(), set.end(), output_data);
   if (sorted) {
-    std::sort_n(output_data, set.size());
+    std::sort(output_data, output_data + set.size());
   }
   return output;
 }
 
-Tensor unique_elements(const bool* begin, const bool* end, bool /*sorted*/) {
+Tensor unique_elements(const bool* begin, const bool* end,
+                       bool /*sorted*/, const TensorOptions &options) {
   std::array<bool, 2> seen;
+  seen.fill(false);
+
   for (; begin != end; ++begin) {
     seen[c10::load(begin)] = true;
     if (seen[false] && seen[true]) {
@@ -45,8 +49,8 @@ Tensor unique_elements(const bool* begin, const bool* end, bool /*sorted*/) {
   }
 
   int64_t num_elem = seen[false] + seen[true];
-  Tensor output = at::empty({num_elem}, input.options());
-  scalar_t *output_data = output.data_ptr<scalar_t>();
+  Tensor output = at::empty({num_elem}, options);
+  bool *output_data = output.data_ptr<bool>();
 
   if (seen[false]) {
     *output_data++ = false;
@@ -66,10 +70,11 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_template(
   const Tensor& input = self.contiguous();
   const scalar_t* input_data = input.data_ptr<scalar_t>();
   int64_t numel = input.numel();
-  Tensor output;
   Tensor inverse_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor counts = at::empty({0}, self.options().dtype(kLong));
-  auto output = unique_elements(input_data, input_data + numel, sorted);
+  Tensor output = unique_elements(input_data, input_data + numel,
+                                  sorted, input.options());
+  const scalar_t *output_data = output.data_ptr<scalar_t>();
 
   if (return_inverse || return_counts) {
     inverse_indices.resize_(input.sizes());
