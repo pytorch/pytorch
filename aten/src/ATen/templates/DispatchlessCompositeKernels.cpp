@@ -1,8 +1,6 @@
 // ${generated_comment}
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/DeviceGuard.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/Dispatch.h>
