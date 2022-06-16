@@ -67,25 +67,3 @@ def _apply_to_modules(
 
     f(root_module, "", *args, **kwargs)
     return return_fn(*args, **kwargs)
-
-
-def _get_param_to_param_name(
-    root_module: torch.nn.Module,
-) -> Dict[torch.nn.Parameter, str]:
-    """
-    Returns a mapping from parameter to prefixed parameter name for all
-    parameters in the module hierarchy rooted at ``root_module`` assuming no
-    FSDP wrapping. The parameter names are prefixed with submodule names
-    starting from ``root_module`` (exclusive), meaning that they match the keys
-    in :meth:`nn.Module.state_dict` with ``prefix=""``."""
-    def module_fn(module, prefix, param_to_param_name):
-        for param_name, param in module.named_parameters(recurse=False):
-            param_to_param_name[param] = prefix + param_name
-
-    def return_fn(param_to_param_name):
-        return param_to_param_name
-
-    param_to_param_name: Dict[torch.nn.Parameter, str] = {}
-    return _apply_to_modules(
-        root_module, module_fn, return_fn, param_to_param_name,
-    )

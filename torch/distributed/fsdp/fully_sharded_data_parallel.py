@@ -4009,16 +4009,6 @@ def _get_param_to_unflat_param_names(
             in the module walk order; if ``False``, then includes all of the
             unflattened parameter names.
     """
-    def _clean_param_name(prefix, param_info):
-        """This replicates the parameter name cleaning logic in model state
-        dict but avoids gathering any parameters."""
-        if len(param_info.module_name) > 0:
-            prefix += param_info.module_name + "."
-        name = clean_tensor_name(
-            prefix + param_info.param_name
-        )
-        return name
-
     def module_fn(module, prefix, param_to_unflat_param_names):
         # For FSDP modules, only add the entry when considering the contained
         # `FlattenParamsWrapper` to avoid duplication
@@ -4026,8 +4016,8 @@ def _get_param_to_unflat_param_names(
             return
         for param_name, param in module.named_parameters(recurse=False):
             prefixed_param_names = [
-                _clean_param_name(prefix, param_info)
-                for param_info in param._param_infos
+                clean_tensor_name(prefix + prefixed_param_name)
+                for prefixed_param_name in param._prefixed_param_names
             ] if isinstance(param, FlatParameter) else [prefix + param_name]
             # If this parameter has already been visited, then it is a
             # shared parameter; then, only take the first parameter name

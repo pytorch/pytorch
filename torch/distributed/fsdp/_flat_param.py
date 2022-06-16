@@ -17,8 +17,6 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from ._utils import _get_param_to_param_name
-
 
 class ParamInfo(NamedTuple):
     """Information for an original module parameter."""
@@ -231,7 +229,6 @@ class FlatParamHandle:
         params_to_flatten: List[nn.Parameter] = []
         dtype: Optional[torch.dtype] = None
         requires_grad: Optional[bool] = None
-        param_to_param_name = _get_param_to_param_name(module)
         for submodule_name, submodule in module.named_modules():
             for param_name, param in submodule.named_parameters(recurse=False):
                 if param not in params_set:
@@ -259,7 +256,9 @@ class FlatParamHandle:
                     param_infos.append(ParamInfo(param_name, submodule, submodule_name))
                     numels.append(param.numel())
                     shapes.append(param.shape)
-                    prefixed_param_names.append(param_to_param_name[param])
+                    prefixed_param_name = submodule_name + "." + param_name \
+                        if submodule_name else param_name
+                    prefixed_param_names.append(prefixed_param_name)
         assert requires_grad is not None
         self.flat_param = FlatParamHandle.flatten_params(params_to_flatten, requires_grad)
         self.flat_param.init_metadata(
