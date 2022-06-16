@@ -99,7 +99,7 @@ def define_targets(rules):
         ],
         tools = ["//tools/setup_helpers:generate_code"],
         outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
-        cmd = "$(location //tools/setup_helpers:generate_code) " +
+        cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
@@ -155,6 +155,8 @@ GENERATED_H_CORE = [
     "CPUFunctions_inl.h",
     "CompositeExplicitAutogradFunctions.h",
     "CompositeExplicitAutogradFunctions_inl.h",
+    "CompositeExplicitAutogradNonFunctionalFunctions.h",
+    "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "CompositeImplicitAutogradFunctions.h",
     "CompositeImplicitAutogradFunctions_inl.h",
     "MetaFunctions.h",
@@ -191,6 +193,7 @@ GENERATED_CPP = [
     "RegisterZeroTensor.cpp",
     "RegisterMeta.cpp",
     "RegisterCompositeExplicitAutograd.cpp",
+    "RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "CompositeViewCopyKernels.cpp",
     "RegisterSchema.cpp",
     "RegisterFunctionalization_0.cpp",
