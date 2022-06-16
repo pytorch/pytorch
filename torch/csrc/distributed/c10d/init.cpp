@@ -1264,8 +1264,8 @@ Arguments:
           .def(
               "alltoall",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
-                 at::TensorList output_tensors,
-                 at::TensorList input_tensors,
+                 const std::vector<at::Tensor>& output_tensors,
+                 const std::vector<at::Tensor>& input_tensors,
                  const ::c10d::AllToAllOptions& opts) {
                 return ::c10d::ops::alltoall(
                     self, output_tensors, input_tensors, opts);
