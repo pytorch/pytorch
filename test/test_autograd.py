@@ -6614,7 +6614,6 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertFalse(view_tangent._is_view())  # Optimization to share the same tensor!
         self.assertIs(view_tangent, base_tangent)
         self.assertIs(x_tangent, tangent)
-        self.assertIs(view_tangent, tangent)
 
     def test_inplace_on_view_not_same_layout(self):
         input = torch.zeros([2, 2])
@@ -7758,6 +7757,16 @@ class TestAutogradDeviceType(TestCase):
         with fwAD.dual_level():
             dual = fwAD.make_dual(primal, tangent)
             non_dual.copy_(dual)
+
+    def test_copy_forward_ad_same_layout_copies_grad(self, device):
+        primal = torch.tensor([[3.], [4.]], device=device)
+        tangent = torch.tensor([[5.], [6.]], device=device)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(primal, tangent)
+            non_dual = torch.tensor([[1.], [2.]])
+            non_dual.copy_(x_dual)
+            self.assertTrue(fwAD.unpack_dual(non_dual).tangent is not tangent)
 
     @onlyCUDA
     def test_simple_reentrant_cross_device(self, device):
