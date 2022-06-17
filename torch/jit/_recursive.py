@@ -26,13 +26,15 @@ ignored_attributes = [
     "_parameters",
     "_buffers",
     "_non_persistent_buffers_set",
-    "_modules",
-    "_initializing",
     "_backward_hooks",
+    "_is_full_backward_hook",
     "_forward_hooks",
     "_forward_pre_hooks",
     "_state_dict_hooks",
     "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+    "_modules",
+    "_initializing",
     "dump_patches",
 ]
 
