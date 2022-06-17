@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantization_mappings import float_to_apot, float_to_reduced_precision
+from torch.ao.quantization.experimental.apot_utils import float_to_apot, float_to_reduced_precision
 
 # class to store APoT quantized tensor
 class TensorAPoT(torch.Tensor):
