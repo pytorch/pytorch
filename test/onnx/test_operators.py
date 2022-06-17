@@ -16,6 +16,7 @@ from test_pytorch_common import (
     TestCase,
     flatten,
     run_tests,
+    skipIfCaffe2,
     skipIfNoLapack,
 )
 
@@ -35,7 +36,6 @@ from torch.onnx.symbolic_helper import (
     _get_tensor_sizes,
     parse_args,
 )
-from torch.testing._internal.common_utils import skipIfCaffe2
 
 """Usage: python test/onnx/test_operators.py [--no-onnx] [--produce-onnx-test-data]
           --no-onnx: no onnx python dependence
