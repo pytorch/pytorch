@@ -3448,7 +3448,7 @@ Example::
     tensor([[2.0000, 2.0000, 3.2300, 2.0000],
             [2.0000, 2.0000, 2.0000, 3.2300]])
 
-    >>> # Testing the case where index.size(d) > src.size(d)
+    >>> # case where index.size(d) > src.size(d)
     >>> src = torch.arange(1, 13).reshape((2, 2, 3))
     >>> src
     tensor([[[ 1,  2,  3],
@@ -3543,7 +3543,7 @@ Example::
             [0., 2., 0., 0., 0.],
             [0., 0., 2., 1., 1.]])
 
-    >>> # Testing the case where index.size(d) > src.size(d)
+    >>> # case where index.size(d) > src.size(d)
     >>> src = torch.arange(1, 13).reshape((2, 2, 3))
     >>> src
     tensor([[[ 1,  2,  3],
@@ -3649,7 +3649,7 @@ Example::
     >>> input2.scatter_reduce(0, index, src, reduce="amax", include_self=False)
     tensor([3., 6., 5., 2.])
 
-    >>> # Testing the case where index.size(d) > src.size(d)
+    >>> # case where index.size(d) > src.size(d)
     >>> src = torch.arange(1, 13).reshape((2, 2, 3))
     >>> src
     tensor([[[ 1,  2,  3],
