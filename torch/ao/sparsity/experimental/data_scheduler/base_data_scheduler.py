@@ -2,6 +2,7 @@ from torch.ao.sparsity import BaseDataSparsifier
 from functools import wraps
 import weakref
 import abc
+import warnings
 
 __all__ = ['BaseDataScheduler']
 
@@ -85,4 +86,42 @@ class BaseDataScheduler(object):
         raise NotImplementedError
 
     def step(self, epoch=None):
-        pass
+        # Raise warning if trying to call scheduler step before the sparsifier.
+        # https://github.com/pytorch/pytorch/issues/20124
+        if self._step_count == 1:
+            if not hasattr(self.data_sparsifier.step, "_with_counter"):
+                warnings.warn("Seems like `data_sparsifier.step()` has been overridden after sparsity scheduler "
+                              "initialization. Please, make sure to call `data_sparsifier.step()` before "
+                              "`scheduler.step()`.", UserWarning)
+
+            # Just check if there were two first scheduler.step() calls before sparsifier.step()
+            elif self.data_sparsifier._step_count < 1:  # type: ignore[attr-defined]
+                warnings.warn("Detected call of `scheduler.step()` before `data_sparsifier.step()`. "
+                              "You have to make sure you run the data_sparsifier.step() BEFORE any "
+                              "calls to the scheduer.step().", UserWarning)
+        self._step_count += 1
+
+        class _enable_get_sl_call:
+
+            def __init__(self, o):
+                self.o = o
+
+            def __enter__(self):
+                self.o._get_sl_called_within_step = True
+                return self
+
+            def __exit__(self, type, value, traceback):
+                self.o._get_sl_called_within_step = False
+
+        with _enable_get_sl_call(self):
+            self.last_epoch += 1
+            updated_scheduler_params = self.get_hyperparam()
+
+        for name, param in updated_scheduler_params.items():
+            self.data_sparsifier.data_groups[name][self.schedule_param] = param
+
+        self._last_param = {
+            name: config.get(self.schedule_param, None)
+            for name, config in self.data_sparsifier.data_groups.items()
+        }
+        self.data_sparsifier.enable_mask_update = True
