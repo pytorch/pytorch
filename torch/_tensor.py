@@ -83,7 +83,7 @@ def _rebuild_from_type_v2(func, new_type, args, state):
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
-        if has_torch_function_unary(self) or _C._get_torch_function_mode():
+        if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__deepcopy__, (self,), self, memo)
         if not self.is_leaf:
             raise RuntimeError("Only Tensors created explicitly by the user "

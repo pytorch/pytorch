@@ -17,6 +17,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         }
     }
 
+    // using meta bit test to catch Fake Tensor as well until __torch__function defined
     if (self.key_set().has_all(DispatchKeySet(BackendComponent::MetaBit))) {
         AT_ERROR("Can not infer total number of classes from meta tensor.");
     }
