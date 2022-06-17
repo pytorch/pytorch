@@ -192,11 +192,13 @@ __all__ = [
     "hsplit",
     "hstack",
     "narrow",
+    "native_layer_norm",
     "permute",
     "ravel",
     "reshape",
     "roll",
     "rot90",
+    "rsqrt",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
@@ -624,6 +626,11 @@ def reciprocal(a):
 )
 def round(a):
     return prims.round(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def rsqrt(a):
+    return prims.rsqrt(a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -1426,7 +1433,7 @@ def _set_correction(
 @out_wrapper
 def var(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
@@ -1484,7 +1491,7 @@ def std(
 
 def mean(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     dtype=None,
@@ -1539,7 +1546,7 @@ def std_mean(
 
 def var_mean(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
@@ -1795,6 +1802,92 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
     return prims.slice_in_dim(a, start, start + length, axis=dim)
+
+
+def _normalize(
+    a: Tensor, norm_dims: DimsType, eps: float
+) -> Tuple[Tensor, Tensor, Tensor]:
+    """Computes mean and 1/std of a tensor along norm_dims.
+
+    Used as a helper function for normalization layers.
+
+    Args:
+        a (Tensor): input tensor
+        norm_dims (DimsType): dimensions to normalize over
+        eps (float): epsilon for numerical stability
+
+    Returns:
+        out (Tensor): normalized tensor.
+        mean (Tensor): mean of the tensor along norm_dims.
+        rstd (Tensor): 1/std of the tensor along norm_dims.
+    """
+    computation_dtype = utils.get_computation_dtype(a.dtype)
+    a_acc = _maybe_convert_to_dtype(a, computation_dtype)
+    assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
+    biased_var, mean = var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    rstd = torch.rsqrt(biased_var + eps)
+    out = (a - mean) * rstd
+    return out, mean, rstd
+
+
+@register_decomposition(torch.ops.aten.native_layer_norm)
+def native_layer_norm(
+    input: Tensor,
+    normalized_shape: ShapeType,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    normalized_ndim = len(normalized_shape)
+    utils.check(
+        normalized_ndim >= 1,
+        lambda: "Expected normalized_shape to be at least 1-dimensional, i.e., "
+        + "containing at least one element, but got normalized_shape = "
+        + str(normalized_shape),
+    )
+    # torch.Size([1, 2, 3]) == [1, 2, 3] evaluates to False
+    # while torch.Size([1, 2, 3]) == (1, 2, 3) is True
+    # therefore we use tuple(normalized_shape)
+    utils.check(
+        weight is None or weight.shape == tuple(normalized_shape),
+        lambda: "Expected weight to be of same shape as normalized_shape, but got "
+        + "weight of shape "
+        + str(weight.shape)  # type: ignore[union-attr]
+        + " and normalized_shape = "
+        + str(normalized_shape),
+    )
+    utils.check(
+        bias is None or bias.shape == tuple(normalized_shape),
+        lambda: "Expected bias to be of same shape as normalized_shape, but got "
+        + "bias of shape "
+        + str(bias.shape)  # type: ignore[union-attr]
+        + " and normalized_shape = "
+        + str(normalized_shape),
+    )
+    utils.check(
+        input.ndim >= normalized_ndim
+        and input.shape[(input.ndim - normalized_ndim) :] == tuple(normalized_shape),
+        lambda: "Given normalized_shape="
+        + str(normalized_shape)
+        + ", expected input with shape "
+        + str(normalized_shape)
+        + ", but got input of size "
+        + str(input.shape),
+    )
+    axis = input.ndim - normalized_ndim
+    reduction_dims = list(range(axis, input.ndim))
+    out, mean, rstd = _normalize(input, reduction_dims, eps)
+    if weight is None and bias is not None:
+        out = out + bias
+    elif weight is not None and bias is None:
+        out = out * weight
+    elif weight is not None and bias is not None:
+        out = out * weight + bias
+    out = prims.convert_element_type(out, input.dtype)
+    if input.device.type == "cpu":
+        mean = prims.convert_element_type(mean, input.dtype)
+        rstd = prims.convert_element_type(rstd, input.dtype)
+    return (out, mean, rstd)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
