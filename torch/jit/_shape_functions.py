@@ -88,6 +88,25 @@ def broadcast_inplace(a: List[int], b: List[int]):
             )
     return _copy(a)
 
+def repeat(self: List[int], repeats: List[int]):
+    ndim = len(repeats)
+    tensor_dim = len(self)
+    if tensor_dim > ndim:
+         raise AssertionError(
+            "The dims of tensor must be less than or equal to"
+            "the size of repeats".format(tensor_dim, ndim)
+        )
+ 
+    if ndim == 0:
+        return _copy(self)
+    out: List[int] = []
+    leading_rank = ndim - tensor_dim
+    for i in range(leading_rank):
+        out.append(repeats[i])
+    for i in range(tensor_dim):
+        out.append(self[i] * repeats[i + leading_rank])
+    return out
+
 
 def expand(self: List[int], sizes: List[int]):
     assert len(sizes) >= len(self)
@@ -1001,6 +1020,7 @@ add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_di
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
 add_shape_compute_mapping("aten::view(Tensor(a) self, int[] size) -> Tensor(a)", view)
+add_shape_compute_mapping("aten::repeat(Tensor self, int[] repeats) -> Tensor", repeat)
 add_shape_compute_mapping("aten::expand_as(Tensor(a) self, Tensor other) -> Tensor(a)", expand)
 add_shape_compute_mapping("aten::expand(Tensor(a) self, int[] size, *, bool implicit=False) -> Tensor(a)", expand_one_unused)
 add_shape_compute_mapping("aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor", mean_dim)

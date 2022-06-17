@@ -2022,6 +2022,34 @@ def transpose(self: List[int],
   return out
 
 )=====")
++ std::string(R"=====(def repeat(self: List[int],
+    repeats: List[int]) -> List[int]:
+  _0 = "The dims of tensor must be less than or equal tothe size of repeats"
+  ndim = torch.len(repeats)
+  tensor_dim = torch.len(self)
+  if torch.gt(tensor_dim, ndim):
+    _1 = torch.add("AssertionError: ", torch.format(_0, tensor_dim, ndim))
+    ops.prim.RaiseException(_1)
+  else:
+    pass
+  if torch.eq(ndim, 0):
+    out = annotate(List[int], [])
+    for _3 in range(torch.len(self)):
+      elem = self[_3]
+      _4 = torch.append(out, elem)
+    _2 = out
+  else:
+    out0 = annotate(List[int], [])
+    leading_rank = torch.sub(ndim, tensor_dim)
+    for i in range(leading_rank):
+      _5 = torch.append(out0, repeats[i])
+    for i0 in range(tensor_dim):
+      _6 = self[i0]
+      _7 = repeats[torch.add(i0, leading_rank)]
+      _8 = torch.append(out0, torch.mul(_6, _7))
+    _2 = out0
+  return _2
+)=====")
 + std::string(R"=====(def expand(self: List[int],
     sizes: List[int]) -> List[int]:
   _0 = torch.ge(torch.len(sizes), torch.len(self))
