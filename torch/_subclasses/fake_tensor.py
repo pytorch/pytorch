@@ -500,7 +500,9 @@ class FakeCopyMode(TorchFunctionMode):
             if id(tensor) in memo:
                 return memo[id(tensor)]
 
-            return self.fake_mode.from_tensor(tensor)
+            out = self.fake_mode.from_tensor(tensor)
+            memo[id(tensor)] = out
+            return out
         else:
             with torch._C.DisableTorchFunction():
                 return func(*args, **kwargs)
