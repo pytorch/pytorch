@@ -18,8 +18,7 @@ class Transformer(Module):
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
     Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
     Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
-    Processing Systems, pages 6000-6010. Users can build the BERT(https://arxiv.org/abs/1810.04805)
-    model with corresponding parameters.
+    Processing Systems, pages 6000-6010.
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -164,7 +163,8 @@ class Transformer(Module):
 
 
 class TransformerEncoder(Module):
-    r"""TransformerEncoder is a stack of N encoder layers
+    r"""TransformerEncoder is a stack of N encoder layers. Users can build the
+    BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
 
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
@@ -226,9 +226,10 @@ class TransformerEncoder(Module):
                         first_layer.linear2.bias,
                     )
                     if not torch.overrides.has_torch_function(tensor_args):
-                        if output.is_cuda or 'cpu' in str(output.device):
-                            convert_to_nested = True
-                            output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
+                        if not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]):
+                            if output.is_cuda or 'cpu' in str(output.device):
+                                convert_to_nested = True
+                                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
 
         for mod in self.layers:
             if convert_to_nested:
@@ -378,9 +379,9 @@ class TransformerEncoderLayer(Module):
 
         # We can't test self.activation in forward() in TorchScript,
         # so stash some information about it instead.
-        if activation is F.relu:
+        if activation is F.relu or isinstance(activation, torch.nn.ReLU):
             self.activation_relu_or_gelu = 1
-        elif activation is F.gelu:
+        elif activation is F.gelu or isinstance(activation, torch.nn.GELU):
             self.activation_relu_or_gelu = 2
         else:
             self.activation_relu_or_gelu = 0

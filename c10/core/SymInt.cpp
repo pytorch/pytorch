@@ -17,4 +17,46 @@ c10::SymInt SymInt::toSymInt(std::shared_ptr<SymbolicIntNode> sin_sp) {
   uint64_t data = idx | IS_SYM;
   return c10::SymInt(static_cast<int64_t>(data));
 }
+
+SymInt SymInt::operator+(SymInt sci) const {
+  TORCH_CHECK(
+      !this->is_symbolic() && !sci.is_symbolic(),
+      "Symbolic Add isn't supported yet");
+  return SymInt(data_ + sci.data_);
+}
+
+bool SymInt::operator<(SymInt sci) const {
+  TORCH_CHECK(
+      !this->is_symbolic() && !sci.is_symbolic(),
+      "Symbolic lt isn't supported yet");
+  return data_ < sci.data_;
+}
+
+void SymInt::operator*=(SymInt sci) {
+  TORCH_CHECK(
+      !this->is_symbolic() && !sci.is_symbolic(),
+      "Symbolic mul_ isn't supported yet");
+  data_ = data_ * sci.data_;
+}
+
+bool SymInt::operator<(int64_t sci) const {
+  TORCH_CHECK(!this->is_symbolic(), "Symbolic lt isn't supported yet");
+  return data_ < sci;
+}
+
+bool SymInt::operator==(int64_t sci) const {
+  TORCH_CHECK(!this->is_symbolic(), "Symbolic eq isn't supported yet");
+  return data_ == sci;
+}
+
+bool SymInt::operator!=(int64_t sci) const {
+  TORCH_CHECK(!this->is_symbolic(), "Symbolic neq isn't supported yet");
+  return data_ != sci;
+}
+
+SymInt SymInt::operator*(int64_t sci) const {
+  TORCH_CHECK(!this->is_symbolic(), "Symbolic mul isn't supported yet");
+  return SymInt(data_ * sci);
+}
+
 } // namespace c10

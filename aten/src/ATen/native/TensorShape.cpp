@@ -843,7 +843,7 @@ Tensor diag_embed(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim
 }
 
 Tensor expand_symint(const Tensor& self, c10::SymIntArrayRef packed_size, bool implicit) {
-  auto size = expectIntArrayRef(packed_size);
+  auto size = asIntArrayRefSlow(packed_size);
   return expand(self, size, implicit);
 }
 
@@ -1985,11 +1985,6 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
   }
 }
 
-Tensor index_select_sparse_cuda(const Tensor& self, int64_t dim, const Tensor& index) {
-  auto res = index_select_sparse_cpu(self.to(at::kCPU), dim, index.to(at::kCPU));
-  return res.to(self.device());
-}
-
 Tensor slice(
     const Tensor& self,
     int64_t dim,
@@ -2980,7 +2975,7 @@ Tensor numpy_T(const Tensor &self) {
   if (n != 2 && n != 0) {
     TORCH_WARN_ONCE(
         "The use of `x.T` on tensors of dimension other than 2 to reverse their shape is deprecated ",
-        "and it will throw an error in a future release. Consider `x.mT` to transpose batches of matrices",
+        "and it will throw an error in a future release. Consider `x.mT` to transpose batches of matrices ",
         "or `x.permute(*torch.arange(x.ndim - 1, -1, -1))` to reverse the dimensions of a tensor."
     );
   }
