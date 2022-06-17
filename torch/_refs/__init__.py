@@ -1138,6 +1138,34 @@ def clamp(
     raise ValueError(msg)
 
 
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "min"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def clamp_min(
+    self: TensorLikeType,
+    min: Optional[TensorOrNumberLikeType] = None,
+) -> TensorLikeType:
+    a, min = _maybe_broadcast(a, min)
+
+    return maximum(a, min)
+
+
+@out_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "max"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def clamp_max(
+    self: TensorLikeType,
+    max: Optional[TensorOrNumberLikeType] = None,
+) -> TensorLikeType:
+    a, max = _maybe_broadcast(a, max)
+
+    return minimum(a, max)
+
+
 #
 # Conditional references
 #
