@@ -237,7 +237,7 @@ def rrelu(
     if inplace:
         raise NotImplementedError
 
-    rhs = refs.uniform(a.shape, low=lower, high=upper, dtype=a.dtype, device=a.device)
+    rhs = refs.mul(a, refs.uniform(a.shape, low=lower, high=upper, dtype=a.dtype, device=a.device))
     return refs.where(refs.ge(a, 0), a, rhs)
 
 
