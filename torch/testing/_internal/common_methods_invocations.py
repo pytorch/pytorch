@@ -10630,10 +10630,6 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-           #skips=(
-               # https://github.com/pytorch/pytorch/issues/55907
-               #DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-           #),
                     supports_two_python_scalars=True),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -20786,10 +20782,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clamp_min",
         torch_opinfo_name="clamp_min",
-        #skips=(
-        #    # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-        #    #DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        #),
     ),
     PythonRefInfo(
         "_refs.clamp",
