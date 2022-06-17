@@ -26,13 +26,15 @@ __all__ = [
     "celu",
     "dropout",
     "elu",
-    "relu",
+    "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "mish",
+    "relu",
     "selu",
     "softplus",
+    "softshrink",
     "tanhshrink",
 ]
 
@@ -254,6 +256,29 @@ def softplus(
         rhs = torch.log1p(torch.exp(scaled_input))
 
     return torch.where(scaled_input > threshold, a, rhs)
+
+
+@out_wrapper
+def hardshrink(a: TensorLikeType, lambd: float = 0.5):
+    # Formula for reference,
+    # hardshrink(x) = x if x > lambd
+    #               = x if x < -lambd
+    #               = 0 otherwise
+    return refs.where(abs(a) > abs(lambd), a, 0)
+
+
+@out_wrapper
+def softshrink(a: TensorLikeType, lambd: float = 0.5):
+    # Formula for reference,
+    # softshrink(x) = x - lambd if x > lambd
+    #               = x + lambd if x < -lambd
+    #               = 0 otherwise
+    ge_mask = a > lambd
+    le_mask = a < -lambd
+    zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
+    result = refs.where(ge_mask, a - lambd, a)
+    result = refs.where(le_mask, a + lambd, result)
+    return refs.where(zero_mask, 0, result)
 
 
 # Losses
