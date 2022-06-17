@@ -136,6 +136,7 @@ class TestProxyTensor(TestCase):
 
 make_fx_failures = {
     xfail('allclose'),
+    xfail('equal'),
     xfail('nn.functional.dropout'),
     xfail('linalg.eigvals'),
     xfail('nn.functional.max_pool1d', device_type='cpu'),  # precision problems?
