@@ -12,7 +12,7 @@ namespace jit {
 bool insertableTensor(const at::Tensor& ten) {
   // bail if tensor has no storage i.e. opaque tensor used in MKLdnn.
   // or gradients because we have no way of serializing them & are mutable
-  return !ten.requires_grad() && ten.has_storage();
+  return !ten.requires_grad() && ten.has_storage() && !ten.is_nested();
 }
 
 bool insertableIValue(const IValue& ivalue) {
