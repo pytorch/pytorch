@@ -104,137 +104,112 @@ class TestQuantizedTensor(unittest.TestCase):
 
         self.assertTrue(expectedResult)
 
-    """ Tests quantize_apot result on random 1-dim tensor
-        and hardcoded values for b, k
+    r""" Tests dequantize_apot result on random 1-dim tensor
+        (int repr) and hardcoded values for b, k.
+        Dequant -> quant an input tensor and verify that
+        result is equivalent to input
         * tensor2quantize: Tensor
         * b: 4
         * k: 2
     """
-    def test_dequantize_APoT_ramd_1d(self):
+    def test_dequantize_quantize_rand_1d(self):
         # generate random size of tensor2dequantize
         size = random.randint(1, 16)
 
+        # initialize quantize APoT tensor to dequantize:
         # generate tensor with random values between 0 -> 2**4 = 16
         # because there are 2**b = 2**4 quantization levels total
         tensor2dequantize = 16 * torch.rand(size)
+        apot_tens = TensorAPoT(4, 2, False)
+        apot_tens.data = tensor2dequantize.int()
+        apot_tens.apot_repr = APoTRepr.level_indices
+        orig_input = torch.clone(apot_tens.data)
 
-        tensor2dequantize = tensor2dequantize.int()
+        dequantized_result = apot_tens.dequantize()
 
-        orig_input = tensor2dequantize.clone()
+        quantized_result = apot_tens.quantize_APoT(tensor2quantize=dequantized_result, apot_repr=APoTRepr.level_indices)
 
-        max_val = torch.max(orig_input)
+        self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
-        tensor2dequantize = dequantize(tensor2dequantize, 4, 2)
-
-        # make observer
-        obs = APoTObserver(max_val=max_val, b=4, k=2)
-        obs_result = obs.calculate_qparams(signed=False)
-
-        quantized_levels = obs_result[1]
-        level_indices = obs_result[2]
-
-        input_arr = list(orig_input)
-        result_arr = list(tensor2dequantize)
-
-        zipped_result = zip(input_arr, result_arr)
-
-        expected_result = True
-
-        for ele, res in zipped_result:
-            idx = list(level_indices).index(ele)
-            if res != quantized_levels[idx]:
-                expected_result = False
-
-        self.assertTrue(expected_result)
-
-    """ Tests quantize_apot result on random 2-dim tensor
-        and hardcoded values for b, k
+    r""" Tests dequantize_apot result on random 2-dim tensor
+        (int repr) and hardcoded values for b, k.
+        Dequant -> quant an input tensor and verify that
+        result is equivalent to input
         * tensor2quantize: Tensor
         * b: 6
         * k: 2
     """
-    def test_dequantize_APoT_ramd_2d(self):
+    def test_dequantize_quantize_rand_2d(self):
         # generate random size of tensor2dequantize
-        size1 = random.randint(1, 64)
-        size2 = random.randint(1, 64)
+        size = random.randint(1, 64)
 
+        # initialize quantize APoT tensor to dequantize:
         # generate tensor with random values between 0 -> 2**6 = 64
         # because there are 2**b = 2**6 quantization levels total
-        tensor2dequantize = 64 * torch.rand(size1, size2)
+        tensor2dequantize = 64 * torch.rand(size, size)
+        apot_tens = TensorAPoT(6, 2, False)
+        apot_tens.data = tensor2dequantize.int()
+        apot_tens.apot_repr = APoTRepr.level_indices
+        orig_input = torch.clone(apot_tens.data)
 
-        tensor2dequantize = tensor2dequantize.int()
+        dequantized_result = apot_tens.dequantize()
 
-        orig_input = tensor2dequantize.clone()
+        quantized_result = apot_tens.quantize_APoT(tensor2quantize=dequantized_result, apot_repr=APoTRepr.level_indices)
 
-        max_val = torch.max(orig_input)
+        self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
-        tensor2dequantize = dequantize(tensor2dequantize, 6, 2)
-
-        # make observer
-        obs = APoTObserver(max_val=max_val, b=6, k=2)
-        obs_result = obs.calculate_qparams(signed=False)
-
-        quantized_levels = obs_result[1]
-        level_indices = obs_result[2]
-
-        input_arr = list(orig_input.flatten())
-        result_arr = list(tensor2dequantize.flatten())
-
-        zipped_result = zip(input_arr, result_arr)
-
-        expected_result = True
-
-        for ele, res in zipped_result:
-            idx = list(level_indices).index(ele)
-            if res != quantized_levels[idx]:
-                expected_result = False
-
-        self.assertTrue(expected_result)
-
-    """ Tests quantize_apot result on random 3-dim tensor
-        and hardcoded values for b, k
+    r""" Tests dequantize_apot result on random 3-dim tensor
+        (int repr) and hardcoded values for b, k.
+        Dequant -> quant an input tensor and verify that
+        result is equivalent to input
         * tensor2quantize: Tensor
         * b: 6
         * k: 2
     """
-    def test_dequantize_APoT_ramd_3d(self):
+    def test_dequantize_quantize_rand_3d(self):
         # generate random size of tensor2dequantize
-        size1 = random.randint(1, 64)
-        size2 = random.randint(1, 64)
-        size3 = random.randint(1, 64)
+        size = random.randint(1, 64)
 
+        # initialize quantize APoT tensor to dequantize:
         # generate tensor with random values between 0 -> 2**6 = 64
         # because there are 2**b = 2**6 quantization levels total
-        tensor2dequantize = 64 * torch.rand(size1, size2, size3)
+        tensor2dequantize = 64 * torch.rand(size, size, size)
+        apot_tens = TensorAPoT(6, 2, False)
+        apot_tens.data = tensor2dequantize.int()
+        apot_tens.apot_repr = APoTRepr.level_indices
+        orig_input = torch.clone(apot_tens.data)
 
-        tensor2dequantize = tensor2dequantize.int()
+        dequantized_result = apot_tens.dequantize()
 
-        orig_input = tensor2dequantize.clone()
+        quantized_result = apot_tens.quantize_APoT(tensor2quantize=dequantized_result, apot_repr=APoTRepr.level_indices)
 
-        max_val = torch.max(orig_input)
+        self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
-        tensor2dequantize = dequantize(tensor2dequantize, 6, 2)
+    r""" Tests dequantize_apot result on random 1-dim tensor
+        (reduced precision fp repr) and hardcoded values for b, k.
+        Dequant -> quant an input tensor and verify that
+        result is equivalent to input
+        * tensor2quantize: Tensor
+        * b: 4
+        * k: 2
+    """
+    def test_dequantize_quantize_fp_rand_1d(self):
+        # generate random size of tensor2dequantize between 1 -> 16
+        # because there are 2**b = 2**4 quantization levels total
+        size = random.randint(1, 16)
 
-        # make observer
-        obs = APoTObserver(max_val=max_val, b=6, k=2)
-        obs_result = obs.calculate_qparams(signed=False)
+        # initialize quantize APoT tensor to dequantize:
+        # generate tensor with random fp values between 0 -> 1
+        tensor2quantize = torch.rand(size)
+        apot_tens = TensorAPoT(4, 2, False)
+        apot_tens.apot_repr = APoTRepr.reduced_precision_fp
+        orig_input = torch.clone(apot_tens.data)
 
-        quantized_levels = obs_result[1]
-        level_indices = obs_result[2]
+        dequantized_result = apot_tens.dequantize()
 
-        input_arr = list(orig_input.flatten())
-        result_arr = list(tensor2dequantize.flatten())
+        quantized_result = apot_tens.quantize_APoT(tensor2quantize=dequantized_result, apot_repr=APoTRepr.reduced_precision_fp)
 
-        zipped_result = zip(input_arr, result_arr)
-
-        expected_result = True
-
-        for ele, res in zipped_result:
-            idx = list(level_indices).index(ele)
-            if res != quantized_levels[idx]:
-                expected_result = False
-
-        self.assertTrue(expected_result)
+        self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
     def test_q_apot_alpha(self):
         with self.assertRaises(NotImplementedError):

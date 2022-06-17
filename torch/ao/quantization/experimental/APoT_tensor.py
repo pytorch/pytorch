@@ -1,7 +1,7 @@
 import torch
 import enum
 from torch import Tensor
-from torch.ao.quantization.experimental.observer import APoTObserver, float_to_apot, float_to_reduced_precision
+from torch.ao.quantization.experimental.observer import APoTObserver, float_to_apot, float_to_reduced_precision, apot_to_float
 
 # enum to represent APoT representation
 class APoTRepr(enum.Enum):
@@ -17,6 +17,7 @@ class TensorAPoT(torch.Tensor):
     quantization_levels: torch.Tensor
     level_indices: torch.Tensor
     data: torch.Tensor
+    apot_repr: APoTRepr
 
     def __init__(
         self,
@@ -49,6 +50,7 @@ class TensorAPoT(torch.Tensor):
         result: APoT representation of tensor2quantize (integer or reduced precision fp)
     """
     def quantize_APoT(self, tensor2quantize: Tensor, apot_repr: APoTRepr):
+        self.apot_repr = apot_repr
         if apot_repr == APoTRepr.level_indices:
             # map float_to_apot over tensor2quantize elements
             self.data = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
@@ -61,31 +63,25 @@ class TensorAPoT(torch.Tensor):
     based on the calculated quantization levels from a specified APoT non-uniform observer.
     The approach follows the method outlined in the APoT paper: https://arxiv.org/pdf/1909.13144.pdf.
     Args:
-        tensor2dequantize: integer Tensor
-        b: total number of bits across all terms in non-uniform observer
-        k: base bitwidth, i.e. bitwidth of every term, in non-uniform observer
+        self: APoT tensor to dequantize
     Returns:
         result: floating point representation of input Tensor
     """
-    @staticmethod
-    def dequantize(tensor2dequantize: Tensor, b: int, k: int) -> Tensor:  # type: ignore[override]
-        tensor2dequantize = tensor2dequantize.float()
+    def dequantize(self):  # type: ignore[override]
+        result = None
 
-        # by paper defn, max value of floating point tensor will be 1.0
-        max_val = 1.0
+        if self.apot_repr == APoTRepr.level_indices:
+            tensor2dequantize = self.data.float()
 
-        # make observer
-        obs = APoTObserver(max_val=max_val, b=b, k=k)
-        obs_result = obs.calculate_qparams(signed=False)
+            max_val = 1.0
 
-        quantized_levels = obs_result[1]
-        level_indices = obs_result[2]
+            quantization_levels = self.quantization_levels
+            level_indices = self.level_indices
 
-        print("quantized levels", quantized_levels)
-        print("level indices", level_indices)
-
-        # map apot_to_float over tensor2quantize elements
-        result = tensor2dequantize.apply_(lambda x: float(apot_to_float(x, quantized_levels, level_indices)))
+            # map apot_to_float over tensor2quantize elements
+            result = tensor2dequantize.apply_(lambda x: float(apot_to_float(x, quantization_levels, level_indices)))
+        elif self.apot_repr == APoTRepr.reduced_precision_fp:
+            return self.data
 
         return result
 
