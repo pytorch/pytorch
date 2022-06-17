@@ -99,7 +99,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
         prepared_model = self._prepare_model_and_run_input(ConvModel(), q_config_mapping, input)
 
         # run the detector
-        per_channel_detector = PerChannelDetector()
+        per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
         optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # no optims possible and there should be nothing in per_channel_status
@@ -139,7 +139,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        per_channel_detector = PerChannelDetector()
+        per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
         optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # there should be optims possible
@@ -206,7 +206,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        per_channel_detector = PerChannelDetector()
+        per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
         optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # the only suggestions should be to linear layers
@@ -256,7 +256,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        per_channel_detector = PerChannelDetector()
+        per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
         optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # there should be optims possible
@@ -298,7 +298,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        per_channel_detector = PerChannelDetector()
+        per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
         optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # there should be optims possible
@@ -340,7 +340,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
         )
 
         # run the detector
-        per_channel_detector = PerChannelDetector()
+        per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
         optims_str, per_channel_info = per_channel_detector.generate_detector_report(prepared_model)
 
         # no optims possible and there should be nothing in per_channel_status
@@ -406,7 +406,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
         model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused)
 
         # run the detector
-        per_channel_detector = PerChannelDetector()
+        per_channel_detector = PerChannelDetector(torch.backends.quantized.engine)
         optims_str, per_channel_info = per_channel_detector.generate_detector_report(model_fp32_prepared)
 
         # there should be optims possible
@@ -820,8 +820,10 @@ class TestFxModelReportClass(QuantizationTestCase):
         - Ensures that the observers of interest are properly initialized
         """
 
+        backend = torch.backends.quantized.engine
+
         # make an example set of detectors
-        test_detector_set = set([DynamicStaticDetector(), PerChannelDetector()])
+        test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
         # initialize with an empty detector
         model_report = ModelReport(test_detector_set)
 
@@ -877,9 +879,9 @@ class TestFxModelReportClass(QuantizationTestCase):
                 return z
 
         # create model report object
-
         # make an example set of detectors
-        test_detector_set = set([DynamicStaticDetector(), PerChannelDetector()])
+        backend = torch.backends.quantized.engine
+        test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
         # initialize with an empty detector
         model_report = ModelReport(test_detector_set)
 
