@@ -163,8 +163,6 @@ class CapabilityBasedPartitioner:
                 id = partitions_size_by_id[0][1]
                 assign(node, id)
 
-        # print("assignment", assignment)
-
         return partitions_by_id.values()
 
     def fuse_partitions(self, partitions: List[Partition]):

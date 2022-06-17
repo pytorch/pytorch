@@ -171,6 +171,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # call_function aten
             # ===============================================================
             # Following supported aten ops is copied from torch/csrc/jit/codegen/cuda/parser.cpp
+            # TODO: might need to update according to supported input types
             "torch.ops.aten.add": None,
             "torch.ops.aten.sub": None,
             "torch.ops.aten.rsub": None,
@@ -282,14 +283,12 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.view": None,
             "torch.ops.aten.flatten.using_ints": None,
 
-
             # ===============================================================
             # call_function aten: inplace variants
             # ===============================================================
-
+            # These nodes shouldn't show up, the functionalization pass should have removed inplace ops
             "torch.ops.aten.add_": None,
             "torch.ops.aten.relu_": None,
-
 
             # ===============================================================
             # call_function builtins and operator
@@ -297,7 +296,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             "getattr": None,
             #     "_operator.add": None,
             #     "_operator.div": None,
-            #     "_operator.getitem": None,
+            "_operator.getitem": None,
             #     "_operator.mul": None,
             #     "_operator.sub": None,
             #     "_operator.truediv": None,

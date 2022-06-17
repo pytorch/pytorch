@@ -222,6 +222,7 @@ class TestFXGraphPasses(JitTestCase):
 
 
     def test_nvfuser_patition_real_models(self):
+        # this test assumes torch_bench_graphs is place at torch's root folder
         test_cases = [
             "torch_bench_graphs/resnext50_32x4d/resnext50_32x4d_forward_0",
             "torch_bench_graphs/resnext50_32x4d/resnext50_32x4d_backward_0",
@@ -448,6 +449,9 @@ class TestFXGraphPasses(JitTestCase):
             print("Forming partitions...")
             partitions = partitioner.partition(candidates)
 
+            print("Filtering out single node partitions...")
+            partitions = [partition for partition in partitions if len(partition.nodes) > 1]
+
             print("Partitions formed:")
             for partition in partitions:
                 print([node.name for node in partition.nodes])
@@ -459,12 +463,11 @@ class TestFXGraphPasses(JitTestCase):
             # drawer = FxGraphDrawer(fused_graph, "test")
             # dot_graph = drawer.get_dot_graph()
             # dot_graph.write_png("after.png")
+
             try:
                 print("Generating testing data...")
                 with (open(input_data_path, 'rb')) as f:
                     inputs_meta = pickle.load(f)
-                    # print(len(inputs_meta))
-                    # print(inputs_meta)
 
                     inputs = []
                     for meta in inputs_meta:
