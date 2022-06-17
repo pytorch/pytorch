@@ -1609,7 +1609,7 @@ void initJITBindings(PyObject* module) {
               }),
           py::call_guard<py::gil_scoped_release>());
   m.def("_is_alias_of", [](const at::Tensor& self, const at::Tensor& other) {
-    return IValue(self).isAliasOf(IValue(other));
+    return self.is_alias_of(other);
   });
   m.def("fork", [](const py::args& args, const py::kwargs& kwargs) {
     AT_ASSERT(args.size() >= 1);
