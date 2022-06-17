@@ -7740,14 +7740,6 @@
     CPU, CUDA: multinomial_out
     MPS: multinomial_out_mps
 
-- func: multinomial_with_replacement_mps(Tensor self, int num_samples, *, Generator? generator=None) -> Tensor
-  dispatch:
-    MPS: multinomial_with_replacement_mps_entry
-
-- func: multinomial_with_replacement_mps.out(Tensor self, int num_samples, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    MPS: multinomial_with_replacement_mps_kernel
-
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:

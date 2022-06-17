@@ -524,25 +524,6 @@ Tensor& exponential_mps_(Tensor& self, double lambda, c10::optional<Generator> g
 
 }
 
-// Multinomial with replacement
-Tensor multinomial_with_replacement_mps_entry(
-    const Tensor& self,
-    const int64_t n_sample,
-    c10::optional<Generator> generator) {
-
-  Tensor result = at::empty({0}, self.options().dtype(kLong));
-
-  if (self.dim() == 1) {
-    result.resize_({n_sample});
-  } else {
-    const int64_t n_dist = self.size(0);
-    result.resize_({n_dist, n_sample});
-  }
-
-  return multinomial_with_replacement_mps_kernel(self, n_sample, generator, result);
-
-}
-
 Tensor& multinomial_with_replacement_mps_kernel(
     const Tensor& self,
     const int64_t n_sample,
