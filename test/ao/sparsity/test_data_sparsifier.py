@@ -43,13 +43,6 @@ class _BaseDataSparsiferTestRunner:
         # This will be rewritten as soon as possible
         self._test_case = TestCase()
 
-    def run_tests(self):
-        self._run_constructor_test()
-        self._run_squash_mask_test()
-        self._run_add_data_test()
-        self._run_step_test()
-        self._run_state_dict_test()
-
     def _get_name_data_config(self, some_data):
         if isinstance(some_data, Tuple):
             # dealing with data_list
@@ -139,6 +132,13 @@ class _BaseDataSparsiferTestRunner:
             data2 = sparsifier._extract_weight(data2)
             sparsifier.add_data(name=name1, data=data2)
             assert torch.all(data2 == sparsifier.get_data(name=name1))
+
+    def run_tests(self):
+        self._run_constructor_test()
+        self._run_squash_mask_test()
+        self._run_add_data_test()
+        self._run_step_test()
+        self._run_state_dict_test()
 
     def _run_state_dict_test(self):
         sparsifier1 = self._get_sparsifier()
