@@ -147,6 +147,25 @@ def float_to_apot(x, levels, indices):
 
     return best_idx
 
+r"""Converts floating point input into
+    reduced precision floating point value
+    based on quantization levels
+"""
+def float_to_reduced_precision(x, levels, indices):
+    levels_lst = list(levels)
+    indices_lst = list(indices)
+
+    min_delta = math.inf
+    best_fp = 0.0
+
+    for level, idx in zip(levels_lst, indices_lst):
+        cur_delta = abs(level - x)
+        if cur_delta < min_delta:
+            min_delta = cur_delta
+            best_fp = level
+
+    return best_fp
+
 r"""Converts int4 APoT2 input into floating point number
 based on quantization levels
 """
