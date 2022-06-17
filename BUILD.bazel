@@ -6,9 +6,10 @@ load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/bazel.bzl", "rules")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
+load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
 load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
 load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
+load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 
 define_targets(rules = rules)
 

@@ -2082,14 +2082,14 @@ TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const 
 
 std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& A) {
   auto out = at::_linalg_slogdet(A);
-  return {std::get<0>(out), std::get<1>(out)};
+  return std::make_tuple(std::move(std::get<0>(out)), std::move(std::get<1>(out)));
 }
 
 std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
   auto LU = at::empty({0}, A.options());
   auto pivots = at::empty({0}, A.options().dtype(kInt));
   at::_linalg_slogdet_out(sign, logabsdet, LU, pivots, A);
-  return {sign, logabsdet};
+  return std::tie(sign, logabsdet);
 }
 
 // Alias
