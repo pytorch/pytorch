@@ -270,7 +270,7 @@ on them and append them to the :class:`Graph`.
         graph : fx.Graph = tracer_class().trace(model)
         new_graph = fx.Graph()
         env = {}
-        tracer = torch.fx.proxy.GraphAppendingTracer(graph)
+        tracer = torch.fx.proxy.GraphAppendingTracer(new_graph)
         for node in graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
                 # By wrapping the arguments with proxies,
