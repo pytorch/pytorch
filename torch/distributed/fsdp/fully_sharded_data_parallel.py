@@ -83,6 +83,14 @@ except ImportError:
     _TORCHDISTX_AVAIL = False
 
 
+__all__ = [
+    "FullyShardedDataParallel", "ShardingStrategy", "MixedPrecision",
+    "CPUOffload", "BackwardPrefetch", "StateDictType", "StateDictConfig",
+    "FullStateDictConfig", "LocalStateDictConfig", "ShardedStateDictConfig",
+    "OptimStateKeyType", "TrainingState_", "p_assert", "clean_tensor_name",
+]
+
+
 FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
