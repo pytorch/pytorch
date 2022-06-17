@@ -9,8 +9,8 @@
 #     OR
 #     bazel run --config=shell //:target
 
-shell="/bin/bash"
-rcfile="/tmp/pytorch_bazel_tools_shellwrap"
+shell='/bin/bash'
+rcfile='/tmp/pytorch_bazel_tools_shellwrap'
 while [[ $# -gt 0 ]] ; do
     case "$1" in
         --shell_bin_path)
@@ -31,7 +31,7 @@ while [[ $# -gt 0 ]] ; do
 done
 
 if ! tty -s; then
-    echo "A tty is not available."
+    echo 'A tty is not available.'
     echo "Use \`bazel run\`, not \`bazel test\`."
     exit 1
 fi
@@ -43,9 +43,6 @@ YELLOW='\033[1;33m'
 export PYTORCH_SHELL_COMMAND=$*
 echo "alias run=\"$*\"" > "$rcfile"
 echo "PS1='\s-\v\$ '" >> "$rcfile"
-echo "cat"
-cat "$rcfile"
-echo "cat"
 
 echo =====
 # print the execution command (command is yellow)
