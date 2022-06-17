@@ -97,16 +97,15 @@ def main() -> None:
         capture_output=True,
         cwd=f"{args.repo_name}",
     ).stdout.decode("utf-8")
-    with open(f".github/{args.repo_name}_commit_hash.txt", "w") as f:
+    with open(f".github/ci_commit_pins/{args.repo_name}.txt", "w") as f:
         f.write(hash.strip())
     git_diff = subprocess.run(
-        f"git diff --exit-code .github/{args.repo_name}_commit_hash.txt".split()
+        f"git diff --exit-code .github/ci_commit_pins/{args.repo_name}.txt".split()
     )
     if git_diff.returncode == 1:
         # if there was an update, push to branch
         subprocess.run(f"git checkout -b {branch_name}".split())
-        subprocess.run(f"git add .github/{args.repo_name}_commit_hash.txt".split())
-        subprocess.run(f"git add .github/{args.repo_name}_commit_hash.txt".split())
+        subprocess.run(f"git add .github/ci_commit_pins/{args.repo_name}.txt".split())
         subprocess.run(
             "git commit -m".split() + [f"update {args.repo_name} commit hash"]
         )
