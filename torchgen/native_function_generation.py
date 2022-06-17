@@ -1,26 +1,30 @@
+from collections import defaultdict
+
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import torchgen.api.dispatcher as dispatcher
+from torchgen.api.translate import translate
+from torchgen.api.types import Binding, DispatcherSignature, Expr
+from torchgen.context import with_native_function
 from torchgen.model import (
-    Argument,
-    DispatchKey,
-    FunctionSchema,
-    BaseType,
-    BaseTy,
-    Return,
     Annotation,
-    NativeFunction,
-    OperatorName,
+    Argument,
     BackendIndex,
     BackendMetadata,
+    BaseTy,
+    BaseType,
+    DEFAULT_KERNEL_NAMESPACE,
     DeviceCheckType,
+    DispatchKey,
+    FunctionSchema,
+    NativeFunction,
+    NativeFunctionsGroup,
+    OperatorName,
+    Return,
     SchemaKind,
     Variant,
 )
-from torchgen.utils import (
-    concatMap,
-)
-
-
-from typing import List, Tuple, Sequence, Dict
-from collections import defaultdict
+from torchgen.utils import concatMap
 
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
@@ -186,7 +190,6 @@ def generate_function(
 
     if k == SchemaKind.functional:
         assert f.func.kind() != SchemaKind.functional
-        gets_composite_kernel = True
         # The new "functional" NativeFunction has:
         # - any mutable arguments have been converted into (immutable) returns.
         #   (if a mutable argument was not also a return, it gets converted to one)
@@ -204,7 +207,6 @@ def generate_function(
         # We generate out= ops mostly just so that we can pair up NativeFunctions into groups easily,
         # but at least today, there is no good reason to actually use them.
         # we'll generate a dispatcher entry for them, but won't actually register any kernels for them.
-        gets_composite_kernel = False
         if f.func.kind() == SchemaKind.inplace:
             func = self_to_out_signature(f.func)
         elif f.func.kind() == SchemaKind.mutable:
@@ -218,14 +220,13 @@ def generate_function(
             "We currently only generate either functional or out= NativeFunctions"
         )
 
-    if gets_composite_kernel:
-        backend_metadata = {
-            DispatchKey.CompositeExplicitAutograd: {
-                func.name: BackendMetadata(cpp.name(func), structured=False)
-            }
+    backend_metadata = {
+        DispatchKey.CompositeExplicitAutograd: {
+            func.name: BackendMetadata(
+                cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
+            )
         }
-    else:
-        backend_metadata = {}
+    }
 
     return (
         NativeFunction(
@@ -249,10 +250,12 @@ def generate_function(
             cpp_no_default_args=set(),
             is_abstract=f.is_abstract,
             has_composite_implicit_autograd_kernel=False,
-            has_composite_explicit_autograd_kernel=gets_composite_kernel,
+            has_composite_explicit_autograd_kernel=True,
+            has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=set(["generated"]),
+            namespace=f.namespace,
         ),
         backend_metadata,
     )
@@ -380,3 +383,149 @@ please convert it to an inplace operator"""
                 d[SchemaKind.functional] = fn
                 BackendIndex.grow_index(indices, metadata)
                 rs.append(fn)
+
+
+def return_str(rets: Tuple[Return, ...], names: List[str]) -> str:
+    assert len(rets) == len(names)
+    if len(rets) == 0:
+        return ""
+    elif len(rets) == 1:
+        return f"return {names[0]};"
+    else:
+        return f"return {dispatcher.returns_type(rets).cpp_type()}({', '.join(names)});"
+
+
+# Given a function, and the name of a variable correponding to the output of that function,
+# gather up all of the individual returns that are not aliased
+def gather_nonaliased_inner_rets(func: FunctionSchema, out_var: str) -> List[str]:
+    aliased_rets = func.aliased_return_names()
+    non_aliased_names = []
+    is_out_var_a_tuple = len(func.returns) > 1
+    for (i, r) in enumerate(aliased_rets):
+        if r is None:
+            non_aliased_names.append(
+                f"std::get<{i}>({out_var})" if is_out_var_a_tuple else out_var
+            )
+    return non_aliased_names
+
+
+# Generates functional kernels in terms of their inplace.mutable counterparts.
+# We only do this for "generated" NativeFunctions
+@with_native_function
+def gen_composite_functional_kernel(g: NativeFunctionsGroup) -> Optional[str]:
+    # We should only be generating these for code-generated NativeFunctions
+    if "generated" not in g.functional.tags:
+        return None
+    # And we always write the kernel for a generated op in terms of a non-generated op.
+    if g.inplace is not None and "generated" not in g.inplace.tags:
+        target_f = g.inplace
+    elif g.mutable is not None and "generated" not in g.mutable.tags:
+        target_f = g.mutable
+    else:
+        # We should be guaranteed to have a valid inplace/mutable variant to call into.
+        # See Note: [Mutable Ops Not Using Functionalization]
+        raise AssertionError(str(g.functional.func))
+
+    sig = DispatcherSignature(g.functional.func)
+    target_sig = DispatcherSignature(target_f.func)
+
+    context: List[Union[Binding, Expr]] = []
+    clone_mutable_inputs = []
+    cloned_return_names = []
+    # We can't just directly pass all of the arguments from the functional op into the mutating op.
+    # We need to check for which inputs to the mutating operator are mutable,
+    # and clone those inputs first.
+    for a_curr, a_tgt in zip(
+        dispatcher.jit_arguments(g.functional.func),
+        dispatcher.jit_arguments(target_f.func),
+    ):
+        if a_tgt.annotation is not None and a_tgt.annotation.is_write:
+            clone_mutable_inputs.append(
+                f"auto {a_curr.name}_clone = clone_arg({a_curr.name});"
+            )
+            context.append(
+                Expr(
+                    expr=f"{a_curr.name}_clone",
+                    type=dispatcher.argument_type(a_curr, binds=a_curr.name),
+                )
+            )
+            # Invariant: mutable arguments on the inner mutable op are always returns on the functional op.
+            cloned_return_names.append(f"{a_curr.name}_clone")
+        else:
+            context.append(dispatcher.argument(a_curr))
+    exprs = ", ".join([e.expr for e in translate(context, target_sig.arguments())])
+
+    out_name = "output"
+    maybe_assign = f"auto {out_name} = " if len(target_f.func.returns) > 0 else ""
+    inner_return_names = gather_nonaliased_inner_rets(target_f.func, out_name)
+    ret_str = return_str(
+        g.functional.func.returns, inner_return_names + cloned_return_names
+    )
+
+    clone_mutable_inputs_str = "\n".join(clone_mutable_inputs)
+    return f"""
+{sig.defn()} {{
+  {clone_mutable_inputs_str}
+  {maybe_assign}at::_ops::{target_f.func.name.unambiguous_name()}::call({exprs});
+  {ret_str}
+}}
+"""
+
+
+# Generates out= kernels in terms of their functional counterparts.
+# We only do this for "generated" NativeFunctions
+@with_native_function
+def gen_composite_out_kernel(g: NativeFunctionsGroup) -> Optional[str]:
+    # We should only be generating these for code-generated NativeFunctions
+    if "generated" not in g.out.tags:
+        return None
+    # And we always write the kernel for the out= op in terms of the functional.
+    # Note that the functional op might have also been generated, but we don't have to
+    # worry about cycles, because the generated functional kernels are always implemented
+    # in terms of non-generated kernels (see gen_composite_functional_kernel).
+
+    sig = DispatcherSignature(g.out.func)
+    target_sig = DispatcherSignature(g.functional.func)
+
+    exprs = ", ".join(
+        [e.expr for e in translate(sig.arguments(), target_sig.arguments())]
+    )
+
+    copy_outs = []
+    out_name = "tmp_output"
+    for i, out_arg in enumerate(g.out.func.arguments.out):
+        functional_return_name = (
+            out_name
+            if len(g.functional.func.returns) == 1
+            else f"std::get<{i}>({out_name})"
+        )
+        copy_outs.append(
+            f"""\
+  resize_out_helper({out_arg.name}, {functional_return_name});
+  copy_arg({out_arg.name}, {functional_return_name});"""
+        )
+
+    rets = []
+    # For each return arg in the calling (out=) operator,
+    # If it corresponds to an aliased input, return the input.
+    # Otherwise, return the corresponding output from calling the functional operator.
+    for i, ret_name in enumerate(g.out.func.aliased_return_names()):
+        if ret_name is not None:
+            rets.append(ret_name)
+        else:
+            functional_return_name = (
+                out_name
+                if len(g.functional.func.returns) == 1
+                else f"std::get<{i}>({out_name})"
+            )
+            rets.append(functional_return_name)
+
+    copy_outs_str = "\n".join(copy_outs)
+
+    return f"""
+{sig.defn()} {{
+  auto {out_name} = at::_ops::{g.functional.func.name.unambiguous_name()}::call({exprs});
+  {copy_outs_str}
+  {return_str(g.out.func.returns, rets)}
+}}
+"""

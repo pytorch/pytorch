@@ -41,8 +41,6 @@ COMMON_COPTS = [
     "-DUSE_CUDNN",
 ])
 
-
-
 filegroup(
     name = "cpp_generated_code",
     data = [":generate-code"],
