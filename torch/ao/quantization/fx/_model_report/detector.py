@@ -1,14 +1,12 @@
 from typing import Any, Dict, Set, Tuple
 
-import torch
 import torch.nn as nn
+import torch.nn.qat as nnqat
 from abc import ABCMeta, abstractmethod
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.qconfig import QConfig
-from torch.nn.qat.modules.conv import _ConvNd as QatConvNd
-from torch.nn.qat.modules.linear import Linear as QatLinear
 
 ABC: Any = ABCMeta(str("ABC"), (object,), {})
 
@@ -25,7 +23,7 @@ class DetectorBase(ABC):
     """
 
     def __init__(self):
-        super(DetectorBase, self).__init__()
+        super().__init__()
 
     @abstractmethod
     def determine_observer_insert_points(self, model):
@@ -62,20 +60,24 @@ class PerChannelDetector(DetectorBase):
 
         per_channel quantization can lead to major benefits in the form of accuracy.
         Therefore, if the backend used by the user supports it, it is recommended to use
+
+        Args:
+            backend (str): the backend the user wishes to use in production
+                If the user wishes to use the current backend, they should set backend = torch.backends.quantized.engine
     """
 
     # Default map for representing supported per channel quantization modules for different backends
     DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES: Dict[str, Set[Any]] = {
-        "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, QatLinear, QatConvNd]),
-        "qnnpack": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, QatLinear, QatConvNd]),
-        "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, QatLinear, QatConvNd]),
+        "fbgemm": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
+        "qnnpack": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
+        "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
     }
 
-    def __init__(self):
-        super(PerChannelDetector, self).__init__()
+    def __init__(self, backend):
+        super().__init__()
 
         # store the backend information
-        self.backend_chosen = torch.backends.quantized.engine
+        self.backend_chosen = backend
         self.supported_modules = set([])
         if self.backend_chosen in self.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES:
             self.supported_modules = self.DEFAULT_BACKEND_PER_CHANNEL_SUPPORTED_MODULES[self.backend_chosen]
@@ -83,7 +85,7 @@ class PerChannelDetector(DetectorBase):
             raise ValueError("Not configured to work with {}. Try a different default backend".format(self.backend_chosen))
 
     def get_detector_name(self) -> str:
-        """ returns the string name of this detector"""
+        r""" returns the string name of this detector"""
         return "per_channel_detector"
 
     def determine_observer_insert_points(self, model):
@@ -94,7 +96,7 @@ class PerChannelDetector(DetectorBase):
 
 
     def __detect_per_channel_helper(self, model: nn.Module, per_channel_info: Dict):
-        """
+        r"""
         determines if per_channel quantization is supported in modules and submodules.
 
         Returns a dictionary in the higher level _detect_per_channel function.
@@ -229,7 +231,7 @@ class DynamicStaticDetector(DetectorBase):
     DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
 
     def __init__(self, tolerance=0.5):
-        super(DynamicStaticDetector, self).__init__()
+        super().__init__()
 
         # set tolerance level and initialize a set to keep track of useful fqn locations
         self.tolerance = tolerance
@@ -240,7 +242,7 @@ class DynamicStaticDetector(DetectorBase):
         raise NotImplementedError("Will be implemented in a future commit")
 
     def get_detector_name(self) -> str:
-        """ returns the string name of this detector"""
+        r""" returns the string name of this detector"""
         return "dynamic_vs_static_detector"
 
     def __generate_dict_info(self, model: GraphModule) -> Dict[str, Any]:
