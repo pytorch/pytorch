@@ -25,6 +25,7 @@ ignored_attributes = [
     "_version",
     "_parameters",
     "_buffers",
+    "_non_persistent_buffers_set",
     "_modules",
     "_initializing",
     "_backward_hooks",
