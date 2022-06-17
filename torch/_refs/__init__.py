@@ -92,6 +92,8 @@ __all__ = [
     "tanh",
     "trace",
     "trunc",
+    # Conversion funcs
+    "bfloat16",
     #
     # Elementwise Binary References
     #
@@ -737,6 +739,10 @@ def tan(a):
 def tanh(a):
     return prims.tanh(a)
 
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+                                   aten_op=None)
+def bfloat16(a):
+    return prims.convert_element_type(a, torch.bfloat16)
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def trunc(a):

@@ -20461,6 +20461,9 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.trunc",
         torch_opinfo_name="trunc",
+    PythonRefInfo(
+        "_refs.bfloat16",
+        torch_opinfo_name="bfloat16",
     ),
     #
     # Elementwise Unary Special OpInfos
