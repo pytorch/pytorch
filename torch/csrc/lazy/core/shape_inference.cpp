@@ -51,13 +51,13 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 #include <ATen/InferSize.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
-#include <aten/src/ATen/ExpandUtils.h>
-#include <aten/src/ATen/native/ReduceOpsUtils.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/api/include/torch/enum.h>
 #include <torch/csrc/lazy/core/ops/utils.h>

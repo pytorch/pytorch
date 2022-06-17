@@ -95,28 +95,37 @@ def hook_iterator(namespace, profile_name):
 
     class IteratorDecorator:
         """Wrap the iterator and modifying its `__next__` method"""
-        def __init__(self, iterator, source_dp, iterator_id):
+        def __init__(self, iterator, source_dp, iterator_id, has_next_method):
             self.iterator = iterator
             self.source_dp = source_dp
             self.iterator_id = iterator_id
             self._profiler_enabled = torch.autograd._profiler_enabled()
+            self.has_next = has_next_method
 
         def __iter__(self):
             return self
 
+        def _step(self):
+            _check_iterator_valid(self.source_dp, self.iterator_id)
+            try:
+                # Avoid double counting since if `__next__` is defined, it will be called
+                if not self.has_next:
+                    self.source_dp._number_of_samples_yielded += 1
+                return next(self.iterator)
+            except Exception:
+                # If there is an exception,the element was not successfully returned, the count needs to -= 1.
+                if not self.has_next:
+                    self.source_dp._number_of_samples_yielded -= 1
+                raise
+
         def __next__(self):
             # TODO: Add try-except to in-place reduce traceback from the Exception
             # See: https://github.com/pytorch/data/issues/284
-            try:
-                if self._profiler_enabled:
-                    with profiler_record_fn_context():
-                        _check_iterator_valid(self.source_dp, self.iterator_id)
-                        return next(self.iterator)
-                else:  # Decided against using `contextlib.nullcontext` for performance reasons
-                    _check_iterator_valid(self.source_dp, self.iterator_id)
-                    return next(self.iterator)
-            finally:
-                self.source_dp._number_of_samples_yielded += 1
+            if self._profiler_enabled:
+                with profiler_record_fn_context():
+                    return self._step()
+            else:  # Decided against using `contextlib.nullcontext` for performance reasons
+                return self._step()
 
         def __getattr__(self, name):
             return getattr(self.iterator, name)
@@ -139,10 +148,8 @@ def hook_iterator(namespace, profile_name):
                     response = gen.send(None)
 
                 while True:
-                    try:
-                        request = yield response
-                    finally:
-                        datapipe._number_of_samples_yielded += 1
+                    datapipe._number_of_samples_yielded += 1
+                    request = yield response
                     # Pass through here every time `__next__` is called
                     if _profiler_enabled:
                         with profiler_record_fn_context():
@@ -182,14 +189,21 @@ def hook_iterator(namespace, profile_name):
                             return next_func(*args, **kwargs)
                     else:
                         return next_func(*args, **kwargs)
+                except Exception:
+                    # If there is an exception,the element was not successfully returned, the count needs to -= 1.
+                    datapipe = args[0]
+                    datapipe._number_of_samples_yielded -= 1
+                    raise
                 finally:
                     datapipe = args[0]
                     datapipe._number_of_samples_yielded += 1
 
             namespace['__next__'] = wrap_next
 
-            # Note that if the `__next__` and `__iter__` do something completely unrelated? It may cause issue but
-            # the user will be violating the iterator protocol
+            # Note that if the `__next__` and `__iter__` do something completely unrelated. It may cause issue but
+            # the user will be violating the iterator protocol. Potential issue:
+            # 1. Valid iterator ID may not update or checked properly
+            # 2. The number of samples yielded will be miscounted
 
         # Regardless if `__next__` exists or not, `__iter__` needs a wrapper to track the number of valid iterators
         @functools.wraps(func)
@@ -197,6 +211,6 @@ def hook_iterator(namespace, profile_name):
             iter_ret = func(*args, **kwargs)
             datapipe = args[0]
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
-            return IteratorDecorator(iter_ret, datapipe, iterator_id)
+            return IteratorDecorator(iter_ret, datapipe, iterator_id, '__next__' in namespace)
 
         namespace['__iter__'] = wrap_iter
