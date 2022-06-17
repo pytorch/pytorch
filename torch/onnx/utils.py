@@ -882,7 +882,7 @@ def _create_jit_graph(
     model: torch.nn.Module, args: Sequence[Any]
 ) -> Tuple[
     _C.Graph,
-    Sequence[_C.IValue],
+    List[_C.IValue],
     Optional[Any],
     Optional[Union[_C.ScriptModule, _C.ScriptFunction]],
 ]:
@@ -907,7 +907,7 @@ def _create_jit_graph(
         )
         return graph, params, torch_out, module
     elif isinstance(model, torch.jit.ScriptFunction):
-        params = ()
+        params = []
         graph = model.graph
         _C._jit_pass_onnx_function_substitution(graph)
         param_count_list = _get_param_count_list(graph, args)
