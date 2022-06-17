@@ -933,7 +933,7 @@ class FullyShardedDataParallel(nn.Module):
         device_id: Optional[Union[int, torch.device]] = None,
         sync_module_states: bool = False,
     ) -> None:
-        # The initial FSDP wrapping is done with auto_wrap_policy.initial_policy
+        # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         self.__init__(
             module=module,
             process_group=process_group,
@@ -947,7 +947,7 @@ class FullyShardedDataParallel(nn.Module):
             device_id=device_id,
             sync_module_states=sync_module_states,
         )
-        self._use_param_exec_order_policy : bool = True
+        self._param_exec_order_policy : bool = True
         # self._param_exec_order_prep_stage is set to True in the first forward and backward iteration,
         # and set to False otherwise.
         self._param_exec_order_prep_stage : bool = True
@@ -955,8 +955,10 @@ class FullyShardedDataParallel(nn.Module):
         self._fsdp_params_exec_order: List[FlatParameter] = []
         for m in self.modules():
             if m is not self and isinstance(m, FullyShardedDataParallel):
+                # Assignment by reference, so each children FSDP wrap has access to
+                # the _fsdp_params_exec_order of the root module
                 m._fsdp_params_exec_order = self._fsdp_params_exec_order
-                m._use_param_exec_order_policy = True
+                m._param_exec_order_policy = True
                 m._param_exec_order_prep_stage = True
 
 
@@ -1161,13 +1163,13 @@ class FullyShardedDataParallel(nn.Module):
         assert self._is_root is not None
         return self._is_root
 
-    def use_param_exec_order_policy(self) -> bool:
+    def _use_param_exec_order_policy(self) -> bool:
         return (
-            hasattr(self, "_use_param_exec_order_policy")
-            and self._use_param_exec_order_policy
+            hasattr(self, "_param_exec_order_policy")
+            and self._param_exec_order_policy
         )
 
-    def is_param_exec_order_prep_stage(self) -> bool:
+    def _is_param_exec_order_prep_stage(self) -> bool:
         is_prep_stage = (
             hasattr(self, "_param_exec_order_prep_stage")
             and self._param_exec_order_prep_stage
@@ -2358,9 +2360,6 @@ class FullyShardedDataParallel(nn.Module):
         with self.set_state_dict_type(StateDictType.SHARDED_STATE_DICT):
             return self.load_state_dict(state_dict, strict)
 
-    def flatten_params_exec_order(self):
-        return self._fsdp_params_exec_order
-
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
             self._lazy_init()
@@ -2849,6 +2848,12 @@ class FullyShardedDataParallel(nn.Module):
             # then subsequent hook callbacks will see POST state.
             self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
             self.training_state = TrainingState_.BACKWARD_POST
+
+            if (self._use_param_exec_order_policy() and self._param_exec_order_prep_stage):
+                # In self._fsdp_params_exec_order, the parameters are ordered based on
+                # the execution order in the backward pass in the first iteration.
+                self._fsdp_params_exec_order.append(param)
+
             if param.grad is None:
                 return
 
@@ -2870,11 +2875,6 @@ class FullyShardedDataParallel(nn.Module):
                 # Noop if reshard_after_forward=True because we'd free the param
                 # shard when rebuilding the full params in the pre_beckward_hook.
                 self._free_mp_shard(cast(List[FlatParameter], [param]))
-
-            if (self.use_param_exec_order_policy() and self._param_exec_order_prep_stage):
-                # In self._fsdp_params_exec_order, the parameters are ordered based on
-                # the execution order in the backward pass in the first iteration.
-                self._fsdp_params_exec_order.append(param)
 
             # Switch to local shard after backward. Note that
             # when CPU offload is enabled, _use_param_local_shard implicitly
@@ -3137,33 +3137,36 @@ class FullyShardedDataParallel(nn.Module):
                     # reset this flag for cases like "one forward pass + multiple backward passes"
                     self._post_backward_callback_queued = False
 
-        if (self.use_param_exec_order_policy() and self._param_exec_order_prep_stage):
-            self._param_exec_order_prep_stage = False
-            # Let the parameters in self._fsdp_params_exec_order ordered based on
-            # the execution order in the forward pass.
-            self._fsdp_params_exec_order.reverse()
-            for m in self.modules():
-                if m is not self and isinstance(m, FullyShardedDataParallel):
-                    assert hasattr(
-                        m, "_use_param_exec_order_policy"
-                    ), "Non-root FSDP modules should also have _use_param_exec_order_policy attribute"
-                    assert hasattr(
-                        m, "_param_exec_order_prep_stage"
-                    ), "Non-root FSDP modules should also have _param_exec_order_prep_stage attribute"
-                    m._param_exec_order_prep_stage = False
-            # TODO (linjianma): Construct a fsdp_wrap_map whose keys are all children modules with a FSDP wrap,
-            # and values are its FSDP wraps. These children FSDP wraps will be detached from the root FSDP module
-            # and will be used to schedule the parameters (rebuild_full_params and reshard).
-            # TODO (linjianma): Remove all internal FSDP wraps from the root FSDP module.
-            # TODO (linjianma): Based on self._fsdp_params_exec_order, get the information
-            # needed to patch the forward() function of each key in the fsdp_wrap_map. The rules are as follows:
-            # 1: Before each forward(), rebuild_full_params of all parameters that are currently sharded and
-            # will be used in the forward, and reshard all parameters that are currently full and will not be
-            # used in the next forward()
-            # 2: After each forward(), reshard all parameters just used in the forward, and rebuild_full_params of
-            # all parameters that will be used next.
-            # TODO (linjianma): Patch the forward of each model in the keys
-            # of fsdp_wrap_map based on the information above.
+        if (self._use_param_exec_order_policy() and self._param_exec_order_prep_stage):
+            self._param_exec_order_policy_second_iter_init()
+
+    def _param_exec_order_policy_second_iter_init(self) -> None:
+        self._param_exec_order_prep_stage = False
+        # Let the parameters in self._fsdp_params_exec_order ordered based on
+        # the execution order in the forward pass.
+        self._fsdp_params_exec_order.reverse()
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
+                assert hasattr(
+                    m, "_param_exec_order_policy"
+                ), "Non-root FSDP modules should also have _param_exec_order_policy attribute"
+                assert hasattr(
+                    m, "_param_exec_order_prep_stage"
+                ), "Non-root FSDP modules should also have _param_exec_order_prep_stage attribute"
+                m._param_exec_order_prep_stage = False
+        # TODO (linjianma): Construct a fsdp_wrap_map whose keys are all children modules with a FSDP wrap,
+        # and values are its FSDP wraps. These children FSDP wraps will be detached from the root FSDP module
+        # and will be used to schedule the parameters (rebuild_full_params and reshard).
+        # TODO (linjianma): Remove all internal FSDP wraps from the root FSDP module.
+        # TODO (linjianma): Based on self._fsdp_params_exec_order, get the information
+        # needed to patch the forward() function of each key in the fsdp_wrap_map. The rules are as follows:
+        # 1: Before each forward(), rebuild_full_params of all parameters that are currently sharded and
+        # will be used in the forward, and reshard all parameters that are currently full and will not be
+        # used in the next forward()
+        # 2: After each forward(), reshard all parameters just used in the forward, and rebuild_full_params of
+        # all parameters that will be used next.
+        # TODO (linjianma): Patch the forward of each model in the keys
+        # of fsdp_wrap_map based on the information above.
 
     def _update_p_data(self, p, output_tensor: torch.Tensor) -> None:
         """

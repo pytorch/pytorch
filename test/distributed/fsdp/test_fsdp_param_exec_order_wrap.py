@@ -61,23 +61,24 @@ class TestFSDPExecOrder(FSDPTest):
     def test_fsdp_flatten_params_exec_order(self, sharding_strategy: ShardingStrategy, iters: int):
         """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
         fsdp_model = Model.wrap(sharding_strategy, self.device)
+        assert fsdp_model._is_param_exec_order_prep_stage()
         for _ in range(iters):
             input = fsdp_model.module.get_input(self.device)
             output = fsdp_model(input)
             loss = fsdp_model.module.get_loss(input, output).to(self.device)
             loss.backward()
         params_list = list(fsdp_model.parameters())
-        assert set(fsdp_model.flatten_params_exec_order()) == set(params_list)
+        assert set(fsdp_model._fsdp_params_exec_order) == set(params_list)
         # Since the forward execution order is NOT consistent with the model definition order,
         # the ordering in flatten_named_params_exec_order should be different from named_parameters
-        assert fsdp_model.flatten_params_exec_order() == [
+        assert fsdp_model._fsdp_params_exec_order == [
             params_list[0],
             params_list[2],
             params_list[3],
             params_list[1]
         ]
-        assert fsdp_model.use_param_exec_order_policy()
-        assert not fsdp_model.is_param_exec_order_prep_stage()
+        assert fsdp_model._use_param_exec_order_policy()
+        assert not fsdp_model._is_param_exec_order_prep_stage()
 
 
 instantiate_parametrized_tests(TestFSDPExecOrder)
