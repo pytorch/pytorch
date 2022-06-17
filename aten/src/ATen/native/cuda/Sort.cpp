@@ -109,7 +109,7 @@ void sort_cuda_kernel(
   }
 
   c10::MaybeOwned<Tensor> values_tmp, indices_tmp;
-  if (values.strides() == self_.strides() && (newself || get_overlap_status(self, values) == MemOverlapStatus::NO)) {
+  if (values.strides() == self_.strides() && (newself || get_overlap_status(self, values) == MemOverlapStatus::No)) {
     values_tmp = c10::MaybeOwned<Tensor>::borrowed(values);
   } else {
     values_tmp = c10::MaybeOwned<Tensor>::owned(

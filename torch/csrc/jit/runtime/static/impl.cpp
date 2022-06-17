@@ -1918,11 +1918,11 @@ void ProcessedNode::run() {
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
   at::MemOverlapStatus status = at::get_overlap_status(a, b);
-  if (status == at::MemOverlapStatus::FULL ||
-      status == at::MemOverlapStatus::PARTIAL) {
+  if (status == at::MemOverlapStatus::Full ||
+      status == at::MemOverlapStatus::Partial) {
     return false;
   }
-  if (status == at::MemOverlapStatus::TOO_HARD) {
+  if (status == at::MemOverlapStatus::TooHard) {
     VLOG(1) << "Detected TOO_HARD memory overlap status";
   }
   return true;
