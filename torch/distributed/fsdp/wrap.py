@@ -20,6 +20,7 @@ from typing import (
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
 
+
 def always_wrap_policy(*args, **kwargs) -> bool:
     """
     A simple wrapper policy that always returns ``True``,
