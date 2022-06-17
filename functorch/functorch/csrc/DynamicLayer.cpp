@@ -502,6 +502,8 @@ TORCH_LIBRARY_IMPL(aten, FT_DYNAMIC_LAYER_FRONT_MODE_KEY, m) {
   OP_DECOMPOSE(log_sigmoid);
   JVP_DECOMP(log_sigmoid_forward);
   JVP_DECOMP(native_layer_norm_backward);
+  JVP_DECOMP(native_batch_norm_backward);
+  JVP_DECOMP(cudnn_batch_norm_backward);
 }
 
 
