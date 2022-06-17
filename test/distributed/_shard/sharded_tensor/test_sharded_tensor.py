@@ -1098,7 +1098,11 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         # Test save
         m._register_state_dict_hook(state_dict_hook)
         buffer = io.BytesIO()
-        torch.save(m.state_dict(), buffer)
+        mod_state_dict = m.state_dict()
+        mod_state_keys = mod_state_dict.keys()
+        self.assertTrue("sharded_tensor1" in mod_state_keys)
+        self.assertTrue("submodule.sharded_tensor2" in mod_state_keys)
+        torch.save(mod_state_dict, buffer)
 
         # Test load.
         module_load = MyShardedModel1()
@@ -1108,6 +1112,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         state_dict_deser = torch.load(buffer)
         module_load.load_state_dict(state_dict_deser, strict=False)
 
+        module_load._register_state_dict_hook(state_dict_hook)
+        loaded_dict_keys = module_load.state_dict().keys()
+        self.assertTrue("sharded_tensor1" in loaded_dict_keys)
+        self.assertTrue("submodule.sharded_tensor2" in loaded_dict_keys)
         # Verify after load.
         self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
         self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
