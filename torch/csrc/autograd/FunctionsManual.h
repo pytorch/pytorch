@@ -482,9 +482,11 @@ at::Tensor softplus_double_backward(
     const at::Scalar& beta,
     const at::Scalar& threshold);
 std::tuple<at::Tensor, at::Tensor> slogdet_jvp(
-    const at::Tensor& A,
+    const at::Tensor& LU,
+    const at::Tensor& pivots,
     const at::Tensor& dA,
-    const at::Tensor& sign);
+    const at::Tensor& sign,
+    const bool use_A_T);
 at::Tensor slogdet_backward(
     const at::Tensor& grad_sign,
     const at::Tensor& grad_logabsdet,
