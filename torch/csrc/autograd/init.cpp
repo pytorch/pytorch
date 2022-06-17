@@ -7,7 +7,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/variant.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/function.h>
@@ -29,14 +28,6 @@
 
 #include <set>
 #include <unordered_set>
-
-namespace pybind11 {
-namespace detail {
-template <typename... Ts>
-struct VISIBILITY_HIDDEN type_caster<c10::variant<Ts...>>
-    : variant_caster<c10::variant<Ts...>> {};
-} // namespace detail
-} // namespace pybind11
 
 PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   using namespace torch::autograd::profiler;
