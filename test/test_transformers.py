@@ -4,7 +4,7 @@ import torch
 import unittest
 
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import TEST_FAIRSEQ
+from torch.testing._internal.common_utils import TEST_FAIRSEQ, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.common_cuda import TEST_CUDA
 
 if TEST_FAIRSEQ:
@@ -13,6 +13,36 @@ if TEST_FAIRSEQ:
 class TestTransformers(NNTestCase):
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
+
+    @parametrize("use_torchscript", [True, False])
+    @parametrize("with_no_grad", [True, False])
+    @parametrize("training", [True, False])
+    def test_transformerencoder_fastpath_torchscript(self, use_torchscript, with_no_grad, training):
+        """
+        Test TransformerEncoder does not crash
+        """
+        model = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(d_model=2, nhead=2, dim_feedforward=8, batch_first=True),
+            num_layers=2,
+            enable_nested_tensor=True
+        )
+
+        if training:
+            model = model.train()
+        else:
+            model = model.eval()
+
+        if use_torchscript:
+            model = torch.jit.script(model)
+
+        x = torch.Tensor([[[1, 2], [3, 4]]]).to(torch.float)
+        mask = torch.Tensor([[0, 1]]).to(torch.bool)
+
+        if with_no_grad:
+            with torch.no_grad():
+                model(x, src_key_padding_mask=mask)
+        else:
+            model(x, src_key_padding_mask=mask)
 
     @unittest.skipIf(not TEST_FAIRSEQ, "numpy not found")
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
@@ -315,3 +345,5 @@ class TestTransformers(NNTestCase):
 
         self.assertEqual(result.shape, ref_output.shape)
         torch.testing.assert_close(result, ref_output, atol=1e-3, rtol=1e-2)
+
+instantiate_parametrized_tests(TestTransformers)
