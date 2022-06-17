@@ -277,7 +277,7 @@ class TORCH_API FunctionalizationReapplyViewsGuard {
 // set, and will *remove that key from the exclude set while the guard is
 // active. Useful for re-entrant functionalization within a single dispatch
 // chain.
-class C10_API _RemoveExcludeDispatchKeyGuard {
+class TORCH_API _RemoveExcludeDispatchKeyGuard {
  public:
   _RemoveExcludeDispatchKeyGuard(DispatchKey k) {
     // This guard expects the key to already be excluded, and will temporary
