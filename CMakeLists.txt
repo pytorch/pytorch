@@ -93,7 +93,7 @@ if(APPLE)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
     execute_process(
-      COMMAND bash -c "xcodebuild -sdk macosx -version SDKVersion"
+      COMMAND bash -c "xcrun --sdk macosx --show-sdk-version"
       RESULT_VARIABLE _exit_code
       OUTPUT_VARIABLE _macosx_sdk_version
       OUTPUT_STRIP_TRAILING_WHITESPACE)
