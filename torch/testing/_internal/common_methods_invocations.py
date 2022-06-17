@@ -20780,7 +20780,7 @@ python_ref_db = [
     #
     # Elementwise Ternary Reference OpInfos
     #
-    PythonRefInfo(
+    ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_min",
         torch_opinfo_name="clamp_min",
         skips=(

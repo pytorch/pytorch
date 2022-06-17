@@ -1147,9 +1147,9 @@ def clamp_min(
     self: TensorLikeType,
     min: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    a, min = _maybe_broadcast(a, min)
+    self, min = _maybe_broadcast(self, min)
 
-    return maximum(a, min)
+    return maximum(self, min)
 
 
 @out_wrapper
@@ -1161,9 +1161,9 @@ def clamp_max(
     self: TensorLikeType,
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    a, max = _maybe_broadcast(a, max)
+    self, max = _maybe_broadcast(self, max)
 
-    return minimum(a, max)
+    return minimum(self, max)
 
 
 #
