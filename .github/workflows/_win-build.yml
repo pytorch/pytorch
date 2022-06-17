@@ -66,7 +66,6 @@ jobs:
           MAX_JOBS: 8
           CUDA_VERSION: ${{ inputs.cuda-version }}
           PYTHON_VERSION: "3.8"
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           SCCACHE_BUCKET: "ossci-compiler-cache"
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
@@ -97,7 +96,7 @@ jobs:
           s3-prefix: |
             ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
           retention-days: 14
-          if-no-files-found: error
+          if-no-files-found: warn
           path: sccache-stats-*.json
 
       - name: Teardown Windows
