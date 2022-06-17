@@ -107,3 +107,8 @@ jobs:
       - name: Remove Conda env
         run: |
           conda env remove --name reltest
+      - name: Submit GH artifacats
+        uses: actions/upload-artifact@v2
+        with:
+          name: Benchmark result
+          path: ${{ env.RESULT_DIR }}
