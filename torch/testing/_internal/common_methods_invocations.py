@@ -20784,6 +20784,14 @@ python_ref_db = [
     # Elementwise Ternary Reference OpInfos
     #
     PythonRefInfo(
+        "_refs.clamp_min",
+        torch_opinfo_name="clamp_min",
+        #skips=(
+        #    # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
+        #    #DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        #),
+    ),
+    PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
         skips=(
