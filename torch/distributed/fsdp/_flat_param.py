@@ -88,8 +88,6 @@ class FlatParameter(nn.Parameter):
         _is_sharded (bool): Whether the flattened parameter is *ever* sharded
             across ranks (not whether it is *currently* sharded).
         _unsharded_size (torch.Size): Unsharded flattened parameter's size.
-        _flat_param_name (str): Uniquely-identifying name for the flattened
-            parameter.
 
         _param_infos (Tuple[ParamInfo, ...]): Each parameter's parameter info
             entry; see :class:`ParamInfo`.
@@ -166,17 +164,6 @@ class FlatParameter(nn.Parameter):
         self._is_sharded = False
         self._unsharded_size = self.size()
 
-    @property
-    def _flat_param_name(self) -> str:
-        """
-        Returns a name for the flattened parameter that uniquely identifies
-        it in a module hierarchy wrapped by a top-level FSDP instance. The name
-        is constructed from the fully-prefixed names of the original parameters
-        comprising the flattened parameter with "." replaced with "_" since
-        parameter names cannot contain ".".
-        """
-        return ",".join(self._prefixed_param_names).replace(".", "_")
-
 
 class FlatParamHandle:
     """
@@ -219,7 +206,8 @@ class FlatParamHandle:
         """
         params_set = set(params)
         params_set.discard(None)
-        assert len(params_set) > 0
+        assert len(params_set) > 0, \
+            "Cannot initialize a `FlatParameter` from an empty parameter list"
         param_infos: List[ParamInfo] = []
         numels: List[int] = []
         shapes: List[torch.Size] = []
@@ -370,8 +358,9 @@ class FlatParamHandle:
         ``_shard_numel_padded``.
 
         Args:
-            sharded_flat_param_numel (int): Numel of this rank's sharded
-                flattened parameter.
+            sharded_flat_param_numel (int): Numel of each rank's sharded
+                flattened parameter with padding (i.e. including
+                ``numel_padded``).
             numel_padded (int): Numel padded for this rank's sharded flattened
                 parameter.
             rank (int): Caller's rank.

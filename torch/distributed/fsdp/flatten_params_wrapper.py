@@ -96,6 +96,8 @@ class FlattenParamsWrapper(nn.Module):
         # Defining `self.flat_param` registers the `FlatParameter` and makes it
         # visible to `named_parameters()`
         self.flat_param = self._flat_param_handle.flat_param
+        assert getattr(self, FPW_MODULE) is self._fpw_module
+        assert getattr(self, FLAT_PARAM) is self.flat_param
 
     @property
     def has_params(self) -> bool:
