@@ -4,6 +4,37 @@ import torch._C as _C
 from torch._C import DispatchKey, DispatchKeySet, ExcludeDispatchKeyGuard
 from torch.overrides import handle_torch_function, has_torch_function
 
+"""
+Structured control flow operators prototype.
+
+This is a prototype of the cond operator. Its API is the following:
+  cond(pred, true_fn, false_fn, *operands)
+
+Note that cond has some special features that makes it different from
+an ATen operator:
+- It accepts two functions as arguments (true_fn, false_fn)
+- It accepts varargs (*operands)
+
+We don't quite know how to shoehorn these types into the PyTorch dispatcher
+(I'm sure it's possible though), so the proposal is: handle all of the
+weirdness in Python.
+
+The approach we take is:
+- We set up a "Python version of the PyTorch Dispatcher" (call this PyDispatcher).
+  This is responsible for performing dispatch on operations in python.
+- We have a notion of a "pyoperator" (not to be confused with Anjali's Python Op
+  Registration API). A "pyoperator" is an Operator that was defined in Python
+  and handled by the "Python version of the PyTorch Dispatcher"
+  (Anjali's Python Op Registration API creates operators in Python that are handled
+  by the PyTorch C++ Dispatcher).
+- A "pyoperator":
+  - Does not require a schema
+  - Can accept functions as arguments
+  - Can accept varargs as arguments
+
+Given a PyOperator, we can define "rules" for it for each dispatch key.
+"""
+
 
 SUPPORTED_KEYS = {
     DispatchKey.CPU,
@@ -20,7 +51,7 @@ This is a dispatcher (in Python)
 - It interfaces with the PyTorch dispatcher
 """
 
-class Dispatcher:
+class PyDispatcher:
     def __init__(self):
         self.current_dispatching_op = None
         self.already_dispatched_keys = None
@@ -29,7 +60,7 @@ class Dispatcher:
         try:
             key = compute_dispatch_key(operator, args, kwargs)
             self.record_dispatch(key, operator)
-            print(f"Dispatcher.call {key}")
+            print(f"PyDispatcher.call {key}")
             return dispatch(key, operator, args, kwargs)
         finally:
             self.reset_dispatch_record()
@@ -39,7 +70,7 @@ class Dispatcher:
         assert operator == self.currently_dispatching_op
         key = compute_dispatch_key(operator, args, kwargs, self.already_dispatched_keys)
         self.record_dispatch(key, operator)
-        print(f"Dispatcher.redispatch {key}")
+        print(f"PyDispatcher.redispatch {key}")
         return dispatch(key, operator, args, kwargs)
 
     def reset_dispatch_record(self):
@@ -55,15 +86,15 @@ class Dispatcher:
 
 
 
-dispatcher_singleton = Dispatcher()
+dispatcher_singleton = PyDispatcher()
 
 
-class Operator:
+class PyOperator:
     def __init__(self, name):
         self.name = name
         self.table = {}
 
-        # TODO: torch_dispatch expects Operator to be an instance of a torch.ops.aten op.
+        # TODO: torch_dispatch expects PyOperator to be an instance of a torch.ops.aten op.
         self.overloadpacket = self
 
         # Hack for FX tracing
@@ -85,7 +116,7 @@ class Operator:
         return dispatcher_singleton.call(self, args, kwargs)
 
 
-def compute_dispatch_key(operator, args, kwargs, additional_exclude=None):
+def compute_dispatch_key(PyOperator, args, kwargs, additional_exclude=None):
     tensors = get_tensors(args, kwargs)
     dispatch_key = key_extractor(tensors, additional_exclude)
     return dispatch_key
@@ -172,7 +203,7 @@ def python_fallback(op):
     return inner
 
 
-cond = Operator('cond')
+cond = PyOperator('cond')
 cond.impl(DispatchKey.CPU, cond_dense)
 cond.impl(DispatchKey.AutogradCPU, cond_autograd)
 cond.fallthrough(DispatchKey.ADInplaceOrView)
@@ -198,6 +229,12 @@ assert torch.allclose(result, torch.cos(x))
 
 """
 Test case #2: tracing
+
+NB: We need some additional way to add a new "lowering rule" for
+lowering the cond call to an FX node. In particular,
+cond accepts a true_fn/false_fn and these need to be traced out.
+
+I've hardcoded the logic into ProxyTensor.
 """
 from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -233,4 +270,11 @@ def forward(self, x_1):
     cos = torch.ops.aten.cos(x_1);  x_1 = None
     return cos
 
+"""
+
+"""
+More test cases (coming soon)
+
+3. Autograd
+4. functorch transforms!
 """
