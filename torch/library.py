@@ -65,7 +65,9 @@ class Library:
 
 
         if dispatch_key == "Meta":
-            dispatcher_op_name = f'{self.ns}::{name}'
+            dispatcher_op_name = name
+            if '::' not in dispatcher_op_name:
+                dispatcher_op_name = f'{self.ns}::{dispatcher_op_name}'
             # get a string containing the names of every dispatch key that the operator has a registration for.
             dispatch_key_registration = torch._C._dispatch_dump(dispatcher_op_name)
             # Internally, we shouldn't be registering meta kernels for any operators that

@@ -4147,7 +4147,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: mish_backward
-    CompositeImplicitAutograd: math_mish_backward
+    CompositeExplicitAutograd: math_mish_backward
 
 - func: sigmoid(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
