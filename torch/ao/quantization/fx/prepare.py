@@ -140,7 +140,7 @@ DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
 
 def _move_all_kwargs_to_args(model: GraphModule) -> GraphModule:
     for n in model.graph.nodes:
-        n.args = get_all_args_as_positional_args(n)
+        n.args = tuple(get_all_args_as_positional_args(n))
         n.kwargs = {}
     return model
 
@@ -227,9 +227,8 @@ def is_observer_in_same_graph(node, modules, node_name_to_target_dtype):
     in a different place rather than not observed.
     """
     node_output_dtype = get_arg_target_dtype_as_output(node, modules, node_name_to_target_dtype)
-    all_node_args = get_all_args_as_positional_args(node)
-    if len(all_node_args) > 0 and isinstance(all_node_args[0], Node):
-        if node_output_dtype == torch.quint8 and all_node_args[0].op == 'placeholder':
+    if len(node.args) > 0 and isinstance(node.args[0], Node):
+        if node_output_dtype == torch.quint8 and node.args[0].op == 'placeholder':
             return False
     return True
 
@@ -577,7 +576,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
                 torch.quint8,
                 torch.int8,
                 torch.float16]
-             ) and arg is get_all_args_as_positional_args(node)[0]
+             ) and arg is node.args[0]
         )
 
     else:
@@ -591,7 +590,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
         # for args, this is set to the index of the current arg
         # for kwargs, this is left at None
         cur_input_idx = None
-        for arg_idx, arg_to_check in enumerate(get_all_args_as_positional_args(node)):
+        for arg_idx, arg_to_check in enumerate(node.args):
             if arg_to_check is arg:
                 cur_input_idx = arg_idx
                 break
@@ -723,7 +722,7 @@ def maybe_insert_input_equalization_observers_for_node(
         return
 
     new_args = []
-    for arg in get_all_args_as_positional_args(node):
+    for arg in node.args:
         if not isinstance(arg, Node) or node_arg_is_bias(node, arg):
             new_args.append(arg)
             continue
@@ -915,7 +914,7 @@ def maybe_propagate_dtype_for_node(
     root_node, _, pattern, qhandler, qconfig = matches.get(
         node.name, (None, None, None, None, None))
     if qhandler is not None and qhandler.is_general_tensor_value_op():
-        prev_node = get_all_args_as_positional_args(node)[0]
+        prev_node = node.args[0]
         if isinstance(prev_node, Node):
             maybe_propagate_dtype_for_node(
                 prev_node, target_dtype, node_name_to_target_dtype, matches)
@@ -942,7 +941,7 @@ def propagate_dtypes_for_known_nodes(
             non_observable_indices = non_observable_arg_dict[arg_type](node)
 
             for index in non_observable_indices:
-                arg = get_all_args_as_positional_args(node)[index]
+                arg = node.args[index]
 
                 # when an argument is a tuple, it does not show up as another node so we need to go through
                 # all elements of the tuple manually
@@ -978,10 +977,9 @@ def maybe_make_input_output_share_observers(
     """
     first_arg = None
     # find the first non-Tensor arg
-    all_node_args = get_all_args_as_positional_args(node)
-    for i in range(len(all_node_args)):
-        if isinstance(all_node_args[i], (Node, list, tuple)):
-            first_arg = all_node_args[i]
+    for i in range(len(node.args)):
+        if isinstance(node.args[i], (Node, list, tuple)):
+            first_arg = node.args[i]
             break
 
     # if there is no non-Tensor arg, return directly
@@ -1007,9 +1005,8 @@ def maybe_make_input_output_share_observers(
             return False
         # trace back the args until we found the first Tensor/Node
         trace_back_node = None
-        all_first_arg_arg_args = get_all_args_as_positional_args(first_arg_arg)
-        for i in range(len(all_first_arg_arg_args)):
-            trace_back_node = all_first_arg_arg_args[i]
+        for i in range(len(first_arg_arg.args)):
+            trace_back_node = first_arg_arg.args[i]
             if isinstance(trace_back_node, Node):
                 break
         if trace_back_node is None:
@@ -1035,7 +1032,7 @@ def maybe_make_input_output_share_observers(
                 # failed to trace back since no input arg for the current node
                 if len(input_arg.args) < 1:
                     return False
-                input_arg = get_all_args_as_positional_args(input_arg)[0]
+                input_arg = input_arg.args[0]
                 iteration_guard += 1
                 if iteration_guard > 10000:
                     raise AssertionError('Unable to find observer of previous node')
@@ -1236,13 +1233,12 @@ def insert_observers_for_model(
                     # If this is the case, we will not apply equalization to the
                     # initial two layers.
                     is_quantized_branch = False
-                    all_node_args = get_all_args_as_positional_args(node)
                     if (
-                        len(all_node_args) > 0 and
-                        isinstance(all_node_args[0], Node) and
-                        len(all_node_args[0].users) > 1
+                        len(node.args) > 0 and
+                        isinstance(node.args[0], Node) and
+                        len(node.args[0].users) > 1
                     ):
-                        for user in all_node_args[0].users:
+                        for user in node.args[0].users:
                             # Checks if there exists another user being quantized
                             is_user_quantized = (
                                 qconfig_map.get(user.name, None) is not None or

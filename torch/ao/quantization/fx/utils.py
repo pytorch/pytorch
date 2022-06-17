@@ -129,7 +129,7 @@ def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined]
-            qparams = {"_scales_": scale, "_zero_points_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
+            qparams = {"_scale_": scale, "_zero_point_": zero_point, "_axis_": ch_axis, "_dtype_": dtype}
             quantize_op = torch.quantize_per_channel
         else:
             scale = float(scale)
@@ -206,7 +206,7 @@ def quantize_node(
     inputs = [in_node]
 
     for key, value in qparams.items():
-        if key in ['_scale_', '_zero_point_', '_scales_', '_zero_points_']:
+        if key in ['_scale_', '_zero_point_']:
             # For scale and zero_point values we register them as buffers in the root module.
             qparam_node = create_getattr_from_value(root_module, graph, module_path + prefix + key, value)
             inputs.append(qparam_node)
@@ -490,45 +490,45 @@ def return_arg_list(arg_indices: List[int]) -> Callable[[Node], List[int]]:
         return [i for i in arg_indices if i < len(node.args)]
     return arg_indices_func
 
-_NodeInfo = namedtuple("_NodeInfo", "op target")
+NodeInfo = namedtuple("NodeInfo", "op target")
 
 # this dict identifies which indices of a node are non tensors
 # so that they can be propagated correctly since inserting observers
 # for them would cause errors
 
-NON_OBSERVABLE_ARG_DICT: Dict[_NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]] = {
-    _NodeInfo("call_method", "masked_fill") : {
+NON_OBSERVABLE_ARG_DICT: Dict[NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]] = {
+    NodeInfo("call_method", "masked_fill") : {
         torch.bool: return_arg_list([1]),
         float: return_arg_list([2])
     },
-    _NodeInfo("call_method", "permute") : {
+    NodeInfo("call_method", "permute") : {
         int: all_node_args_except_first
     },
-    _NodeInfo("call_method", "repeat") : {
+    NodeInfo("call_method", "repeat") : {
         int: all_node_args_except_first
     },
-    _NodeInfo("call_method", "reshape") : {
+    NodeInfo("call_method", "reshape") : {
         int: all_node_args_except_first
     },
-    _NodeInfo("call_method", "size") : {
+    NodeInfo("call_method", "size") : {
         int: return_arg_list([1])
     },
-    _NodeInfo("call_method", "transpose") : {
+    NodeInfo("call_method", "transpose") : {
         int: all_node_args_except_first
     },
-    _NodeInfo("call_method", torch.transpose) : {
+    NodeInfo("call_method", torch.transpose) : {
         int: all_node_args_except_first
     },
-    _NodeInfo("call_method", "unsqueeze") : {
+    NodeInfo("call_method", "unsqueeze") : {
         int: return_arg_list([1])
     },
-    _NodeInfo("call_method", "unsqueeze_") : {
+    NodeInfo("call_method", "unsqueeze_") : {
         int: return_arg_list([1])
     },
-    _NodeInfo("call_method", torch.unsqueeze) : {
+    NodeInfo("call_method", torch.unsqueeze) : {
         int: return_arg_list([1])
     },
-    _NodeInfo("call_method", "view") : {
+    NodeInfo("call_method", "view") : {
         int: all_node_args_except_first
     },
 }
@@ -540,7 +540,7 @@ def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[Union[type, tor
     Returns a dict with of non float tensor types as keys and values which correspond to a
     function to retrieve the list (which takes the node as an argument)
     """
-    info = _NodeInfo(node.op, node.target)
+    info = NodeInfo(node.op, node.target)
 
     return NON_OBSERVABLE_ARG_DICT.get(info, EMPTY_ARG_DICT)
 

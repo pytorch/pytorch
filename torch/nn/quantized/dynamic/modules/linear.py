@@ -38,21 +38,21 @@ class Linear(nnq.Linear):
         # deserialization modules
         self.version = 4
 
-    def forward(self, input):
+    def forward(self, x):
         # Note that we can handle self.bias == None case.
         if self._packed_params.dtype == torch.qint8:
             if self.version is None or self.version < 4:
                 Y = torch.ops.quantized.linear_dynamic(
-                    input, self._packed_params._packed_params)
+                    x, self._packed_params._packed_params)
             else:
                 Y = torch.ops.quantized.linear_dynamic(
-                    input, self._packed_params._packed_params, reduce_range=True)
+                    x, self._packed_params._packed_params, reduce_range=True)
         elif self._packed_params.dtype == torch.float16:
             Y = torch.ops.quantized.linear_dynamic_fp16(
-                input, self._packed_params._packed_params)
+                x, self._packed_params._packed_params)
         else:
             raise RuntimeError('Unsupported dtype on dynamic quantized linear!')
-        return Y.to(input.dtype)
+        return Y.to(x.dtype)
 
     def _get_name(self):
         return 'DynamicQuantizedLinear'

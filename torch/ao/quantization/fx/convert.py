@@ -51,7 +51,6 @@ from .utils import (
     create_getattr_from_value,
     collect_producer_nodes,
     graph_module_from_producer_nodes,
-    get_all_args_as_positional_args,
     WEIGHT_INDEX_DICT,
 )
 
@@ -110,7 +109,7 @@ def run_weight_observers(observed: GraphModule) -> None:
     for node in observed.graph.nodes:
         if node.op != 'call_function' or node.target not in WEIGHT_INDEX_DICT:
             continue
-        for i, node_arg in enumerate(get_all_args_as_positional_args(node)):
+        for i, node_arg in enumerate(node.args):
             if i not in WEIGHT_INDEX_DICT[node.target]:
                 continue
             # node_arg is weight
@@ -162,8 +161,8 @@ def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraph
                         new_node = quantized.graph.create_node(
                             "call_method",
                             "dequantize",
-                            tuple(get_all_args_as_positional_args(node)),
-                            {}
+                            node.args,
+                            node.kwargs
                         )
                     user.replace_input_with(node, new_node)
                 quantized.graph.erase_node(node)
@@ -187,8 +186,8 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
                 unique_dq = quantized.graph.create_node(
                     "call_method",
                     "dequantize",
-                    tuple(get_all_args_as_positional_args(users[0])),
-                    {}
+                    users[0].args,
+                    users[0].kwargs
                 )
             for dequant in dequant_users:
                 dequant.replace_all_uses_with(unique_dq)
@@ -204,9 +203,9 @@ def remove_quant_dequant_pairs(quantized: QuantizedGraphModule) -> QuantizedGrap
             users = list(node.users)
             user = users[0] if users else None
             if len(users) == 1 and user.op == "call_method" and user.target == "dequantize":
-                user.replace_all_uses_with(get_all_args_as_positional_args(node)[0])
+                user.replace_all_uses_with(node.args[0])
                 quantized.graph.erase_node(user)
-                orig_args = list(get_all_args_as_positional_args(node))
+                orig_args = list(node.args)
                 quantized.graph.erase_node(node)
                 for arg in orig_args:
                     if isinstance(arg, Node) and len(list(arg.users)) == 0:
@@ -222,7 +221,7 @@ def maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph):
     if isinstance(arg, Node) and \
        arg.op == "call_method" and \
        arg.target == "dequantize":
-        quantize_node = get_all_args_as_positional_args(arg)[0]
+        quantize_node = arg.args[0]
         # we only replace the specific use since dequantize could be used by other nodes
         # as well
         node.replace_input_with(arg, quantize_node)
@@ -246,7 +245,7 @@ def get_module_path_and_prefix(
     TODO: this logic is hacky, we should think about how to remove it or make it more
     general
     """
-    observed_node = get_all_args_as_positional_args(obs_node)[0]
+    observed_node = obs_node.args[0]
     # an observer can be inserted for both input of the next operator or output of the previous
     # operator (they can be the same)
     # this flag identifies if the observer is inserted only because the observed node is
@@ -336,14 +335,14 @@ def convert_standalone_module(
         ._standalone_module_input_quantized_idxs\
         .tolist()  # type: ignore[operator]
     # remove the dequantize nodes for inputs
-    args = list(get_all_args_as_positional_args(node))
+    args = list(node.args)
     for idx in range(len(args)):
         if idx in sm_input_quantized_idxs:
             arg = args[idx]
             if not isinstance(arg, Node):
                 continue
             if arg.op == "call_method" and arg.target == "dequantize":  # type: ignore[union-attr]
-                quantize_node = get_all_args_as_positional_args(arg)[0]  # type: ignore[union-attr]
+                quantize_node = arg.args[0]  # type: ignore[union-attr]
                 node.replace_input_with(arg, quantize_node)
                 if len(arg.users) == 0:  # type: ignore[union-attr]
                     model.graph.erase_node(arg)
@@ -516,7 +515,7 @@ def convert_custom_module(
     if activation_is_statically_quantized(qconfig):
         statically_quantized_custom_module_nodes.add(node)
         # remove the previous dequant node
-        prev_node = get_all_args_as_positional_args(node)[0]
+        prev_node = node.args[0]
         # expecting the input node for a custom module node to be a Node
         assert isinstance(prev_node, Node), \
             f"Expecting the argument for custom module node to be a Node, but got {prev_node}"
@@ -526,7 +525,7 @@ def convert_custom_module(
             # Before: quantize - dequantize - custom - module
             # After: quantize - custom - module
             #              \ - dequantize
-            node.replace_input_with(prev_node, get_all_args_as_positional_args(prev_node)[0])
+            node.replace_input_with(prev_node, prev_node.args[0])
 
             # Remove the dequantize node if it doesn't have other users
             if len(prev_node.users) == 0:
@@ -690,22 +689,20 @@ def convert(
             with graph.inserting_before(node):
                 input_node = node.args[0]
                 inputs = [input_node]
-                quantize_node_kwargs = {}
                 for key, value in qparams.items():
                     # TODO: we can add the information of whether a value needs to
                     # be registered as an attribute in qparams dict itself
                     # remove the prefix and suffix to get the keyword for quantize operator
-                    arg_keyword = key[1:-1]
-                    if key in ['_scale_', '_zero_point_', '_scales_', '_zero_points_']:
+                    if key in ['_scale_', '_zero_point_']:
                         # For scale and zero_point values we register them as buffers in the root module.
                         # TODO: maybe need more complex attr name here
                         qparam_node = create_getattr_from_value(model, graph, module_path + prefix + key, value)
-                        quantize_node_kwargs[arg_keyword] = qparam_node
+                        inputs.append(qparam_node)
                     else:
                         # for qparams that are not scale/zero_point (like axis, dtype) we store them as literals in the graph.
-                        quantize_node_kwargs[arg_keyword] = value
+                        inputs.append(value)
 
-                quantized_node = graph.create_node(node_type, quantize_op, tuple(inputs), quantize_node_kwargs)
+                quantized_node = graph.create_node(node_type, quantize_op, tuple(inputs), {})
                 dequantized_node = graph.call_method("dequantize", args=(quantized_node,))
                 node.replace_all_uses_with(dequantized_node)
                 graph.erase_node(node)
@@ -753,7 +750,7 @@ def convert(
             # output_quantized_idxs override.
             # Remove the dequantize operator for the node in the end if any
             return_node = node
-            output = get_all_args_as_positional_args(node)[0]
+            output = node.args[0]
             # outputs can be Node, list, tuple, dict, other cases are not supported yet
             if isinstance(output, (list, tuple)):
                 for idx in output_quantized_idxs:

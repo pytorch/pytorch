@@ -28,19 +28,19 @@ class Linear(nn.Linear, ReferenceQuantizedModule):
     def _get_name(self):
         return "QuantizedLinear(Reference)"
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         we have:
         w(float) -- quant - dequant \
-        input(float) ------------- F.linear ---
+        x(float) ------------- F.linear ---
 
         In the full model, we will see
         w(float) -- quant - *dequant \
-        input -- quant --- *dequant --  *F.linear --- *quant - dequant
+        x -- quant --- *dequant --  *F.linear --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized linear
         """
         weight_quant_dequant = self.get_weight()
-        result = F.linear(input, weight_quant_dequant, self.bias)
+        result = F.linear(x, weight_quant_dequant, self.bias)
         return result
 
     @classmethod

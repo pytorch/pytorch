@@ -53,20 +53,20 @@ class Conv1d(_ConvNd, nn.Conv1d):
             groups, bias, padding_mode, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         we have:
         w(float) -- quant - dequant \
-        input(float) ------------- F.conv1d ---
+        x(float) ------------- F.conv1d ---
 
         In the full model, we will see
         w(float) -- quant - *dequant \
-        input -- quant --- *dequant --  *F.conv1d --- *quant - dequant
+        x -- quant --- *dequant --  *F.conv1d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv1d
         """
         weight_quant_dequant = self.get_weight()
         result = F.conv1d(
-            input, weight_quant_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
@@ -89,20 +89,20 @@ class Conv2d(_ConvNd, nn.Conv2d):
             groups, bias, padding_mode, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         we have:
         w(float) -- quant - dequant \
-        input(float) ------------- F.conv2d ---
+        x(float) ------------- F.conv2d ---
 
         In the full model, we will see
         w(float) -- quant - *dequant \
-        input -- quant --- *dequant --  *F.conv2d --- *quant - dequant
+        x -- quant --- *dequant --  *F.conv2d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv2d
         """
         weight_quant_dequant = self.get_weight()
         result = F.conv2d(
-            input, weight_quant_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
@@ -125,20 +125,20 @@ class Conv3d(_ConvNd, nn.Conv3d):
             groups, bias, padding_mode, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
 
-    def forward(self, input: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         we have:
         w(float) -- quant - dequant \
-        input(float) ------------- F.conv3d ---
+        x(float) ------------- F.conv3d ---
 
         In the full model, we will see
         w(float) -- quant - *dequant \
-        input -- quant --- *dequant --  *F.conv3d --- *quant - dequant
+        x -- quant --- *dequant --  *F.conv3d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv3d
         """
         weight_quant_dequant = self.get_weight()
         result = F.conv3d(
-            input, weight_quant_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, self.dilation, self.groups)
         return result
 
@@ -197,14 +197,14 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
             groups, bias, dilation, padding_mode, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
 
-    def forward(self, input: torch.Tensor, output_size: Optional[List[int]] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, output_size: Optional[List[int]] = None) -> torch.Tensor:
         """
         we have:
         w(float) -- quant - dequant \
-        input(float) ------------- F.convTranspose1d ---
+        x(float) ------------- F.convTranspose1d ---
         In the full model, we will see
         w(float) -- quant - *dequant \
-        input -- quant --- *dequant --  *F.convTranspose1d --- *quant - dequant
+        x -- quant --- *dequant --  *F.convTranspose1d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv1d
         """
 
@@ -212,11 +212,11 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            x, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
         weight_quant_dequant = self.get_weight()
         result = F.conv_transpose1d(
-            input, weight_quant_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, output_padding, self.groups, self.dilation)
         return result
 
@@ -241,14 +241,14 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
             groups, bias, dilation, padding_mode, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
 
-    def forward(self, input: torch.Tensor, output_size: Optional[List[int]] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, output_size: Optional[List[int]] = None) -> torch.Tensor:
         """
         we have:
         w(float) -- quant - dequant \
-        input(float) ------------- F.convTranspose2d ---
+        x(float) ------------- F.convTranspose2d ---
         In the full model, we will see
         w(float) -- quant - *dequant \
-        input -- quant --- *dequant --  *F.convTranspose2d --- *quant - dequant
+        x -- quant --- *dequant --  *F.convTranspose2d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv2d
         """
         assert isinstance(self.padding, tuple)
@@ -256,11 +256,11 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
 
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            x, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
         weight_quant_dequant = self.get_weight()
         result = F.conv_transpose2d(
-            input, weight_quant_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, output_padding, self.groups, self.dilation)
 
         return result
@@ -285,14 +285,14 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
             groups, bias, dilation, padding_mode, device, dtype)
         self._init_weight_qparams(weight_qparams, device)
 
-    def forward(self, input: torch.Tensor, output_size: Optional[List[int]] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, output_size: Optional[List[int]] = None) -> torch.Tensor:
         """
         we have:
         w(float) -- quant - dequant \
-        input(float) ------------- F.convTranspose3d ---
+        x(float) ------------- F.convTranspose3d ---
         In the full model, we will see
         w(float) -- quant - *dequant \
-        input -- quant --- *dequant --  *F.convTranspose3d --- *quant - dequant
+        x -- quant --- *dequant --  *F.convTranspose3d --- *quant - dequant
         and the backend should be able to fuse the ops with `*` into a quantized conv3d
         """
 
@@ -300,11 +300,11 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         # One cannot replace List by Tuple or Sequence in "_output_padding" because
         # TorchScript does not support `Sequence[T]` or `Tuple[T, ...]`.
         output_padding = self._output_padding(
-            input, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
+            x, output_size, self.stride, self.padding, self.kernel_size, self.dilation)  # type: ignore[arg-type]
 
         weight_quant_dequant = self.get_weight()
         result = F.conv_transpose3d(
-            input, weight_quant_dequant, self.bias, self.stride,
+            x, weight_quant_dequant, self.bias, self.stride,
             self.padding, output_padding, self.groups, self.dilation)
         return result
 

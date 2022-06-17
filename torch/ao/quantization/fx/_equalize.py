@@ -4,7 +4,6 @@ import torch.nn.functional as F
 import torch.nn.intrinsic as nni
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-from torch.ao.quantization.fx.utils import get_all_args_as_positional_args
 
 from .utils import (
     WEIGHT_INDEX_DICT,
@@ -305,7 +304,7 @@ def maybe_get_weight_eq_obs_node(op_node: Node, modules: Dict[str, nn.Module]) -
     """ Gets the weight equalization observer node if it exists.
     """
     assert(op_node.op == 'call_function' and op_node.target in WEIGHT_INDEX_DICT)
-    for i, node_arg in enumerate(get_all_args_as_positional_args(op_node)):
+    for i, node_arg in enumerate(op_node.args):
         if i in WEIGHT_INDEX_DICT[op_node.target]:  # type: ignore[index]
             assert(isinstance(node_arg, Node) and node_arg.op == 'call_module' and
                    isinstance(modules[str(node_arg.target)], _WeightEqualizationObserver))
@@ -379,7 +378,7 @@ def scale_input_observer(node: Node, modules: Dict[str, nn.Module]) -> None:
     input_eq_obs = modules[str(node.target)]
     assert(isinstance(input_eq_obs, _InputEqualizationObserver))
 
-    input_quant_obs_node = get_all_args_as_positional_args(node)[0]
+    input_quant_obs_node = node.args[0]
     assert(isinstance(input_quant_obs_node, Node))
 
     input_quant_obs = modules[str(input_quant_obs_node.target)]
@@ -472,14 +471,14 @@ def scale_weight_functional(
         return
 
     # Get the quantization observer node
-    weight_quant_obs_node = get_all_args_as_positional_args(weight_eq_obs_node)[0]
+    weight_quant_obs_node = weight_eq_obs_node.args[0]
     if weight_quant_obs_node is None:
         return
     assert(isinstance(weight_quant_obs_node, Node) and
            isinstance(modules[str(weight_quant_obs_node.target)], ObserverBase))
 
     # Get the get_attr(weight) node
-    weight_node = get_all_args_as_positional_args(weight_quant_obs_node)[0]
+    weight_node = weight_quant_obs_node.args[0]
     if weight_node is None:
         return
     assert(isinstance(weight_node, Node) and weight_node.op == 'get_attr')
@@ -507,7 +506,7 @@ def scale_weight_functional(
 
     # Multiply the bias element wise by the next equalization scale
     bias_node = None
-    for node in get_all_args_as_positional_args(op_node):
+    for node in op_node.args:
         # Find the node containing the weight values
         if isinstance(node, Node) and node.op == 'get_attr' and 'bias' in node.name:
             bias_node = node
@@ -531,7 +530,7 @@ def clear_weight_quant_obs_node(op_node: Node, modules: Dict[str, nn.Module]) ->
     if weight_eq_obs_node is None:
         return
 
-    weight_quant_obs_node = get_all_args_as_positional_args(weight_eq_obs_node)[0]
+    weight_quant_obs_node = weight_eq_obs_node.args[0]
     if weight_quant_obs_node is None:
         return
     assert(isinstance(weight_quant_obs_node, Node))
@@ -644,10 +643,10 @@ def convert_eq_obs(
     """
     for node in model.graph.nodes:
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
-            inp_quant_obs_node = get_all_args_as_positional_args(node)[0]
+            inp_quant_obs_node = node.args[0]
             if not isinstance(inp_quant_obs_node, Node):
                 continue
-            prev_node = get_all_args_as_positional_args(inp_quant_obs_node)[0]
+            prev_node = inp_quant_obs_node.args[0]
             if not isinstance(prev_node, Node):
                 continue
 
@@ -711,7 +710,7 @@ def convert_eq_obs(
                 clear_weight_quant_obs_node(node, modules)
 
                 # Erase the weight equalization observer node
-                prev_node = get_all_args_as_positional_args(weight_eq_obs_node)[0]
+                prev_node = weight_eq_obs_node.args[0]
                 assert isinstance(prev_node, Node)
                 remove_node(model, weight_eq_obs_node, prev_node)
             else:

@@ -3896,7 +3896,7 @@ class TestQuantizeFx(QuantizationTestCase):
         # make sure the arg[1] of lstm module is a tuple
         for n in m.graph.nodes:
             if n.target == "lstm":
-                self.assertEqual(type(n.kwargs["hx"]), tuple)
+                self.assertEqual(type(n.args[1]), tuple)
 
     def test_relu_lowering(self):
         class M(torch.nn.Module):

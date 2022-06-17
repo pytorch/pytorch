@@ -17,10 +17,6 @@ from ..utils import (
 from .graph_module import (
     is_observed_standalone_module,
 )
-from .utils import (
-    get_all_args_as_positional_args,
-)
-
 from typing import Any, Dict, List, Callable, Optional, Tuple, Set
 
 MatchResult = Tuple[Node, List[Node], Optional[Pattern], QuantizeHandler,
@@ -48,8 +44,6 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if len(node.users) > max_uses:
         return False
 
-    all_node_args = [a for a in get_all_args_as_positional_args(node) if isinstance(a, Node)]
-
     if isinstance(self_match, type) and issubclass(self_match, torch.nn.Module):
         if node.op != 'call_module':
             return False
@@ -59,7 +53,7 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
         if node.op != 'call_function' or node.target is not self_match:
             return False
         elif node.target is getattr:
-            if all_node_args[1] != pattern[1]:
+            if node.args[1] != pattern[1]:
                 return False
     elif isinstance(self_match, str):
         if node.op != 'call_method' or node.target != self_match:
@@ -70,10 +64,10 @@ def is_match(modules, node, pattern, max_uses=sys.maxsize):
     if not arg_matches:
         return True
 
-    if len(arg_matches) != len(all_node_args):
+    if len(arg_matches) != len(node.args):
         return False
 
-    return all(is_match(modules, node, arg_match, max_uses=1) for node, arg_match in zip(all_node_args, arg_matches))
+    return all(is_match(modules, node, arg_match, max_uses=1) for node, arg_match in zip(node.args, arg_matches))
 
 def find_matches(
         graph: Graph,
@@ -150,7 +144,7 @@ def find_matches(
                 matched_node_pattern,
                 match_map)
             if pattern[0] is not getattr:
-                for subpattern, arg in zip(args, get_all_args_as_positional_args(node)):
+                for subpattern, arg in zip(args, node.args):
                     record_match(
                         subpattern,
                         arg,
