@@ -18241,6 +18241,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_embedding,
         error_inputs_func=error_inputs_embedding,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
