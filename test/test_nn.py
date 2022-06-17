@@ -14415,10 +14415,16 @@ class TestNNDeviceType(NNTestCase):
         with self.assertWarnsRegex(UserWarning, "Received a 2-D input to dropout2d"):
             nn.Dropout2d(p=0.5)(torch.rand(1, 2, device=device))
 
-        # no batch dims
-        input = torch.rand(50, 2, 2, device=device)
-        self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5), input)
-        self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5, inplace=True), input)
+        # TODO: Uncomment these lines once no-batch-dim inputs are supported.
+        # For now, the historical dropout1d behavior is performed for 3D inputs.
+        # See https://github.com/pytorch/pytorch/issues/77081
+
+        # input = torch.rand(50, 2, 2, device=device)
+        # self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5), input)
+        # self._test_dropoutNd_no_batch(nn.Dropout2d(p=0.5, inplace=True), input)
+
+        with self.assertWarnsRegex(UserWarning, "assuming that channel-wise 1D dropout behavior is desired"):
+            nn.Dropout2d(p=0.5)(torch.rand(1, 2, 2, device=device))
 
         # check that complete channels are dropped
         input = torch.ones(10, 4, 2, 2, device=device)
