@@ -84,7 +84,9 @@ except ImportError:
 
 # Test the model report module
 try:
-    from quantization.fx.test_model_report_fx import TestModelReportFxDetector  # noqa: F401
+    from quantization.fx.test_model_report_fx import TestFxModelReportDetector  # noqa: F401
+    from quantization.fx.test_model_report_fx import TestFxModelReportObserver      # noqa: F401
+    from quantization.fx.test_model_report_fx import TestFxModelReportDetectDynamicStatic  # noqa: F401
 except ImportError:
     pass
 
