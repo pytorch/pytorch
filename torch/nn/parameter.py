@@ -53,7 +53,11 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         if id(self) in memo:
             return memo[id(self)]
         else:
-            result = type(self)(self.data.__deepcopy__(memo), self.requires_grad)
+            # Redispatch to Tensor.__deepcopy__() with self reinterpreted as a Tensor
+            # to get proper view handling.
+            # https://github.com/pytorch/pytorch/issues/79788
+            result = torch.Tensor._make_subclass(torch.Tensor, self, self.requires_grad)
+            result = type(self)(result.__deepcopy__(memo), self.requires_grad)
             memo[id(self)] = result
             return result
 
