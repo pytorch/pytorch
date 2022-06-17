@@ -42,14 +42,16 @@ class ModelReport:
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set
         # this set can then be used to traverse the graph and remove added observers
+        # this can be passed into some detectors to help them only focus on some observers
         self.__report_to_observers_of_interest: Dict[str, Set[str]] = {}
 
         # initialize each report to have empty set of observers of interest
         for desired_report in self.__desired_reports:
             self.__report_to_observers_of_interest[desired_report] = set([])
 
-        # flags to ensure that we can only prepare once
+        # flags to ensure that we can only prepare and generate report once
         self.__prepared_flag = False
+        self.__removed_observers = False
 
     def get_desired_reports(self) -> Set[str]:
         """ Returns a copy of the desired reports for viewing """
@@ -137,7 +139,7 @@ class ModelReport:
         # recompile model after inserts are made
         prepared_fx_model.recompile()
 
-    def __get_node_from_fqn(self, fx_model: GraphModule, node_fqn: str) -> torch.fx.node.Node:
+    def __get_node_from_fqn(self, fx_model: GraphModule, node_fqn: str) -> Any:
         r"""
         Takes in a graph model and returns the node based on the fqn
 
@@ -147,7 +149,14 @@ class ModelReport:
 
         Returns the Node object of the given node_fqn otherwise returns None
         """
-        pass
+        node_to_return = None
+        for node in fx_model.graph.nodes:
+            # if the target matches the fqn, it's the node we are looking for
+            if node.target == node_fqn:
+                node_to_return = node
+                break
+
+        return node_to_return
 
     def generate_model_report(
         self, calibrated_fx_model: GraphModule, remove_inserted_observers: bool
@@ -166,4 +175,42 @@ class ModelReport:
             The textual summary of that report information
             A dictionary containing relavent statistics or information for that report
         """
-        pass
+        # if we already removed the observers, we cannot generate report
+        if self.__removed_observers:
+            raise Exception("Cannot generate report on model you already removed observers from")
+
+        # keep track of all the reports of interest and their outputs
+        reports_of_interest = {}
+
+        for detector in self.__desired_report_detectors:
+            # generate the individual report for the detector
+            report_output = detector.generate_detector_report(calibrated_fx_model)
+            reports_of_interest[detector.get_detector_name()] = report_output
+
+        # if user wishes to remove inserted observers, go ahead and remove
+        if remove_inserted_observers:
+            self.__removed_observers = True
+            # get the set of all Observers inserted by this instance of ModelReport
+            all_observers_of_interest: Set[str] = set([])
+            for desired_report in self.__report_to_observers_of_interest:
+                observers_of_interest = self.__report_to_observers_of_interest[desired_report]
+                all_observers_of_interest.update(observers_of_interest)
+
+            # go through all_observers_of_interest and remove them from the graph and model
+            for observer_fqn in all_observers_of_interest:
+                # remove the observer from the model
+                calibrated_fx_model.delete_submodule(observer_fqn)
+
+                # remove the observer from the graph structure
+                node_obj = self.__get_node_from_fqn(calibrated_fx_model, observer_fqn)
+
+                if node_obj:
+                    calibrated_fx_model.graph.erase_node(node_obj)
+                else:
+                    raise ValueError("Node no longer exists in GraphModule structure")
+
+            # remember to recompile the model
+            calibrated_fx_model.recompile()
+
+        # return the reports of interest
+        return reports_of_interest
