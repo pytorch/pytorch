@@ -1787,6 +1787,7 @@
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   grad_output: embedding_dense_double_backward(grad, indices, padding_idx)
   indices: non_differentiable
+  result: auto_linear
 
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False, int padding_idx=-1) -> (Tensor, Tensor, Tensor, Tensor)
   indices: non_differentiable
@@ -1808,11 +1809,6 @@
   self: kl_div_backward(grad, self, target, reduction, log_target)
   target: kl_div_target_backward(grad, self, target, reduction, log_target)
   result: apply_loss_reduction(kl_div_backward(self_t, self_p, target_p, at::Reduction::None, log_target) +  kl_div_target_backward(target_t, self_p, target_p, at::Reduction::None, log_target), reduction)
-
-- name: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  self: l1_loss_backward(grad, self, target, reduction)
-  target: l1_loss_backward(grad, target, self, reduction)
-  result: apply_loss_reduction(l1_loss_backward(self_t.conj(), self_p, target_p, at::Reduction::None).conj() + l1_loss_backward(target_t.conj(), target_p, self_p, at::Reduction::None).conj(), reduction)
 
 - name: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: mse_loss_backward(grad, self, target, reduction)
@@ -2293,16 +2289,6 @@
   grad_output: kl_div_double_backward_grad_output(grad, self, target, reduction, log_target)
   self: zeros_like(grad)
   target: zeros_like(grad)
-
-- name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  grad_output: l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
-  self: l1_loss_double_backward(grad, grad_output, self, target, reduction)
-  target: l1_loss_double_backward(grad, grad_output, target, target, reduction)
-  result: "self_p.is_complex()
-          ?  l1_loss_double_backward_grad_output(grad_output_t, grad_output_p, self_p, target_p, reduction)
-           + l1_loss_double_backward(self_t, grad_output_p, self_p, target_p, reduction)
-           + l1_loss_double_backward(target_t, grad_output_p, target_p, target_p, reduction)
-          : l1_loss_double_backward_grad_output(grad_output_t, grad_output_p, self_p, target_p, reduction)"
 
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)
