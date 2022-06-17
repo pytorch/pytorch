@@ -41,7 +41,7 @@ class TensorAPoT(torch.Tensor):
     The approach follows the method outlined in the APoT paper: https://arxiv.org/pdf/1909.13144.pdf.
     Args:
         tensor2quantize: fp Tensor
-        apot_repr: enum flag to specify whether to return an integer or reduced fp APoT representation of tensor
+        use_int_repr: bool flag to specify int of reduced precision fp representation of APoT tensor
     Returns:
         result: APoT representation of tensor2quantize (integer or reduced precision fp)
     """
