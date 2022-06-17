@@ -377,9 +377,7 @@ class TestCommon(TestCase):
             try:
                 with enable_torch_dispatch_mode(mode):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-            except torch._subclasses.fake_tensor.ComplexInputException:
-                continue
-            except torch._subclasses.fake_tensor.SparseInputException:
+            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
 
             if isinstance(result, torch.Tensor):
@@ -1549,7 +1547,6 @@ fake_skips = (
 dynamic_output_op_tests = (
     "argwhere",
     "bincount",
-    "index_select",
     "combinations",
     "linalg.lstsq",
     "masked_select",
@@ -1562,6 +1559,7 @@ dynamic_output_op_tests = (
 # some inputs invoke dynamic output shape operators, some do not
 sometimes_dynamic_output_op_test = (
     "__getitem__",
+    "index_select",
 )
 
 class TestFakeTensorNonErroring(TestCase):
@@ -1606,9 +1604,7 @@ class TestFakeTensorNonErroring(TestCase):
                     prims.utils.compare_tensor_meta(fake_out, real_out)
                 self.assertTrue(name not in dynamic_output_op_tests)
 
-            except torch._subclasses.fake_tensor.ComplexInputException:
-                pass
-            except torch._subclasses.fake_tensor.SparseInputException:
+            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)

@@ -2487,6 +2487,7 @@
   variants: function, method
   dispatch:
     QuantizedCPU: quantized_index
+  tags: dynamic_output_shape
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
   # NB: The following functions are declared in aten/src/ATen/templates/TensorBody.h and defined in aten/src/ATen/TensorIndexing.cpp:
   # - Tensor Tensor::index(ArrayRef<TensorIndex> indices)
@@ -3852,6 +3853,7 @@
   dispatch:
     CPU: repeat_interleave_cpu
     CUDA: repeat_interleave_cuda
+  tags: dynamic_output_shape
 
 - func: repeat_interleave.self_Tensor(Tensor self, Tensor repeats, int? dim=None, *, int? output_size=None) -> Tensor
   variants: function, method
@@ -7399,7 +7401,6 @@
     CPU, QuantizedCPU: index_select_out_cpu_
     CUDA, QuantizedCUDA: index_select_out_cuda
     MPS: index_select_out_mps
-  tags: dynamic_output_shape
 
 - func: index_select(Tensor self, int dim, Tensor index) -> Tensor
   variants: method, function
@@ -7411,14 +7412,11 @@
     SparseCPU: index_select_sparse_cpu
     SparseCUDA: index_select_sparse_cuda
     MPS: index_select_mps
-  tags: dynamic_output_shape
 
 - func: index_select.dimname_out(Tensor self, Dimname dim, Tensor index, *, Tensor(a!) out) -> Tensor(a!)
-  tags: dynamic_output_shape
 
 - func: index_select.dimname(Tensor self, Dimname dim, Tensor index) -> Tensor
   variants: method, function
-  tags: dynamic_output_shape
 
 - func: index_select_backward(Tensor grad, int[] self_sizes, int dim, Tensor index) -> Tensor
   variants: function
