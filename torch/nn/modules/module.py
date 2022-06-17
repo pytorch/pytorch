@@ -625,6 +625,7 @@ class Module:
                     grad_applied = fn(param.grad)
                 should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
                 if should_use_set_data:
+                    assert out_param.grad is not None
                     out_param.grad.data = grad_applied
                 else:
                     assert param.grad.is_leaf
