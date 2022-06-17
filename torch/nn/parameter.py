@@ -53,7 +53,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         if id(self) in memo:
             return memo[id(self)]
         else:
-            result = type(self)(self.data.clone(memory_format=torch.preserve_format), self.requires_grad)
+            result = type(self)(self.data.__deepcopy__(memo), self.requires_grad)
             memo[id(self)] = result
             return result
 

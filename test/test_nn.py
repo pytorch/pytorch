@@ -489,6 +489,22 @@ class TestNN(NNTestCase):
         for b in net.buffers():
             self.assertTrue(b.storage().is_shared())
 
+    def test_param_deepcopy_preserves_view_relationships(self):
+
+        class Net(nn.Module):
+            def __init__(self):
+                super().__init__()
+                t = torch.randn(3)
+                self.p1 = torch.nn.Parameter(t)
+                self.p2 = torch.nn.Parameter(t)
+
+        net = Net()
+        self.assertTrue(net.p1.storage().data_ptr() == net.p2.storage().data_ptr())
+
+        # Copy's parameters should reference the same storage.
+        net_copy = deepcopy(net)
+        self.assertTrue(net_copy.p1.storage().data_ptr() == net_copy.p2.storage().data_ptr())
+
     def _test_hooks(self, backward_register_fn):
         module = nn.Sigmoid()
         input = torch.ones(5, 5, requires_grad=True)
