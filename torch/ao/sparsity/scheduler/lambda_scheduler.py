@@ -2,6 +2,8 @@ import warnings
 
 from .base_scheduler import BaseScheduler
 
+__all__ = ["LambdaSL"]
+
 class LambdaSL(BaseScheduler):
     """Sets the sparsity level of each parameter group to the final sl
     times a given function. When last_epoch=-1, sets initial sl as zero.

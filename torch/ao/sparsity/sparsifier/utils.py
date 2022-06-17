@@ -1,5 +1,7 @@
 from torch import nn
 
+__all__ = ["module_to_fqn", "fqn_to_module", "get_arg_info_from_tensor_fqn", "FakeSparsity"]
+
 def module_to_fqn(model, module, prefix=''):
     for name, child in model.named_children():
         new_name = prefix + '.' + name

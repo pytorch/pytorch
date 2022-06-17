@@ -14,6 +14,8 @@ from .parametrization import PruningParametrization, ZeroesParametrization, Acti
 from torch.ao.sparsity import BaseSparsifier, module_to_fqn, fqn_to_module
 from torch.ao.sparsity.sparsifier.utils import get_arg_info_from_tensor_fqn
 
+__all__ = ["BasePruner"]
+
 SUPPORTED_MODULES = {  # added to config if None given
     nn.Linear,
     nn.Conv2d,
@@ -23,7 +25,6 @@ SUPPORTED_MODULES = {  # added to config if None given
 NEEDS_ZEROS = {  # these layers should have pruned indices zero-ed, not removed
     nn.BatchNorm2d
 }
-
 
 class BasePruner(BaseSparsifier):
     r"""Base class for all pruners.
