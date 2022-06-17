@@ -17,7 +17,8 @@ from trymerge import (find_matching_merge_rule,
                       read_merge_rules,
                       GitHubPR,
                       MergeRule,
-                      MandatoryChecksMissingError)
+                      MandatoryChecksMissingError,
+                      main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from typing import Any, List, Optional
 from unittest import TestCase, main, mock
@@ -258,16 +259,14 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))
     @mock.patch('trymerge.try_revert', side_effect=mock_revert)
     def test_main_revert(self, mock_revert: Any, mock_parse_args: Any, gh_get_pr_info: Any) -> None:
-        import trymerge
-        trymerge.main()
+        trymerge_main()
         mock_revert.assert_called_once()
 
     @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, True))
     @mock.patch('trymerge.merge', side_effect=mock_merge)
     def test_main_force(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
-        import trymerge
-        trymerge.main()
+        trymerge_main()
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
                                            dry_run=mock.ANY,
@@ -280,8 +279,7 @@ class TestGitHubPR(TestCase):
     @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
     @mock.patch('trymerge.merge', side_effect=mock_merge)
     def test_main_merge(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
-        import trymerge
-        trymerge.main()
+        trymerge_main()
         mock_merge.assert_called_once_with(mock.ANY,
                                            mock.ANY,
                                            dry_run=mock.ANY,
