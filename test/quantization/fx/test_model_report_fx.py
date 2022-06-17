@@ -819,8 +819,10 @@ class TestFxModelReportClass(QuantizationTestCase):
         - Ensures that the observers of interest are properly initialized
         """
 
+        backend = torch.backends.quantized.engine
+
         # make an example set of detectors
-        test_detector_set = set([DynamicStaticDetector(), PerChannelDetector()])
+        test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
         # initialize with an empty detector
         model_report = ModelReport(test_detector_set)
 
