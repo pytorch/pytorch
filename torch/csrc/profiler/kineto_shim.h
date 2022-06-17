@@ -12,14 +12,14 @@
 #undef USE_KINETO
 #endif
 
-#include <ActivityType.h>
-
+#include <c10/util/strong_type.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/profiler/api.h>
 
 #ifdef USE_KINETO
 // Forward declarations so we don't have to include `libkineto.h` in a header.
 namespace libkineto {
+enum class ActivityType;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
 } // namespace libkineto
@@ -59,6 +59,12 @@ using trace_t = DummyTraceBuffer;
 using interface_trace_t = DummyTraceBuffer;
 #endif // USE_KINETO
 
+// Stores `libkineto::ActivityType`
+using ActivityType =
+    strong::type<int, struct ActivityType_, strong::convertible_to<int>>;
+
+ActivityType toActivityType(const std::string& str);
+
 using annotation_t = std::vector<std::pair<std::string, std::string>>;
 
 // Wraps: libkineto::CpuTraceBuffer
@@ -70,7 +76,7 @@ struct TraceWrapper {
   // The caller is expected to hold a mutex when calling `addCPUActivity`.
   void addCPUActivity(
       const std::string& name,
-      const libkineto::ActivityType kineto_type,
+      const ActivityType kineto_type,
       const DeviceAndResource device_and_resource,
       const uint64_t correlation_id,
       const int64_t start_time,
@@ -89,9 +95,23 @@ struct TraceWrapper {
   std::unique_ptr<trace_t> cpu_trace_;
 };
 
-void saveTrace(
-    const std::string& path,
-    std::unique_ptr<interface_trace_t>&& trace);
+// Wraps libkineto::ActivityTraceInterface
+struct ActivityTraceWrapper {
+  explicit ActivityTraceWrapper(std::unique_ptr<interface_trace_t> trace);
+  ActivityTraceWrapper() = default;
+  ActivityTraceWrapper(ActivityTraceWrapper&&) = default;
+  ActivityTraceWrapper(const ActivityTraceWrapper&) = delete;
+  explicit operator bool() const;
+  void save(const std::string& path);
+
+  const std::unique_ptr<interface_trace_t>& get() {
+    return trace_;
+  }
+
+ private:
+  std::unique_ptr<interface_trace_t> trace_;
+  bool saved_ = false; // Kineto's save is destructive
+};
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 void prepareTrace(
@@ -99,7 +119,7 @@ void prepareTrace(
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config);
 void startTrace();
-std::unique_ptr<interface_trace_t> stopTrace();
+ActivityTraceWrapper stopTrace();
 void pushCorrelationId(uint64_t correlation_id);
 void pushUserCorrelationId(uint64_t correlation_id);
 void popCorrelationId();
@@ -112,7 +132,9 @@ void recordThreadInfo();
 
 namespace autograd {
 namespace profiler {
+#ifdef USE_KINETO
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type);
+#endif // USE_KINETO
 
 TORCH_API void addMetadataJson(
     const std::string& key,

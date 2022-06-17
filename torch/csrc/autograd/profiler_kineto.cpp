@@ -44,14 +44,6 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 
-struct ProfilerResult::KinetoTraceWrapper {
-  KinetoTraceWrapper(
-      std::unique_ptr<torch::profiler::impl::kineto::interface_trace_t>&& trace)
-      : trace_{std::move(trace)} {}
-
-  std::unique_ptr<torch::profiler::impl::kineto::interface_trace_t> trace_;
-};
-
 namespace {
 inline int64_t getTimeUs() {
 #ifdef USE_KINETO
@@ -301,7 +293,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     event_post_process_cb_ = std::move(cb);
   }
 
-  std::unique_ptr<torch::profiler::impl::kineto::interface_trace_t> finalizeTrace() {
+  torch::profiler::impl::kineto::ActivityTraceWrapper finalizeTrace() {
     auto end_time = getTimeUs();
     record_queue_.stop();
     materializeOpEvents();
@@ -328,7 +320,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       addTraceEvents(trace);
       return trace;
     } else {
-      return nullptr;
+      return torch::profiler::impl::kineto::ActivityTraceWrapper();
     }
   }
 
@@ -344,8 +336,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       if (e->finished_) {
         int64_t start_us = e->start_time_ns_ / 1000;
         int64_t end_us = e->endTimeNS() / 1000;
-        kineto_events_.emplace_back(
-            e->kinetoType() == libkineto::ActivityType::PYTHON_FUNCTION);
+
+        const auto is_python = c10::visit(c10::overloaded(
+          [](const torch::profiler::impl::PyExtraFieldsBase&){ return true; },
+          [](const auto&){ return false; }
+        ), e->extra_fields_);
+
+        kineto_events_.emplace_back(is_python);
         kineto_events_.back()
             .name(e->name())
             .startUs(start_us)
@@ -447,7 +444,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
 #endif // USE_KINETO
 
   void addTraceEvents(
-      std::unique_ptr<torch::profiler::impl::kineto::interface_trace_t>& trace) {
+      torch::profiler::impl::kineto::ActivityTraceWrapper& trace) {
 #ifdef USE_KINETO
     const auto& events = *(trace.get()->activities());
     for (const auto& ev_ptr : events) {
@@ -737,7 +734,7 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     result = std::make_unique<ProfilerResult>(
         kineto_state_ptr->start_time_,
         std::move(kineto_state_ptr->kineto_events_),
-        std::make_unique<ProfilerResult::KinetoTraceWrapper>(std::move(trace)),
+        std::move(trace),
         std::move(kineto_state_ptr->event_tree_));
   }
 
@@ -761,7 +758,7 @@ int64_t KinetoEvent::cudaElapsedUs() const {
 ProfilerResult::ProfilerResult(
     uint64_t start_time,
     std::vector<KinetoEvent> events,
-    std::unique_ptr<KinetoTraceWrapper>&& trace,
+    torch::profiler::impl::kineto::ActivityTraceWrapper trace,
     std::vector<experimental_event_t>&& event_tree)
     : trace_start_us_(start_time),
       events_(std::move(events)),
@@ -771,7 +768,7 @@ ProfilerResult::ProfilerResult() = default;
 ProfilerResult::~ProfilerResult() = default;
 
 void ProfilerResult::save(const std::string& path) {
-  torch::profiler::impl::kineto::saveTrace(path, std::move(trace_->trace_));
+  trace_.save(path);
 }
 
 } // namespace profiler
