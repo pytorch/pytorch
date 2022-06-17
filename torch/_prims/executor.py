@@ -34,8 +34,19 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
         fusion = Fusion()
         with FusionDefinition(fusion) as fd:
 
+            # nvFuser does not have a concept of constant tensor so we make constant
+            # tensors in the graph a fusion input, and store it in the list below
+            const_tensors = []
+
             def _to_nvfuser_constant(arg):
-                if isinstance(arg, Number):
+                if isinstance(arg, torch.Tensor):
+                    x = fd.define_tensor(
+                        arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
+                    )
+                    fd.add_input(x)
+                    const_tensors.append(arg)
+                    return x
+                elif isinstance(arg, Number):
                     return fd.define_constant(arg)
                 else:
                     return arg
@@ -72,7 +83,8 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                     fd.add_output(o)
 
             nv_results = fusion.execute(
-                tuple(arg for arg in args if isinstance(arg, torch.Tensor) or isinstance(arg, Number))
+                (*(arg for arg in args if isinstance(arg, torch.Tensor) or isinstance(arg, Number)),
+                 *const_tensors)
             )
 
             results = []
