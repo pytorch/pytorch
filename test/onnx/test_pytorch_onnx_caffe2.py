@@ -3106,7 +3106,7 @@ def make_test(
     initial_state,
     variable_length,
     dropout,
-    **extra_kwargs
+    **extra_kwargs,
 ):
     test_name = str(
         "_".join(
@@ -3133,7 +3133,7 @@ def make_test(
             initial_state=initial_state[0],
             packed_sequence=variable_length[0],
             dropout=dropout[0],
-            **extra_kwargs
+            **extra_kwargs,
         )
 
     f.__name__ = test_name
@@ -3179,7 +3179,7 @@ def setup_rnn_tests():
                 initial_state,
                 variable_length,
                 dropout,
-                **extra_kwargs
+                **extra_kwargs,
             )
             test_count += 1
 
