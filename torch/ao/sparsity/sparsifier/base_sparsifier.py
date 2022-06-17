@@ -10,6 +10,8 @@ from torch.nn.utils import parametrize
 
 from .utils import FakeSparsity, module_to_fqn, fqn_to_module, get_arg_info_from_tensor_fqn
 
+__all__ = ["BaseSparsifier"]
+
 SUPPORTED_MODULES = {
     nn.Linear
 }
