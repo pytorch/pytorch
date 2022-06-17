@@ -565,11 +565,9 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         class Foo(torch.Tensor):
             pass
 
-
-        a = torch.Tensor._make_subclass(Foo, LoggingTensor(torch.rand(2)))
-        self.assertIsInstance(a, Foo)
-
         err_msg = "subclass Foo but.*already associated to a python object of type LoggingTensor"
+        with self.assertRaisesRegex(RuntimeError, err_msg):
+            a = torch.Tensor._make_subclass(Foo, LoggingTensor(torch.rand(2)))
         with self.assertRaisesRegex(RuntimeError, err_msg):
             b = LoggingTensor(torch.rand(2)).as_subclass(Foo)
         with self.assertRaisesRegex(RuntimeError, err_msg):
@@ -1076,6 +1074,10 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
 
+        class BasicMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
         x = torch.tensor(4.)
         with Mode():
             y = x + x
@@ -1084,11 +1086,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         self.assertIsInstance(z, ModeTensor)
 
         with Mode():
-            with Mode():
+            with BasicMode():  # we can't nest two modes that call make_subclass because it only accepts vanilla tensors
                 y = x + x
                 z = y + y
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
+
+        assert self.assertRaisesRegex(RuntimeError, "subclass Mode but.* associated to a python object of type Mode")
 
     def test_make_wrapper_subclass_with_modes(self):
         class ModeTensor(torch.Tensor):
