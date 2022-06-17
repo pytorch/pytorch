@@ -128,7 +128,7 @@ c10::intrusive_ptr<ProcessGroup::Work> send(
       tensor_vec, static_cast<int>(dstRank), static_cast<int>(tag));
 }
 
-c10::intrusive_ptr<ProcessGroup::Work> recv(
+c10::intrusive_ptr<ProcessGroup::Work> recv_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t srcRank,
@@ -174,7 +174,7 @@ TORCH_LIBRARY(c10d, m) {
       "barrier",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
   m.def("send", dispatch(c10::DispatchKey::CompositeExplicitAutograd, send));
-  m.def("recv", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv));
+  m.def("recv_", dispatch(c10::DispatchKey::CompositeExplicitAutograd, recv_));
 }
 } // namespace
 
@@ -371,7 +371,7 @@ c10::intrusive_ptr<ProcessGroup::Work> recv(
     int64_t srcRank,
     int64_t tag) {
   static auto op = c10::Dispatcher::singleton()
-                       .findSchemaOrThrow("c10d::recv", "")
+                       .findSchemaOrThrow("c10d::recv_", "")
                        .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            at::TensorList,
                            const c10::intrusive_ptr<::c10d::ProcessGroup>&,
