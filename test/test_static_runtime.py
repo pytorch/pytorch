@@ -128,6 +128,13 @@ def fork_wait_graph3(input):
         results.append(torch.jit.wait(future))
     return torch.sum(torch.stack(results))
 
+def add_tensor(input1, input2):
+    return input1 + input2
+
+def fork_wait_graph_exception(input1, input2):
+    fut = torch.jit.fork(add_tensor, input1, input2)
+    return torch.jit.wait(fut)
+
 def loop_graph(a, b, iters: int):
     c = a + b * 2
     for i in range(iters):
@@ -219,6 +226,35 @@ class TestStaticModule(TestCase):
         static_runtime_module = StaticModule(torch_graph)
         output_test = static_runtime_module(input)
         torch.testing.assert_close(output_test, output_ref)
+
+    """
+    Test Case: To test exception handling in fork/wait
+    operation. Add.Tensor op is called for tensors with
+    non-matching dims on the forked subgraph and the
+    exception raised by subgraph is set on future returned
+    by prim::fork to parent graph. Returned exception is
+    checked for substring expected_error_msg as declared below
+    """
+    def test_fork_wait_exception(self):
+        # incompatible tensors for add due to shape mismatch
+        input1 = torch.randn(4, 7)
+        input2 = torch.randn(4, 5)
+        torch_graph = torch.jit.script(fork_wait_graph_exception)
+        try:
+            static_runtime_module = StaticModule(torch_graph)
+            output_test = static_runtime_module(input1, input2)
+        except Exception as error:
+            expected_error_msg = (
+                "The size of tensor a (7) must match the size "
+                "of tensor b (5) at non-singleton dimension 1"
+            )
+            # test fails if error does not contain expected substr
+            if str(error).find(expected_error_msg) == -1:
+                raise RuntimeError(
+                    "Tried execution of add.Tensors with incompatible shape. "
+                    "Exception raised by forked runtime execution does "
+                    f"not contain expected substring: \"{expected_error_msg}\""
+                ) from error
 
     def test_multihead_attention_layer(self):
         HID_DIM = 256

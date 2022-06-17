@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
+#include <torch/custom_class.h>
 #include <limits>
 
 #ifdef FBCODE_CAFFE2
@@ -55,6 +56,10 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
     default:
       return false;
   }
+}
+
+TORCH_API inline c10::Symbol getStaticRuntimeMetadataSymbol() {
+  return Symbol::attr("static_runtime::metadata");
 }
 
 TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
@@ -181,6 +186,26 @@ struct TORCH_API StaticModuleOptions {
   bool use_maybe_copy_variants{true};
   // enable TensorExpr fusion of ops at model loading time
   bool enable_tensorexpr_fusion{false};
+};
+
+/*
+  Responsible for plugging StaticRuntime metadata onto the
+  IR nodes. StaticRuntimeMetdata extends CustomClassHolder
+  which can be casted to IValue and attached to IR node.
+  This is needed to pass parent graph metadata to forked
+  graph in presence of prim::fork operator
+*/
+class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
+ public:
+  explicit StaticRuntimeMetadata(const StaticModuleOptions& opts)
+      : opts_(opts) {}
+
+  const StaticModuleOptions& get_opts() {
+    return opts_;
+  }
+
+ private:
+  StaticModuleOptions opts_;
 };
 
 /// The static runime supports two execution modes.
@@ -463,6 +488,10 @@ class TORCH_API StaticModule {
       const AliasDb& alias_db,
       FastMap<const Value*, uint32_t>& value_to_index);
 
+  // Recursively traverse the graph and attach SR metadata
+  // to the prim::fork nodes as additional attributes
+  void attachNodeMetadata(Block* block);
+
   // Recurses on sub-blocks and populates the array of ProcessedNodes
   // Returns (number of nodes processed, number of blocks processed)
   size_t prepareStaticNodeInfos(
@@ -476,6 +505,8 @@ class TORCH_API StaticModule {
   void prepareForMemoryPlanner();
 
   StaticModuleOptions opts_;
+  // metadata that is stored in IR nodes as attribute
+  at::intrusive_ptr<jit::StaticRuntimeMetadata> sr_metadata_;
   std::shared_ptr<torch::jit::Graph> graph_;
   c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;

@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 #include <ATen/CPUFunctions.h>
@@ -7,6 +9,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
@@ -194,6 +197,30 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         auto list = p_node->Input(0).toList();
         list.push_back(p_node->Input(1));
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::index_put,
+    aten_index_put,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& indices = p_node->Input(1).toOptionalTensorList();
+        const auto& values = p_node->Input(2).toTensor();
+        const auto accumulate = p_node->Input(3).toBool();
+        p_node->Output(0) =
+            at::native::index_put(self, indices, values, accumulate);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::item,
+    aten_item,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        p_node->Output(0) = at::native::item(self);
       };
     });
 
@@ -691,6 +718,40 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::tensor_split, aten_tensor_split, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "tensor_split.indices(Tensor(a -> *) self, int[] indices, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto& b = pnode->Input(1).toIntVector();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto b = pnode->Input(1).toInt();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "tensor_split.tensor_indices_or_sections(Tensor(a -> *) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto& b = pnode->Input(1).toTensor();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+  LogAndDumpSchema(n);
+  return nullptr;
+});
+
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::Int,
     aten_Int,
@@ -834,37 +895,94 @@ std::vector<IValue> collectLoopSubBlockInputs(const ProcessedNode& p_node) {
 
 } // namespace
 
+namespace {
 /*
-prim::fork forks the execution of a subgraph. It returns a future on which
-the corresponding aten::wait op waits until future is marked complete
-Current implementation uses InterpreterState for async execution of subgraph.
-This will be removed in future for faster implementation of async subgraph
+  ForkedSubgraphSRLauncher is responsible for the execution of
+  forked subgraph on new instance of static runtime. Once the
+  execution is completed, future is marked as complete to
+  indicate aten::wait() to proceed
+*/
+class TORCH_API ForkedSubgraphSRLauncher {
+ public:
+  ForkedSubgraphSRLauncher(
+      std::shared_ptr<StaticModule> smodule,
+      std::vector<IValue> args,
+      c10::intrusive_ptr<Future> future)
+      : smodule_(std::move(smodule)),
+        args_(std::move(args)),
+        future_(std::move(future)) {}
+
+  void operator()() {
+    try {
+      StaticRuntime runtime(*smodule_);
+      auto output = runtime(args_, {});
+      future_->markCompleted(output);
+    } catch (const std::exception& e) {
+      future_->setErrorIfNeeded(
+          std::make_exception_ptr(c10::ivalue::Future::FutureError(e.what())));
+    }
+  }
+
+ private:
+  std::shared_ptr<StaticModule> smodule_;
+  std::vector<IValue> args_;
+  c10::intrusive_ptr<Future> future_;
+};
+
+/*
+  helper function to create a future on return type
+  of the graph outputs. This function is utilized by
+  prim::fork and aten::wait oprations for async
+  execution of subgraphs
+*/
+c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
+    std::shared_ptr<torch::jit::Graph> graph) {
+  TypePtr return_type_;
+  if (graph->outputs().size() == 1) {
+    return_type_ = graph->outputs().at(0)->type();
+  } else {
+    return_type_ = TupleType::create(
+        fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
+  }
+  c10::intrusive_ptr<Future> future = c10::make_intrusive<Future>(return_type_);
+  return future;
+}
+} // namespace
+
+/*
+  prim::fork forks the execution of a subgraph. It returns a future on which
+  the corresponding aten::wait op waits until future is marked complete
+  Current implementation creates a instance of StaticModule uses it to
+  create StaticRuntime instances on the fly during runtime to handle the
+  execution of forked subgraph. Async execution is handled by
+  aten::ParallelThreadPoolNative threadpool.
 */
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::fork,
     prim_Fork,
     [](Node* node) -> SROperator {
-      auto graph = node->g(attr::Subgraph);
-      Code code(graph, "");
-      return [code](ProcessedNode* p_node) {
-        auto num_outputs = p_node->num_outputs();
-        Stack stack;
-        if (p_node->Output(0).isNone()) {
-          stack.reserve(p_node->num_inputs());
-        } else {
-          stack.reserve(p_node->num_inputs() + num_outputs);
-          for (const auto& o : p_node->outputs()) {
-            stack.emplace_back(o);
-          }
+      auto forkedGraph = node->g(attr::Subgraph);
+      Inline(*forkedGraph);
+      auto sr_metadata = node->ival(getStaticRuntimeMetadataSymbol())
+                             .toCustomClass<StaticRuntimeMetadata>();
+      auto smodule =
+          std::make_shared<StaticModule>(forkedGraph, sr_metadata->get_opts());
+
+      return [forkedGraph = std::move(forkedGraph),
+              smodule = std::move(smodule)](ProcessedNode* p_node) {
+        std::vector<IValue> args;
+        args.reserve(p_node->num_inputs());
+        for (const auto i : c10::irange(p_node->num_inputs())) {
+          args.push_back(p_node->Input(i));
         }
-        for (auto i : c10::irange(p_node->num_inputs())) {
-          stack.emplace_back(p_node->Input(i));
-        }
+
+        c10::intrusive_ptr<Future> future =
+            createFutureTypeFromGraphOutput(forkedGraph);
+        p_node->Output(0) = future;
+
         TaskLauncher taskLauncher_ = at::launch;
-        InterpreterState interpreter{code, taskLauncher_};
-        InterpreterContinuation continuation(interpreter, stack);
-        taskLauncher_(std::move(continuation));
-        p_node->Output(0) = interpreter.getFuture();
+        ForkedSubgraphSRLauncher runtime_launcher(smodule, args, future);
+        taskLauncher_(std::move(runtime_launcher));
       };
     });
 /*
