@@ -415,11 +415,11 @@ class TestNormDataSparsifiers(TestCase):
             },
         ]
         tensor_test_l1 = _NormDataSparsifierTestRunner(data_list=data_list, defaults=defaults,
-                                                      data_with_config=data_with_config, norm_type='L1')
+                                                       data_with_config=data_with_config, norm_type='L1')
         tensor_test_l1.run_tests()
 
         tensor_test_l2 = _NormDataSparsifierTestRunner(data_list=data_list, defaults=defaults,
-                                                      data_with_config=data_with_config, norm_type='L2')
+                                                       data_with_config=data_with_config, norm_type='L2')
         tensor_test_l2.run_tests()
 
     def test_nn_parameters(self):
@@ -439,11 +439,11 @@ class TestNormDataSparsifiers(TestCase):
             },
         ]
         param_test_l1 = _NormDataSparsifierTestRunner(data_list=data_list, defaults=defaults,
-                                                     data_with_config=data_with_config, norm_type='L1')
+                                                      data_with_config=data_with_config, norm_type='L1')
         param_test_l1.run_tests()
 
         param_test_l2 = _NormDataSparsifierTestRunner(data_list=data_list, defaults=defaults,
-                                                     data_with_config=data_with_config, norm_type='L2')
+                                                      data_with_config=data_with_config, norm_type='L2')
         param_test_l2.run_tests()
 
     def test_nn_embeddings(self):
@@ -465,10 +465,10 @@ class TestNormDataSparsifiers(TestCase):
             },
         ]
         emb_test_l1 = _NormDataSparsifierTestRunner(data_list=data_list, defaults=defaults,
-                                                   data_with_config=data_with_config, norm_type='L1')
+                                                    data_with_config=data_with_config, norm_type='L1')
         emb_test_l1.run_tests()
 
         emb_test_l2 = _NormDataSparsifierTestRunner(data_list=data_list, defaults=defaults,
-                                                   data_with_config=data_with_config, norm_type='L2')
+                                                    data_with_config=data_with_config, norm_type='L2')
 
         emb_test_l2.run_tests()
