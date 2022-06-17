@@ -51,12 +51,12 @@ skipIfNoBFloat16Cuda = _skipper(
 def skipIfUnsupportedMinOpsetVersion(min_opset_version):
     def skip_dec(func):
         @functools.wraps(func)
-        def wrapper(test_class, *args, **kwargs):
-            if test_class.opset_version < min_opset_version:
+        def wrapper(self, *args, **kwargs):
+            if self.opset_version < min_opset_version:
                 raise unittest.SkipTest(
-                    f"Unsupported opset_version: {test_class.opset_version} < {min_opset_version}"
+                    f"Unsupported opset_version: {self.opset_version} < {min_opset_version}"
                 )
-            return func(test_class, *args, **kwargs)
+            return func(self, *args, **kwargs)
 
         return wrapper
 
@@ -67,12 +67,12 @@ def skipIfUnsupportedMinOpsetVersion(min_opset_version):
 def skipIfUnsupportedMaxOpsetVersion(max_opset_version):
     def skip_dec(func):
         @functools.wraps(func)
-        def wrapper(test_class, *args, **kwargs):
-            if test_class.opset_version > max_opset_version:
+        def wrapper(self, *args, **kwargs):
+            if self.opset_version > max_opset_version:
                 raise unittest.SkipTest(
-                    f"Unsupported opset_version: {test_class.opset_version} > {max_opset_version}"
+                    f"Unsupported opset_version: {self.opset_version} > {max_opset_version}"
                 )
-            return func(test_class, *args, **kwargs)
+            return func(self, *args, **kwargs)
 
         return wrapper
 
@@ -83,12 +83,12 @@ def skipIfUnsupportedMaxOpsetVersion(max_opset_version):
 def skipForAllOpsetVersions():
     def skip_dec(func):
         @functools.wraps(func)
-        def wrapper(test_class, *args, **kwargs):
-            if test_class.opset_version:
+        def wrapper(self, *args, **kwargs):
+            if self.opset_version:
                 raise unittest.SkipTest(
                     "Skip verify test for unsupported opset_version"
                 )
-            return func(test_class, *args, **kwargs)
+            return func(self, *args, **kwargs)
 
         return wrapper
 
@@ -99,11 +99,11 @@ def skipForAllOpsetVersions():
 def skipScriptTest(min_opset_version=float("inf")):
     def script_dec(func):
         @functools.wraps(func)
-        def wrapper(test_class, *args, **kwargs):
-            test_class.is_script_test_enabled = (
-                test_class.opset_version >= min_opset_version
+        def wrapper(self, *args, **kwargs):
+            self.is_script_test_enabled = (
+                self.opset_version >= min_opset_version
             )
-            return func(test_class, *args, **kwargs)
+            return func(self, *args, **kwargs)
 
         return wrapper
 
@@ -114,13 +114,13 @@ def skipScriptTest(min_opset_version=float("inf")):
 def skipScriptTest_New(min_opset_version=float("inf")):
     def skip_dec(func):
         @functools.wraps(func)
-        def wrapper(test_class, *args, **kwargs):
-            test_class.is_script_test_enabled = (
-                test_class.opset_version >= min_opset_version
+        def wrapper(self, *args, **kwargs):
+            self.is_script_test_enabled = (
+                self.opset_version >= min_opset_version
             )
-            if not test_class.is_script_test_enabled and test_class.is_script:
+            if not self.is_script_test_enabled and self.is_script:
                 raise unittest.SkipTest("Skip verify test for TorchScript")
-            return func(test_class, *args, **kwargs)
+            return func(self, *args, **kwargs)
 
         return wrapper
 
@@ -133,12 +133,12 @@ def skipScriptTest_New(min_opset_version=float("inf")):
 def skipIfUnsupportedOpsetVersion(unsupported_opset_versions):
     def skip_dec(func):
         @functools.wraps(func)
-        def wrapper(test_class, *args, **kwargs):
-            if test_class.opset_version in unsupported_opset_versions:
+        def wrapper(self, *args, **kwargs):
+            if self.opset_version in unsupported_opset_versions:
                 raise unittest.SkipTest(
                     "Skip verify test for unsupported opset_version"
                 )
-            return func(test_class, *args, **kwargs)
+            return func(self, *args, **kwargs)
 
         return wrapper
 

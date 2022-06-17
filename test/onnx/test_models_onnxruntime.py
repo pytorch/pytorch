@@ -177,8 +177,8 @@ def _init_test_roi_heads_faster_rcnn():
 
 
 @parameterized.parameterized_class(
-    ("opset_version", "is_script"),
-    itertools.product([_constants.onnx_default_opset], [True, False]),
+    ("is_script", ),
+    ([True, False], ),
     class_name_func=class_name_func,
 )
 class TestModelsONNXRuntime(test_onnx_common._TestONNXRuntime):
@@ -372,7 +372,7 @@ class TestModelsONNXRuntime(test_onnx_common._TestONNXRuntime):
             additional_test_inputs=[(images, features), (images2, test_features)],
         )
 
-    @skipScriptTest()  # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1253950
+    @skipScriptTest()  # TODO: #75625
     def test_transformer_encoder(self):
         class MyModule(torch.nn.Module):
             def __init__(self, ninp, nhead, nhid, dropout, nlayers):
