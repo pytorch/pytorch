@@ -1697,10 +1697,7 @@ def contiguous(
     if utils.is_contiguous(a):
         return a
 
-    b = torch.empty(
-        a.shape, dtype=a.dtype, device=a.device, requires_grad=a.requires_grad
-    )
-    return copy_to(b, a)
+    return torch.clone(a, memory_format=memory_format)
 
 
 @out_wrapper
