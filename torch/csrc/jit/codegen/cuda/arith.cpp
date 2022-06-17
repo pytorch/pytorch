@@ -492,10 +492,7 @@ Val* imag(Val* v) {
     IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
     return out;
   }
-  TORCH_CHECK(
-      false,
-      "imag not supported for non-complex tensors, got dtype ",
-      v->getDataType());
+  TORCH_CHECK(false, "imag not supported for non-complex tensors");
 }
 
 TensorView* imag(TensorView* tv) {
