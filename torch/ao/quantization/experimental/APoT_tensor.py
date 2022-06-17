@@ -1,12 +1,7 @@
 import torch
-import enum
 from torch import Tensor
-from torch.ao.quantization.experimental.observer import APoTObserver, float_to_apot, float_to_reduced_precision, apot_to_float
-
-# enum to represent APoT representation
-class APoTRepr(enum.Enum):
-    level_indices = 1
-    reduced_precision_fp = 2
+from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.ao.quantization.experimental.quantization_mappings import float_to_apot, float_to_reduced_precision
 
 # class to store APoT quantized tensor
 class TensorAPoT(torch.Tensor):
@@ -14,10 +9,10 @@ class TensorAPoT(torch.Tensor):
     k: int
     n: int
     signed: bool
+    use_int_repr: bool
     quantization_levels: torch.Tensor
     level_indices: torch.Tensor
     data: torch.Tensor
-    apot_repr: APoTRepr
 
     def __init__(
         self,
@@ -49,14 +44,15 @@ class TensorAPoT(torch.Tensor):
     Returns:
         result: APoT representation of tensor2quantize (integer or reduced precision fp)
     """
-    def quantize_APoT(self, tensor2quantize: Tensor, apot_repr: APoTRepr):
-        self.apot_repr = apot_repr
-        if apot_repr == APoTRepr.level_indices:
+    def quantize_APoT(self, tensor2quantize: Tensor, use_int_repr: bool):
+        self.use_int_repr = use_int_repr
+        if use_int_repr:
             # map float_to_apot over tensor2quantize elements
             self.data = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
-        elif apot_repr == APoTRepr.reduced_precision_fp:
+        else:
             self.data = tensor2quantize.apply_(lambda x:
                                                float_to_reduced_precision(x, self.quantization_levels, self.level_indices))
+
         return self
 
     """ Dequantizes integer Tensor to floating point representation

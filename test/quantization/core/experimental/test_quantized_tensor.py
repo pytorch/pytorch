@@ -2,7 +2,7 @@
 
 import torch
 from torch import quantize_per_tensor
-from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT, APoTRepr
+from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 import unittest
 import random
 quantize_APoT = TensorAPoT.quantize_APoT
@@ -28,7 +28,7 @@ class TestQuantizedTensor(unittest.TestCase):
         qtensor = TensorAPoT(4, 1, False)
 
         # get apot quantized tensor result
-        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize, apot_repr=APoTRepr.level_indices)
+        apot_tens = apot_tens.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
@@ -36,7 +36,7 @@ class TestQuantizedTensor(unittest.TestCase):
         qtensor_data = torch.tensor(qtensor.data).type(torch.uint8)
         uniform_quantized_tensor = uniform_quantized.data
 
-        self.assertTrue(torch.equal(apot_tens_tens, uniform_quantized_tens))
+        self.assertTrue(torch.equal(apot_tens_data, uniform_quantized_tens))
 
     r""" Tests quantize_APoT result (int representation) on random 2-dim tensor
         and hardcoded values for b, k by comparing to uniform quantization
@@ -65,7 +65,7 @@ class TestQuantizedTensor(unittest.TestCase):
         qtensor_data = torch.tensor(qtensor.data).type(torch.uint8)
         uniform_quantized_tensor = uniform_quantized.data
 
-        self.assertTrue(torch.equal(apot_tens_tens, uniform_quantized_tens))
+        self.assertTrue(torch.equal(apot_tens_data, uniform_quantized_tens))
 
     r""" Tests quantize_APoT result (reduced precision fp representation) on random 1-dim tensor
         and hardcoded values for b, k by comparing to int representation
