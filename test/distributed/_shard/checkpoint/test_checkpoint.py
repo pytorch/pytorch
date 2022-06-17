@@ -225,7 +225,6 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
         (_, md) = _prepare_sharded_tensor_write(st, "tensor", mapping)
 
         self.assertEqual(1, len(md.storage_metadata))
-        self.assertEqual(4 * 4 * 8, md.storage_metadata[0].length)
         self.assertEqual(1, len(mapping))
 
 
