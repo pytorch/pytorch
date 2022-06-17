@@ -22,27 +22,30 @@ namespace {
 struct CollectiveFingerPrint {
   // Current collective's operation type.
   OpType op_type_;
-  // Ref to input tensors, if given, of the collective. If given, shapes will be
-  // checked across processes to ensure valid input into the collective.
-  const std::vector<at::Tensor>& input_tensors_ = {};
+  // Number of input tensors
+  std::size_t num_tensors_;
   // input tensor data types
   std::vector<int8_t> tensor_dtypes_;
   // input tensor device types
   std::vector<int8_t> tensor_device_types_;
+  // input tensor sizes
+  std::vector<c10::IntArrayRef> tensor_sizes_;
+
   explicit CollectiveFingerPrint(
       OpType op_type,
       const std::vector<at::Tensor>& input_tensors)
-      : op_type_(op_type), input_tensors_(input_tensors) {
-    tensor_dtypes_.reserve(input_tensors.size());
-    tensor_device_types_.reserve(input_tensors.size());
-    for (const at::Tensor& t : input_tensors_) {
+      : op_type_(op_type), num_tensors_(input_tensors.size()) {
+    tensor_dtypes_.reserve(num_tensors_);
+    tensor_device_types_.reserve(num_tensors_);
+    tensor_sizes_.reserve(num_tensors_);
+    for (const at::Tensor& t : input_tensors) {
       tensor_dtypes_.push_back(static_cast<int8_t>(t.dtype().toScalarType()));
       tensor_device_types_.push_back(static_cast<int8_t>(t.device().type()));
+      tensor_sizes_.push_back(t.sizes());
     }
   }
 
   // Constructor for the data received from deserialized fingerprint
-  // TODO: We no longer have access to the input_tensors_ (just save shape)
   CollectiveFingerPrint(
       OpType op_type,
       std::vector<int8_t> tensor_dtypes,
@@ -101,8 +104,7 @@ struct CollectiveFingerPrint {
         index++;
       }
     }
-    return CollectiveFingerPrint(
-        optype, dtypes, device_types);
+    return CollectiveFingerPrint(optype, dtypes, device_types);
   }
 
  private:
@@ -156,8 +158,7 @@ struct CollectiveFingerPrint {
     // 1. OpType
     data->push_back(static_cast<int64_t>(op_type_));
     // 2. Num tensors
-    // Some collectives do not pass in input tensors
-    data->push_back(static_cast<int64_t>(input_tensors_.size()));
+    data->push_back(static_cast<int64_t>(num_tensors_));
     // 3. Tensor dtypes
     for (const auto& type : tensor_dtypes_) {
       data->push_back(type);
@@ -167,8 +168,7 @@ struct CollectiveFingerPrint {
       data->push_back(d);
     }
     // 5. Shapes
-    for (const auto& tensor : input_tensors_) {
-      auto sizes = tensor.sizes().vec();
+    for (const auto& sizes : tensor_sizes_) {
       for (const auto& s : sizes) {
         data->push_back(s);
       }
@@ -195,7 +195,7 @@ std::ostream& operator<<(
     std::ostream& output,
     const CollectiveFingerPrint& collective_fingerprint) {
   std::string collectiveInfo;
-  if (!collective_fingerprint.input_tensors_.empty()) {
+  if (collective_fingerprint.num_tensors_ != 0) {
     // Convert dtype and device type info to string.
     std::vector<std::string> dtype_strs;
     std::vector<std::string> device_type_strs;
@@ -214,7 +214,7 @@ std::ostream& operator<<(
         "OpType=",
         opTypeToString(collective_fingerprint.op_type_),
         ", TensorShape=",
-        (collective_fingerprint.input_tensors_)[0].sizes(),
+        (collective_fingerprint.tensor_sizes_)[0],
         ", TensorDtypes=",
         (dtype_strs),
         ", TensorDeviceTypes=",
