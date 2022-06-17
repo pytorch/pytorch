@@ -1,6 +1,12 @@
 import torch
+import enum
 from torch import Tensor
-from torch.ao.quantization.experimental.observer import APoTObserver, float_to_apot
+from torch.ao.quantization.experimental.observer import APoTObserver, float_to_apot, float_to_reduced_precision
+
+# enum to represent APoT representation
+class APoTRepr(enum.Enum):
+    level_indices = 1
+    reduced_precision_fp = 2
 
 # class to store APoT quantized tensor
 class TensorAPoT(torch.Tensor):
@@ -33,21 +39,22 @@ class TensorAPoT(torch.Tensor):
         self.quantization_levels = obs_result[1]
         self.level_indices = obs_result[2]
 
-    """ Quantizes fp Tensor to integer or reduced precision fp representation, depending on user input.
+    r""" Quantizes fp Tensor to integer or reduced precision fp representation, depending on user input.
     Conversion is based on the calculated quantization levels from a specified APoT non-uniform observer.
     The approach follows the method outlined in the APoT paper: https://arxiv.org/pdf/1909.13144.pdf.
     Args:
         tensor2quantize: fp Tensor
-        b: total number of bits across all terms in non-uniform observer
-        k: base bitwidth, i.e. bitwidth of every term, in non-uniform observer
-        signed: boolean value indicating whether quantization levels include signed (negative) values
+        apot_repr: enum flag to specify whether to return an integer or reduced fp APoT representation of tensor
     Returns:
         result: APoT representation of tensor2quantize (integer or reduced precision fp)
     """
-    def quantize_APoT(self, tensor2quantize: Tensor):
-        # map float_to_apot over tensor2quantize elements
-        self.data = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
-
+    def quantize_APoT(self, tensor2quantize: Tensor, apot_repr: APoTRepr):
+        if apot_repr == APoTRepr.level_indices:
+            # map float_to_apot over tensor2quantize elements
+            self.data = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
+        elif apot_repr == APoTRepr.reduced_precision_fp:
+            self.data = tensor2quantize.apply_(lambda x:
+                                               float_to_reduced_precision(x, self.quantization_levels, self.level_indices))
         return self
 
     """ Dequantizes integer Tensor to floating point representation
