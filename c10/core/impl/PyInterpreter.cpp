@@ -33,13 +33,33 @@ static void noop_dispatch_fn(
 static bool noop_is_contiguous_fn(const PyInterpreter*, const TensorImpl*) {
   TORCH_INTERNAL_ASSERT(
       0,
-      "attempted to is_contiguous Tensor with nontrivial PyObject after corresponding interpreter died");
+      "attempted to call `is_contiguous` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
 static c10::Device noop_device_fn(const PyInterpreter*, const TensorImpl*) {
   TORCH_INTERNAL_ASSERT(
       0,
-      "attempted to device Tensor with nontrivial PyObject after corresponding interpreter died");
+      "attempted to call `device` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
+static int64_t noop_dim_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `dim` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
+static c10::IntArrayRef noop_strides_fn(
+    const PyInterpreter*,
+    const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `strides` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
+static c10::IntArrayRef noop_sizes_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `sizes` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
 void PyInterpreter::disarm() noexcept {
@@ -49,6 +69,9 @@ void PyInterpreter::disarm() noexcept {
   dispatch_fn_ = &noop_dispatch_fn;
   is_contiguous_fn_ = &noop_is_contiguous_fn;
   device_fn_ = &noop_device_fn;
+  dim_fn_ = &noop_dim_fn;
+  strides_fn_ = &noop_strides_fn;
+  sizes_fn_ = &noop_sizes_fn;
 }
 
 } // namespace impl
