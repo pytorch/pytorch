@@ -3456,11 +3456,8 @@ Example::
 
             [[ 7,  8,  9],
              [10, 11, 12]]])
-    >>> gen = torch.Generator()
-    >>> gen.manual_seed(123456)
-    >>> index = torch.empty((2, 3, 4), dtype = torch.long).random_(0, 3, generator = gen)
-    >>> index
-    tensor([[[0, 0, 3, 0],
+    >>> index = torch.tensor(
+           [[[0, 0, 3, 0],
              [2, 2, 0, 1],
              [1, 0, 3, 2]],
 
@@ -3551,11 +3548,8 @@ Example::
 
             [[ 7,  8,  9],
              [10, 11, 12]]])
-    >>> gen = torch.Generator()
-    >>> gen.manual_seed(123456)
-    >>> index = torch.empty((2, 3, 4), dtype = torch.long).random_(0, 3, generator = gen)
-    >>> index
-    tensor([[[0, 0, 3, 0],
+    >>> index = torch.tensor(
+           [[[0, 0, 3, 0],
              [2, 2, 0, 1],
              [1, 0, 3, 2]],
 
@@ -3657,11 +3651,8 @@ Example::
 
             [[ 7,  8,  9],
              [10, 11, 12]]])
-    >>> gen = torch.Generator()
-    >>> gen.manual_seed(123456)
-    >>> index = torch.empty((2, 3, 4), dtype = torch.long).random_(0, 3, generator = gen)
-    >>> index
-    tensor([[[0, 0, 3, 0],
+    >>> index = torch.tensor(
+           [[[0, 0, 3, 0],
              [2, 2, 0, 1],
              [1, 0, 3, 2]],
 
