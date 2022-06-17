@@ -78,8 +78,9 @@ fi
 
 if [[ "${SHARD_NUMBER}" == "2" ]]; then
   # Heavy memory usage tests that cannot run in parallel.
+  # TODO(#79802): Parameterize test_models.py
   pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_models.py" \  # TODO(#79802): Parameterize test_models.py
+    "$top_dir/test/onnx/test_models.py" \
     "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
 
   pytest "${args[@]}" "${args_parallel[@]}" \
