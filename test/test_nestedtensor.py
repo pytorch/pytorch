@@ -9,7 +9,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipMeta,
 )
-from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests
+from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state
 from torch import nested_tensor
 
 # Tests are ported from pytorch/nestedtensor.
@@ -481,6 +481,120 @@ class TestNestedTensorDeviceType(TestCase):
         msg = "clone_nested only supports memory format Preserve, but got ChannelsLast instead."
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
+
+    # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
+    @torch.inference_mode()
+    def test_dropout(self, device, dtype):
+        # edge case: empty nested tensor
+        nt0 = torch.nested_tensor([])
+        y = torch.nn.functional.dropout(nt0, 0.5)
+        self.nt_equal(nt0, y)
+        # normal nested tensor
+        ntensors = 4
+        nt = self.random_nt(device, dtype, ntensors, (4, 4))
+        # edge case: invalid dropout
+        self.assertRaises(ValueError, lambda: torch.nn.Dropout(-0.1))
+        self.assertRaises(ValueError, lambda: torch.nn.Dropout(1.1))
+        self.assertRaises(ValueError, lambda: torch.nn.functional.dropout(nt, -0.1))
+        self.assertRaises(ValueError, lambda: torch.nn.functional.dropout(nt, 1.1))
+        # edge case: no dropout
+        dropouter = torch.nn.Dropout(0.0)
+        y0 = dropouter(nt)
+        y1 = torch.nn.functional.dropout(nt, 0.0)
+        self.nt_equal(nt, y0)
+        self.nt_equal(nt, y1)
+        # edge case: all dropout
+        dropouter = torch.nn.Dropout(1.0)
+        y0 = dropouter(nt)
+        y1 = torch.nn.functional.dropout(nt, 1.0)
+        nt0 = nt.clone()
+        for i in range(ntensors):
+            nt0[i].fill_(0.0)
+        self.nt_equal(nt0, y0)
+        self.nt_equal(nt0, y1)
+        # normal case: normal dropout
+        p = 0.2
+        y = torch.nn.functional.dropout(nt, p)
+        expect = nt.clone()
+        for i in range(ntensors):
+            actual_tensor = y[i].view(-1)
+            expect_tensor = expect[i].view(-1)
+            for j in range(actual_tensor.shape[0]):
+                if actual_tensor[j].item() == 0.0:
+                    expect_tensor[j] = 0.0
+                else:
+                    expect_tensor[j] /= 1.0 - p
+        self.nt_equal(y, expect)
+        with freeze_rng_state():
+            dropouter = torch.nn.Dropout(p)
+            y0 = dropouter(nt)
+        with freeze_rng_state():
+            y1 = torch.nn.functional.dropout(nt, p)
+        self.nt_equal(y0, y1)
+        # inplace
+        # in principle, since we have established the correctness of functional, we could simply compare inplace vs functional
+        # in practice, cuda functional has its own implementation to skip `bernoulli_`
+        # so cuda functional will differ from cuda inplace causing test failure
+        # in `test_dropout_cuda_float64 (__main__.TestNestedTensorDeviceTypeCUDA)`
+        # on `linux-xenial-cuda11.3-py3.7-gcc7 / test (default, 2, 4, linux.4xlarge.nvidia.gpu)`
+        expect = nt.clone()
+        torch.nn.functional.dropout(nt, p, inplace=True)
+        for i in range(ntensors):
+            actual_tensor = nt[i].view(-1)
+            expect_tensor = expect[i].view(-1)
+            for j in range(actual_tensor.shape[0]):
+                if actual_tensor[j].item() == 0.0:
+                    expect_tensor[j] = 0.0
+                else:
+                    expect_tensor[j] /= 1.0 - p
+        self.nt_equal(nt, expect)
+
+class TestNestedTensorAutograd(TestCase):
+    def nt_equal(self, nt1, nt2):
+        self.assertEqual(nt1.dtype, nt2.dtype)
+        self.assertEqual(nt1.device, nt2.device)
+        ub1 = nt1.unbind()
+        ub2 = nt2.unbind()
+        self.assertEqual(len(ub1), len(ub2))
+        n = len(ub1)
+        for i in range(n):
+            self.assertEqual(ub1[i], ub2[i])
+
+    def _create_nested_tensor_from_list(self, requires_grad=False):
+        return torch.nested_tensor([torch.randn(1, 2, requires_grad=requires_grad),
+                                    torch.randn(7, 8, requires_grad=requires_grad)])
+
+    def _create_nested_tensor_from_mask(self, requires_grad=False):
+        data = torch.randn(2, 3, 4, requires_grad=requires_grad)
+        mask = torch.ones_like(data[:, :, 0]).bool()
+        return torch._nested_tensor_from_mask(data, mask)
+
+    def test_set_requires_grad_from_list(self):
+        nt = self._create_nested_tensor_from_list()
+        nt.requires_grad_()
+        assert nt.requires_grad
+
+    def test_set_requires_grad_from_mask(self):
+        nt = self._create_nested_tensor_from_mask()
+        nt.requires_grad_()
+        assert nt.requires_grad
+
+    def test_backward_for_add_op(self):
+        nt_1 = self._create_nested_tensor_from_mask()
+        nt_2 = self._create_nested_tensor_from_mask()
+
+        nt_1.requires_grad_()
+        c = nt_1 + nt_2
+
+        assert nt_1.requires_grad
+        assert c.requires_grad
+        grad_output = self._create_nested_tensor_from_mask()
+        c.backward(grad_output)
+
+        #  Grad check doesn't work with nested yet.
+        # d/dnt_1 (nt + nt_1) = 1*grad_output
+        self.nt_equal(nt_1.grad, grad_output)
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
