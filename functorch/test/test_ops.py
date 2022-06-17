@@ -1149,8 +1149,6 @@ class TestOperators(TestCase):
         xfail('logdet', ''),
         xfail('nanmean', ''),
         xfail('nansum', ''),
-        xfail('nn.functional.batch_norm', ''),
-        xfail('nn.functional.batch_norm', 'without_cudnn', device_type='cuda'),
         xfail('nn.functional.embedding'),
         xfail('nn.functional.embedding', 'functorch'),
         xfail('nn.functional.embedding_bag', ''),
@@ -1249,7 +1247,8 @@ class TestOperators(TestCase):
                 'softmax',
                 'log_softmax',
                 'nn.functional.cross_entropy',
-                'nn.functional.layer_norm'
+                'nn.functional.layer_norm',
+                'nn.functional.batch_norm',
             }
             if op.name in FUNCTORCH_HAS_FORMULA_BUT_NOT_PYTORCH:
                 self.assertFalse(op.supports_fwgrad_bwgrad,
