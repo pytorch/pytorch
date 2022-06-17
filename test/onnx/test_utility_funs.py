@@ -36,6 +36,7 @@ from torch.onnx.symbolic_helper import (
 
 class _BaseTestCase(TestCase):
     def setUp(self):
+        super().setUp()
         torch.manual_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)

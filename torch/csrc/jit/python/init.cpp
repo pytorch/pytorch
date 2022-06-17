@@ -118,6 +118,7 @@
 namespace torch {
 namespace jit {
 
+using ::c10::AliasInfo;
 using ::c10::Argument;
 using ::c10::FunctionSchema;
 using caffe2::serialize::PyTorchStreamReader;
@@ -663,6 +664,17 @@ void initJITBindings(PyObject* module) {
       .def("_jit_llga_enabled", &RegisterLlgaFuseGraph::isEnabled)
 #endif
       .def(
+          "_jit_set_tracer_state_warn",
+          [](bool new_warn) {
+            jit::tracer::getTracerStateWarnMode() = new_warn;
+          })
+      .def(
+          "_jit_get_tracer_state_warn",
+          []() {
+            bool current_tracer_warn = jit::tracer::getTracerStateWarnMode();
+            return current_tracer_warn;
+          })
+      .def(
           "_jit_set_nvfuser_skip_node_kind",
           // Args:
           //     `op_name`: Symbol of op;
@@ -811,6 +823,12 @@ void initJITBindings(PyObject* module) {
               std::cerr << "ERROR: only `stdout` and `stderr`"
                         << "are supported as output options" << std::endl;
             }
+          })
+      .def(
+          "_storage_id",
+          [](const at::Tensor& ten) -> int64_t {
+            return reinterpret_cast<int64_t>(
+                ten.storage().unsafeGetStorageImpl());
           })
       .def(
           "_jit_try_infer_type",
@@ -1346,7 +1364,7 @@ void initJITBindings(PyObject* module) {
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, true);
                   });
-              return func;
+              return py::make_tuple(func, py::cast(op->getTags().vec()));
             }
           }
           throw std::runtime_error("Found no matching operator overload");
@@ -1474,6 +1492,12 @@ void initJITBindings(PyObject* module) {
           })
       .def_property_readonly(
           "is_out", [](Argument& self) { return self.is_out(); })
+      .def_property_readonly(
+          "is_mutable",
+          [](Argument& self) {
+            const AliasInfo* aliasInfo = self.alias_info();
+            return aliasInfo && aliasInfo->isWrite();
+          })
       .def_property_readonly("kwarg_only", [](Argument& self) -> bool {
         return self.kwarg_only();
       });
