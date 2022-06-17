@@ -64,9 +64,11 @@ TEST(MemDependency, BoundOverlap) {
   ASSERT_EQ(OverlapKind::NoOverlap, boundOverlap(CB(2, 3), CB(0, 1)));
 
   // Partial overlap when middle bounds match.
-  ASSERT_EQ(OverlapKind::PartialOverlap, boundOverlap(CB(0, 100), CB(100, 120)));
+  ASSERT_EQ(
+      OverlapKind::PartialOverlap, boundOverlap(CB(0, 100), CB(100, 120)));
   ASSERT_EQ(OverlapKind::PartialOverlap, boundOverlap(CB(0, 2), CB(2, 4)));
-  ASSERT_EQ(OverlapKind::PartialOverlap, boundOverlap(CB(100, 120), CB(0, 100)));
+  ASSERT_EQ(
+      OverlapKind::PartialOverlap, boundOverlap(CB(100, 120), CB(0, 100)));
   ASSERT_EQ(OverlapKind::PartialOverlap, boundOverlap(CB(2, 3), CB(1, 2)));
 
   // Total overlap when one bound is single length over one end of the other.
@@ -220,21 +222,29 @@ TEST(MemDependency, BoundOverlapSymbolic) {
   // constant.
   // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
   ASSERT_EQ(OverlapKind::ContainedOrEqual, boundOverlap(CB(x, x), CB(x, x)));
-  ASSERT_EQ(OverlapKind::PartialOverlap, boundOverlap(CB(x, x + 3), CB(x + 2, x + 5)));
+  ASSERT_EQ(
+      OverlapKind::PartialOverlap,
+      boundOverlap(CB(x, x + 3), CB(x + 2, x + 5)));
   ASSERT_EQ(OverlapKind::NoOverlap, boundOverlap(CB(x, x), CB(x + 1, x + 1)));
 
   // We can't infer the sign of y, so cannot tell whether adding y is larger or
   // smaller than y/2.
-  ASSERT_EQ(OverlapKind::PartialOverlap, boundOverlap(CB(x, x + y), CB(x, x + y / 2)));
+  ASSERT_EQ(
+      OverlapKind::PartialOverlap,
+      boundOverlap(CB(x, x + y), CB(x, x + y / 2)));
 
   // No information about this bound, have to take the most conservative option:
   // there may be an overlap.
   ASSERT_EQ(OverlapKind::PartialOverlap, boundOverlap(CB(x, y), CB(z, w)));
 
   // Math on opaque terms works.
-  ASSERT_EQ(OverlapKind::ContainedOrEqual, boundOverlap(CB(x + w, y - z), CB(x + w, y - z)));
+  ASSERT_EQ(
+      OverlapKind::ContainedOrEqual,
+      boundOverlap(CB(x + w, y - z), CB(x + w, y - z)));
   // Even requiring simplification.
-  ASSERT_EQ(OverlapKind::ContainedOrEqual, boundOverlap(CB(x - w - w, y), CB(x - w * 2, y)));
+  ASSERT_EQ(
+      OverlapKind::ContainedOrEqual,
+      boundOverlap(CB(x - w - w, y), CB(x - w * 2, y)));
 }
 
 // Tests the helper function for overlap of multi dimensional indices bounds.
@@ -250,7 +260,8 @@ TEST(MemDependency, BoundOverlapMultiDim) {
   // Sanity check one dimensional cases.
   ASSERT_EQ(OverlapKind::ContainedOrEqual, overlaps({CB(0, 0)}, {CB(0, 0)}));
   ASSERT_EQ(OverlapKind::NoOverlap, overlaps({CB(0, 2)}, {CB(5, 10)}));
-  ASSERT_EQ(OverlapKind::PartialOverlap, overlaps({CB(0, 100)}, {CB(100, 120)}));
+  ASSERT_EQ(
+      OverlapKind::PartialOverlap, overlaps({CB(0, 100)}, {CB(100, 120)}));
 
   // Total overlap in 3 dims.
   ASSERT_EQ(

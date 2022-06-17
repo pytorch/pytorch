@@ -144,18 +144,30 @@ CmpEvalResult TORCH_API compareBound(
     const CompareSelectOperation& cmp_op) {
   switch (cmp_op) {
     case CompareSelectOperation::kGT:
-      return (a > b) ? CmpEvalResult::True : (a <= b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
+      return (a > b)
+          ? CmpEvalResult::True
+          : (a <= b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
     case CompareSelectOperation::kGE:
-      return (a >= b) ? CmpEvalResult::True : (a < b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
+      return (a >= b)
+          ? CmpEvalResult::True
+          : (a < b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
     case CompareSelectOperation::kLT:
-      return (a < b) ? CmpEvalResult::True : (a >= b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
+      return (a < b)
+          ? CmpEvalResult::True
+          : (a >= b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
     case CompareSelectOperation::kLE:
-      return (a <= b) ? CmpEvalResult::True : (a > b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
+      return (a <= b)
+          ? CmpEvalResult::True
+          : (a > b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
     case CompareSelectOperation::kNE:
-      return (a != b) ? CmpEvalResult::True : (a == b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
+      return (a != b)
+          ? CmpEvalResult::True
+          : (a == b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
     default:
       TORCH_INTERNAL_ASSERT(cmp_op == CompareSelectOperation::kEQ)
-      return (a == b) ? CmpEvalResult::True : (a != b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
+      return (a == b)
+          ? CmpEvalResult::True
+          : (a != b ? CmpEvalResult::False : CmpEvalResult::NotDetermined);
   }
 }
 
@@ -207,11 +219,13 @@ OverlapKind overlaps(const IndexBounds& a, const IndexBounds& b) {
       return OverlapKind::NoOverlap;
     }
 
-    if (overlap == OverlapKind::ContainedOrEqual && bOverlap == OverlapKind::Contains) {
+    if (overlap == OverlapKind::ContainedOrEqual &&
+        bOverlap == OverlapKind::Contains) {
       overlap = OverlapKind::Contains;
     }
 
-    if (overlap == OverlapKind::Contains && bOverlap == OverlapKind::ContainedOrEqual) {
+    if (overlap == OverlapKind::Contains &&
+        bOverlap == OverlapKind::ContainedOrEqual) {
       continue;
     }
 

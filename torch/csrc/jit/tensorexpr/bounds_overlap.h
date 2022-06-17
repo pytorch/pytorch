@@ -57,7 +57,12 @@ struct BoundHash {
 //     Contains: All elements in the Bound B are in the Bound B.
 //     PartialOverlap: Any elements in the Bound B are in the Bound A.
 //     NoOverlap: No elements in the Bound A are in the bound B.
-enum class OverlapKind { ContainedOrEqual, Contains, PartialOverlap, NoOverlap };
+enum class OverlapKind {
+  ContainedOrEqual,
+  Contains,
+  PartialOverlap,
+  NoOverlap
+};
 
 // The Bound comparison result.
 //     True: Every Bound element always satisfies the given comparison operator
