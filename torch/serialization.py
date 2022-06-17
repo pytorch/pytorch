@@ -56,7 +56,7 @@ def _is_zipfile(f) -> bool:
     start = f.tell()
 
     byte = f.read(1)
-    while byte != "":
+    while byte != b"":
         read_bytes.append(byte)
         if len(read_bytes) == 4:
             break
