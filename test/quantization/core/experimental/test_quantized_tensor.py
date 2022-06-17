@@ -81,23 +81,13 @@ class TestQuantizedTensor(unittest.TestCase):
         qtensor = TensorAPoT(4, 2, False)
 
         # get apot reduced precision fp quantized tensor result
-<<<<<<< HEAD
         qtensor_red_prec = torch.clone(qtensor.quantize_APoT(tensor2quantize=tensor2quantize,
-                                                                 use_int_repr=False))
+                                                             use_int_repr=False))
         reduced_precision_lst = list(qtensor_red_prec)
 
         # get apot int representation quantized tensor result
         qtensor_int_rep = torch.clone(qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True))
         int_rep_lst = list(qtensor_int_rep)
-=======
-        apot_tens_red_prec = torch.clone(qtensor.quantize_APoT(tensor2quantize=tensor2quantize,
-                                                                 apot_repr=APoTRepr.reduced_precision_fp))
-        reduced_precision_lst = list(apot_tens_red_prec)
-
-        # get apot int representation quantized tensor result
-        apot_tens_int_rep = torch.clone(qtensor.quantize_APoT(tensor2quantize=tensor2quantize, apot_repr=APoTRepr.level_indices))
-        int_rep_lst = list(apot_tens_int_rep)
->>>>>>> 52ca62d2dba ([quant] Dequantize apot tensor)
 
         # get quantization levels and level indices
         quant_levels_lst = list(qtensor.quantization_levels)
@@ -131,12 +121,13 @@ class TestQuantizedTensor(unittest.TestCase):
         tensor2dequantize = 16 * torch.rand(size)
         qtensor = TensorAPoT(4, 2, False)
         qtensor.data = tensor2dequantize.int()
-        qtensor.apot_repr = APoTRepr.level_indices
         orig_input = torch.clone(qtensor.data)
 
         dequantized_result = qtensor.dequantize()
 
-        quantized_result = qtensor.quantize_APoT(tensor2quantize=dequantized_result, apot_repr=APoTRepr.level_indices)
+        print(dequantized_result)
+
+        quantized_result = qtensor.quantize_APoT(tensor2quantize=dequantized_result, use_int_repr=True)
 
         self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
@@ -158,12 +149,11 @@ class TestQuantizedTensor(unittest.TestCase):
         tensor2dequantize = 64 * torch.rand(size, size)
         qtensor = TensorAPoT(6, 2, False)
         qtensor.data = tensor2dequantize.int()
-        qtensor.apot_repr = APoTRepr.level_indices
         orig_input = torch.clone(qtensor.data)
 
         dequantized_result = qtensor.dequantize()
 
-        quantized_result = qtensor.quantize_APoT(tensor2quantize=dequantized_result, apot_repr=APoTRepr.level_indices)
+        quantized_result = qtensor.quantize_APoT(tensor2quantize=dequantized_result, use_int_repr=True)
 
         self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
@@ -185,12 +175,11 @@ class TestQuantizedTensor(unittest.TestCase):
         tensor2dequantize = 64 * torch.rand(size, size, size)
         qtensor = TensorAPoT(6, 2, False)
         qtensor.data = tensor2dequantize.int()
-        qtensor.apot_repr = APoTRepr.level_indices
         orig_input = torch.clone(qtensor.data)
 
         dequantized_result = qtensor.dequantize()
 
-        quantized_result = qtensor.quantize_APoT(tensor2quantize=dequantized_result, apot_repr=APoTRepr.level_indices)
+        quantized_result = qtensor.quantize_APoT(tensor2quantize=dequantized_result, use_int_repr=True)
 
         self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
@@ -211,12 +200,11 @@ class TestQuantizedTensor(unittest.TestCase):
         # generate tensor with random fp values between 0 -> 1
         tensor2quantize = torch.rand(size)
         qtensor = TensorAPoT(4, 2, False)
-        qtensor.apot_repr = APoTRepr.reduced_precision_fp
         orig_input = torch.clone(qtensor.data)
 
         dequantized_result = qtensor.dequantize()
 
-        quantized_result = qtensor.quantize_APoT(tensor2quantize=dequantized_result, apot_repr=APoTRepr.reduced_precision_fp)
+        quantized_result = qtensor.quantize_APoT(tensor2quantize=dequantized_result, use_int_repr=False)
 
         self.assertTrue(torch.equal(dequantized_result, quantized_result))
 

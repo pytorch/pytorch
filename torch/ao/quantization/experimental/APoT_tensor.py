@@ -1,7 +1,7 @@
 import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantization_mappings import float_to_apot, float_to_reduced_precision
+from torch.ao.quantization.experimental.apot_utils import float_to_apot, float_to_reduced_precision, apot_to_float
 
 # class to store APoT quantized tensor
 class TensorAPoT(torch.Tensor):
@@ -21,6 +21,7 @@ class TensorAPoT(torch.Tensor):
         signed,
             dtype=torch.quint8) -> None:
         self.signed = signed
+        self.use_int_repr = True
 
         # check for valid inputs of b, k
         assert(k and k != 0)
@@ -64,9 +65,7 @@ class TensorAPoT(torch.Tensor):
         result: floating point representation of input Tensor
     """
     def dequantize(self):  # type: ignore[override]
-        result = None
-
-        if self.apot_repr == APoTRepr.level_indices:
+        if self.use_int_repr:
             tensor2dequantize = self.data.float()
 
             max_val = 1.0
@@ -76,10 +75,10 @@ class TensorAPoT(torch.Tensor):
 
             # map apot_to_float over tensor2quantize elements
             result = tensor2dequantize.apply_(lambda x: float(apot_to_float(x, quantization_levels, level_indices)))
-        elif self.apot_repr == APoTRepr.reduced_precision_fp:
-            return self.data
 
-        return result
+            return result
+        else:
+            return self.data
 
     def q_apot_alpha(self) -> float:
         raise NotImplementedError
