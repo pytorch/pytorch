@@ -1,10 +1,10 @@
 # Owner(s): ["oncall: profiler"]
-
 import collections
 import gc
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 
@@ -22,7 +22,8 @@ from torch.autograd.profiler import profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver
+    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
+    _utils
 )
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
@@ -385,6 +386,9 @@ class TestProfiler(TestCase):
 
         mod = DummyModule()
 
+        def call_module(x):
+            return mod(x)
+
         with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
@@ -393,7 +397,7 @@ class TestProfiler(TestCase):
             v = 2 * w
             v.backward()
             a = torch.randn(2, 3, 2, 2, requires_grad=True)
-            b = mod(a)
+            b = call_module(a)
             c = b.sum()
             c.backward()
 
@@ -404,6 +408,22 @@ class TestProfiler(TestCase):
                     "test_source" in entry or
                     "ts_method_1" in entry or
                     "ts_method_2" in entry) for entry in e.stack]))
+
+        # TODO: https://github.com/pytorch/kineto/issues/617
+        if kineto_available() and not IS_WINDOWS:
+            with TemporaryFileName(mode="w+") as fname:
+                p.export_chrome_trace(fname)
+                with io.open(fname, 'r') as f:
+                    events = json.load(f)["traceEvents"]
+
+                def extract(pattern: str):
+                    matches = [e for e in events if re.search(pattern, e["name"])]
+                    self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
+                    return matches[0]
+
+                module_event = extract(r"DummyModule_0")
+                wrapper_event = extract(r"call_module")
+                self.assertEqual(module_event["args"]["Python parent id"], wrapper_event["args"]["Python id"])
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
@@ -1063,6 +1083,49 @@ class TestProfiler(TestCase):
         # Kineto profiler
         with profile():
             self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
+
+    def test_profiler_correlation_id(self):
+        '''
+        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        So we will reuse id_uniqueness_set.
+        '''
+        id_uniqueness_set = set()
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        uint32_max = 2**32 - 1
+        for i in range(5):
+            with profile() as prof:
+                model(inputs)
+            for event in prof.profiler.kineto_results.events():
+                corr_id = event.correlation_id()
+                if (corr_id):
+                    self.assertTrue(corr_id not in id_uniqueness_set)
+                    id_uniqueness_set.add(corr_id)
+                    self.assertTrue(corr_id < uint32_max)
+
+    def test_utils_compute_self_time(self):
+        with profile() as prof:
+            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
+                1, requires_grad=True)
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+            loss.backward()
+        metrics = dict()
+        _utils.compute_self_time(prof.profiler, metrics)
+        self.assertTrue(len(metrics) > 0)
+        for event_key, event_metrics in metrics.items():
+            self.assertEqual(
+                event_metrics.self_time_ns,
+                event_key.event.duration_time_ns - sum([
+                    child.duration_time_ns
+                    for child in event_key.event.children
+                ]))
 
 
 if __name__ == '__main__':
