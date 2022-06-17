@@ -12,6 +12,49 @@ namespace fuser {
 namespace cuda {
 namespace ir_utils {
 
+std::vector<int64_t> normalizeNew2Old(
+    const std::vector<int64_t>& new2old_in,
+    size_t ndims) {
+  TORCH_CHECK(
+      new2old_in.size() == ndims,
+      "There must be a transpose mapping for each dimension in domain");
+
+  // Canonicalize dimensions by wrapping each dim for the given ndims
+  std::vector<int64_t> new2old;
+  std::transform(
+      new2old_in.begin(),
+      new2old_in.end(),
+      std::inserter(new2old, new2old.begin()),
+      [ndims](int64_t entry) { return entry < 0 ? entry + ndims : entry; });
+
+  // Check if any adjusted values are < 0, or >= nDims, which are invalid
+  TORCH_CHECK(
+      std::none_of(
+          new2old.begin(),
+          new2old.end(),
+          [ndims](int64_t entry) {
+            return entry < 0 || (unsigned int)entry >= ndims;
+          }),
+      "New2Old axes are not within the number of dimensions of the provided domain.\t",
+      new2old);
+
+  // Going to use sets, to see if any duplicate values are in the map.
+  std::set<int64_t> old_pos_set;
+  std::transform(
+      new2old.begin(),
+      new2old.end(),
+      std::inserter(old_pos_set, old_pos_set.begin()),
+      [](int64_t entry) { return entry; });
+
+  // Error out if duplicate values are found.
+  TORCH_CHECK(
+      new2old.size() == ndims && old_pos_set.size() == new2old.size(),
+      "Duplicate entries in transformation map.");
+
+  // END VALIDATION CHECKS
+  return new2old;
+}
+
 std::vector<int> normalizeOld2New(
     const std::unordered_map<int, int>& old2new_in,
     size_t ndims) {
@@ -254,6 +297,26 @@ struct SubstituteInExpr : public OptInDispatch {
         : transpose_expr->in();
     expr_ = IrBuilder::create<TransposeOp>(
         transpose_expr->container(), out, in, transpose_expr->new2old());
+  }
+
+  void handle(ExpandOp* expand_expr) final {
+    auto out = reference_->sameAs(expand_expr->out())
+        ? substitute_->as<TensorView>()
+        : expand_expr->out();
+    auto in = reference_->sameAs(expand_expr->in())
+        ? substitute_->as<TensorView>()
+        : expand_expr->in();
+
+    auto expanded_extents = expand_expr->expanded_extents();
+    if (substitute_->isA<Int>()) {
+      for (auto i : c10::irange(expanded_extents.size())) {
+        if (!expanded_extents[i]->sameAs(substitute_)) {
+          expanded_extents[i] = substitute_;
+        }
+      }
+    }
+    expr_ = IrBuilder::create<ExpandOp>(
+        expand_expr->container(), out, in, expanded_extents);
   }
 
   void handle(ShiftOp* shift_expr) final {
