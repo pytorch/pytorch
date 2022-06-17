@@ -473,6 +473,8 @@ Val* real(Val* v) {
     IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
     return out;
   }
+  // We use UnaryOpType::Set instead of UnaryOpType::Real to support non-complex
+  // tensors
   return unaryOp(UnaryOpType::Set, v);
 }
 
