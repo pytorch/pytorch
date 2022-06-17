@@ -4001,7 +4001,9 @@ Tensor linalg_det_backward(
   // The gradient G is the matrix solving
   // A.mH G = det(A).conj() * grad * I
   auto d_diag = grad * det.conj();
-  auto d = at::diag_embed(d_diag.unsqueeze(-1).expand(pivots.sizes()));
+  // Optimisation, Make it F-transposed as it's what lu_solve expects
+  auto n = LU.size(-1);
+  auto d = at::diag_embed(d_diag.unsqueeze(-1).reshape({n})).mT();
 
   if (!at::GradMode::is_enabled()) {
     // The formula is given by the solution of AX = det.conj() * det * I when A
@@ -4045,9 +4047,9 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
                      .sum(-1);
   if (LU.is_complex()) {
     auto i = c10::complex<double>{0.0, 1.0};
-    return {at::imag(trAinvE) * (i * sign), at::real(trAinvE)};
+    return std::make_tuple(at::imag(trAinvE) * (i * sign), at::real(trAinvE));
   } else {
-    return {at::_efficientzerotensor(sign.sizes(), sign.options()), trAinvE};
+    return std::make_tuple(at::_efficientzerotensor(sign.sizes(), sign.options()), std::move(trAinvE));
   }
 }
 
@@ -4100,7 +4102,9 @@ Tensor slogdet_backward(
 
   // No need to handle the singular case separately here (as we do in det)
   // since this function is not differentiable on singular matrices
-  auto d = at::diag_embed(g.unsqueeze(-1).expand_as(pivots));
+  // Optimisation, Make it F-transposed as it's what lu_solve expects
+  auto n = LU.size(-1);
+  auto d = at::diag_embed(g.unsqueeze(-1).reshape({n})).mT();
   if (!at::GradMode::is_enabled()) {
     auto use_A_T = A.is_contiguous() && !A.is_complex();
     return at::linalg_lu_solve(
