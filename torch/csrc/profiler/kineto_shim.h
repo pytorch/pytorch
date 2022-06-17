@@ -89,23 +89,9 @@ struct TraceWrapper {
   std::unique_ptr<trace_t> cpu_trace_;
 };
 
-// Wraps libkineto::ActivityTraceInterface
-struct ActivityTraceWrapper {
-  explicit ActivityTraceWrapper(std::unique_ptr<interface_trace_t> trace);
-  ActivityTraceWrapper() = default;
-  ActivityTraceWrapper(ActivityTraceWrapper&&) = default;
-  ActivityTraceWrapper(const ActivityTraceWrapper&) = delete;
-  explicit operator bool() const;
-  void save(const std::string& path);
-
-  const std::unique_ptr<interface_trace_t>& get() {
-    return trace_;
-  }
-
- private:
-  std::unique_ptr<interface_trace_t> trace_;
-  bool saved_ = false; // Kineto's save is destructive
-};
+void saveTrace(
+    const std::string& path,
+    std::unique_ptr<interface_trace_t>&& trace);
 
 using ActivitySet = std::set<torch::autograd::profiler::ActivityType>;
 void prepareTrace(
@@ -113,7 +99,7 @@ void prepareTrace(
     const ActivitySet& activities,
     const torch::profiler::impl::ExperimentalConfig& config);
 void startTrace();
-ActivityTraceWrapper stopTrace();
+std::unique_ptr<interface_trace_t> stopTrace();
 void pushCorrelationId(uint64_t correlation_id);
 void pushUserCorrelationId(uint64_t correlation_id);
 void popCorrelationId();

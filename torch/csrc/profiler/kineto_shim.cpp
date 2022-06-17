@@ -100,24 +100,13 @@ TraceWrapper::operator bool() const {
 #endif // USE_KINETO
 }
 
-ActivityTraceWrapper::ActivityTraceWrapper(
-    std::unique_ptr<interface_trace_t> trace)
-    : trace_(std::move(trace)), saved_{false} {}
-
-ActivityTraceWrapper::operator bool() const {
+void saveTrace(
+    const std::string& path,
+    std::unique_ptr<interface_trace_t>&& trace) {
 #ifdef USE_KINETO
-  return trace_ != nullptr;
-#else
-  return false;
-#endif // USE_KINETO
-}
-
-void ActivityTraceWrapper::save(const std::string& path) {
-#ifdef USE_KINETO
-  TORCH_CHECK(!saved_, "Trace is already saved.");
-  TORCH_CHECK(trace_ != nullptr, "Missing trace.")
-  trace_->save(path);
-  saved_ = true;
+  TORCH_CHECK(trace, "Missing trace. (Already saved?)")
+  trace->save(path);
+  trace.reset();
 #else
   TORCH_CHECK(
       false,
@@ -222,14 +211,14 @@ void startTrace() {
 #endif // USE_KINETO
 }
 
-ActivityTraceWrapper stopTrace() {
-  return ActivityTraceWrapper{
+std::unique_ptr<interface_trace_t> stopTrace() {
+  return
 #ifdef USE_KINETO
       libkineto::api().activityProfiler().stopTrace()
 #else
-      std::make_unique<interface_trace_t>()
+      nullptr
 #endif // USE_KINETO
-  };
+          ;
 }
 
 void pushCorrelationId(uint64_t correlation_id) {
