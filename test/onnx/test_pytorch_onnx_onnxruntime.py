@@ -39,9 +39,7 @@ from test_pytorch_common import (
     TestCase,
 )
 from torchvision import ops
-from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
 from torchvision.models.detection.image_list import ImageList
-from torchvision.models.detection.roi_heads import RoIHeads
 from torchvision.models.detection.rpn import (
     AnchorGenerator,
     RegionProposalNetwork,
@@ -115,46 +113,6 @@ def _init_test_rpn():
         score_thresh=rpn_score_thresh,
     )
     return rpn
-
-
-def _init_test_roi_heads_faster_rcnn():
-    out_channels = 256
-    num_classes = 91
-
-    box_fg_iou_thresh = 0.5
-    box_bg_iou_thresh = 0.5
-    box_batch_size_per_image = 512
-    box_positive_fraction = 0.25
-    bbox_reg_weights = None
-    box_score_thresh = 0.05
-    box_nms_thresh = 0.5
-    box_detections_per_img = 100
-
-    box_roi_pool = ops.MultiScaleRoIAlign(
-        featmap_names=["0", "1", "2", "3"], output_size=7, sampling_ratio=2
-    )
-
-    resolution = box_roi_pool.output_size[0]
-    representation_size = 1024
-    box_head = TwoMLPHead(out_channels * resolution**2, representation_size)
-
-    representation_size = 1024
-    box_predictor = FastRCNNPredictor(representation_size, num_classes)
-
-    roi_heads = RoIHeads(
-        box_roi_pool,
-        box_head,
-        box_predictor,
-        box_fg_iou_thresh,
-        box_bg_iou_thresh,
-        box_batch_size_per_image,
-        box_positive_fraction,
-        bbox_reg_weights,
-        box_score_thresh,
-        box_nms_thresh,
-        box_detections_per_img,
-    )
-    return roi_heads
 
 
 def _construct_tensor_for_quantization_test(
@@ -447,48 +405,6 @@ class _TestONNXRuntime:
             [self.get_image("rgb_pytorch.png", (250, 380))],
         )
 
-    @skipIfUnsupportedMinOpsetVersion(11)
-    @skipScriptTest()  # Faster RCNN model is not scriptable
-    def test_faster_rcnn(self):
-        model = torchvision.models.detection.faster_rcnn.fasterrcnn_resnet50_fpn(
-            pretrained=False, pretrained_backbone=True, min_size=200, max_size=300
-        )
-        model.eval()
-        x1 = torch.randn(3, 200, 300, requires_grad=True)
-        x2 = torch.randn(3, 200, 300, requires_grad=True)
-        self.run_test(model, ([x1, x2],), rtol=1e-3, atol=1e-5)
-        self.run_test(
-            model,
-            ([x1, x2],),
-            input_names=["images_tensors"],
-            output_names=["outputs"],
-            dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]},
-            rtol=1e-3,
-            atol=1e-5,
-        )
-        dummy_image = [torch.ones(3, 100, 100) * 0.3]
-        images, test_images = self.get_test_images()
-        self.run_test(
-            model,
-            (images,),
-            additional_test_inputs=[(images,), (test_images,), (dummy_image,)],
-            input_names=["images_tensors"],
-            output_names=["outputs"],
-            dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]},
-            rtol=1e-3,
-            atol=1e-5,
-        )
-        self.run_test(
-            model,
-            (dummy_image,),
-            additional_test_inputs=[(dummy_image,), (images,)],
-            input_names=["images_tensors"],
-            output_names=["outputs"],
-            dynamic_axes={"images_tensors": [0, 1, 2], "outputs": [0, 1, 2]},
-            rtol=1e-3,
-            atol=1e-5,
-        )
-
     def test_paste_mask_in_image(self):
         masks = torch.rand(10, 1, 26, 26)
         boxes = torch.rand(10, 4)
@@ -522,63 +438,6 @@ class _TestONNXRuntime:
 
         assert torch.all(out2.eq(out_trace2))
 
-    @skipIfUnsupportedMinOpsetVersion(11)
-    @skipScriptTest()
-    def test_mask_rcnn(self):
-        model = torchvision.models.detection.mask_rcnn.maskrcnn_resnet50_fpn(
-            pretrained=False, pretrained_backbone=True, min_size=200, max_size=300
-        )
-        images, test_images = self.get_test_images()
-        self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
-        self.run_test(
-            model,
-            (images,),
-            input_names=["images_tensors"],
-            output_names=["boxes", "labels", "scores", "masks"],
-            dynamic_axes={
-                "images_tensors": [0, 1, 2],
-                "boxes": [0, 1],
-                "labels": [0],
-                "scores": [0],
-                "masks": [0, 1, 2],
-            },
-            rtol=1e-3,
-            atol=1e-5,
-        )
-        dummy_image = [torch.ones(3, 100, 100) * 0.3]
-        self.run_test(
-            model,
-            (images,),
-            additional_test_inputs=[(images,), (test_images,), (dummy_image,)],
-            input_names=["images_tensors"],
-            output_names=["boxes", "labels", "scores", "masks"],
-            dynamic_axes={
-                "images_tensors": [0, 1, 2],
-                "boxes": [0, 1],
-                "labels": [0],
-                "scores": [0],
-                "masks": [0, 1, 2],
-            },
-            rtol=1e-3,
-            atol=1e-5,
-        )
-        self.run_test(
-            model,
-            (dummy_image,),
-            additional_test_inputs=[(dummy_image,), (images,)],
-            input_names=["images_tensors"],
-            output_names=["boxes", "labels", "scores", "masks"],
-            dynamic_axes={
-                "images_tensors": [0, 1, 2],
-                "boxes": [0, 1],
-                "labels": [0],
-                "scores": [0],
-                "masks": [0, 1, 2],
-            },
-            rtol=1e-3,
-            atol=1e-5,
-        )
-
     def test_heatmaps_to_keypoints(self):
         maps = torch.rand(10, 1, 26, 26)
         rois = torch.rand(10, 4)
@@ -600,72 +459,6 @@ class _TestONNXRuntime:
 
         assert torch.all(out2[0].eq(out_trace2[0]))
         assert torch.all(out2[1].eq(out_trace2[1]))
-
-    @unittest.skip("Failing, see https://github.com/pytorch/pytorch/issues/66528")
-    @skipIfUnsupportedMinOpsetVersion(11)
-    @skipScriptTest()
-    def test_keypoint_rcnn(self):
-        model = torchvision.models.detection.keypoint_rcnn.keypointrcnn_resnet50_fpn(
-            pretrained=False, pretrained_backbone=False, min_size=200, max_size=300
-        )
-        images, test_images = self.get_test_images()
-        self.run_test(model, (images,), rtol=1e-3, atol=1e-5)
-        self.run_test(
-            model,
-            (images,),
-            input_names=["images_tensors"],
-            output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
-            dynamic_axes={"images_tensors": [0, 1, 2]},
-            rtol=1e-3,
-            atol=1e-5,
-        )
-        dummy_images = [torch.ones(3, 100, 100) * 0.3]
-        self.run_test(
-            model,
-            (images,),
-            additional_test_inputs=[(images,), (test_images,), (dummy_images,)],
-            input_names=["images_tensors"],
-            output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
-            dynamic_axes={"images_tensors": [0, 1, 2]},
-            rtol=5e-3,
-            atol=1e-5,
-        )
-        self.run_test(
-            model,
-            (dummy_images,),
-            additional_test_inputs=[(dummy_images,), (test_images,)],
-            input_names=["images_tensors"],
-            output_names=["outputs1", "outputs2", "outputs3", "outputs4"],
-            dynamic_axes={"images_tensors": [0, 1, 2]},
-            rtol=5e-3,
-            atol=1e-5,
-        )
-
-    @skipIfUnsupportedMinOpsetVersion(11)
-    @skipScriptTest()
-    def test_shufflenet_v2_dynamic_axes(self):
-        model = torchvision.models.shufflenet_v2_x0_5(pretrained=False)
-        dummy_input = torch.randn(1, 3, 224, 224, requires_grad=True)
-        test_inputs = torch.randn(3, 3, 224, 224, requires_grad=True)
-        self.run_test(
-            model,
-            (dummy_input,),
-            additional_test_inputs=[(dummy_input,), (test_inputs,)],
-            input_names=["input_images"],
-            output_names=["outputs"],
-            dynamic_axes={
-                "input_images": {0: "batch_size"},
-                "output": {0: "batch_size"},
-            },
-            rtol=1e-3,
-            atol=1e-5,
-        )
-
-    @skipScriptTest()
-    def test_mobilenet_v3(self):
-        model = torchvision.models.quantization.mobilenet_v3_large(pretrained=False)
-        dummy_input = torch.randn(1, 3, 224, 224)
-        self.run_test(model, (dummy_input,))
 
     @unittest.skip(
         "Unstable loading pretrained quantized mobilenet v3: https://github.com/pytorch/vision/issues/5303"
@@ -1460,8 +1253,8 @@ class _TestONNXRuntime:
                 return self.conv1(input1), self.conv2(input2), self.conv3(input3)
 
         x1 = torch.randn(20, 16, 50)
-        x2 = torch.randn(20, 16, 50, 100)
-        x3 = torch.randn(20, 16, 10, 50, 100)
+        x2 = torch.randn(20, 16, 50, 50)
+        x3 = torch.randn(20, 16, 10, 50, 50)
 
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
 
@@ -1496,9 +1289,9 @@ class _TestONNXRuntime:
             def forward(self, input1, input2, input3):
                 return self.conv1(input1), self.conv2(input2), self.conv3(input3)
 
-        x1 = torch.randn(20, 16, 50)
-        x2 = torch.randn(20, 16, 50, 100)
-        x3 = torch.randn(20, 16, 10, 50, 100)
+        x1 = torch.randn(20, 16, 10)
+        x2 = torch.randn(20, 16, 10, 10)
+        x3 = torch.randn(20, 16, 10, 10, 10)
 
         self.run_test(TraceModel(), (x1, x2, x3), atol=10e-5)
 
@@ -3125,7 +2918,7 @@ class _TestONNXRuntime:
 
     def test_groupnorm(self):
         model = torch.nn.GroupNorm(3, 6, 0.002)
-        x = torch.randn(4, 6, 180, 180, 180)
+        x = torch.randn(4, 6, 36, 36, 18)
         self.run_test(model, x)
 
         model = torch.nn.GroupNorm(1, 6, 0.002)
@@ -3952,12 +3745,12 @@ class _TestONNXRuntime:
         self.run_test(model, x)
 
     def test_batchnorm3d(self):
-        x = torch.randn(10, 3, 128, 128, 128)
+        x = torch.randn(10, 3, 64, 64, 64)
         model = torch.nn.BatchNorm3d(3, affine=True)
         self.run_test(model, x)
 
     def test_batchnorm3d_noaffine(self):
-        x = torch.randn(10, 3, 128, 128, 128)
+        x = torch.randn(10, 3, 64, 64, 64)
         model = torch.nn.BatchNorm3d(3, affine=False)
         self.run_test(model, x)
 
@@ -4003,7 +3796,7 @@ class _TestONNXRuntime:
         9
     )  # Because ConstantOfShape op is not supported for opset < 9
     def test_instancenorm3d_runningstats(self):
-        x = torch.randn(10, 3, 128, 128, 128)
+        x = torch.randn(10, 3, 64, 64, 64)
         model = torch.nn.InstanceNorm3d(3, affine=True, track_running_stats=True)
         self.run_test(model, x)
 
@@ -4011,7 +3804,7 @@ class _TestONNXRuntime:
         self.run_test(model, x)
 
     def test_instancenorm3d_norunningstats(self):
-        x = torch.randn(10, 3, 128, 128, 128)
+        x = torch.randn(10, 3, 64, 64, 64)
         model = torch.nn.InstanceNorm3d(3, affine=True, track_running_stats=False)
         self.run_test(model, x)
 
@@ -9652,22 +9445,6 @@ class _TestONNXRuntime:
         other_input = make_input(RNN_BATCH_SIZE + 1)
         self.run_test(model, other_input)
 
-    @skipScriptTest()  # TODO: https://msdata.visualstudio.com/Vienna/_workitems/edit/1253950
-    def test_transformer_encoder(self):
-        from torch.nn import TransformerEncoder, TransformerEncoderLayer
-
-        class MyModule(torch.nn.Module):
-            def __init__(self, ninp, nhead, nhid, dropout, nlayers):
-                super().__init__()
-                encoder_layers = TransformerEncoderLayer(ninp, nhead, nhid, dropout)
-                self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
-
-            def forward(self, input):
-                return self.transformer_encoder(input)
-
-        x = torch.rand(10, 32, 512)
-        self.run_test(MyModule(512, 8, 2048, 0.0, 3), (x,), atol=1e-5)
-
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_fake_quantize_per_tensor(self):
         class FakeQuantizePerTensorModel(torch.nn.Module):
@@ -10494,58 +10271,6 @@ class _TestONNXRuntime:
                     [boxes1],
                 ),
             ],
-        )
-
-    @skipIfUnsupportedMinOpsetVersion(11)
-    @skipScriptTest()
-    def test_roi_heads(self):
-        class RoiHeadsModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.transform = _init_test_generalized_rcnn_transform()
-                self.rpn = _init_test_rpn()
-                self.roi_heads = _init_test_roi_heads_faster_rcnn()
-
-            def forward(self, images, features: Dict[str, Tensor]):
-                original_image_sizes = [
-                    (img.shape[-1], img.shape[-2]) for img in images
-                ]
-
-                images_m = ImageList(
-                    images, [(i.shape[-1], i.shape[-2]) for i in images]
-                )
-                proposals, _ = self.rpn(images_m, features)
-                detections, _ = self.roi_heads(
-                    features, proposals, images_m.image_sizes
-                )
-                detections = self.transform.postprocess(
-                    detections, images_m.image_sizes, original_image_sizes
-                )
-                return detections
-
-        images = torch.rand(2, 3, 100, 100)
-        features = self.get_features(images)
-        images2 = torch.rand(2, 3, 150, 150)
-        test_features = self.get_features(images2)
-
-        model = RoiHeadsModule()
-        model.eval()
-        model(images, features)
-
-        self.run_test(
-            model,
-            (images, features),
-            input_names=["input1", "input2", "input3", "input4", "input5", "input6"],
-            dynamic_axes={
-                "input1": [0, 1, 2, 3],
-                "input2": [0, 1, 2, 3],
-                "input3": [0, 1, 2, 3],
-                "input4": [0, 1, 2, 3],
-                "input5": [0, 1, 2, 3],
-                "input6": [0, 1, 2, 3],
-            },
-            additional_test_inputs=[(images, features), (images2, test_features)],
-            # dict_check=False,
         )
 
     def test_set_(self):

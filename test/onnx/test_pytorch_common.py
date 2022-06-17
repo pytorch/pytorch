@@ -108,6 +108,21 @@ def skipScriptTest(min_opset_version=float("inf")):
     return script_dec
 
 
+# TODO(#75630): replace `skipScriptTest` with this to parametrize test class.
+def skipScriptTest_New(min_opset_version=float("inf")):
+    def skip_dec(func):
+        @functools.wraps(func)
+        def wrapper(self, *args, **kwargs):
+            self.is_script_test_enabled = self.opset_version >= min_opset_version
+            if not self.is_script_test_enabled and self.is_script:
+                raise unittest.SkipTest("Skip verify test for TorchScript")
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return skip_dec
+
+
 # skips tests for opset_versions listed in unsupported_opset_versions.
 # if the caffe2 test cannot be run for a specific version, add this wrapper
 # (for example, an op was modified but the change is not supported in caffe2)
