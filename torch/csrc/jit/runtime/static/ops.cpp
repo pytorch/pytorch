@@ -1068,7 +1068,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
       in principle, figure out copy of strides.
     */
     if ((at::has_internal_overlap(src.unsafeGetTensorImpl()) ==
-         at::MemOverlap::YES) ||
+         at::MemOverlap::Yes) ||
         (memory_format != c10::MemoryFormat::Preserve)) {
       p_node->Output(0) = at::native::clone(src, memory_format);
       return;
