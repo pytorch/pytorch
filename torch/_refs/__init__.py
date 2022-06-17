@@ -183,8 +183,10 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "contiguous",
     "dsplit",
     "dstack",
+    "expand",
     "flatten",
     "flip",
     "fliplr",
@@ -1685,11 +1687,59 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
+# TODO: add memory format support
+def contiguous(
+    a: Tensor, *, memory_format: torch.memory_format = torch.contiguous_format
+) -> Tensor:
+    if memory_format != torch.contiguous_format:
+        raise NotImplementedError
+
+    if utils.is_contiguous(a):
+        return a
+
+    b = torch.empty(
+        a.shape, dtype=a.dtype, device=a.device, requires_grad=a.requires_grad
+    )
+    return copy_to(b, a)
+
+
 @out_wrapper
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "dstack expects a non-empty TensorList")
     aligned_tensors = atleast_3d(*tensors)
     return cat(aligned_tensors, 2)
+
+
+def expand(a: Tensor, *shape) -> Tensor:
+    # NOTE: cannot use utils.extract_shape_from_varargs here
+    # because that also validates the shape, but the shape
+    # given to expand may be "invalid"
+    if len(shape) == 1 and isinstance(shape[0], tuple):
+        shape = shape[0]
+
+    check(
+        len(shape) >= len(a.shape),
+        lambda: "expand: the requested shape has too few dimensions!",
+    )
+
+    offset = len(shape) - len(a.shape)
+    shape_ = list(shape)
+    for idx, x in enumerate(a.shape):
+        offset_idx = idx + offset
+        requested_length = shape[offset_idx]
+        check(
+            requested_length == x or x == 1 or requested_length == -1,
+            lambda: f"expand: attempting to expand a dimension of length {x}!",
+        )
+
+        shape_[offset_idx] = requested_length if requested_length != -1 else x
+
+    # At this point shape must be valid
+    utils.validate_shape(shape_)
+
+    return prims.broadcast_in_dim(
+        a, shape_, tuple(range(offset, len(a.shape) + offset))
+    )
 
 
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:

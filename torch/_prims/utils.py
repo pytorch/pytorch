@@ -504,6 +504,8 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
             raise RuntimeError(msg)
 
 
+# Acquires a common shape, if it exists, from one or more tensor arguments,
+# filtering number arguments
 def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None
