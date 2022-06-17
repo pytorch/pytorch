@@ -461,6 +461,47 @@ TensorView* abs(TensorView* tv) {
   return abs(tv->as<Val>())->as<TensorView>();
 }
 
+// The output of real(complex_tensor) are real numbers
+Val* real(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    return out;
+  }
+  return unaryOp(UnaryOpType::Set, v);
+}
+
+TensorView* real(TensorView* tv) {
+  return real(tv->as<Val>())->as<TensorView>();
+}
+
+// The output of imag(complex_tensor) are real numbers
+Val* imag(Val* v) {
+  if (v->getDataType() == DataType::ComplexDouble) {
+    Val* out = newValLike(v, DataType::Double);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    return out;
+  }
+  if (v->getDataType() == DataType::ComplexFloat) {
+    Val* out = newValLike(v, DataType::Float);
+    IrBuilder::create<UnaryOp>(UnaryOpType::Real, out, v);
+    return out;
+  }
+  TORCH_CHECK(
+      false,
+      "imag not supported for non-complex tensors, got dtype ",
+      v->getDataType());
+}
+
+TensorView* imag(TensorView* tv) {
+  return imag(tv->as<Val>())->as<TensorView>();
+}
+
 // UNARY FLOAT CAST OPERATIONS
 
 #define NVFUSER_DEFINE_UNARY_FLOAT_OP(op_name, op_type)                       \
