@@ -771,6 +771,9 @@ class OpInfo(object):
     # only run tracing tests
     supports_scripting: bool = True
 
+    # if the operator can be traced
+    supports_tracing: bool = True
+
     # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
 
     # whether the op supports sparse csr inputs
@@ -2428,7 +2431,7 @@ def sample_inputs_equal(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(lhs, args=(rhs,), broadcasts_input=broadcasts_input)
         if shape_lhs == shape_rhs:
-            yield SampleInput(lhs, args=(lhs,))
+            yield SampleInput(lhs, args=(lhs.clone().detach_(),))
 
 
 
@@ -11471,11 +11474,11 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(exclude_zero=True)),
     OpInfo('equal',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           ref=lambda input, other: (input == other).all(),
            sample_inputs_func=sample_inputs_equal,
            supports_autograd=False,
+           supports_tracing=False,
            skips=(
-               DecorateInfo(unittest.skip("Tracer doesn't support bool return"),
-                            'TestJit', 'test_variant_consistency_jit'),
            )),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
@@ -17837,14 +17840,14 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.l1_loss",
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
-        aten_backward_name='l1_loss_backward',
         sample_inputs_func=sample_inputs_l1_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
+            # fwgrad_bwgrad for abs is wrong
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=complex_types()),
             # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
             # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
             DecorateInfo(
@@ -18329,6 +18332,7 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_embedding,
         error_inputs_func=error_inputs_embedding,
         supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
