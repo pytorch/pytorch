@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -50,6 +51,19 @@ def _dict_unflatten(values: List[Any], context: Context) -> Dict[Any, Any]:
 pytree._register_pytree_node(dict, _dict_flatten, _dict_unflatten)
 
 aten = torch.ops.aten
+
+
+@contextmanager
+def preserve_rng_state():
+    rng_state = torch.clone(torch.random.get_rng_state())
+    if torch.cuda.is_available():
+        cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+    try:
+        yield
+    finally:
+        torch.random.set_rng_state(rng_state)
+        if torch.cuda.is_available():
+            torch.cuda.set_rng_state(cuda_rng_state)
 
 
 def create_joint_forward_backward(fn):
@@ -147,27 +161,29 @@ def create_aot_autograd_function(
         def forward(ctx, *flat_tensor_args):
             nonlocal compiled_fw, compiled_bw, num_outs
             if compiled_fw is None:
-                # Set input tensors that require grad to leaves
-                flat_tensor_args = pytree.tree_map(
-                    lambda x: x.detach().requires_grad_(x.requires_grad), flat_tensor_args
-                )
-                with torch.set_grad_enabled(grad_state):
-                    out = flat_fn(*flat_tensor_args)
-                out = pytree.tree_map(
-                    lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x, out
-                )
-
-                if isinstance(out, (list, tuple)):
-                    num_outs = len(out)
-                else:
-                    num_outs = 1
-
-                joint_inputs = (flat_tensor_args, out)
-                aot_decompositions = {**aot_autograd_decompositions, **decompositions}
-                with torch.set_grad_enabled(grad_state):
-                    fx_g = make_fx(joint_forward_backward, aot_decompositions)(
-                        *joint_inputs
+                with preserve_rng_state():
+                    # Set input tensors that require grad to leaves
+                    flat_tensor_args = pytree.tree_map(
+                        lambda x: x.detach().requires_grad_(x.requires_grad), flat_tensor_args
                     )
+                    with torch.set_grad_enabled(grad_state):
+                        out = flat_fn(*flat_tensor_args)
+                    out = pytree.tree_map(
+                        lambda x: x.detach().contiguous() if isinstance(x, Tensor) else x, out
+                    )
+
+                    if isinstance(out, (list, tuple)):
+                        num_outs = len(out)
+                    else:
+                        num_outs = 1
+
+                    joint_inputs = (flat_tensor_args, out)
+                    aot_decompositions = {**aot_autograd_decompositions, **decompositions}
+                    with torch.set_grad_enabled(grad_state):
+                        fx_g = make_fx(joint_forward_backward, aot_decompositions)(
+                            *joint_inputs
+                        )
+
                 fw_module, bw_module = partition_fn(fx_g, joint_inputs)
                 # print(fw_module.code, bw_module.code)
 
