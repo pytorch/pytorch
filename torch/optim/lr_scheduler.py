@@ -86,7 +86,7 @@ class _LRScheduler(object):
     @contextmanager
     def _init_optimizer_lr(self):
         # Save the current learning rate values for all schedulers except the first
-        if self._scheduler_id > 1:
+        if self._scheduler_id > 0:
             for group in self.optimizer.param_groups:
                 group["prev_lr"] = group["lr"]
 
@@ -94,7 +94,7 @@ class _LRScheduler(object):
             yield
         finally:
             # Reset the learning rates to the previous value for all but the first scheduler
-            if self._scheduler_id > 1:
+            if self._scheduler_id > 0:
                 for group in self.optimizer.param_groups:
                     group["lr"] = group.pop("prev_lr")
 
