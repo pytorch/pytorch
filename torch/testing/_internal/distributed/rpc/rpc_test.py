@@ -4601,6 +4601,7 @@ class FaultyAgentRpcTest(RpcAgentTestFixture):
     # faulty_rpc_agent_test_fixture.py for the list of retryable messages.
     @dist_init(messages_to_delay={})
     def test_check_failed_messages(self):
+        print("hello world")
         if self.rank == 0:
             dst_worker_b = worker_name((self.rank + 1) % self.world_size)
             dst_worker_c = worker_name((self.rank + 2) % self.world_size)
