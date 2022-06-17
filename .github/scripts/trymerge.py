@@ -918,7 +918,9 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
-def check_for_sev(org: str, project: str) -> None:
+def check_for_sev(org: str, project: str, force: bool) -> None:
+    if force:
+        return
     response = cast(
         Dict[str, Any],
         fetch_json(
@@ -933,6 +935,7 @@ def check_for_sev(org: str, project: str) -> None:
                     "Not merging any PRs at the moment because there is a "
                     + f"merge blocking ci: sev issue open at {item['html_url']}"
                 )
+    return
 
 
 def merge(pr_num: int, repo: GitRepo,
@@ -945,10 +948,9 @@ def merge(pr_num: int, repo: GitRepo,
           stale_pr_days: int = 3) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
-    if not force:
-        check_for_sev(org, project)
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
+    check_for_sev(org, project, force)
     if force or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
         return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
@@ -959,8 +961,7 @@ def merge(pr_num: int, repo: GitRepo,
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
-        if not force:
-            check_for_sev(org, project)
+        check_for_sev(org, project, force)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
