@@ -1,37 +1,29 @@
 # Owner(s): ["oncall: fx"]
 
+import copy
 import pickle
 import operator
-from typing import Callable, Dict, Union, List, Optional
-from types import BuiltinFunctionType
+import importlib
 
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
-
-import torch.fx.experimental.meta_tracer
-from torch.fx.experimental.proxy_tensor import make_fx
 
 from torch.fx.partitioner.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.partitioner.nvfuser_operator_support import NvFuserOperatorSupport
 import torch._prims as prims
-from torch._prims.executor import make_traced
 from torch.fx.passes.graph_drawer import FxGraphDrawer
-import copy
-
+from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 from torch.fx.passes.fuser_utils import fuse_by_partitions
 
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
-
 from torch.testing._internal.jit_utils import JitTestCase
-
-import importlib
 
 class TestFXGraphPasses(JitTestCase):
 
     def forward1(a, b, c):
         add = a + b
-        add_1 = add +  b
+        add_1 = add + b
         add_2 = add_1 + c
         relu_1 = add_2.relu()
         add_3 = add_1 + add_2
@@ -43,8 +35,8 @@ class TestFXGraphPasses(JitTestCase):
 
     def forward2(a, b, _):
         add = a + b
-        add_1 = add +  b
-        relu_1 = add_1.relu() # blocked by this
+        add_1 = add + b
+        relu_1 = add_1.relu()  # blocked by this
         add_3 = add_1 + relu_1
         add_4 = add_1 + add_3
         return add_4, add_1
@@ -97,7 +89,7 @@ class TestFXGraphPasses(JitTestCase):
         return add_3, add_1
 
     def forward8(a, b, c):
-         # both branches are in the same partition, add should join the same partition
+        # both branches are in the same partition, add should join the same partition
         add = a + 1
 
         # left branch
@@ -240,21 +232,22 @@ class TestFXGraphPasses(JitTestCase):
             "torch_bench_graphs/moco/moco_forward_10",
             "torch_bench_graphs/moco/moco_backward_4",
             "torch_bench_graphs/moco/moco_forward_0",
-
-
+            "torch_bench_graphs/moco/moco_backward_6",
+            "torch_bench_graphs/moco/moco_forward_5",
+            "torch_bench_graphs/moco/moco_backward_2",
             "torch_bench_graphs/moco/moco_forward_2",
             "torch_bench_graphs/moco/moco_forward_8",
             "torch_bench_graphs/moco/moco_backward_11",
-
             "torch_bench_graphs/moco/moco_backward_1",
             "torch_bench_graphs/moco/moco_backward_5",
             "torch_bench_graphs/moco/moco_forward_1",
             "torch_bench_graphs/moco/moco_forward_6",
-
             "torch_bench_graphs/moco/moco_backward_8",
             "torch_bench_graphs/moco/moco_forward_11",
             "torch_bench_graphs/resnet18/resnet18_backward_0",
+            "torch_bench_graphs/resnet18/resnet18_forward_0",
             "torch_bench_graphs/mnasnet1_0/mnasnet1_0_backward_0",
+            "torch_bench_graphs/mnasnet1_0/mnasnet1_0_forward_0",
             "torch_bench_graphs/BERT_pytorch/BERT_pytorch_forward_0",
             "torch_bench_graphs/BERT_pytorch/BERT_pytorch_backward_0",
             "torch_bench_graphs/resnet50/resnet50_forward_0",
@@ -283,21 +276,20 @@ class TestFXGraphPasses(JitTestCase):
             "torch_bench_graphs/Background_Matting/Background_Matting_forward_0",
             "torch_bench_graphs/timm_regnet/timm_regnet_forward_0",
             "torch_bench_graphs/timm_regnet/timm_regnet_backward_0",
-
-            "torch_bench_graphs/hf_Bert/hf_Bert_forward_1",     #passing
-            "torch_bench_graphs/hf_Bert/hf_Bert_backward_2",      # passing
-            "torch_bench_graphs/hf_Bert/hf_Bert_forward_2",     # passing
-            "torch_bench_graphs/hf_Bert/hf_Bert_forward_0",       # passing
-            "torch_bench_graphs/hf_Bert/hf_Bert_backward_0",        # passing
-
+            "torch_bench_graphs/hf_Bert/hf_Bert_forward_1",
+            "torch_bench_graphs/hf_Bert/hf_Bert_backward_1",
+            "torch_bench_graphs/hf_Bert/hf_Bert_backward_2",
+            "torch_bench_graphs/hf_Bert/hf_Bert_forward_2",
+            "torch_bench_graphs/hf_Bert/hf_Bert_forward_0",
+            "torch_bench_graphs/hf_Bert/hf_Bert_backward_0",
             "torch_bench_graphs/densenet121/densenet121_backward_0",
             "torch_bench_graphs/densenet121/densenet121_forward_0",
             "torch_bench_graphs/timm_nfnet/timm_nfnet_backward_0",
             "torch_bench_graphs/timm_nfnet/timm_nfnet_forward_0",
-            "torch_bench_graphs/squeezenet1_1/squeezenet1_1_forward_0",         # passed
-            "torch_bench_graphs/squeezenet1_1/squeezenet1_1_backward_0",        # passed
-            "torch_bench_graphs/alexnet/alexnet_forward_0",     # passed
-            "torch_bench_graphs/alexnet/alexnet_backward_0",    # passed
+            "torch_bench_graphs/squeezenet1_1/squeezenet1_1_forward_0",
+            "torch_bench_graphs/squeezenet1_1/squeezenet1_1_backward_0",
+            "torch_bench_graphs/alexnet/alexnet_forward_0",
+            "torch_bench_graphs/alexnet/alexnet_backward_0",
             "torch_bench_graphs/Super_SloMo/Super_SloMo_forward_0",
             "torch_bench_graphs/Super_SloMo/Super_SloMo_backward_0",
             "torch_bench_graphs/timm_vision_transformer/timm_vision_transformer_backward_0",
@@ -408,16 +400,8 @@ class TestFXGraphPasses(JitTestCase):
             "torch_bench_graphs/hf_T5/hf_T5_backward_8",
             "torch_bench_graphs/hf_T5/hf_T5_forward_5",
             "torch_bench_graphs/hf_T5/hf_T5_forward_11",
-            "torch_bench_graphs/shufflenet_v2_x1_0/shufflenet_v2_x1_0_backward_0",      # passing with nan
-
-            "torch_bench_graphs/hf_Bert/hf_Bert_backward_1",  #failing due to value mismatch
-            "torch_bench_graphs/shufflenet_v2_x1_0/shufflenet_v2_x1_0_forward_0",         # failing due to current build didn't include cudnn
-            "torch_bench_graphs/moco/moco_backward_6",      # failing due to input bad input meta
-            "torch_bench_graphs/moco/moco_forward_5",  #cudnn_batch_norm: ATen not compiled with cuDNN support
-            "torch_bench_graphs/moco/moco_backward_2",  # ??
-
-            "torch_bench_graphs/resnet18/resnet18_forward_0",  #cudnn_batch_norm: ATen not compiled with cuDNN support
-            "torch_bench_graphs/mnasnet1_0/mnasnet1_0_forward_0",  #cudnn_batch_norm: ATen not compiled with cuDNN support
+            "torch_bench_graphs/shufflenet_v2_x1_0/shufflenet_v2_x1_0_backward_0",
+            "torch_bench_graphs/shufflenet_v2_x1_0/shufflenet_v2_x1_0_forward_0",
         ]
 
         device = 'cuda'
@@ -542,26 +526,26 @@ class TestFXGraphPasses(JitTestCase):
 
         # TODO: support for arbitrate node order
         test_cases = [
-            [ ['add', 'add_1'], ['add_5', 'add_6'] ],
-            [ ['add', 'add_1', 'add_2'] ],  # vertical fusion
-            [ ['add_2', 'add_3'] ],         # horizontal fusion
-            [ ['add_3', 'add_4'] ],
-            [ ['add_5', 'add_6'], ['add_1', 'add_2', 'add_3', 'add_4'] ],  # arbitray partition order
-            [ ['add_6', 'add_5'] ],     # arbitray node order
-            [ ['add_4', 'add_1', 'add_3', 'add_2'] ],           # arbitray node order
-            [ ['add_5', 'linear2' ] ],   # includes call_function + call_module node
-            [ ['add_6', 'relu' ] ],   # includes call_function + call_module node
-            [ ['param', 'add_2' ] ],   # includes get_attr + call_module nodes
-            [ ['param', 'add_1', 'linear' ] ],   # includes get_attr + call_function + call_module nodes
-            [ ["add", "linear", "add_1", "param", "add_2", "add_3", "add_4", "linear2", "add_5", "add_6", "relu"] ], # full graph
+            [['add', 'add_1'], ['add_5', 'add_6']],
+            [['add', 'add_1', 'add_2']],  # vertical fusion
+            [['add_2', 'add_3']],         # horizontal fusion
+            [['add_3', 'add_4']],
+            [['add_6', 'add_5']],     # arbitray node order
+            [['add_4', 'add_1', 'add_3', 'add_2']],           # arbitray node order
+            [['add_5', 'add_6'], ['add_1', 'add_2', 'add_3', 'add_4']],  # arbitray partition order
+            [['add_5', 'linear2']],   # includes call_function + call_module node
+            [['add_6', 'relu']],   # includes call_function + call_module node
+            [['param', 'add_2']],   # includes get_attr + call_module nodes
+            [['param', 'add_1', 'linear']],   # includes get_attr + call_function + call_module nodes
+            [["add", "linear", "add_1", "param", "add_2", "add_3", "add_4", "linear2", "add_5", "add_6", "relu"]],  # full graph
         ]
 
         # expected failing cases
         x_test_cases = [
-            [ ['add', 'add_1'], ['add_1', 'add_5', 'add_6'] ],  # add_1 exists in multiple partitions
-            [ ['add', 'add_1', 'add_3'] ],    # invalid partition: circular dependency
-            [ ['add_4', 'add_5'] ],    # invalid partition: circular dependency
-            [ ['relu', 'add_5'] ],    # invalid partition: circular dependency
+            [['add', 'add_1'], ['add_1', 'add_5', 'add_6']],  # add_1 exists in multiple partitions
+            [['add', 'add_1', 'add_3']],    # invalid partition: circular dependency
+            [['add_4', 'add_5']],    # invalid partition: circular dependency
+            [['relu', 'add_5']],    # invalid partition: circular dependency
         ]
 
         # drawer = FxGraphDrawer(traced, "test")
@@ -590,16 +574,17 @@ class TestFXGraphPasses(JitTestCase):
 
             torch.testing.assert_close(expected, result)
 
-    # def test_nvfuser_prim_operator_support(self):
-    #     def _wrapper(a, b, broadcast_dimensions):
-    #         a_bc = prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
-    #         return prims.add(a_bc, b)
+    def test_nvfuser_prim_operator_support(self):
+        def _wrapper(a, b, broadcast_dimensions):
+            a_bc = prims.broadcast_in_dim(a, b.shape, broadcast_dimensions)
+            return prims.add(a_bc, b)
 
-    #     traced = symbolic_trace(_wrapper)
+        traced = symbolic_trace(_wrapper)
 
-    #     supported_ops = NvFuserOperatorSupport()
-    #     for node in traced.graph.nodes:
-    #         assert supported_ops.is_node_supported({}, node)
+        supported_ops = NvFuserOperatorSupport()
+        for node in traced.graph.nodes:
+            if node.op in CALLABLE_NODE_OPS:
+                assert supported_ops.is_node_supported({}, node)
 
 instantiate_parametrized_tests(TestFXGraphPasses)
 

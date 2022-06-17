@@ -1,24 +1,17 @@
-import operator
 from typing import Dict, List, Set, Iterable
 
 from torch.fx.passes.fuser_utils import fuse_by_partitions
-
-from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
-
-import torch
+from torch.fx.passes.tools_common import NodeList
 
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node, map_arg
-from torch.fx.passes.operator_support import (
-    get_node_target,
-    OperatorSupportBase,
-)
+from torch.fx.node import Node
+from torch.fx.passes.operator_support import OperatorSupportBase
 
 from itertools import groupby
 from collections import defaultdict
 
 class Partition:
-    def __init__(self, id=None, nodes: Iterable[Node]=set()):
+    def __init__(self, id: int = None, nodes: Iterable[Node] = set()):
         self.id = id
         self.nodes: Set[Node] = set(nodes)
 
@@ -34,24 +27,20 @@ class Partition:
 class CapabilityBasedPartitioner:
 
     def __init__(self,
-                 module: torch.fx.GraphModule,
+                 graph_module: GraphModule,
                  operator_support: OperatorSupportBase) -> None:
-        self.partitions = None
-
-        self.module = module
+        self.graph_module = graph_module
         self.operator_support = operator_support
-        self.kernel_registry = [operator.add]
-        self.executors = None
 
         # map of node to it's upstream dependency nodes
         # if A is found in dependency_map[B], then B depends on A (or a is an upstream depedency of b)
-        self.dependency_map  = self.__build_dependency_map()
+        self.dependency_map = self.__build_dependency_map()
 
     def __build_dependency_map(self) -> Dict[Node, Set[Node]]:
         dependency_map = defaultdict(set)
 
         # assumptions: nodes in graph are sorted in topological order
-        for node in self.module.graph.nodes:
+        for node in self.graph_module.graph.nodes:
             for input_node in node.all_input_nodes:
                 # add input_node and input_node's upstream dependency
                 dependency_map[node].add(input_node)
@@ -59,7 +48,7 @@ class CapabilityBasedPartitioner:
 
         return dependency_map
 
-    def __node_depends_on(self, a: Node, b: Node) -> bool:
+    def __node_depends_on(self, a: Node, b: Node) -> int:
         # Returns
         # 1 if b depends on a (,or equivalently a is an upstream depedency of b)
         # -1 if a depends on b (,or equivalently b is an upstream depedency of a)
@@ -72,7 +61,7 @@ class CapabilityBasedPartitioner:
         else:
             return 0
 
-    def __partition_depends_on(self, partition_a: Partition, partition_b: Partition) -> bool:
+    def __partition_depends_on(self, partition_a: Partition, partition_b: Partition) -> int:
         # Returns
         # 1 if b depends on a (,or equivalently a is an upstream depedency of b)
         # -1 if a depends on b (,or equivalently b is an upstream depedency of a)
@@ -87,17 +76,17 @@ class CapabilityBasedPartitioner:
                     return dependency
         return 0
 
-    def get_candidates(self):
+    def get_candidates(self) -> NodeList:
         candidates = []
-        for node in self.module.graph.nodes:
-            if self.operator_support.is_node_supported(self.module.named_modules(), node):
+        for node in self.graph_module.graph.nodes:
+            if self.operator_support.is_node_supported(self.graph_module.named_modules(), node):
                 candidates.append(node)
         return candidates
 
     def partition(self, candidates: NodeList) -> List[Partition]:
         # assumptions: nodes in candidate list is sorted in topological order
         assignment: Dict[Node, int] = {}   # maping from node to partition_id
-        partitions_by_id: Dict[int, Partition] = dict()   # mapping from partition_id to partition
+        partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
 
         def assign(node, id):
             assignment[node] = id
@@ -129,7 +118,7 @@ class CapabilityBasedPartitioner:
             # TODO: find a better way to do this, rather than pair-wise comparision
             user_partitions_list = list(user_partitions)
             for i in range(len(user_partitions_list)):
-                for j in range(i+1, len(user_partitions_list)):
+                for j in range(i + 1, len(user_partitions_list)):
                     pi = user_partitions_list[i]
                     pj = user_partitions_list[j]
                     dependency = self.__partition_depends_on(pi, pj)
@@ -157,14 +146,14 @@ class CapabilityBasedPartitioner:
                 assign(node, id)
 
             else:
-                partitions_size_by_id = [ [partitions_by_id[id].size(), id] for id in assigned_candidate_partition_ids]
+                partitions_size_by_id = [[partitions_by_id[id].size(), id] for id in assigned_candidate_partition_ids]
                 partitions_size_by_id = sorted(partitions_size_by_id, reverse=True)
 
                 id = partitions_size_by_id[0][1]
                 assign(node, id)
 
-        return partitions_by_id.values()
+        return list(partitions_by_id.values())
 
-    def fuse_partitions(self, partitions: List[Partition]):
+    def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
-        return fuse_by_partitions(self.module, [partition.nodes for partition in partitions] )
+        return fuse_by_partitions(self.graph_module, [list(partition.nodes) for partition in partitions])

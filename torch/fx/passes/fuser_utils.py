@@ -1,15 +1,17 @@
 from queue import SimpleQueue
-from typing import List, Optional, Dict
+from typing import List, Dict
 
 import torch.fx
-from torch.fx.graph import map_arg
+from torch.fx.graph_module import GraphModule
+from torch.fx.graph import Graph
+from torch.fx.node import Node
 from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 from torch.fx.passes.split_utils import HolderModule
 
 def topo_sort(nodes: NodeList) -> NodeList:
     # sort nodes according to the topological order
     indegree_map = {node : 0 for node in nodes}
-    candidates = SimpleQueue()
+    candidates: SimpleQueue = SimpleQueue()
 
     for node in nodes:
         for n in node.all_input_nodes:
@@ -28,6 +30,8 @@ def topo_sort(nodes: NodeList) -> NodeList:
                 indegree_map[n] -= 1
                 if indegree_map[n] == 0:
                     candidates.put(n)
+
+    assert len(nodes) == len(sorted_nodes), "topological sorted nodes doesn't have same length as input nodes"
 
     return sorted_nodes
 
@@ -48,6 +52,7 @@ def validate_partition(partition: NodeList) -> bool:
     # perform DFS on the parition outputs
     # if it reaches a node within the partition, then it found a cycle
     visited: NodeSet = set()
+
     def dfs_find_cycle(node):
         if node in partition_set:
             return False  # found cycle, return False for invalid
@@ -67,7 +72,7 @@ def validate_partition(partition: NodeList) -> bool:
 
 
 # TODO: copied from split_by_tags's impl, refactor split_by_tags to use this function
-def copy_module_attributes(gm: torch.fx.GraphModule, subgraph: torch.fx.Graph) -> HolderModule:
+def copy_module_attributes(gm: GraphModule, subgraph: Graph) -> HolderModule:
     # Loop through all module calls (call_module) and param fetches (get_attr)
     # in this component, creating HolderModules as necessary to match the path.
     # e.g. if in the original module there's a get_attr node fetches "conv.weight".
@@ -100,9 +105,9 @@ def copy_module_attributes(gm: torch.fx.GraphModule, subgraph: torch.fx.Graph) -
 
     return submodule
 
-def fuse_partition(gm: torch.fx.GraphModule,
+def fuse_partition(gm: GraphModule,
                    nodes: NodeList,
-                   partition_name: str) -> torch.fx.GraphModule:
+                   partition_name: str) -> GraphModule:
     # returns a graph module that is a copy of `nodes` in gm
     # assumption: nodes are already sorted in topo order
 
@@ -114,10 +119,10 @@ def fuse_partition(gm: torch.fx.GraphModule,
     # validates partition doesn't introduce dependency circles in the graph
     assert validate_partition(nodes), "Invalid partition, found dependency cycles"
 
-    subgraph = torch.fx.Graph()
+    subgraph = Graph()
 
-    node_to_placeholder = {}  # mapping of nodes from old graph to placeholder in new graph
-    node_map = {}       # mapping of nodes from old graph to new graph
+    node_to_placeholder: Dict[Node, Node] = {}  # mapping of nodes from old graph to placeholder in new graph
+    node_map: Dict[Node, Node] = {}       # mapping of nodes from old graph to new graph
 
     # handles inputs throught graph.node_copy's arg_transform functions
     def remap_inputs(x):
@@ -143,7 +148,7 @@ def fuse_partition(gm: torch.fx.GraphModule,
         node_map[node] = new_node
 
     # handles outputs
-    output_mapping = {}  # mapping from old output to new outputs
+    output_mapping: Dict[Node, Node] = {}  # mapping from old output to new outputs
 
     for node in nodes:
         for user_node in node.users:
@@ -166,7 +171,7 @@ def fuse_partition(gm: torch.fx.GraphModule,
 
     submodule = copy_module_attributes(gm, subgraph)
 
-    sub_gm = torch.fx.GraphModule(submodule, subgraph, class_name=partition_name)
+    sub_gm = GraphModule(submodule, subgraph, class_name=partition_name)
 
     # TODO: fix this
     sub_gm.name = partition_name
@@ -204,7 +209,7 @@ def insert_subgm(gm, sub_gm, original_nodes):
 
     return gm
 
-def fuse_by_partitions(gm: torch.fx.GraphModule, partitions: List[NodeList]) -> torch.fx.GraphModule:
+def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:
     for partition_id, nodes in enumerate(partitions):
         partition_name = "fused_" + str(partition_id)
 
