@@ -46,7 +46,6 @@ class OpOverload:
         return "<OpOverload(op='{}.{}', overload='{}')>".format(*self._schema.name.split("::"), self._overloadname)
 
     def __call__(self, *args, **kwargs):
-        print(self._schema, args, kwargs)
         return self._op(*args, **kwargs or {})
 
     def __getattr__(self, key):
