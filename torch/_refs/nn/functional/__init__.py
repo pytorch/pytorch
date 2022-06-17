@@ -164,12 +164,8 @@ def hardsigmoid(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     if inplace:
         raise NotImplementedError
 
-    le_neg3 = a <= -3
-    ge_3 = a >= 3
-    zeros = torch.zeros_like(a)
-    ones = torch.ones_like(a)
     other = torch.true_divide(a, 6) + 0.5
-    return torch.where(le_neg3, zeros, torch.where(ge_3, ones, other))
+    return refs.where(a <= -3, 0, refs.where(a >= 3, 1, other))
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
@@ -324,6 +320,14 @@ def softsign(a: TensorLikeType) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.softsign
     """
+
+    # This restriction is made because the type promotion rules of the 
+    # ops composing softsign impact the final answer for types like INT8.
+    # For instance, if softsign is int-to-float type promoted, the calculation
+    # abs(127) + 1 = 128. If softsign is not type promoted,
+    # abs(127) + 1 = -128 in INT8.
+    if (not utils.is_float_dtype(a.dtype)) and (not utils.is_complex_dtype(a.dtype)):
+        raise TypeError('softsign only supports floating and complex types.')
 
     return torch.true_divide(a, torch.abs(a) + 1)
 

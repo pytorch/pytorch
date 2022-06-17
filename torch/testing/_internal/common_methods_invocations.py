@@ -14634,7 +14634,8 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'nn.functional.softsign',
         ref=lambda x: x / (np.abs(x) + 1),
-        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_autograd=True,
@@ -20304,6 +20305,9 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.rrelu",
         torch_opinfo_name="nn.functional.rrelu",
+        op=lambda input, *args, **kwargs:
+            wrapper_set_seed(torch._refs.nn.functional.rrelu, input, *args, **kwargs),
+        gradcheck_wrapper=wrapper_set_seed,
         skips=(
             # The errors are from uniform not being tested and likely not having a seed reset
             # AssertionError: tensor(False) is not true : Reference result
@@ -20312,8 +20316,6 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback'),
             # RuntimeError: Tracing expected 4 arguments but got 1 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-            # AssertionError: Tensor-likes are not close!
-            DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -20343,6 +20345,8 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softsign",
         torch_opinfo_name="nn.functional.softsign",
+        dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
