@@ -19,11 +19,10 @@ class TestQuantizedTensor(unittest.TestCase):
     """
     def test_quantize_APoT_rand_1d(self):
         # generate random size of tensor2dequantize between 1 -> 16
-        # because there are 2**b = 2**4 quantization levels total
         size = random.randint(1, 16)
 
         # generate tensor with random fp values between 0 -> 1
-        tensor2quantize = torch.rand(size)
+        tensor2quantize = torch.rand((size), )
 
         qtensor = TensorAPoT(4, 1, False)
 
@@ -67,11 +66,45 @@ class TestQuantizedTensor(unittest.TestCase):
 
         self.assertTrue(torch.equal(apot_tens_data, uniform_quantized_tens))
 
+    """ Tests quantize_apot result (int representation) on random 1-dim tensor
+        and hardcoded values for b, k
+        * tensor2quantize: Tensor
+        * b: 6
+        * k: 2
+    """
+    def test_quantize_APoT_rand_k_2(self):
+        # generate random size of tensor2dequantize
+        size = random.randint(1, 16)
+
+        # initialize quantize APoT tensor to dequantize:
+        # generate tensor with random values between 0 -> 2**4 = 16
+        # because there are 2**b = 2**4 quantization levels total
+        tensor2dequantize = 16 * torch.rand(size)
+        apot_tens = TensorAPoT(4, 2, False)
+        apot_tens.data = tensor2dequantize.int()
+
+        dequantized_result = apot_tens.dequantize()
+
+        quantization_levels = apot_tens.quantization_levels
+        level_indices = apot_tens.level_indices
+
+        input_lst = list(apot_tens.data)
+        result_lst = list(dequantized_result)
+
+        expected_result = True
+
+        for ele, res in zip(input_lst, result_lst):
+            idx = list(level_indices).index(ele)
+            if res != quantization_levels[idx]:
+                expected_result = False
+
+        self.assertTrue(expected_result)
+
     r""" Tests quantize_APoT result (reduced precision fp representation) on random 1-dim tensor
         and hardcoded values for b, k by comparing to int representation
         * tensor2quantize: Tensor
         * b: 4
-        * k: 1
+        * k: 2
     """
     def test_quantize_APoT_reduced_precision(self):
         # generate random size of tensor2dequantize between 1 -> 16
