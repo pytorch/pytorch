@@ -83,8 +83,14 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                     fd.add_output(o)
 
             nv_results = fusion.execute(
-                (*(arg for arg in args if isinstance(arg, torch.Tensor) or isinstance(arg, Number)),
-                 *const_tensors)
+                (
+                    *(
+                        arg
+                        for arg in args
+                        if isinstance(arg, torch.Tensor) or isinstance(arg, Number)
+                    ),
+                    *const_tensors,
+                )
             )
 
             results = []
