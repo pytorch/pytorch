@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
-#include <aten/src/ATen/core/jit_type.h>
+#include <ATen/core/jit_type.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
