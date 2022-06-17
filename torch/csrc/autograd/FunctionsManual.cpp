@@ -20,7 +20,6 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <c10/core/TensorOptions.h>
-#include <c10/util/OptionalArrayRef.h>
 #include <c10/util/SmallBuffer.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -39,7 +38,6 @@ namespace details {
 
 using at::areAnyTensorSubclassLike;
 using at::IntArrayRef;
-using at::OptionalIntArrayRef;
 using at::Scalar;
 using at::Tensor;
 using at::TensorList;
@@ -537,11 +535,8 @@ Tensor deg2rad_backward(const Tensor& grad) {
   return at::mul(grad, at::native::wrapped_scalar_tensor(Scalar(M_PI_180)));
 }
 
-Tensor unsqueeze_multiple(
-    const Tensor& t,
-    OptionalIntArrayRef opt_dim,
-    size_t n_dims) {
-  auto dims_to_unsqueeze = at::dim_list_to_bitset(opt_dim, n_dims);
+Tensor unsqueeze_multiple(const Tensor& t, IntArrayRef dim, size_t n_dims) {
+  auto dims_to_unsqueeze = at::dim_list_to_bitset(dim, n_dims);
   Tensor res = t;
   for (const auto i : c10::irange(n_dims)) {
     if (dims_to_unsqueeze[i]) {
@@ -554,13 +549,13 @@ Tensor unsqueeze_multiple(
 Tensor sum_backward(
     const Tensor& grad,
     IntArrayRef sizes,
-    OptionalIntArrayRef opt_dims,
+    IntArrayRef dims,
     bool keepdim) {
   if (!keepdim && sizes.size() > 0) {
-    if (opt_dims.has_value() && opt_dims.value().size() == 1) {
-      return grad.unsqueeze(opt_dims.value()[0]).expand(sizes);
+    if (dims.size() == 1) {
+      return grad.unsqueeze(dims[0]).expand(sizes);
     } else {
-      Tensor res = unsqueeze_multiple(grad, opt_dims, sizes.size());
+      Tensor res = unsqueeze_multiple(grad, dims, sizes.size());
       return res.expand(sizes);
     }
   } else {
@@ -3652,7 +3647,14 @@ Tensor linalg_eig_backward(
     auto ret = std::move(VhgV).div_(std::move(Econj));
 
     if (gL.defined()) {
-      ret.diagonal(0, -2, -1).copy_(gL);
+      // For CompositeCompliance, if `gL` is subclass but `ret`
+      // is a regular Tensor, then use out-of-place version of diagonal
+      // copy aka `diagonal_scatter`.
+      if (at::isTensorSubclassLike(gL)) {
+        ret = ret.diagonal_scatter(gL, 0, -2, -1);
+      } else {
+        ret.diagonal(0, -2, -1).copy_(gL);
+      }
     }
     return ret;
   }();
