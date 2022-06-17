@@ -10624,16 +10624,16 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('clamp_min',
                     aliases=('multiply',),
-                    ref=_clamp_numpy,
+                    ref=_clamp_min_numpy,
                     dtypes=all_types_and(torch.bfloat16, torch.float16, torch.bool),
                     dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16, torch.float16, torch.bool),
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-           skips=(
+           #skips=(
                # https://github.com/pytorch/pytorch/issues/55907
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-           ),
+               #DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+           #),
                     supports_two_python_scalars=True),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
