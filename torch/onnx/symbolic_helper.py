@@ -3,7 +3,7 @@ import functools
 import inspect
 import sys
 import warnings
-from typing import Optional, Set
+from typing import Optional, Set, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1129,13 +1129,17 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
     return weight, bias, running_mean, running_var
 
 
-def _avgpool_helper(tuple_fn, padding, kernel_size, stride, divisor_override, name):
+def _avgpool_helper(
+    tuple_fn,
+    padding: Union[int, Tuple[int, ...]],
+    kernel_size,
+    stride,
+    divisor_override,
+    name,
+) -> Tuple[int]:
     if divisor_override and divisor_override.node().kind() != "prim::Constant":
-        return _unimplemented(name, "divisor_override")
-    if not stride:
-        stride = kernel_size
-    padding = tuple(tuple_fn(padding))
-    return padding
+        _unimplemented(name, "divisor_override")
+    return tuple(tuple_fn(padding))
 
 
 def check_training_mode(op_train_mode: int, op_name: str) -> None:

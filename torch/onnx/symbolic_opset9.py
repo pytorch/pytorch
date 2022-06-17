@@ -8,7 +8,7 @@ import functools
 import math
 import sys
 import warnings
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1388,15 +1388,16 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Tuple[int, ...],
+        stride: Tuple[int, ...],
+        padding: Union[int, Tuple[int, ...]],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         if not stride:
@@ -1404,8 +1405,6 @@ def _avg_pool(name, tuple_fn):
         padding = symbolic_helper._avgpool_helper(
             tuple_fn, padding, kernel_size, stride, divisor_override, name
         )
-        if ceil_mode:
-            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
         if count_include_pad:
             input = g.op(
                 "Pad",
@@ -1414,17 +1413,18 @@ def _avg_pool(name, tuple_fn):
                 mode_s="constant",
                 value_f=0.0,
             )
-            padding = (0,) * len(padding)
+            result_padding = (0,) * len(padding)
         if ceil_mode:
-            padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
+            padding_ceil = get_pool_ceil_padding(input, kernel_size, stride, padding)
+            result_padding = padding + tuple(a + b for (a, b) in zip(padding_ceil, padding))
         else:
-            padding = padding * 2
+            result_padding = padding * 2
         output = g.op(
             "AveragePool",
             input,
             kernel_shape_i=tuple_fn(kernel_size),
             strides_i=tuple_fn(stride),
-            pads_i=padding,
+            pads_i=result_padding,
         )
         return output
 
