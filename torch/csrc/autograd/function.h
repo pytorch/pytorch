@@ -426,8 +426,21 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
     return post_hooks_;
   }
 
-  void add_pre_hook(std::unique_ptr<FunctionPreHook>&& pre_hook) {
+  uintptr_t add_pre_hook(std::unique_ptr<FunctionPreHook>&& pre_hook) {
     pre_hooks_.push_back(std::move(pre_hook));
+    // Use the raw pointer as the unique key to identify this hook. This key
+    // can then be used in del_post_hook(key) to remove this hook.
+    return reinterpret_cast<std::uintptr_t>(pre_hooks_.back().get());
+  }
+
+  bool del_pre_hook(const uintptr_t& key) {
+    for (auto it = pre_hooks_.begin(); it != pre_hooks_.end(); ++it) {
+      if (key == reinterpret_cast<std::uintptr_t>(it->get())) {
+        pre_hooks_.erase(it);
+        return true;
+      }
+    }
+    return false;
   }
 
   const std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks()

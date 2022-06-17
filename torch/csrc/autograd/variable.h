@@ -186,7 +186,7 @@ TORCH_API const std::vector<std::shared_ptr<FunctionPreHook>>& hooks(
     const Variable&);
 TORCH_API void clear_hooks(const at::TensorBase&);
 
-TORCH_API void create_cpp_hook(const at::TensorBase&);
+TORCH_API void create_cpp_hook(const at::TensorBase&, bool use_existing_hook_list);
 } // namespace impl
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,6 +224,10 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
 
   // Only meaningful on non-leaf variables (must be false otherwise)
   bool retains_grad_;
+
+  // When CppFunctionPreHook is registered as a prehook on the grad_fn,
+  // this value is returned
+  uintptr_t grad_fn_prehook_key;
 
   bool is_view_;
 
@@ -284,6 +288,7 @@ struct TORCH_API AutogradMeta : public c10::AutogradMetaInterface {
     retains_grad_ = false;
     is_view_ = false;
     output_nr_ = gradient_edge.input_nr;
+    grad_fn_prehook_key = 0;
 
     // set_requires_grad also checks error conditions.
     if (requires_grad) {

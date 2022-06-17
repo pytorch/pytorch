@@ -181,19 +181,29 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
   }
 
   set_gradient_edge(self, std::move(gradient_edge));
+  if (self.retains_grad()) {
+    auto old_fn = self.grad_fn()->next_edges()[0].function;
+    old_fn->del_pre_hook(materialize_autograd_meta(self)->grad_fn_prehook_key);
+    create_cpp_hook(self, /*use_existing_hook_list=*/true);
+  }
 }
 
-void create_cpp_hook(const at::TensorBase& self) {
-  auto& list = materialize_autograd_meta(self)->cpp_hooks_list_;
-  // NOLINTNEXTLINE(modernize-make-shared)
-  list.reset(new hooks_list());
+void create_cpp_hook(const at::TensorBase& self, bool use_existing_hook_list) {
+  auto meta = materialize_autograd_meta(self);
+  auto& list = meta->cpp_hooks_list_;
+  if (!use_existing_hook_list) {
+    // NOLINTNEXTLINE(modernize-make-shared)
+    list.reset(new hooks_list());
+  }
   std::unique_ptr<FunctionPreHook> hook_ptr(
       new CppFunctionPreHook(list, self.output_nr()));
-  clear_hooks(self);
+  if (!use_existing_hook_list) {
+    clear_hooks(self);
+  }
   add_hook(self, std::make_shared<CppFunctionPreHook>(list, 0));
   const auto& fn = self.grad_fn();
   if (fn) {
-    fn->add_pre_hook(std::move(hook_ptr));
+    meta->grad_fn_prehook_key = fn->add_pre_hook(std::move(hook_ptr));
   }
 }
 
@@ -692,7 +702,7 @@ unsigned VariableHooks::_register_hook(
   // NB: materialize_autograd_meta unnecessary due to requires grad check
   auto& list = torch::autograd::impl::get_autograd_meta(self)->cpp_hooks_list_;
   if (!list) {
-    torch::autograd::impl::create_cpp_hook(self);
+    torch::autograd::impl::create_cpp_hook(self, /*use_existing_hook_list=*/false);
   }
   unsigned idx = list->size();
   list->push_back(hook);
