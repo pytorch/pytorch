@@ -21,6 +21,17 @@ import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
 
 
+__all__ = [
+    "always_wrap_policy",
+    "lambda_auto_wrap_policy",
+    "transformer_auto_wrap_policy",
+    "size_based_auto_wrap_policy",
+    "enable_wrap",
+    "wrap",
+    "ParamExecOrderWrapPolicy",
+]
+
+
 def always_wrap_policy(*args, **kwargs) -> bool:
     """
     A simple wrapper policy that always returns ``True``,
