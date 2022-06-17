@@ -816,13 +816,10 @@ def _copysign(
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        if a.device != torch.device("cpu") and b.ndim == 0:
-            b = prims.device_put(b, device=a.device)
-        else:
-            msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
-                a.device, b.device
-            )
-            raise RuntimeError(msg)
+        msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+            a.device, b.device
+        )
+        raise RuntimeError(msg)
     return where(signbit(b), neg(abs(a)), abs(a))
 
 
