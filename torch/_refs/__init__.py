@@ -1102,10 +1102,7 @@ def clamp(
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
 # TODO: implement alternate where
-# only registering `where.self` because we want to avoid registering
-# for CompositeAutogradImplicit of `where.Scalar` etc
-# see: https://github.com/pytorch/pytorch/issues/79734
-@register_decomposition(torch.ops.aten.where.self)
+@register_decomposition(torch.ops.aten.where)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
