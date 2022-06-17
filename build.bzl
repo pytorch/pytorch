@@ -46,7 +46,7 @@ def define_targets(rules):
     ] + rules.glob(["aten/src/ATen/templates/*"])
 
     gen_aten_cmd = " ".join([
-        "$(location //torchgen:gen)",
+        "$(execpath //torchgen:gen)",
         "--install_dir=$(RULEDIR)/aten/src/ATen/",
         "--source-path aten/src/ATen",
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
@@ -99,7 +99,7 @@ def define_targets(rules):
         ],
         tools = ["//tools/setup_helpers:generate_code"],
         outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
-        cmd = "$(location //tools/setup_helpers:generate_code) " +
+        cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
@@ -119,7 +119,7 @@ def define_targets(rules):
             ":version.txt",
         ],
         outs = ["torch/csrc/api/include/torch/version.h"],
-        cmd = "$(location //tools/setup_helpers:gen_version_header) " +
+        cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
               "--template-path $(location :torch/csrc/api/include/torch/version.h.in) " +
               "--version-path $(location :version.txt) --output-path $@ ",
         tools = ["//tools/setup_helpers:gen_version_header"],
@@ -176,6 +176,8 @@ GENERATED_H_CORE = [
     "aten/src/ATen/CPUFunctions_inl.h",
     "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeExplicitAutogradNonFunctionalFunctions.h",
+    "aten/src/ATen/CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
     "aten/src/ATen/MetaFunctions.h",
@@ -183,6 +185,7 @@ GENERATED_H_CORE = [
     "aten/src/ATen/core/TensorBody.h",
     "aten/src/ATen/MethodOperators.h",
     "aten/src/ATen/core/aten_interned_strings.h",
+    "aten/src/ATen/core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [
@@ -211,6 +214,7 @@ GENERATED_CPP = [
     "aten/src/ATen/RegisterZeroTensor.cpp",
     "aten/src/ATen/RegisterMeta.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "aten/src/ATen/CompositeViewCopyKernels.cpp",
     "aten/src/ATen/RegisterSchema.cpp",
     "aten/src/ATen/RegisterFunctionalization_0.cpp",
@@ -268,6 +272,7 @@ _GENERATED_AUTOGRAD_PYTHON_CPP = [
     "torch/csrc/autograd/generated/python_fft_functions.cpp",
     "torch/csrc/autograd/generated/python_linalg_functions.cpp",
     "torch/csrc/autograd/generated/python_return_types.cpp",
+    "torch/csrc/autograd/generated/python_enum_tag.cpp",
     "torch/csrc/autograd/generated/python_sparse_functions.cpp",
     "torch/csrc/autograd/generated/python_special_functions.cpp",
     "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
