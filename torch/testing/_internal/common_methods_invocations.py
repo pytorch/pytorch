@@ -20262,6 +20262,9 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.prelu",
+        torch_opinfo_name="nn.functional.prelu",),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
