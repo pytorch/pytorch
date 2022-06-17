@@ -113,7 +113,6 @@ def checkUplo(uplo: str):
     ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
 
 
-@torch.library.impl(meta_lib, "linalg_eigh")
 def meta_linalg_eigh(self, uplo="L"):
     squareCheckInputs(self, "linalg_eigh")
     checkUplo(uplo)
