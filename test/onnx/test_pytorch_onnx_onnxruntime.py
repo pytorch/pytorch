@@ -49,7 +49,6 @@ from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 import torch
 import torch.nn.functional as F
-import torch.onnx._constants as _constants
 import torch.onnx.verification as verification
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
@@ -128,9 +127,11 @@ def _parameterized_class_attrs_and_values():
     attrs = ("opset_version", "is_script", "keep_initializers_as_inputs")
     input_values = []
     input_values.extend(itertools.product((7, 8), (True, False), (True,)))
+    # Valid opset versions are defined in torch/onnx/_constants.py.
+    # Versions are intentionally set statically, to not be affected by elsewhere changes.
     input_values.extend(
         itertools.product(
-            _constants.onnx_constant_folding_opsets, (True, False), (True, False)
+            range(9, 17), (True, False), (True, False)
         )
     )
     return {"attrs": attrs, "input_values": input_values}

@@ -27,10 +27,11 @@ if [[ $PARALLEL == 1 ]]; then
     pip install pytest-xdist
 fi
 
-pip install pytest scipy hypothesis # these may not be necessary
-pip install pytest-cov # installing since `coverage run -m pytest ..` doesn't work
+# pytest, scipy, hypothesis: these may not be necessary
+# pytest-cov: installing since `coverage run -m pytest ..` doesn't work
+# parameterized: parameterizing test class
+pip install pytest scipy hypothesis pytest-cov parameterized
 pip install -e tools/coverage_plugins_package # allows coverage to run w/o failing due to a missing plug-in
-pip install parameterized # parameterizing test class
 
 # realpath might not be available on MacOS
 script_path=$(python -c "import os; import sys; print(os.path.realpath(sys.argv[1]))" "${BASH_SOURCE[0]}")
@@ -78,7 +79,7 @@ fi
 if [[ "${SHARD_NUMBER}" == "2" ]]; then
   # Heavy memory usage tests that cannot run in parallel.
   pytest "${args[@]}" \
-    "$top_dir/test/onnx/test_models.py" \
+    "$top_dir/test/onnx/test_models.py" \  # TODO(#79802): Parameterize test_models.py
     "$top_dir/test/onnx/test_models_onnxruntime.py" "-k" "TestModelsONNXRuntime"
 
   pytest "${args[@]}" "${args_parallel[@]}" \

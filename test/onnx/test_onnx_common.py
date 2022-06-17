@@ -32,7 +32,7 @@ pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 
-def _run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
+def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
@@ -80,7 +80,7 @@ class _TestONNXRuntime(unittest.TestCase):
         verbose=False,
     ):
         def _run_test(m, remained_onnx_input_idx, flatten=True):
-            return _run_model_test(
+            return run_model_test(
                 self,
                 m,
                 input_args=input_args,
