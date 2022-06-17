@@ -7494,6 +7494,14 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
         yield SampleInput(a, args=(b, c))
 
 
+def _clamp_min_numpy(a, min=None):
+    return np.maximum(a, min)
+
+
+def _clamp_max_numpy(a, max=None):
+    return np.minimum(a, max)
+
+
 def _clamp_numpy(a, min=None, max=None):
     if min is None:
         return np.minimum(a, max)
@@ -10616,7 +10624,9 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('clamp_min',
                     aliases=('multiply',),
-                    dtypes=all_types_and_complex_and(torch.chalf, torch.float16, torch.bfloat16, torch.bool),
+                    ref=_clamp_numpy,
+                    dtypes=all_types_and(torch.bfloat16),
+                    dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16),
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
