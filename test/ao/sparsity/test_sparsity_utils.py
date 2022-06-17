@@ -5,9 +5,6 @@
 import logging
 
 import torch
-import torch.ao.quantization as tq
-from torch import nn
-from torch.ao import sparsity
 from torch.ao.sparsity.sparsifier.utils import (
     fqn_to_module,
     get_arg_info_from_tensor_fqn,
