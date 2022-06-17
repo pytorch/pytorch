@@ -3,6 +3,7 @@
 #include "torch/csrc/autograd/FunctionsManual.h"
 
 #include <ATen/RedispatchFunctions.h>
+#include <ATen/core/TorchDispatchModeTLS.h>
 #include <torch/library.h>
 
 
@@ -32,6 +33,7 @@ using namespace at;
 using namespace torch::autograd::generated;
 using namespace torch::autograd::generated::details;
 
+
 namespace torch { namespace autograd {
 
 namespace VariableType {
@@ -45,6 +47,8 @@ namespace{
 }
 
 namespace {
+
+
 ${type_derived_method_definitions}
 }
 }
