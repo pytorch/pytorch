@@ -4012,7 +4012,8 @@ Tensor linalg_det_backward(
     auto LU_ =
         LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
     auto use_A_T = A.is_contiguous() && !A.is_complex();
-    return at::linalg_lu_solve(LU_, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
+    return at::linalg_lu_solve(
+        LU_, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
     // If we want to compute further gradients, we need to recompute the LU
     // decomposition so that autograd computes the correct gradients wrt to A
@@ -4039,7 +4040,9 @@ std::tuple<Tensor, Tensor> slogdet_jvp(
     const bool use_A_T) {
   // No need to handle the singular case separately as we do in det since
   // this function is not differentiable on singular matrices
-  auto trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/true, use_A_T).diagonal(0, -2, -1).sum(-1);
+  auto trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
+                     .diagonal(0, -2, -1)
+                     .sum(-1);
   if (LU.is_complex()) {
     auto i = c10::complex<double>{0.0, 1.0};
     return {at::imag(trAinvE) * (i * sign), at::real(trAinvE)};
@@ -4100,7 +4103,8 @@ Tensor slogdet_backward(
   auto d = at::diag_embed(g.unsqueeze(-1).expand_as(pivots));
   if (!at::GradMode::is_enabled()) {
     auto use_A_T = A.is_contiguous() && !A.is_complex();
-    return at::linalg_lu_solve(LU, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
+    return at::linalg_lu_solve(
+        LU, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
     // If we want to compute further gradients, we need to recompute the LU
     // decomposition so that autograd computes the correct gradients wrt to A
