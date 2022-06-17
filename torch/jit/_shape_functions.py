@@ -93,10 +93,9 @@ def repeat(self: List[int], repeats: List[int]):
     tensor_dim = len(self)
     if tensor_dim > ndim:
          raise AssertionError(
-            "The dims of tensor must be less than or equal to"
-            "the size of repeats".format(tensor_dim, ndim)
+            "The dims of tensor ({}) must be less than or equal to"
+            "the size of repeats ({})".format(tensor_dim, ndim)
         )
- 
     if ndim == 0:
         return _copy(self)
     out: List[int] = []
