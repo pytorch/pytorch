@@ -421,6 +421,7 @@ class TestFXGraphPasses(JitTestCase):
         ]
 
         device = 'cuda'
+        draw = False
 
         for dir in test_cases:
             path = dir.split('/')
@@ -435,10 +436,11 @@ class TestFXGraphPasses(JitTestCase):
             m = module.FxModule()
             traced = symbolic_trace(m)
 
-            # print("Drawing original graph...")
-            # drawer = FxGraphDrawer(traced, "test")
-            # dot_graph = drawer.get_dot_graph()
-            # dot_graph.write_png("before.png")
+            if draw:
+                print("Drawing original graph...")
+                drawer = FxGraphDrawer(traced, "test")
+                dot_graph = drawer.get_dot_graph()
+                dot_graph.write_png("before.png")
 
             supported_ops = NvFuserOperatorSupport()
             partitioner = CapabilityBasedPartitioner(traced, supported_ops)
@@ -454,7 +456,7 @@ class TestFXGraphPasses(JitTestCase):
             for partition in partitions:
                 count = 0
                 for node in partition.nodes:
-                    if node.target.__name__ != "getitem":
+                    if node.target.__name__ not in {"view", "getitem"}:
                         count += 1
                 if count > 1:
                     filtered_partitions.append(partition)
@@ -469,10 +471,11 @@ class TestFXGraphPasses(JitTestCase):
             print("Fusing partitions...")
             fused_graph = partitioner.fuse_partitions(partitions)
 
-            # print("Drawing fused graph...")
-            # drawer = FxGraphDrawer(fused_graph, "test")
-            # dot_graph = drawer.get_dot_graph()
-            # dot_graph.write_png("after.png")
+            if draw:
+                print("Drawing fused graph...")
+                drawer = FxGraphDrawer(fused_graph, "test")
+                dot_graph = drawer.get_dot_graph()
+                dot_graph.write_png("after.png")
 
             try:
                 print("Generating testing data...")

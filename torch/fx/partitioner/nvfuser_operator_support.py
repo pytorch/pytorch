@@ -253,6 +253,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten._batch_norm_impl_index": None,
             "torch.ops.aten.native_batch_norm": None,
             "torch.ops.aten.batch_norm": None,
+            "torch.ops.aten.cudnn_batch_norm": None,
             "torch.ops.aten._batch_norm_impl_index_backward": None,
             "torch.ops.aten.native_batch_norm_backward": None,
             "torch.ops.aten.native_layer_norm": None,
