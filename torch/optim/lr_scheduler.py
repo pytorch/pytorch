@@ -753,7 +753,7 @@ class CosineAnnealingLR(_LRScheduler):
 
 class ChainedScheduler(_LRScheduler):
     """Chains list of learning rate schedulers. It takes a list of chainable learning
-    rate schedulers and performs consecutive step() functions belong to them by just
+    rate schedulers and performs consecutive step() functions belonging to them by just
     one call.
 
     Args:
