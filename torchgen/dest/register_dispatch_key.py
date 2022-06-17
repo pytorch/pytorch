@@ -618,9 +618,9 @@ check_inplace(out, sizes, options);
 const auto& out = outputs_[output_idx].get();
 resize_out(out, sizes, strides, options);
 {create_proxy}"""
-        elif k is SchemaKind.mutable:
+        elif k is SchemaKind.mutable or k is SchemaKind.scratch:
             raise AssertionError(
-                "SchemaKind.mutable structured operators are currently not supported"
+                f"{k} structured operators are currently not supported"
             )
         else:
             assert_never(k)
@@ -637,9 +637,9 @@ resize_out(out, sizes, strides, options);
             out_args = ", ".join(f"Tensor& out{i}" for i in range(returns))
             out_refs = ", ".join(f"std::ref(out{i})" for i in range(returns))
             return f"{class_name}({out_args}) : outputs_{{ {out_refs} }} {{}}"
-        elif k is SchemaKind.mutable:
+        elif k is SchemaKind.mutable or k is SchemaKind.scratch:
             raise AssertionError(
-                "SchemaKind.mutable structured operators are currently not supported"
+                f"{k} structured operators are currently not supported"
             )
         else:
             assert_never(k)
