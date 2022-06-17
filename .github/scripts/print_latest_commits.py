@@ -19,7 +19,7 @@ def get_latest_commits() -> List[str]:
             "-n",
             "1",
             "--pretty=format:%H",
-            "upstream/viable/strict",
+            "origin/viable/strict",
         ],
         encoding="ascii",
     )
@@ -28,7 +28,7 @@ def get_latest_commits() -> List[str]:
             "git",
             "rev-list",
             f"{latest_viable_commit}^..HEAD",
-            "--remotes=*upstream/master",
+            "--remotes=*origin/master",
         ],
         encoding="ascii",
     ).splitlines()
