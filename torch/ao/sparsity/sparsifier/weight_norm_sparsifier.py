@@ -6,6 +6,8 @@ import torch.nn.functional as F
 
 from .base_sparsifier import BaseSparsifier
 
+__all__ = ["WeightNormSparsifier"]
+
 def _flat_idx_to_2d(idx, shape):
     rows = idx // shape[1]
     cols = idx % shape[1]
