@@ -17,6 +17,7 @@ class TensorAPoT(torch.Tensor):
     quantization_levels: torch.Tensor
     level_indices: torch.Tensor
     data: torch.Tensor
+    apot_repr: APoTRepr
 
     def __init__(
         self,
@@ -49,6 +50,7 @@ class TensorAPoT(torch.Tensor):
         result: APoT representation of tensor2quantize (integer or reduced precision fp)
     """
     def quantize_APoT(self, tensor2quantize: Tensor, apot_repr: APoTRepr):
+        self.apot_repr = apot_repr
         if apot_repr == APoTRepr.level_indices:
             # map float_to_apot over tensor2quantize elements
             self.data = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
