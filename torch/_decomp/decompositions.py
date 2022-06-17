@@ -662,7 +662,7 @@ def native_dropout(input: Tensor, p: float, train: Optional[bool]):
 @register_decomposition(aten._softmax)
 @pw_cast_for_opmath
 def _softmax(x: Tensor, dim: int, half_to_float: bool):
-    x_max = torch.max(x, dim, keepdim=True)[0]
+    x_max = torch.amax(x, dim, keepdim=True)
     unnormalized = torch.exp(x - x_max)
     return unnormalized / torch.sum(unnormalized, dim, keepdim=True)
 
@@ -671,7 +671,7 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
 @register_decomposition(aten._log_softmax)
 @pw_cast_for_opmath
 def _log_softmax(x: Tensor, dim: int, half_to_float: bool):
-    x_max = torch.max(x, dim, keepdim=True)[0]
+    x_max = torch.amax(x, dim, keepdim=True)
     shifted = x - x_max
     shifted_logsumexp = torch.log(torch.sum(torch.exp(shifted), dim, keepdim=True))
     return shifted - shifted_logsumexp
