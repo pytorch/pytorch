@@ -393,7 +393,7 @@ def gather_leaf_tensors(args, kwargs):
 # Checks if the backward formula is composite compliant by testing
 # all possible permutations of {inputs, grad_outputs} being
 # CompositeCompliantTensor or regular Tensors.
-def check_backward_formula(op, args, kwargs):
+def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
     assert op.supports_autograd
     CCT = generate_cct()
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
@@ -402,7 +402,9 @@ def check_backward_formula(op, args, kwargs):
         assert len(leaf_tensors) > 0
 
         try:
-            results = op(*new_args, **new_kwargs)
+            results = op.gradcheck_wrapper(op.get_op(), *new_args, **new_kwargs)
+            if output_process_fn_grad is not None:
+                results = output_process_fn_grad(results)
         # see NOTE: [What errors are Composite Compiance trying to catch?]
         except RuntimeError as err:
             raise_composite_compliance_error(
