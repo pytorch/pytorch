@@ -546,6 +546,24 @@ class TestAOTModuleSimplified(TestCase):
         assert torch.allclose(inputs[1].grad, cloned_inputs[1].grad)
 
 
+class TestRandom(TestCase):
+    def test_preserve_random(self):
+        def fn(x):
+            return torch.nn.functional.dropout(x, 0.5) + x
+
+
+        x = torch.randn(4)
+
+        torch.manual_seed(0)
+        ref = fn(x)
+
+        torch.manual_seed(0)
+        aot_fn = aot_function(fn, nop)
+        res = aot_fn(x)
+
+        assert torch.allclose(ref, res)
+
+
 only_for = ("cpu")
 instantiate_device_type_tests(
     TestPythonKey,
