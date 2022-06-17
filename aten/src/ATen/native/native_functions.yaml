@@ -9222,25 +9222,8 @@
     CPU, CUDA: mse_loss_backward
     MPS: mse_loss_backward_mps
 
-- func: l1_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: l1_loss_out
-
 - func: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: l1_loss
-
-- func: l1_loss_backward.grad_input(Tensor grad_output, Tensor self, Tensor target, int reduction, *, Tensor(a!) grad_input) -> Tensor(a!)
-  python_module: nn
-  dispatch:
-    CPU, CUDA: l1_loss_backward_out
-
-- func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  python_module: nn
-  dispatch:
-    CompositeExplicitAutograd: l1_loss_backward
 
 - func: multi_margin_loss.out(Tensor self, Tensor target, Scalar p=1, Scalar margin=1, Tensor? weight=None, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
