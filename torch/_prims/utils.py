@@ -24,15 +24,26 @@ if torch.cuda.is_available():
         torch.int: DataType.Int32,
         torch.bool: DataType.Bool,
     }
+
+    _python_dtype_to_nvfuser_dtype_map = {
+        complex: DataType.ComplexDouble,
+        float: DataType.Double,
+        int: DataType.Int,
+        bool: DataType.Bool,
+    }
 else:
     _torch_dtype_to_nvfuser_dtype_map = {}
+    _python_dtype_to_nvfuser_dtype_map = {}
 
 
-def getnvFuserDtype(dtype: torch.dtype):
+def getnvFuserDtype(dtype: Union[torch.dtype, type]):
     """
     Translates from torch.dtype to nvFuser's DataType enum
     """
-    return _torch_dtype_to_nvfuser_dtype_map[dtype]
+    if isinstance(dtype, torch.dtype):
+        return _torch_dtype_to_nvfuser_dtype_map[dtype]
+    else:
+        return _python_dtype_to_nvfuser_dtype_map[dtype]
 
 
 ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]

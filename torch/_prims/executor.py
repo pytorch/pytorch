@@ -45,30 +45,25 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                     args = tuple(map(_to_nvfuser_constant, args))
                     target = target.impl_nvfuser
                     args = (fd,) + args
-                    nv_args = [to_nv(x) for x in args]
-                    nv_kwargs = {k: to_nv(v) for k, v in kwargs.items()}
-                    return target(*nv_args, **nv_kwargs)
+                    return target(*args, **kwargs)
 
             def to_nv(arg):
                 if isinstance(arg, torch.Tensor):
                     x = fd.define_tensor(
                         arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
                     )
+                    fd.add_input(x)
                     return x
                 elif isinstance(arg, Number):
-                    return fd.define_constant(arg)
+                    x = fd.define_scalar(getnvFuserDtype(type(arg)))
+                    fd.add_input(x)
+                    return x
                 else:
                     return arg
 
-            def add_inputs(arg):
-                x = to_nv(arg)
-                if isinstance(x, TensorView):
-                    fd.add_input(x)
-                return x
-
             # Transforms graph to call nvfuser lowerings
-            nv_args = tree_map(add_inputs, args)
-            nv_kwargs = tree_map(add_inputs, kwargs)
+            nv_args = tree_map(to_nv, args)
+            nv_kwargs = tree_map(to_nv, kwargs)
 
             out = FusionInterpreter(gm).run(*nv_args, **nv_kwargs)
             flat_out, unflatten_spec = torch.utils._pytree.tree_flatten(out)
@@ -77,7 +72,7 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                     fd.add_output(o)
 
             nv_results = fusion.execute(
-                tuple(arg for arg in args if isinstance(arg, torch.Tensor))
+                tuple(arg for arg in args if isinstance(arg, torch.Tensor) or isinstance(arg, Number))
             )
 
             results = []
