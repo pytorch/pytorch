@@ -145,6 +145,7 @@ __all__ = [
     #
     # Conditional references
     #
+    "masked_fill",
     "where",
     #
     # Data conversion and movement references
@@ -192,6 +193,7 @@ __all__ = [
     "hstack",
     "narrow",
     "permute",
+    "ravel",
     "reshape",
     "roll",
     "rot90",
@@ -516,6 +518,41 @@ def log2(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def log10(a):
     return prims.log10(a)
+
+
+@out_wrapper
+def log_softmax(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    result_dtype = dtype or a.dtype
+    computation_dtype = utils.get_computation_dtype(a.dtype)
+    a_ = _maybe_convert_to_dtype(a, computation_dtype)
+    return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
+
+
+@out_wrapper
+def logsumexp(
+    a: TensorLikeType,
+    dim: DimsType,
+    keepdim: bool = False,
+) -> TensorLikeType:
+    dim = utils.canonicalize_dims(a.ndim, dim)
+    # ATen specifies int[1] type dims which expands integers to tuples of length 1
+    if not isinstance(dim, Iterable):
+        dim = (dim,)
+    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
+        # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
+        a_max = amax(a, dim, keepdim=True)
+        a_max = where(abs(a_max) == float("inf"), 0.0, a_max)
+        a_max_squeezed = prims.squeeze(a_max, dim) if not keepdim else a_max
+        result = log(sum(exp(a - a_max), dim, keepdim=keepdim)) + a_max_squeezed
+    else:
+        # This case covers boolean and integer dtypes and we use non-stabilized computation
+        result = log(sum(exp(a), dim, keepdim=keepdim))
+    return result
 
 
 @register_decomposition(torch.ops.aten.nan_to_num)
@@ -1108,8 +1145,8 @@ def clamp(
 )
 def where(
     pred: Tensor,
-    a: Optional[Union[TensorLikeType, NumberType]] = None,
-    b: Optional[Union[TensorLikeType, NumberType]] = None,
+    a: Optional[TensorOrNumberLikeType] = None,
+    b: Optional[TensorOrNumberLikeType] = None,
 ):
     """ """
 
@@ -1348,7 +1385,7 @@ def amin(
 
 def amax(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     out: Optional[Tensor] = None,
@@ -2016,6 +2053,24 @@ def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
 
 @out_wrapper
+def softmax(
+    a: TensorLikeType,
+    dim: int,
+    *,
+    dtype: Optional[torch.dtype] = None,
+) -> TensorLikeType:
+    result_dtype = dtype or a.dtype
+    computation_dtype = utils.get_computation_dtype(a.dtype)
+    a_ = _maybe_convert_to_dtype(a, computation_dtype)
+    assert isinstance(a_, TensorLike)  # to avoid MyPy error for amax
+    a_max = amax(a_, dim, keepdim=True)
+    a_exp = exp(a_ - a_max)
+    return _maybe_convert_to_dtype(
+        true_divide(a_exp, sum(a_exp, dim, keepdim=True)), result_dtype
+    )  # type: ignore[return-value]
+
+
+@out_wrapper
 def hstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
     aligned_tensors = atleast_1d(*tensors)
@@ -2268,6 +2323,10 @@ def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
 
 
+def ravel(a: TensorLikeType) -> TensorLikeType:
+    return reshape(a, (-1,))
+
+
 @out_wrapper
 def empty(
     *shape,
@@ -2376,6 +2435,39 @@ def uniform(
     device = utils.canonicalize_device(device)
 
     return prims.uniform(shape, low=low, high=high, dtype=dtype, device=device)
+
+
+def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLikeType):
+    python_type = utils.dtype_to_type(a.dtype)
+    if isinstance(value, Number):
+        value_type = type(value)
+    else:
+        # NOTE: Could not use value = item(value) as it resulted in
+        # RuntimeError: Cannot cast FakeTensor(cpu) to number
+        value_ndim = value.ndim
+        check(
+            value_ndim == 0,
+            lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
+        )
+        value_type = utils.dtype_to_type(value.dtype)
+
+    if value_type is complex:
+        # only downcasting from complex to lower type is not allowed.
+        # We allow casting `value` to lower type for other case
+        # Eg. float -> int.
+        # Ref: https://github.com/pytorch/pytorch/issues/79195
+        check(
+            utils.is_weakly_lesser_type(value_type, python_type),
+            lambda: f"could not convert to type {python_type} without overflow",
+        )
+
+    # Since `where` allows type-promotion,
+    # cast value to correct type before passing to `where`
+    if isinstance(value, Number):
+        return where(mask, python_type(value), a)
+
+    assert isinstance(value, TensorLike)
+    return where(mask, prims.to_dtype(value, a.dtype), a)
 
 
 # TODO: add OpInfo for torch.equal and refs.equal

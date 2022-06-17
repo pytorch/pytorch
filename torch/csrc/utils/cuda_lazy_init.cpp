@@ -18,9 +18,12 @@ void cuda_lazy_init() {
   // have taken a lock.
   if (!run_yet) {
     auto module = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
-    if (!module) throw python_error();
-    auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
-    if (!res) throw python_error();
+    if (!module)
+      throw python_error();
+    auto res =
+        THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
+    if (!res)
+      throw python_error();
     run_yet = true;
   }
 }
@@ -29,5 +32,5 @@ void set_run_yet_variable_to_false() {
   run_yet = false;
 }
 
-}
-}
+} // namespace utils
+} // namespace torch
