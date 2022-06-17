@@ -10624,7 +10624,7 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('clamp_min',
                     #ref=_clamp_min_numpy,
-                    dtypes=all_types_and(torch.bfloat16, torch.float16),
+                    dtypes=all_types_and(torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16, torch.float16),
                     assert_autodiffed=True,
                     supports_forward_ad=True,
