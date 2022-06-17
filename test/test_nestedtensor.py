@@ -596,6 +596,67 @@ class TestNestedTensorAutograd(TestCase):
         # d/dnt_1 (nt + nt_1) = 1*grad_output
         self.nt_equal(nt_1.grad, grad_output)
 
+    # Test Factory Functions
+    def test_nested_tensor_from_mask_and_to_padded(self):
+        N, L, D = 2, 4, 4
+        mask = torch.ones(N, L)
+        for i in range(N):
+            end = torch.randint(1, L - 1, (1,))
+            mask[i, end:] = 0
+
+        mask[0, :] = 1
+        mask = mask.bool()
+
+        # Random data
+        data = torch.randn(N, L, D, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(inpt):
+            nt = torch._nested_tensor_from_mask(inpt, mask)
+            # This implictily test to_padded_tensor grads
+            return nt.to_padded_tensor(0)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_from_padded(self):
+        # Random data
+        nested_size = torch.tensor([[1, 2], [2, 2]])
+        padded_tensor = torch.randn(2, 2, 2, dtype=torch.float64)
+        padded_tensor[0, 1, :] = 0
+        padded_tensor.requires_grad_()
+
+        def grad_test_func(tensor, nested_size):
+            nt = torch._nested_from_padded(tensor, nested_size, fuse_transform_0213=False)
+            # This implictily test to_padded_tensor grads
+            return nt.to_padded_tensor(0)
+
+        data = (padded_tensor, nested_size)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_from_padded_fused(self):
+        # Random data
+        nested_size = torch.tensor([[1, 8], [2, 8]])
+        padded_tensor = torch.randn(2, 2, 2, 4, dtype=torch.float64)
+        padded_tensor[0, 1, :] = 0
+        padded_tensor.requires_grad_()
+        def grad_test_func(tensor, nested_size):
+            nt = torch._nested_from_padded(tensor, nested_size, fuse_transform_0213=True)
+            # This implictily test to_padded_tensor grads
+            return nt.to_padded_tensor(0)
+        data = (padded_tensor, nested_size)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_from_list(self):
+
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(10, 2, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c):
+            c = torch.nested_tensor([a, b, c])
+            return c.to_padded_tensor(0)
+        data = (a, b, c)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
 if __name__ == '__main__':
