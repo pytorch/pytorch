@@ -18,8 +18,8 @@ if __name__ == '__main__':
                        "\tpython test/test_jit.py TESTNAME\n\n"
                        "instead.")
 
-# This TorchDispatchTensor Subclass is used to test incorrectly aliasing ops
-# This is done by aliasing the output to the first argument for all ops in INCORRECT_OPS
+# This TorchDispatchTensor Subclass is used to simulate an incorrect schema
+# which is then used to test that SchemaCheckMode behaves as expected
 
 class IncorrectAliasTensor(torch.Tensor):
     INCORRECT_OPS = {"aten::add", "aten::sub"}
@@ -60,6 +60,7 @@ class IncorrectAliasTensor(torch.Tensor):
         out = func(*unwrapped_args, **tree_map(unwrap, kwargs))
         if func._schema.name in IncorrectAliasTensor.INCORRECT_OPS:
             args[0].elem = out
+
         return tree_map(wrap, out)
 
 # Tests various schema checking functionalities.
@@ -126,7 +127,7 @@ class TestSchemaCheck(JitTestCase):
 
     # Tests that an exception is raised for a mismatching mutation
     def test_mutation_check_fail(self):
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Argument running_mean is not defined as mutable but was mutated"):
             x = torch.rand((3, 3), requires_grad=True)
             batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
             with enable_torch_dispatch_mode(SchemaCheckMode()):
@@ -134,36 +135,36 @@ class TestSchemaCheck(JitTestCase):
 
     # Tests that an exception is raised for a mismatching mutation over multiple ops
     def test_mutation_check_fail_multiple_operators(self):
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Argument running_mean is not defined as mutable but was mutated"):
             x = torch.rand((3, 3), requires_grad=True)
             batch = torch.nn.BatchNorm1d(3, track_running_stats=True)
             with enable_torch_dispatch_mode(SchemaCheckMode()):
-                x.sinh_()
-                x.tanh_()
-                x.relu_()
-                batch(SchemaCheckMode(x))
+                x = x.sinh()
+                x = x.tanh()
+                x = x.relu()
+                batch(x)
 
     # Tests that an exception is raised for a mismatching alias
     def test_alias_check_fail(self):
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Argument input is not defined to alias output but was aliasing"):
             x = torch.rand((3, 3), requires_grad=True)
-            y = torch.rand((3, 3), requires_grad=True)
+            y = torch.zeros((3, 3))
             with enable_torch_dispatch_mode(SchemaCheckMode()):
                 IncorrectAliasTensor(x).add(IncorrectAliasTensor(y), alpha=2)
 
     # Tests that an exception is raised for a mismatching alias over multiple ops
     def test_alias_check_fail_multiple_operators(self):
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Argument input is not defined to alias output but was aliasing"):
             x = torch.rand((3, 3), requires_grad=True)
-            y = torch.rand((3, 3), requires_grad=True)
+            y = torch.zeros((3, 3), requires_grad=True)
             with enable_torch_dispatch_mode(SchemaCheckMode()):
                 IncorrectAliasTensor(x).sin().relu().add(IncorrectAliasTensor(y), alpha=2)
 
     # Tests that an exception is raised for a centered mismatching alias over multiple ops
     def test_alias_check_fail_multiple_operators_centered(self):
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, "Argument input is not defined to alias output but was aliasing"):
             x = torch.rand((3, 3), requires_grad=True)
-            y = torch.rand((3, 3), requires_grad=True)
+            y = torch.zeros((3, 3), requires_grad=True)
             with enable_torch_dispatch_mode(SchemaCheckMode()):
                 IncorrectAliasTensor(x).sin().add(IncorrectAliasTensor(y), alpha=2).relu()
 

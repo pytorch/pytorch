@@ -1,5 +1,5 @@
 import torch
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.jit_utils import clone_inputs
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -36,6 +36,15 @@ class SchemaCheckMode(TorchDispatchMode):
             else:
                 return bool(len(lhs_alias_info.before_set & rhs_alias_info.before_set))
 
+        def unwrap(e):
+            if isinstance(e, torch.Tensor) and not type(e) == torch.Tensor:
+                try:
+                    return e.elem
+                except AttributeError as t:
+                    return e
+            else:
+                return e
+
         self.ops.append(func._schema.name)
         arguments = normalize_function(
             func,
@@ -47,20 +56,22 @@ class SchemaCheckMode(TorchDispatchMode):
         cloned_arguments = dict(zip(arguments.keys(), clone_inputs(arguments.values())))
         out = func(*args, **kwargs)
 
-        for argument in func._schema.arguments:
-            name = argument.name if argument.name != "self" else "input"
+        for arg in func._schema.arguments:
+            name = arg.name if arg.name != "self" else "input"
             if arguments.get(name) is not None:
                 before = tree_flatten(cloned_arguments.get(name))[0]
                 after = tree_flatten(arguments.get(name))[0]
-                if any([has_mutated(i, j) for i, j in zip(before, after)]) and not is_mutable(argument.alias_info):
+                u_values = tree_map(unwrap, after)
+                u_out = tree_map(unwrap, out)
+                if (any([has_mutated(i, j) for i, j in zip(before, after)]) and not is_mutable(arg.alias_info)):
                     raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
-                for b in before:
-                    if not isinstance(out, tuple):
-                        if has_aliased(b, out) and not is_aliasing(argument.alias_info, func._schema.returns[0].alias_info):
+                for v in u_values:
+                    if not isinstance(u_out, tuple):
+                        if has_aliased(v, u_out) and not is_aliasing(arg.alias_info, func._schema.returns[0].alias_info):
                             raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
                     else:
-                        for j in range(len(out)):
-                            if has_aliased(b, out[j]) and not is_aliasing(argument.alias_info, func._schema.returns[j].alias_info):
+                        for j in range(len(u_out)):
+                            if has_aliased(v, u_out[j]) and not is_aliasing(arg.alias_info, func._schema.returns[j].alias_info):
                                 raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
 
         return out
