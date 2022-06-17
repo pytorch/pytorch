@@ -344,9 +344,10 @@ Tensor _nested_from_padded_backward(
     const Tensor& input,
     const bool do_transform_0213) {
   if (do_transform_0213){
-    // I am not convinced this is right
     auto new_sizes = IntArrayRef{input.size(0), input.size(2), (input.size(1)*input.size(3))};
     auto out = grad.to_padded_tensor(0, new_sizes);
+    auto expand_last_dim_size = IntArrayRef{input.size(0), input.size(2), input.size(1), input.size(3)};
+    out = out.view(expand_last_dim_size).permute({0, 2, 1, 3});
     return out.reshape(input.sizes());
   }
   return grad.to_padded_tensor(0, input.sizes());
