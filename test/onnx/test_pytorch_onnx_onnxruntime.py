@@ -30,11 +30,13 @@ from test_pytorch_common import (
     RNN_HIDDEN_SIZE,
     RNN_INPUT_SIZE,
     RNN_SEQUENCE_LENGTH,
+    run_tests,
     skipIfNoLapack,
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
+    TestCase,
 )
 from torchvision import ops
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
@@ -62,9 +64,7 @@ from torch.onnx.symbolic_helper import _unimplemented
 _ORT_PROVIDERS = ["CPUExecutionProvider"]
 
 
-def run_model_test(
-    test_suite: Union[_TestONNXRuntime, unittest.TestCase], *args, **kwargs
-):
+def run_model_test(test_suite: Union[_TestONNXRuntime, TestCase], *args, **kwargs):
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
@@ -72,7 +72,7 @@ def run_model_test(
 
 
 def run_model_test_with_external_data(
-    test_suite: Union[_TestONNXRuntime, unittest.TestCase], *args, **kwargs
+    test_suite: Union[_TestONNXRuntime, TestCase], *args, **kwargs
 ):
     kwargs["use_external_data"] = True
     return run_model_test(test_suite, *args, **kwargs)
@@ -226,7 +226,7 @@ class _TestONNXRuntime:
         input_names=None,
         output_names=None,
         fixed_batch_size=False,
-        training=None,
+        training=torch.onnx.TrainingMode.EVAL,
         remained_onnx_input_idx=None,
         verbose=False,
     ):
@@ -12723,7 +12723,7 @@ def MakeTestCase(opset_version: int, keep_initializers_as_inputs: bool = True) -
         name += "_IRv4"
     return type(
         str(name),
-        (unittest.TestCase,),
+        (TestCase,),
         dict(
             _TestONNXRuntime.__dict__,
             opset_version=opset_version,
@@ -12762,4 +12762,4 @@ TestONNXRuntime_opset16 = MakeTestCase(16, keep_initializers_as_inputs=False)
 
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()
