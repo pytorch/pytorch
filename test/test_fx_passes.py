@@ -450,7 +450,17 @@ class TestFXGraphPasses(JitTestCase):
             partitions = partitioner.partition(candidates)
 
             print("Filtering out single node partitions...")
-            partitions = [partition for partition in partitions if len(partition.nodes) > 1]
+            filtered_partitions = []
+            for partition in partitions:
+                count = 0
+                for node in partition.nodes:
+                    if node.target.__name__ != "getitem":
+                        count += 1
+                if count > 1:
+                    filtered_partitions.append(partition)
+
+            partitions = filtered_partitions
+            # partitions = [partition for partition in partitions if len([for node in partition.nodes if node.target != "_operator.getitem"]) > 1]
 
             print("Partitions formed:")
             for partition in partitions:
