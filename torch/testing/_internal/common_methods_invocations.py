@@ -14732,18 +14732,22 @@ op_db: List[OpInfo] = [
                          active_if=(IS_MACOS or IS_WINDOWS)),
         ),
     ),
-    OpInfo(
+    UnaryUfuncInfo(
         'nn.functional.threshold',
-        aten_backward_name='threshold_backward',
         ref=lambda x, threshold, value: np.where(x > threshold, x, value).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        supports_autograd=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        sample_kwargs=lambda device, dtype, input: ({'threshold': 0.123,
+                                                    'value': -9},
+                                                    {'threshold': 0.123,
+                                                    'value': -9}),
+        # TODO(whc) should not need sample_inputs_func, but without it
+        # kwargs aren't being hooked up properly
         sample_inputs_func=sample_inputs_threshold,
     ),
     OpInfo(
@@ -20291,6 +20295,16 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.threshold",
+        torch_opinfo_name="nn.functional.threshold",
+        skips=(
+            # NotImplementedError: Could not run 'aten::where.ScalarOther' with arguments from the 'AutogradMeta'...
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
+            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
