@@ -1,7 +1,9 @@
 from torch import nn
 from typing import Dict, Any, Optional
 
-def module_to_fqn(model, module: nn.Module, prefix: str = '') -> Any:
+__all__ = ["module_to_fqn", "fqn_to_module", "get_arg_info_from_tensor_fqn", "FakeSparsity"]
+
+def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = '') -> Any:
     for name, child in model.named_children():
         new_name = prefix + '.' + name
         if child is module:

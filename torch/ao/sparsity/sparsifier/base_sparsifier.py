@@ -13,9 +13,15 @@ from .utils import (
     module_to_fqn,
 )
 
-SUPPORTED_MODULES = {nn.Linear}
+__all__ = ["BaseSparsifier"]
+
+SUPPORTED_MODULES = {
+    nn.Linear
+}
 
 KEYS_NOT_IN_STATE_DICT = ["module", "module_fqn", "tensor_name"]
+
+__all__ = ["BaseSparsifier"]
 
 # TODO update desc with new config args
 class BaseSparsifier(abc.ABC):
@@ -42,13 +48,11 @@ class BaseSparsifier(abc.ABC):
         >>> # model.layer1.weight will have `sparsity_level` = 0.7 (getting default)
         >>> sparsifier = BaseSparsifier(config, defaults)
     """
-
     def __init__(self, defaults: Optional[Dict[str, Any]] = None):
         super().__init__()
         self.defaults = defaults
         if self.defaults is None:
             self.defaults = dict()
-
 
         self.state: Dict[str, Dict] = defaultdict(dict)
         self.groups: List[Dict[str, Any]] = []
