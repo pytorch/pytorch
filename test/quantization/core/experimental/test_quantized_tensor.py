@@ -82,7 +82,7 @@ class TestQuantizedTensor(unittest.TestCase):
 
         # get apot reduced precision fp quantized tensor result
         qtensor_red_prec = torch.clone(qtensor.quantize_APoT(tensor2quantize=tensor2quantize,
-                                                                 use_int_repr=False))
+                                                             use_int_repr=False))
         reduced_precision_lst = list(qtensor_red_prec)
 
         # get apot int representation quantized tensor result
