@@ -816,14 +816,10 @@ def _copysign(
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        if a.device == torch.device("cpu"):
-            msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
-                a.device, b.device
-            )
-            raise RuntimeError(msg)
-        else:
-            b = prims.device_put(b, device=a.device)
-
+        msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+            a.device, b.device
+        )
+        raise RuntimeError(msg)
     return where(signbit(b), neg(abs(a)), abs(a))
 
 
@@ -904,7 +900,30 @@ def float_power(
     return prims.pow(a, b)
 
 
+# >>> a = torch.tensor(-0.2500, dtype=torch.float64)
+# tensor(-0.250000000000000, dtype=torch.float64)
+#
+# >>> b = torch.tensor(-0.0010, dtype=torch.float64)
+# tensor(-0.001000000000000, dtype=torch.float64)
+#
+# Note: In this case, casting float to double will expand the float mantissa with zeros,
+# while creating a double generates a distinct mantissa.
+# >>> torch.tensor(-0.001).to(dtype=torch.float64)
+# tensor(-0.001000000047497, dtype=torch.float64)
+#
+# Floor Division
+# The difference is caused because torch.remainder(a, b) = -0.001.
+#
+# >>> torch.floor(torch.true_divide(a, b))
+# tensor(250., dtype=torch.float64)
+#
+# >>> torch.div(a, b, rounding_mode='floor')
+# tensor(249., dtype=torch.float64)
+#
 # Definition: a // b = (a - remainder(a, b)) / b
+# >>> torch.true_divide(torch.sub(a, torch.remainder(a, b)), b)
+# tensor(249., dtype=torch.float64)
+#
 # For reference, see CPython's implementation:
 # https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
 def _floor_divide(
