@@ -80,11 +80,11 @@ class _LRScheduler(object):
         self._scheduler_id = getattr(self.optimizer, "_lr_registration_count", 0)
         self.optimizer._lr_registration_count = self._scheduler_id + 1
 
-        with self.init_optimizer_lr():
+        with self._init_optimizer_lr():
             self.step()
 
     @contextmanager
-    def init_optimizer_lr(self):
+    def _init_optimizer_lr(self):
         # Save the current learning rate values for all schedulers except the first
         if self._scheduler_id > 1:
             for group in self.optimizer.param_groups:

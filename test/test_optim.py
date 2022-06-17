@@ -1471,6 +1471,21 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_sequentiallr4(self):
+        optimizer = torch.optim.SGD([torch.tensor(0.5)], lr=0.1)
+        prev_lr = optimizer.param_groups[0]["lr"]
+
+        schedulers = [
+            torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1),
+            torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1)
+        ]
+        scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers, milestones=[10])
+
+        new_lr = optimizer.param_groups[0]["lr"]
+
+        # Ensure that multiple schedulers does not affect the initial learning rate
+        self.assertEqual(prev_lr, new_lr)
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]
