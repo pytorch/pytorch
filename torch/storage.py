@@ -116,6 +116,13 @@ class _StorageBase(object):
         else:
             return self
 
+    def mps(self):
+        """Returns a CPU copy of this storage if it's not already on the CPU"""
+        if self.device.type != 'mps':
+            return torch._UntypedStorage(self.size(), device="mps").copy_(self, False)
+        else:
+            return self
+
     def _to(self, dtype):
         if not isinstance(dtype, torch.dtype):
             raise TypeError(f"Argument 'dtype' must be torch.dtype, not {type(dtype)}")
