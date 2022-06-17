@@ -215,8 +215,8 @@ def clone(fake_mode, func, input, memory_format=None):
         return FakeTensor(fake_mode, out, out_device)
 
 # index.Tensor data-dependent in only some conditions
-@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags
-                  and func != aten.index.Tensor)  # type: ignore[attr-defined]
+@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
+                  and func != aten.index.Tensor)
 def data_dep_op(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
