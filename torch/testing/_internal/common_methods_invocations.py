@@ -10630,6 +10630,10 @@ op_db: List[OpInfo] = [
                     assert_autodiffed=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
+           skips=(
+               # https://github.com/pytorch/pytorch/issues/55907
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+           ),
                     supports_two_python_scalars=True),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
