@@ -687,6 +687,7 @@ void initJITBindings(PyObject* module) {
             return fuser::cuda::skipNode(op_name, flip);
           })
       .def("_jit_set_nvfuser_enabled", &fuser::cuda::setEnabled)
+      .def("_jit_nvfuser_can_be_enabled", &fuser::cuda::canBeEnabled)
       .def(
           "_jit_set_nvfuser_single_node_mode",
           [](bool flag) { return fuser::cuda::setSingletonFusion(flag); })
