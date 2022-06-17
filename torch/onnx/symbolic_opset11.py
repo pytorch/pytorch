@@ -1,9 +1,11 @@
 """This file exports ONNX ops for opset 11."""
 
 import sys
+from typing import Tuple, Union
 import warnings
 
 import torch
+from torch import _C
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
 from torch.onnx import symbolic_opset10 as opset10
@@ -428,12 +430,12 @@ def _avg_pool(name, tuple_fn):
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
+        input: _C.Value,
+        kernel_size: Tuple[int, ...],
+        stride: Tuple[int, ...],
+        padding: Union[int, Tuple[int, ...]],
+        ceil_mode: int,
+        count_include_pad: int,
         divisor_override=None,
     ):
         padding = symbolic_helper._avgpool_helper(
