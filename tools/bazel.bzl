@@ -20,10 +20,10 @@ def _requirement(_pypi_project):
 def pytorch_cc_test(name, srcs, tags = [], **kwargs):
     """PyTorch cc test rule.
 
-    One of the reason to proxy all tests through this central location
+    One of the reasons to proxy all tests through this central location
     is ability to change the behavior on all of them instead of one-by-one.
 
-    For example, sombody using Remote Build Execution can add exec_properties for tests here.
+    For example, somebody using Remote Build Execution can add exec_properties for tests here.
     """
     if "gpu-required" in tags:
         exec_properties = {
