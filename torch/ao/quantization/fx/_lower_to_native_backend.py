@@ -536,7 +536,6 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
             continue
         ref_node = n
         dq_node = ref_node.args[0]
-        assert isinstance(dq_node, Node)
         if dq_node.op != "call_method" or dq_node.target != "dequantize":
             continue
         # don't support lowering the pattern when the result of dequantize is used by
@@ -545,8 +544,6 @@ def _lower_dynamic_weighted_ref_module(model: QuantizedGraphModule):
             continue
 
         input_dynamic_q_node = dq_node.args[0]
-        if not isinstance(input_dynamic_q_node, Node):
-            continue
         # don't support lowering the pattern when the result of quantize is used by
         # multiple nodes
         if len(input_dynamic_q_node.users) > 1:
@@ -709,15 +706,11 @@ def _lower_dynamic_weighted_ref_functional(
         if func_node.op != "call_function" or func_node.target not in DYNAMIC_LOWER_FUNCTIONAL_MAP:
             continue
         (input_dq_node, weight_dq_node, *remaining_func_args) = func_node.args
-        if not isinstance(input_dq_node, Node) or not isinstance(weight_dq_node, Node):
-            continue
         if input_dq_node.op != "call_method" or input_dq_node.target != "dequantize" or \
            weight_dq_node.op != "call_method" or weight_dq_node.target != "dequantize":
             continue
 
         input_dynamic_q_node = input_dq_node.args[0]
-        if not isinstance(input_dynamic_q_node, Node):
-            continue
         # don't support lowering the pattern when the result of quantize is used by
         # multiple nodes
         if len(input_dynamic_q_node.users) > 1:
@@ -729,19 +722,13 @@ def _lower_dynamic_weighted_ref_functional(
 
         reduce_range_node = None
         (pattern_input, activation_compute_dtype, reduce_range_node) = input_dynamic_q_node.args
-        if not isinstance(activation_compute_dtype, torch.dtype):
-            continue
         is_fp16 = activation_compute_dtype == torch.float16
         is_int8 = activation_compute_dtype in [torch.quint8, torch.qint8]
         if not is_int8 and not is_fp16:
             continue
 
         quantized_weight = weight_dq_node.args[0]
-        if not isinstance(quantized_weight, Node):
-            continue
         weight_dtype = quantized_weight.args[-1]
-        if not isinstance(weight_dtype, torch.dtype):
-            continue
 
         # Step 1: Try to select reference pattern with the corresponding quantized op
         dynamic_quant_dtype_key = (activation_compute_dtype, weight_dtype)
@@ -816,7 +803,6 @@ def _lower_quantized_binary_op(
             if not is_dequantize_node(arg):
                 continue
             dq_node = arg
-            assert(isinstance(dq_node, Node))
             dn_input = dq_node.args[0]
             dq_node.replace_all_uses_with(dn_input)
             model.graph.erase_node(dq_node)
@@ -878,8 +864,6 @@ def special_pattern_replacement(model: QuantizedGraphModule):
         is_call_function, is_call_method, is_call_module = is_special_pattern_node(ref_node, modules)
         if not (is_call_module or is_call_function or is_call_method):
             continue
-        if not isinstance(ref_node, Node):
-            continue
         dq_node_or_nodes = ref_node.args[0]
         assert isinstance(dq_node_or_nodes, Node) or isinstance(dq_node_or_nodes, (tuple, list))
         is_dequantize = False
@@ -899,12 +883,8 @@ def special_pattern_replacement(model: QuantizedGraphModule):
             ref_module = modules[ref_node.target]
             if type(ref_module) in SPECIAL_PATTERN_LOWER_MODULE_MAP and is_quantize:
                 qmodule_cls = SPECIAL_PATTERN_LOWER_MODULE_MAP.get(type(ref_module))
-                if not isinstance(q_node, Node):
-                    continue
                 scale_node = q_node.args[1]
                 zero_point_node = q_node.args[2]
-                if not isinstance(scale_node, Node) or not isinstance(zero_point_node, Node):
-                    continue
                 output_scale = getattr(model, scale_node.target)
                 output_zero_point = getattr(model, zero_point_node.target)
 

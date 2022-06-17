@@ -644,11 +644,7 @@ def convert_eq_obs(
     for node in model.graph.nodes:
         if node.op == 'call_module' and isinstance(modules[node.target], _InputEqualizationObserver):
             inp_quant_obs_node = node.args[0]
-            if not isinstance(inp_quant_obs_node, Node):
-                continue
             prev_node = inp_quant_obs_node.args[0]
-            if not isinstance(prev_node, Node):
-                continue
 
             # If the previous node is a layer that needs to be equalized, then
             # we will remove the current node because we do not need to add any
@@ -711,7 +707,6 @@ def convert_eq_obs(
 
                 # Erase the weight equalization observer node
                 prev_node = weight_eq_obs_node.args[0]
-                assert isinstance(prev_node, Node)
                 remove_node(model, weight_eq_obs_node, prev_node)
             else:
                 raise ValueError("Expected operation node to be 'call_module' or 'call_function" +

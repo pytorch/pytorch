@@ -339,8 +339,6 @@ def convert_standalone_module(
     for idx in range(len(args)):
         if idx in sm_input_quantized_idxs:
             arg = args[idx]
-            if not isinstance(arg, Node):
-                continue
             if arg.op == "call_method" and arg.target == "dequantize":  # type: ignore[union-attr]
                 quantize_node = arg.args[0]  # type: ignore[union-attr]
                 node.replace_input_with(arg, quantize_node)
@@ -692,7 +690,6 @@ def convert(
                 for key, value in qparams.items():
                     # TODO: we can add the information of whether a value needs to
                     # be registered as an attribute in qparams dict itself
-                    # remove the prefix and suffix to get the keyword for quantize operator
                     if key in ['_scale_', '_zero_point_']:
                         # For scale and zero_point values we register them as buffers in the root module.
                         # TODO: maybe need more complex attr name here

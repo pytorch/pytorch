@@ -144,6 +144,21 @@ def _move_all_kwargs_to_args(model: GraphModule) -> GraphModule:
         n.kwargs = {}
     return model
 
+def _cleanup_args(model: GraphModule) -> GraphModule:
+    """ This pass removes some unused arguments
+    * inplace argument for F.relu and torch.relu since we use them
+    in pattern matching which assumes that relu only has one argument
+    """
+    for n in model.graph.nodes:
+        # remove inplace arg from relu
+        if n.op == "call_function" and n.target in (torch.nn.functional.relu, torch.relu):
+            # ignroe the inplace op since that will interfere with node
+            # matching
+            n.args = (n.args[0],)
+            n.kwargs = {}
+    return model
+
+
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
         is_activation_post_process(modules[str(node.target)])
@@ -1493,6 +1508,7 @@ def prepare(
     # this with something more robust by using real example_inputs in the future
     model = NormalizeArgs(model).transform()
     model = _move_all_kwargs_to_args(model)
+    model = _cleanup_args(model)
 
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, equalization_config)

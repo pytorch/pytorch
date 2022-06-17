@@ -147,8 +147,7 @@ def end_node_matches_reversed_fusion(
             if fusion_el_is_fun:
                 if cur_node.target != cur_fusion_el:
                     return False
-                if len(cur_node.args) > 0 and \
-                   isinstance(cur_node.args[0], Node):
+                if len(cur_node.args) > 0 and isinstance(cur_node.args[0], Node):
                     cur_node = cur_node.args[0]
                 else:
                     return False
