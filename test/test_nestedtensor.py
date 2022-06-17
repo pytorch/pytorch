@@ -355,6 +355,54 @@ class TestNestedTensorDeviceType(TestCase):
         is_cuda = 'cuda' in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @dtypes(torch.float, torch.float16, torch.double)
+    def test_nested_tensor_indexing(self, device, dtype):
+        # edge case: empty nested tensor
+        nt0 = torch.nested_tensor([])
+        self.assertRaisesRegex(
+            RuntimeError,
+            "cannot index an empty nested tensor",
+            lambda: nt0[0]
+        )
+        # normal case
+        x0 = torch.randn((2, 5), device=device, dtype=dtype)
+        x1 = torch.randn((3, 4), device=device, dtype=dtype)
+        nt = torch.nested_tensor([x0, x1])
+        # single index: only support integer in the batch dimension
+        self.assertEqual(nt[0], x0)
+        self.assertEqual(nt[-1], x1)
+        self.assertRaises(IndexError, lambda: nt[2])
+        self.assertRaises(IndexError, lambda: nt[-3])
+        self.assertRaises(NotImplementedError, lambda: nt[:])
+        self.assertRaises(NotImplementedError, lambda: nt[None])
+        self.assertRaises(NotImplementedError, lambda: nt[...])
+        # tuple of indices: only support integer in the batch dimension
+        #                 + all possible indexing in the original tensor dimensions
+        self.assertEqual(nt[0, 0, 0], x0[0, 0])
+        self.assertEqual(nt[0, 1, :], x0[1, :])
+        self.assertEqual(nt[1, ...], x1)
+        self.assertRaises(IndexError, lambda: nt[1, 4, 2])
+        self.assertRaises(NotImplementedError, lambda: nt[:, 1, 1])
+        # make sure indexing returns a view
+        nt[0].fill_(100.0)
+        answer = torch.tensor(100.0, device=device, dtype=dtype).expand((2, 5))
+        self.assertEqual(nt[0], answer)
+        nt[1, 1, :].fill_(200.0)
+        answer = torch.tensor(200.0, device=device, dtype=dtype).expand(4)
+        self.assertEqual(nt[1, 1, :], answer)
+
+    # Helper functions for testing elementwise ops
+    def random_nt(self, device, dtype, num_tensors, max_dims, min_dims=None):
+        if min_dims is None:
+            min_dims = tuple([0] * len(max_dims))
+        ts1 = []
+        for _ in range(num_tensors):
+            tensor_dims = tuple([torch.randint(low=min_dim, high=max_dim, size=(1,)).item()
+                                for (min_dim, max_dim) in zip(min_dims, max_dims)])
+            t1 = torch.randn(tensor_dims, device=device, dtype=dtype)
+            ts1.append(t1)
+        return torch.nested_tensor(ts1, device=device, dtype=dtype)
+
     # Helper functions for testing elementwise ops
     def random_nt_pair(self, device, dtype, num_tensors, max_dims):
         ts1 = []
@@ -413,6 +461,26 @@ class TestNestedTensorDeviceType(TestCase):
         ref = torch.nested_tensor([t1 * t2 for (t1, t2) in zip(nt1.unbind(), nt2.unbind())])
         nt1 *= nt2
         self.nt_equal(ref, nt1)
+
+    @dtypes(torch.float, torch.float16)
+    @skipMeta
+    @torch.inference_mode()
+    def test_clone(self, device, dtype):
+        nt1 = self.random_nt(device, dtype, 4, (4, 4), (1, 1))
+        nt2 = nt1.clone()
+        # Verify the values match
+        self.nt_equal(nt1, nt2)
+        # Verify modifying nt2 doesn't affect nt1
+        nt2.mul_(nt1)
+        ub1 = nt1.unbind()
+        ub2 = nt2.unbind()
+        for i in range(len(ub1)):
+            self.assertNotEqual(ub1[i], ub2[i])
+
+        nt1.clone(memory_format=torch.preserve_format)
+        msg = "clone_nested only supports memory format Preserve, but got ChannelsLast instead."
+        with self.assertRaisesRegex(RuntimeError, msg):
+            nt1.clone(memory_format=torch.channels_last)
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
