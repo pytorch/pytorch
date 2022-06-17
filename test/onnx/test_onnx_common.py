@@ -40,6 +40,11 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
 
 
 def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
+    """Combine class name with the parameterized arguments.
+
+    This function is passed to `parameterized.parameterized_class` as the
+    `class_name_func` argument.
+    """
     suffix = "_".join(f"{k}_{v}" for k, v in input_dicts.items())
     return f"{cls.__name__}_{suffix}"
 

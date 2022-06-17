@@ -129,11 +129,7 @@ def _parameterized_class_attrs_and_values():
     input_values.extend(itertools.product((7, 8), (True, False), (True,)))
     # Valid opset versions are defined in torch/onnx/_constants.py.
     # Versions are intentionally set statically, to not be affected by elsewhere changes.
-    input_values.extend(
-        itertools.product(
-            range(9, 17), (True, False), (True, False)
-        )
-    )
+    input_values.extend(itertools.product(range(9, 17), (True, False), (True, False)))
     return {"attrs": attrs, "input_values": input_values}
 
 

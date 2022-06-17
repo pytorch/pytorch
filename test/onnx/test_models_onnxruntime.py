@@ -1,6 +1,5 @@
 # Owner(s): ["module: onnx"]
 
-import itertools
 import os
 import unittest
 from collections import OrderedDict
@@ -30,7 +29,6 @@ from torchvision.models.detection import (
 
 import torch
 from torch import nn
-from torch.onnx import _constants
 
 
 def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
@@ -179,8 +177,8 @@ def _init_test_roi_heads_faster_rcnn():
 
 
 @parameterized.parameterized_class(
-    ("is_script", ),
-    ([True, False], ),
+    ("is_script",),
+    ([True, False],),
     class_name_func=test_onnx_common.parameterize_class_name,
 )
 class TestModelsONNXRuntime(test_onnx_common._TestONNXRuntime):
