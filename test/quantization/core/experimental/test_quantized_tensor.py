@@ -11,10 +11,11 @@ dequantize = TensorAPoT.dequantize
 class TestQuantizedTensor(unittest.TestCase):
     r""" Tests quantize_APoT result (int representation) on random 1-dim tensor
         and hardcoded values for b, k by comparing to uniform observer
+        (non-uniform observer reduces to uniform for k = 1)
         quantized tensor (https://pytorch.org/docs/stable/generated/torch.quantize_per_tensor.html)
         * tensor2quantize: Tensor
         * b: 4
-        * k: 2
+        * k: 1
     """
     def test_quantize_APoT_rand_1d(self):
         # generate random size of tensor2dequantize between 1 -> 16
@@ -24,7 +25,7 @@ class TestQuantizedTensor(unittest.TestCase):
         # generate tensor with random fp values between 0 -> 1
         tensor2quantize = torch.rand(size)
 
-        apot_tens = TensorAPoT(4, 2, False)
+        apot_tens = TensorAPoT(4, 1, False)
 
         # get apot quantized tensor result
         apot_tens = apot_tens.quantize_APoT(tensor2quantize=tensor2quantize, apot_repr=APoTRepr.level_indices)
@@ -39,20 +40,21 @@ class TestQuantizedTensor(unittest.TestCase):
 
     r""" Tests quantize_APoT result (int representation) on random 2-dim tensor
         and hardcoded values for b, k by comparing to uniform observer
+        (non-uniform observer reduces to uniform for k = 1)
         quantized tensor (https://pytorch.org/docs/stable/generated/torch.quantize_per_tensor.html)
         * tensor2quantize: Tensor
-        * b: 6
-        * k: 2
+        * b: 4
+        * k: 1
     """
     def test_quantize_APoT_rand_2d(self):
-        # generate random size of tensor2dequantize between 1 -> 64
-        # because there are 2**b = 2**6 quantization levels total
-        size = random.randint(1, 64)
+        # generate random size of tensor2dequantize between 1 -> 16
+        # because there are 2**b = 2**4 quantization levels total
+        size = random.randint(1, 16)
 
         # generate tensor with random fp values between 0 -> 1
         tensor2quantize = torch.rand(size, size)
 
-        apot_tens = TensorAPoT(6, 2, False)
+        apot_tens = TensorAPoT(4, 1, False)
 
         # get apot quantized tensor result
         apot_tens = apot_tens.quantize_APoT(tensor2quantize=tensor2quantize, apot_repr=APoTRepr.level_indices)
@@ -69,7 +71,7 @@ class TestQuantizedTensor(unittest.TestCase):
         and hardcoded values for b, k by comparing to int representation
         * tensor2quantize: Tensor
         * b: 4
-        * k: 2
+        * k: 1
     """
     def test_quantize_APoT_reduced_precision(self):
         # generate random size of tensor2dequantize between 1 -> 16
