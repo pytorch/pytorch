@@ -33,6 +33,8 @@ TORCH_API c10::intrusive_ptr<ProcessGroup::Work> alltoall(const c10::intrusive_p
       at::TensorList output_tensors,
       at::TensorList input_tensors,
       const AllToAllOptions& opts = {});
+TORCH_API c10::intrusive_ptr<ProcessGroup::Work> barrier(const c10::intrusive_ptr<ProcessGroup>& process_group,
+      const BarrierOptions& opts = {});
 
 } // namespace ops
 } // namespace c10d
