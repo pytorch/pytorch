@@ -988,8 +988,7 @@ logical_and = _make_elementwise_binary_reference(
 
 
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
-    aten_op = torch.ops.aten.logical_not
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL, aten_op=torch.ops.aten.logical_not
 )
 def logical_not(a: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
