@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_cache.h>
+#include <torch/csrc/jit/codegen/cuda/ops/normalization.h>
 #include <torch/csrc/jit/codegen/cuda/python_frontend/python_bindings.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <iostream>
@@ -583,6 +584,16 @@ void initNvFuserPythonBindings(PyObject* module) {
       "min", &torch::jit::fuser::cuda::min, py::return_value_policy::reference);
   nvf_ops.def_static(
       "sum", &torch::jit::fuser::cuda::sum, py::return_value_policy::reference);
+  nvf_ops.def_static(
+      "var",
+      [](TensorView* input,
+         const std::vector<int>& dims,
+         int64_t correction,
+         bool keepdim) -> TensorView* {
+        return torch::jit::fuser::cuda::variance(
+            input, dims, correction, keepdim);
+      },
+      py::return_value_policy::reference);
 
   // Broadcast operations
   nvf_ops.def_static(
