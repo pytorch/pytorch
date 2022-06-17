@@ -54,6 +54,8 @@ elif [[ "$image" == *-bionic* ]]; then
   UBUNTU_VERSION=18.04
 elif [[ "$image" == *-focal* ]]; then
   UBUNTU_VERSION=20.04
+elif [[ "$image" == *-jammy* ]]; then
+  UBUNTU_VERSION=22.04
 elif [[ "$image" == *ubuntu* ]]; then
   extract_version_from_image_name ubuntu UBUNTU_VERSION
 elif [[ "$image" == *centos* ]]; then
@@ -70,7 +72,8 @@ else
 fi
 
 DOCKERFILE="${OS}/Dockerfile"
-if [[ "$image" == *cuda* ]]; then
+# When using ubuntu - 22.04, start from Ubuntu docker image, instead of nvidia/cuda docker image.
+if [[ "$image" == *cuda* && "$UBUNTU_VERSION" != "22.04" ]]; then
   DOCKERFILE="${OS}-cuda/Dockerfile"
 elif [[ "$image" == *rocm* ]]; then
   DOCKERFILE="${OS}-rocm/Dockerfile"
@@ -248,6 +251,15 @@ case "$image" in
     DB=yes
     VISION=yes
     KATEX=yes
+    ;;
+  pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12)
+    ANACONDA_PYTHON_VERSION=3.8
+    CUDA_VERSION=11.6
+    CUDNN_VERSION=8
+    CLANG_VERSION=12
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
