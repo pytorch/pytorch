@@ -40,7 +40,6 @@ from torchgen.api.types import (
     intArrayRefT,
     optionalIntArrayRefT,
     tensorOptionsT,
-    symIntArrayRefT,
 )
 from torchgen import local
 from torchgen.utils import assert_never

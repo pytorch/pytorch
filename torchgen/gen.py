@@ -2294,7 +2294,12 @@ TORCH_LIBRARY({custom_namespace}, m) {{
             op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
             op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)
             if same_base_op and op1_not_symint and op2_symint:
-                view_copy_with_symint_pairs.append((g1.view_copy, g2.view_copy,))
+                view_copy_with_symint_pairs.append(
+                    (
+                        g1.view_copy,
+                        g2.view_copy,
+                    )
+                )
 
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
@@ -2336,7 +2341,10 @@ TORCH_LIBRARY({custom_namespace}, m) {{
                 mapMaybe(gen_composite_view_copy_kernel, view_groups)
             ),
             "SymIntViewCopyKernel_Definitions": list(
-                mapMaybe(lambda pair: gen_symint_view_copy_kernel(pair[0], pair[1]), view_copy_with_symint_pairs)
+                mapMaybe(
+                    lambda pair: gen_symint_view_copy_kernel(pair[0], pair[1]),
+                    view_copy_with_symint_pairs,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
