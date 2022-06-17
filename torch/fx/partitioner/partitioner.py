@@ -6,15 +6,7 @@ from torch.fx.passes.fuser_utils import fuse_by_partitions
 from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
 
 import torch
-# from torch.fx.experimental.partitioner_utils import (
-#     Device,
-#     PartitionerConfig,
-#     get_partition_to_latency_mapping,
-#     get_latency_of_partitioned_graph,
-#     NodeLatency,
-#     get_extra_size_of,
-#     PartitionMode,
-# )
+
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, map_arg
 from torch.fx.passes.operator_support import (
@@ -97,12 +89,9 @@ class CapabilityBasedPartitioner:
 
     def get_candidates(self):
         candidates = []
-
-        # TODO: replace following with self.operator_support.is_node_supported()
         for node in self.module.graph.nodes:
-            if node.op == "call_function":
-                if node.target in self.kernel_registry:
-                    candidates.append(node)
+            if self.operator_support.is_node_supported(self.module.named_modules(), node):
+                candidates.append(node)
         return candidates
 
     def partition(self, candidates: NodeList) -> List[Partition]:
@@ -133,8 +122,8 @@ class CapabilityBasedPartitioner:
                 else:
                     user_partitions.add(Partition(nodes=[user_node]))
 
-            print(node)
-            print('user_partitions', user_partitions)
+            # print(node)
+            # print('user_partitions', user_partitions)
 
             # Filter out all the partitions that has dependency on other users
             # TODO: find a better way to do this, rather than pair-wise comparision
@@ -149,7 +138,7 @@ class CapabilityBasedPartitioner:
                     elif dependency == -1 and pi in user_partitions:
                         user_partitions.remove(pi)
 
-            print("user_partitions after filtering", user_partitions)
+            # print("user_partitions after filtering", user_partitions)
 
             # We use the following rules for partition assignment:
             # 1. If none of the candidates has been assigned to a partition, create a new partition
@@ -174,7 +163,7 @@ class CapabilityBasedPartitioner:
                 id = partitions_size_by_id[0][1]
                 assign(node, id)
 
-        print("assignment", assignment)
+        # print("assignment", assignment)
 
         return partitions_by_id.values()
 
