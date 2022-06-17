@@ -21,11 +21,6 @@ if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
-
-  # Deploy feature builds cpython. It requires these packages.
-  # TODO move this to dockerfile?
-  sudo apt-get -qq update
-  sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
 fi
 
 echo "Python version:"
