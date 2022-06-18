@@ -39,7 +39,7 @@ def ensure_map_fn_works(fn: Callable, input_col: Optional[Union[int, tuple, list
     if len(sig.parameters) >= sz:
         non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
         if len(non_default_params) > sz:
-            raise TypeError(
+            raise ValueError(
                 f"The function {fn.__name__} takes {len(non_default_params)} "
                 f"non-default parameters, but {sz} are required."
             )
