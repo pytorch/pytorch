@@ -25,7 +25,7 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 
 // alpha is always 1.0 except when this function is called from add_sub_template()
 void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha,
-                    const Tensor& output, std::string op_name, BinaryOpBlock binaryBlock)
+                    const Tensor& output_, std::string op_name, BinaryOpBlock binaryBlock)
 {
   // it's possible to receive empty tensors here
   if (self.numel() == 0 || other.numel() == 0) {
@@ -35,6 +35,30 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
 
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
+  bool needsScatterOrNotContig = false;
+
+  Tensor output;
+  if (!output_.is_contiguous()) {
+    output = output_.contiguous();
+    needsScatterOrNotContig = true;
+  }
+  else if (output_.is_view() && (self.storage().data() == output_.storage().data() || other.storage().data() == output_.storage().data())) {
+    // Determine if this is an in-place operation
+    IValue selfIVal(self);
+    IValue otherIVal(other);
+    IValue outputIVal(output_);
+
+   if (selfIVal.isAliasOf(outputIVal) || otherIVal.isAliasOf(outputIVal)) {
+      output = at::native::empty_mps(
+                        output_.sizes(),
+                        output_.scalar_type(),
+                        c10::nullopt,
+                        kMPS,
+                        c10::nullopt,
+                        c10::nullopt);
+      needsScatterOrNotContig = true;
+    }
+  }
 
   auto new_size = at::infer_size(self.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
@@ -99,11 +123,14 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
       feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha, getMPSScalarType(other.scalar_type()));
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, needsScatterOrNotContig ? output : output_);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+    if (needsScatterOrNotContig) {
+      output_.copy_(output);
+    }
   }
 }
 
