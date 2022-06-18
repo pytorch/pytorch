@@ -21,7 +21,7 @@ from functorch._src.aot_autograd import aot_module_simplified
 from functorch.compile import (
     nnc_jit, compiled_function, compiled_module,
     min_cut_rematerialization_partition, aot_function, aot_module, decomposition_table, nop,
-    num_of_recompilations, default_partition, default_decompositions
+    num_of_recompilations, default_partition, default_decompositions, memory_efficient_fusion,
 )
 
 from torch.testing._internal.common_device_type import ops
@@ -562,6 +562,22 @@ class TestRandom(TestCase):
         res = aot_fn(x)
 
         assert torch.allclose(ref, res)
+
+
+class TestAutocast(TestCase):
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
+    @unittest.skipIf(not USE_TORCHVISION, "test requires torchvision")
+    def test_autocast(self):
+        mod = torchvision.models.resnet18().cuda()
+        mod.train()
+
+        x = torch.randn(16, 3, 32, 32, device="cuda")
+        aot_mod = memory_efficient_fusion(mod)
+
+        # Ensure that AOT Autograd works with AMP
+        with torch.cuda.amp.autocast(True):
+            res = aot_mod(x)
+        res.sum().backward()
 
 
 only_for = ("cpu")
