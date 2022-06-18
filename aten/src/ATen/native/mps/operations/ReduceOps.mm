@@ -220,6 +220,15 @@ void reduction_out_mps
                                                            axes:axes
                                                            name:nil];
           }
+          else if(reduction_type == "amax") {
+            castOutputTensor = [mpsGraph reductionMaximumWithTensor:inputTensor
+                                                               axes:axes
+                                                               name:nil];
+          } else if(reduction_type == "amin") {
+            castOutputTensor = [mpsGraph reductionMinimumWithTensor:inputTensor
+                                                               axes:axes
+                                                               name:nil];
+          }
 
           MPSGraphTensor* outputTensor = nil;
 
@@ -292,6 +301,24 @@ inline ScalarType get_dtype_from_self(
     return kLong;
   }
   return src_type;
+}
+
+TORCH_IMPL_FUNC(amax_out_mps)
+   (const Tensor& input_t,
+    IntArrayRef dim,
+    bool keepdim,
+    const Tensor& output_t) {
+
+    reduction_out_mps(input_t, dim, keepdim, c10::nullopt, output_t, "amax", "amax_out_mps");
+}
+
+TORCH_IMPL_FUNC(amin_out_mps)
+   (const Tensor& input_t,
+    IntArrayRef dim,
+    bool keepdim,
+    const Tensor& output_t) {
+
+    reduction_out_mps(input_t, dim, keepdim, c10::nullopt, output_t, "amin", "amin_out_mps");
 }
 
 Tensor prod_mps(const Tensor &self, c10::optional<ScalarType> opt_dtype) {
