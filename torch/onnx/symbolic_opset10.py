@@ -1,10 +1,11 @@
 import sys
 import warnings
+from typing import Sequence
 
 import torch
-from torch import _C
 import torch._C._onnx as _C_onnx
 import torch.onnx
+from torch import _C
 
 # Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
@@ -622,5 +623,16 @@ class Quantized:
         output = opset9.conv2d(
             g, input, weight, bias, stride, padding, dilation, groups
         )
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    # TODO: Unpack list here with the decorator
+    def cat(g, q_inputs: _C.Value, dim, op_scale, op_zero_point):
+        dequantized = [
+            symbolic_helper.dequantize_helper(g, input)[0] for input in q_inputs
+        ]
+
+        output = opset9.cat(g, dequantized, dim=dim)
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
