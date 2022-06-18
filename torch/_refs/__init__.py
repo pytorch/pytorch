@@ -140,6 +140,7 @@ __all__ = [
     # 'xlogy', # where?, log, mul
     #
     # Elementwise Ternary References
+    "addcmul",
     #
     "clamp",
     #
@@ -1113,6 +1114,18 @@ true_divide = _make_elementwise_binary_reference(
 #
 # Elementwise Ternary References
 #
+
+# Remove special case when https://github.com/pytorch/pytorch/pull/72949 is landed.
+# @register_decomposition(torch.ops.aten.addcmul)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("self", "tensor1", "tensor2", "value"),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def addcmul(self: Tensor, tensor1: Tensor, tensor2: Tensor, value: float = 1):
+    if self.is_floating_point() or self.is_complex():
+        return self + value * tensor1 * tensor2
+    else:
+        return self + int(value) * tensor1 * tensor2
 
 
 @out_wrapper

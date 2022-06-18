@@ -20782,6 +20782,10 @@ python_ref_db = [
     # Elementwise Ternary Reference OpInfos
     #
     PythonRefInfo(
+        "_refs.addcmul",
+        torch_opinfo_name="addcmul",
+    ),
+    PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
         skips=(
