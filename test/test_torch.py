@@ -748,7 +748,7 @@ class TestTorchDeviceType(TestCase):
 
             # Checks for cpp context in the warning message
             escaped_warning_message = str(warning.message).encode('unicode_escape')
-            self.assertTrue(re.search(s, repr(escaped_warning_message), re.IGNORECASE) is not None)
+            self.assertTrue(re.search(s, str(escaped_warning_message), re.IGNORECASE) is not None)
 
             # Checks the Python features of the warning
             # Note: the eager mode warning refers to the line in the function
@@ -764,7 +764,7 @@ class TestTorchDeviceType(TestCase):
 
             # Checks for cpp context in the warning message
             escaped_warning_message = str(warning.message).encode('unicode_escape')
-            self.assertTrue(re.search(s, repr(escaped_warning_message), re.IGNORECASE) is not None)
+            self.assertTrue(re.search(s, str(escaped_warning_message), re.IGNORECASE) is not None)
 
             # Checks the Python features of the warning
             # Note: the jitted warning's lineno refers to the call to the jitted
