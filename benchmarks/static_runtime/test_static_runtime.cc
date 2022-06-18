@@ -2532,6 +2532,87 @@ TEST(StaticRuntime, Tensor_Split) {
   testStaticRuntime(tensor_split_str3, args3);
 }
 
+TEST(StaticRuntime, JIT_Aten_Cpu) {
+  const std::string script = R"IR(
+    graph(%a: Tensor):
+        %1 : int = prim::Constant[value=0]()
+        %aa: Tensor = aten::add(%a, %a, %1)
+        %ret: Tensor = aten::cpu(%aa)
+        return (%ret)
+  )IR";
+
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  vmap.reserve(0);
+  parseIR(script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+
+  auto a = at::randn({2, 4});
+  std::vector<IValue> args0{a};
+
+  testStaticRuntime(script, args0);
+}
+
+TEST(StaticRuntime, JIT_Aten_Numel) {
+  const std::string script = R"IR(
+    graph(%a: Tensor):
+        %1 : int = prim::Constant[value=0]()
+        %aa: Tensor = aten::add(%a, %a, %1)
+        %ret: int = aten::numel(%aa)
+        return (%ret)
+  )IR";
+
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  vmap.reserve(0);
+  parseIR(script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+
+  auto a = at::randn({2, 4});
+  std::vector<IValue> args0{a};
+
+  testStaticRuntime(script, args0);
+}
+
+TEST(StaticRuntime, JIT_Aten_List) {
+  const std::string script = R"IR(
+    graph(%a: str):
+        %1 : int = prim::Constant[value=0]()
+        %ret: str[] = aten::list(%a)
+        return (%ret)
+  )IR";
+
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  vmap.reserve(0);
+  parseIR(script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+
+  string a = "abcd";
+  std::vector<IValue> args0{a};
+
+  testStaticRuntime(script, args0);
+}
+
+TEST(StaticRuntime, JIT_Aten_Range_Length) {
+  const std::string script = R"IR(
+    graph(%lo: int, %hi: int, %step: int):
+        %1 : int = prim::Constant[value=0]()
+        %ret: int = aten::__range_length(%lo, %hi, %step)
+        return (%ret)
+  )IR";
+
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  vmap.reserve(0);
+  parseIR(script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+
+  std::vector<IValue> args0{0, 10, 2};
+
+  testStaticRuntime(script, args0);
+}
+
 TEST(StaticRuntime, Cat) {
   const std::string cat_script = R"IR(
     graph(%a: Tensor, %b: Tensor, %dim: int):
