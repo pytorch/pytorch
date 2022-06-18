@@ -7740,11 +7740,13 @@
 - func: multinomial.out(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: multinomial_out
+    MPS: multinomial_out_mps
 
 - func: multinomial(Tensor self, int num_samples, bool replacement=False, *, Generator? generator=None) -> Tensor
   variants: method, function
   dispatch:
     CPU, CUDA: multinomial
+    MPS: multinomial_mps
 
 - func: lgamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
