@@ -193,22 +193,31 @@ def meta_bernoulli(self, *, generator=None, out):
 
 
 @torch.library.impl(meta_lib, "convolution_overrideable")
-def meta_conv2d(input_tensor: torch.Tensor, weight: torch.Tensor,
-                bias: torch.Tensor, stride: list[int], padding: list[int],
-                dilation: list[int], *args):
-
+def meta_conv2d(
+    input_tensor: torch.Tensor,
+    weight: torch.Tensor,
+    bias: torch.Tensor,
+    stride: list[int],
+    padding: list[int],
+    dilation: list[int],
+    *args,
+):
     def calc_conv_return_shape(dim, kernel_size, stride, padding, dilation):
         h_out = math.floor(
             (dim[0] + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1)
-            / stride[0] + 1)
+            / stride[0]
+            + 1
+        )
         w_out = math.floor(
             (dim[1] + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1)
-            / stride[1] + 1)
+            / stride[1]
+            + 1
+        )
         return h_out, w_out
 
-    shape_out = calc_conv_return_shape(input_tensor.shape[-2:],
-                                       weight.shape[-2:],
-                                       stride, padding, dilation)
+    shape_out = calc_conv_return_shape(
+        input_tensor.shape[-2:], weight.shape[-2:], stride, padding, dilation
+    )
     return input_tensor.new_empty((input_tensor.shape[0], weight.shape[0], *shape_out))
 
 
@@ -587,6 +596,7 @@ def meta_nanmedian(input):
 def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
-    return input.new_empty(output_shape), input.new_empty(
-        output_shape, dtype=torch.long
+    return (
+        input.new_empty(output_shape),
+        input.new_empty(output_shape, dtype=torch.long),
     )
