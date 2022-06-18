@@ -1,8 +1,3 @@
-
-
-
-
-
 import sys
 import numpy as np
 
@@ -12,20 +7,20 @@ def print_test_debug_info(testname, items_dict):
     with open(filename, 'w') as f:
         for key, value in items_dict.items():
             print(key, value)
-            f.write("{}\n".format(key))
-            f.write("{}\n".format(value))
+            f.write(f"{key}\n")
+            f.write(f"{value}\n")
 
 def print_net(net):
     for i in net.external_input:
-        print("Input: {}".format(i))
+        print(f"Input: {i}")
     for i in net.external_output:
-        print("Output: {}".format(i))
+        print(f"Output: {i}")
     for op in net.op:
-        print("Op {}".format(op.type))
+        print("Op {op.type}")
         for x in op.input:
-            print("  input: {}".format(x))
+            print(f"  input: {x}")
         for y in op.output:
-            print("  output: {}".format(y))
+            print(f"  output: {y}")
 
 def _sigmoid(x):
     return 1. / (1. + np.exp(np.float64(-x)))
