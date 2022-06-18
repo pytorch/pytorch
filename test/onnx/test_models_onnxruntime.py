@@ -51,7 +51,12 @@ def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7, opset_versions=None):
 TestModels = type(
     "TestModels",
     (TestCase,),
-    dict(TestModels.__dict__, is_script_test_enabled=False, exportTest=exportTest),
+    dict(
+        TestModels.__dict__,
+        is_script_test_enabled=False,
+        is_script=False,
+        exportTest=exportTest,
+    ),
 )
 
 
@@ -63,6 +68,7 @@ TestModels_new_jit_API = type(
         TestModels.__dict__,
         exportTest=exportTest,
         is_script_test_enabled=True,
+        is_script=True,
         onnx_shape_inference=True,
     ),
 )
