@@ -1,11 +1,13 @@
 from torch import nn
 
-def module_to_fqn(model, layer, prefix=''):
+__all__ = ["module_to_fqn", "fqn_to_module", "get_arg_info_from_tensor_fqn", "FakeSparsity"]
+
+def module_to_fqn(model, module, prefix=''):
     for name, child in model.named_children():
         new_name = prefix + '.' + name
-        if child is layer:
+        if child is module:
             return new_name
-        child_path = module_to_fqn(child, layer, prefix=new_name)
+        child_path = module_to_fqn(child, module, prefix=new_name)
         if child_path is not None:
             return child_path
     return None
@@ -17,6 +19,29 @@ def fqn_to_module(model, path):
         if model is None:
             return None
     return model
+
+def get_arg_info_from_tensor_fqn(model, tensor_fqn):
+    # remove starting '.' from tensor_fqn if it exists
+    if tensor_fqn[0] == '.':
+        tensor_fqn = tensor_fqn[1:]
+
+    # string manip to split tensor_fqn into module_fqn and tensor_name
+    # if tensor_fqn is 'weight' then module_fqn and tensor_name are '' and 'weight'
+    # if tensor_fqn is 'linear.weight' then module_fqn and tensor_name are 'linear' and 'weight'
+    tensor_name = tensor_fqn.split('.')[-1]
+    module_fqn = tensor_fqn[:-len(tensor_name) - ('.' in tensor_fqn)]
+
+
+    module = fqn_to_module(model, module_fqn)
+    if module is None:  # handling for module_fqn=''
+        module = model
+
+    return {
+        'module_fqn': module_fqn,
+        'module': module,
+        'tensor_name': tensor_name,
+        'tensor_fqn': tensor_fqn,
+    }
 
 # Parametrizations
 class FakeSparsity(nn.Module):
