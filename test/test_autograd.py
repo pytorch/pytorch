@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
     disable_gc, gradcheck, gradgradcheck, parametrize,
     instantiate_parametrized_tests, skipIfMps)
-from torch.autograd import Variable, Function, detect_anomaly, kineto_available
+from torch.autograd import Variable, Function, detect_anomaly, kineto_available, _calculate_shape
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
@@ -3295,6 +3295,25 @@ class TestAutograd(TestCase):
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
+
+    def test_calculate_shape_util(self):
+        out = torch.randn(10, 5, requires_grad=True)
+        grad = torch.randn(5, 10, requires_grad=True)
+        out_shape, grad_shape = _calculate_shape(out, grad, False)
+
+        assert out_shape == torch.Size([10, 5])
+        assert grad_shape == torch.Size([5, 10])
+
+        out = torch.nested_tensor([
+            torch.randn(10, 5, requires_grad=True),
+            torch.randn(10, 5, requires_grad=True),
+            torch.randn(10, 5, requires_grad=True)]
+        )
+        grad = torch.nested_tensor([torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True)])
+        out_shape, grad_shape = _calculate_shape(out, grad, False)
+
+        assert torch.equal(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]))
+        assert torch.equal(grad_shape, torch.tensor([[5, 10], [5, 10]]))
 
     def test_nested_anomaly_detect_nan(self):
         size = 10
@@ -6595,7 +6614,6 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertFalse(view_tangent._is_view())  # Optimization to share the same tensor!
         self.assertIs(view_tangent, base_tangent)
         self.assertIs(x_tangent, tangent)
-        self.assertIs(view_tangent, tangent)
 
     def test_inplace_on_view_not_same_layout(self):
         input = torch.zeros([2, 2])
@@ -7739,6 +7757,16 @@ class TestAutogradDeviceType(TestCase):
         with fwAD.dual_level():
             dual = fwAD.make_dual(primal, tangent)
             non_dual.copy_(dual)
+
+    def test_copy_forward_ad_same_layout_copies_grad(self, device):
+        primal = torch.tensor([[3.], [4.]], device=device)
+        tangent = torch.tensor([[5.], [6.]], device=device)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(primal, tangent)
+            non_dual = torch.tensor([[1.], [2.]])
+            non_dual.copy_(x_dual)
+            self.assertTrue(fwAD.unpack_dual(non_dual).tangent is not tangent)
 
     @onlyCUDA
     def test_simple_reentrant_cross_device(self, device):

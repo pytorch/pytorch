@@ -130,7 +130,6 @@ class TestAutodiffJit(JitTestCase):
             return x, y, z
 
         fn_s = torch.jit.script(fn)
-        print(fn_s.graph)
 
         a = torch.rand((10, 10), requires_grad=True)
         b = torch.rand((10, 10), requires_grad=True)
