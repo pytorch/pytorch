@@ -484,6 +484,7 @@ class TestNestedTensorDeviceType(TestCase):
 
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
+    @torch.inference_mode()
     def test_dropout(self, device, dtype):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
