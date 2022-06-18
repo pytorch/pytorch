@@ -693,7 +693,9 @@ class TestConstFold(TestCase):
         gm = torch.fx.symbolic_trace(mod)
         in_x, in_y = torch.tensor([[-0.45]]), torch.tensor([0.9])
         ShapeProp(gm).propagate(in_x, in_y)
-        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(gm)
+        mod_folded: const_fold.FoldedGraphModule = const_fold.split_const_subgraphs(
+            gm, device_for_folded_attrs="cpu"
+        )
         self._verify_const_fold_mod(mod_folded)
 
         mod_folded.run_folding()

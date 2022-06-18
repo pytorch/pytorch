@@ -22,7 +22,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
         graph: torch.fx.Graph,
         const_subgraph: Optional[torch.fx.Graph] = None,
         fx_const_folded_attrs_name: str = None,
-        device_for_folded_attrs: str = "cpu",
+        device_for_folded_attrs: str = "cuda",
     ):
         # In init, we set graph's owning module to root which will make graph's
         # owning module be None because graph already have a owning module. We
