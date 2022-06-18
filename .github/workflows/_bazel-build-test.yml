@@ -19,7 +19,7 @@ jobs:
   build-and-test:
     # Don't run on forked repos.
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.2xlarge]
+    runs-on: linux.4xlarge.nvidia.gpu
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
