@@ -4079,12 +4079,7 @@ def _any(g, *args):
     input_sum = symbolic_helper._reducesum_helper(
         g, input, axes_i=dim, keepdims_i=keepdim
     )
-
-    if dim is None and keepdim == 0:
-        return g.op(
-            "Squeeze", gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
-        )
-    return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
+    return gt(g, input_sum, g.op("Constant", value_t=torch.tensor(0, dtype=torch.long)))
 
 
 def _all(g, *args):
