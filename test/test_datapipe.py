@@ -1457,7 +1457,7 @@ class TestFunctionalIterDataPipe(TestCase):
 
         p_mul_filter_fn = partial(_mul_filter_fn, b=1)
         out = tuple_input_ds.filter(p_mul_filter_fn, input_col=0)
-        self.assertEqual(list(out), [(d - 1, d, d+1) for d in range(10)])
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(10)])
 
         def _mul_filter_fn_with_defaults(a, b=1):
             return a + b < 10
