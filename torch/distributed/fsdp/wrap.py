@@ -268,6 +268,7 @@ class ParamExecOrderWrapPolicy:
             within each transformer layer.
     """
     init_policy : Callable = always_wrap_policy
+    group_size : int = 1
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:

@@ -954,6 +954,7 @@ class FullyShardedDataParallel(nn.Module):
             device_id=device_id,
             sync_module_states=sync_module_states,
         )
+        self._param_exec_order_policy_group_size : int = auto_wrap_policy.group_size
         self._use_param_exec_order_policy : bool = True
         # self._param_exec_order_prep_stage is set to True in the first forward and backward iteration,
         # and set to False otherwise.
@@ -3201,16 +3202,43 @@ class FullyShardedDataParallel(nn.Module):
         # Construct a fsdp_wrap_map whose keys are all children modules
         # with a FSDP wrap, and values are its FSDP wraps. These children FSDP wraps
         # will be detached from the root FSDP module.
-        self.module_fsdpwrap_map : Dict[torch.nn.Module, FullyShardedDataParallel] = dict()
+        self.module_fsdpwrap_map : Dict[nn.Module, FullyShardedDataParallel] = dict()
+        self.param_module_map : Dict[FlatParameter, nn.Module] = dict()
         # Remove all internal FSDP wraps from the root FSDP module
         self._remove_inner_fsdp_wraps()
+        fsdp_wraps = self.module_fsdpwrap_map.values()
+        self._grouped_fsdp_wraps : List[FullyShardedDataParallel] = []
+        # group fsdp wraps
+        if self._param_exec_order_policy_group_size == 1:
+            self._grouped_fsdp_wraps = fsdp_wraps
+        else:
+            num_groups = math.ceil(len(self._fsdp_params_exec_order) / self._param_exec_order_policy_group_size)
+            for i in range(num_groups):
+                params = []
+                for j in range(self._param_exec_order_policy_group_size):
+                    index = i * self._param_exec_order_policy_group_size + j
+                    if index < len(self._fsdp_params_exec_order):
+                        params.append(self._fsdp_params_exec_order[index])
+                wraps_to_group = [self.module_fsdpwrap_map[self.param_module_map[p]] for p in params]
+                grouped_wrap = FullyShardedDataParallel.group_fsdp_modules(wraps_to_group)
+                # grouped_wrap._is_root = False
+                # Used to track when to do _post_forward
+                grouped_wrap._call_index = 0
+                grouped_wrap._group_size = len(wraps_to_group)
+                self._grouped_fsdp_wraps.append(grouped_wrap)
+                for p in params:
+                    self.module_fsdpwrap_map[self.param_module_map[p]] = grouped_wrap
         # register non-root FSDP wraps as children module of root FSDP wrap
         assert (
             len(self.module_fsdpwrap_map) > 0
         ), "self.module_fsdpwrap_map needs to be not empty."
-        for (i, wrap) in enumerate(self.module_fsdpwrap_map.values()):
+        for (i, wrap) in enumerate(self._grouped_fsdp_wraps):
             if wrap is not self:
                 self.add_module(f"flatten_layer_{i}", wrap)
+        # Force it to reset
+        self._reset_lazy_init()
+        # For validating execution order across ranks
+        self._exec_order_data = _ExecOrderData()
         # Patch the forward of each model in the keys of module_fsdpwrap_map
         self._patch_forwards()
 
@@ -3221,6 +3249,7 @@ class FullyShardedDataParallel(nn.Module):
         if isinstance(module, FullyShardedDataParallel):
             unwrapped_module = module.module
             self.module_fsdpwrap_map[unwrapped_module] = module
+            self.param_module_map[module._fsdp_wrapped_module.flat_param] = unwrapped_module
             return unwrapped_module
         return module
 
@@ -3238,10 +3267,20 @@ class FullyShardedDataParallel(nn.Module):
         unpatched_forward = module.forward
 
         def patched_forward(*args: Any, **kwargs: Any) -> Any:
-            self.module_fsdpwrap_map[module]._pre_forward(args, kwargs)
+            if hasattr(self.module_fsdpwrap_map[module], "_call_index"):
+                self.module_fsdpwrap_map[module]._call_index += 1
+            if self.module_fsdpwrap_map[module].training_state != TrainingState_.FORWARD:
+                self.module_fsdpwrap_map[module]._pre_forward(args, kwargs)
             self.module_fsdpwrap_map[module]._fsdp_wrapped_module._unflatten_params_if_needed()
+
             outputs = unpatched_forward(*args, **kwargs)
-            outputs = self.module_fsdpwrap_map[module]._post_forward(outputs)
+
+            if hasattr(self.module_fsdpwrap_map[module], "_call_index"):
+                if self.module_fsdpwrap_map[module]._call_index == self.module_fsdpwrap_map[module]._group_size:
+                    outputs = self.module_fsdpwrap_map[module]._post_forward(outputs)
+                    self.module_fsdpwrap_map[module]._call_index = 0
+            else:
+                outputs = self.module_fsdpwrap_map[module]._post_forward(outputs)
             return outputs
 
         return patched_forward

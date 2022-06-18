@@ -19,11 +19,11 @@ class Model(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.layer0 = torch.nn.Linear(6, 6)
-        self.layer1 = torch.nn.Linear(6, 6, bias=False)
+        self.layer1 = torch.nn.Linear(6, 6)
         self.layer2 = torch.nn.Sequential(
-            torch.nn.Linear(6, 3, bias=False),
+            torch.nn.Linear(6, 3),
             torch.nn.ReLU(),
-            torch.nn.Linear(3, 6, bias=False),
+            torch.nn.Linear(3, 6),
         )
         self.relu = torch.nn.ReLU()
 
@@ -110,16 +110,19 @@ class TestFSDPExecOrder(FSDPTest):
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     @parametrize("iters", [1, 10])
+    @parametrize("group_size", [1, 2, 4])
     def test_fsdp_accuracy(
         self,
         sharding_strategy: ShardingStrategy,
-        iters: int
+        iters: int,
+        group_size: int,
     ):
         """Tests the accuracy with ParamExecOrderWrapPolicy"""
         model = Model()
         model_copy = copy.deepcopy(model)
         policy_exec_order = ParamExecOrderWrapPolicy(
-            init_policy=always_wrap_policy
+            init_policy=always_wrap_policy,
+            group_size=group_size,
         )
         fsdp_model_1 = Model.wrap(
             model,
@@ -133,10 +136,14 @@ class TestFSDPExecOrder(FSDPTest):
             self.device,
             always_wrap_policy
         )
+        input = fsdp_model_1.module.get_input(self.device)
+        # initialization
+        output_1 = fsdp_model_1(input)
+        loss_1 = fsdp_model_1.module.get_loss(input, output_1).to(self.device)
+        loss_1.backward()
+        # end initialization
         optim_1 = SGD(fsdp_model_1.parameters(), lr=0.1)
         optim_2 = SGD(fsdp_model_2.parameters(), lr=0.1)
-
-        input = fsdp_model_1.module.get_input(self.device)
         for _ in range(iters):
             output_1 = fsdp_model_1(input)
             loss_1 = fsdp_model_1.module.get_loss(input, output_1).to(self.device)
