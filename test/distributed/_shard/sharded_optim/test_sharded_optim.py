@@ -13,7 +13,6 @@ from torch.distributed._shard.sharding_spec import (
 )
 from torch.distributed._shard.sharded_optim import (
     ShardedOptimizer,
-    named_params_with_sharded_tensor
 )
 from torch.testing._internal.common_distributed import (
     requires_nccl,
@@ -35,7 +34,7 @@ class MyShardedModel(torch.nn.Module):
         torch.manual_seed(0)
         self.param = torch.nn.Parameter(torch.rand(5, 10))
         if spec is not None:
-            self.sharded_param = sharded_tensor.rand(spec, 20, 10, requires_grad=True, process_group=group)
+            self.sharded_param = torch.nn.Parameter(sharded_tensor.rand(spec, 20, 10, requires_grad=True, process_group=group))
         else:
             self.sharded_param = torch.nn.Parameter(torch.rand(5, 10))
 
@@ -110,7 +109,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
             local_model.sharded_param.detach().clone().requires_grad_()
 
         local_optim = optim.SGD(local_model.parameters(), lr=0.1)
-        sharded_model_params = dict(named_params_with_sharded_tensor(sharded_model))
+        sharded_model_params = dict(sharded_model.named_parameters())
         sharded_optim = ShardedOptimizer(sharded_model_params, optim.SGD, lr=0.1)
 
         local_optim.zero_grad()
@@ -163,7 +162,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
             ],
         )
         sharded_model = MyShardedModel(spec=rowwise_spec).cuda(self.rank)
-        sharded_model_params = dict(named_params_with_sharded_tensor(sharded_model))
+        sharded_model_params = dict(sharded_model.named_parameters())
         param_keys = list(sharded_model_params.keys())
         self.assertEqual(len(param_keys), 2)
         self.assertTrue("param" in param_keys)
@@ -171,7 +170,7 @@ class TestShardedOptimizer(ShardedTensorTestBase):
 
         sharded_linear = MyShardedLinear(rank=self.rank).cuda(self.rank)
         sharded_linear.shard_parameter()
-        sharded_linear_params = dict(named_params_with_sharded_tensor(sharded_linear))
+        sharded_linear_params = dict(sharded_linear.named_parameters())
         param_keys = list(sharded_linear_params.keys())
         self.assertEqual(len(param_keys), 4)
         self.assertTrue("linear1.bias" in param_keys)
@@ -179,10 +178,6 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         self.assertTrue("linear1.weight" in param_keys)
         self.assertTrue("linear2.weight" in param_keys)
         self.assertFalse("bias" in param_keys)
-
-
-
-
 
 if __name__ == '__main__':
     run_tests()

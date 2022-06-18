@@ -31,7 +31,6 @@ def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
 
 
 # Tensor properties access
-_register_default_op(torch.Tensor.requires_grad.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.shape.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.dtype.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 _register_default_op(torch.Tensor.layout.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
@@ -43,6 +42,12 @@ _register_default_op(torch.Tensor.contiguous, _sharded_op_impl)
 
 # __reduce_ex__ to dispatch to get_state/set_state
 _register_default_op(torch.Tensor.__reduce_ex__, _sharded_op_impl)
+
+# autograd related properties
+_register_default_op(torch.Tensor.requires_grad.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.grad.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.grad_fn.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
+_register_default_op(torch.Tensor.is_leaf.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
 
 def sharded_type_as_check(*args, **kwargs):
     """
@@ -167,6 +172,9 @@ def tensor_requires_grad_set(types, args=(), kwargs=None, pg=None):
     for local_shard in self_st.local_shards():
         local_shard.tensor.requires_grad_(requires_grad)
 
+        # update the wrapper class property
+    with torch._C.DisableTorchFunction():
+        self_st.requires_grad_(requires_grad)
     # update the metadata in the meanwhile
     self_st._metadata.tensor_properties.requires_grad = requires_grad
     return self_st
