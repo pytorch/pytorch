@@ -193,7 +193,7 @@ def meta_bernoulli(self, *, generator=None, out):
 
 
 @torch.library.impl(meta_lib, "convolution_overrideable")
-def meta_conv2d(
+def meta_conv(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
     bias: torch.Tensor,
