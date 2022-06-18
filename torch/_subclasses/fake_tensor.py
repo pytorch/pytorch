@@ -224,7 +224,7 @@ def data_dep_op(fake_mode, func, *args, **kwargs):
 # See: IndexingUtils.h:expandTensors
 def check_no_bool_index_tensors(func, self, indices):
     for index in indices:
-        if index is not None and index.dtype in [torch.bool, torch.uint8]:
+        if index is not None and index.dtype in (torch.bool, torch.uint8):
             raise DynamicOutputShapeException(func)
 
 # Meta tensors give you the ability to run PyTorch code without having to
