@@ -5352,6 +5352,73 @@ def sample_inputs_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
     # With `None` weight and bias (tests failing for this, see the link above)
     # yield SampleInput(make_arg((1, 2)), args=((2,), None, make_arg((2,))))
 
+
+def sample_inputs_native_layer_norm(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    # Ordered as input shape, normalized_shape, eps
+    cases: Tuple[Tuple[int], Tuple[int], float] = (  # type: ignore[assignment]
+        ((1, 2, 3), (1, 2, 3), 0.5),
+        ((2, 2, 3), (2, 3), -0.5),
+        ((1,), (1,), 1e-5),
+        ((1, 2), (2,), 1e-5),
+        ((0, 1), (1,), 1e-5),
+    )
+
+    for input_shape, normalized_shape, eps in cases:
+        # Shape of weight and bias should be the same as normalized_shape
+        weight = make_arg(normalized_shape)
+        bias = make_arg(normalized_shape)
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, weight, bias, eps),
+        )
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, None, bias, eps),
+        )
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, weight, None, eps),
+        )
+        yield SampleInput(
+            make_arg(input_shape),
+            args=(normalized_shape, None, None, eps),
+        )
+
+
+def error_inputs_native_layer_norm(opinfo, device, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32, requires_grad=False)
+    input_shape = (1, 2, 3)
+
+    err_msg1 = "Expected normalized_shape to be at least 1-dimensional"
+    s1 = SampleInput(
+        make_arg(input_shape), args=(tuple(), None, None, 1e-5)
+    )
+    yield ErrorInput(s1, error_regex=err_msg1)
+
+    normalized_shape = (1, 2, 3)
+    weight = make_arg((1, 2))
+    err_msg2 = "Expected weight to be of same shape as normalized_shape"
+    s2 = SampleInput(
+        make_arg(input_shape), args=(normalized_shape, weight, None, 1e-5)
+    )
+    yield ErrorInput(s2, error_regex=err_msg2)
+
+    bias = make_arg((1, 2))
+    err_msg3 = "Expected bias to be of same shape as normalized_shape"
+    s3 = SampleInput(
+        make_arg(input_shape), args=(normalized_shape, None, bias, 1e-5)
+    )
+    yield ErrorInput(s3, error_regex=err_msg3)
+
+    err_msg4 = "Given normalized_shape="
+    s4 = SampleInput(
+        make_arg((2, 2, 3)), args=((2, 2), None, None, 1e-5)
+    )
+    yield ErrorInput(s4, error_regex=err_msg4)
+
+
 def sample_inputs_local_response_norm(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
@@ -8382,9 +8449,19 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
         inp_shape, dim, lengths, unsafe = args
         lengths_t = torch.tensor(lengths, dtype=torch.long, device=device)
+        sample_input_kwargs = {'axis': dim, 'unsafe': unsafe, 'initial': initial}
+        if mode == 'lengths':
+            sample_input_kwargs['lengths'] = lengths_t
+        elif mode == 'offsets':
+            zeros_shape = list(lengths_t.shape)
+            zeros_shape[dim] = 1
+            offsets_t = torch.cat((lengths_t.new_zeros(zeros_shape), lengths_t), dim).cumsum_(dim)
+            sample_input_kwargs['offsets'] = offsets_t
+        else:
+            raise RuntimeError(f"mode most be one of 'offsets' or 'lengths' got '{mode}'.")
         yield SampleInput(_tensor(inp_shape),
                           args=(reduce,),
-                          kwargs={'lengths': lengths_t, 'axis': dim, 'unsafe': unsafe, 'initial': initial})
+                          kwargs=sample_input_kwargs)
 
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
@@ -10071,6 +10148,10 @@ def wrapper_set_seed(op, *args, **kwargs):
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
+    return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
+
+
+def reference_native_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight, bias, eps):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
@@ -10082,7 +10163,10 @@ def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=N
         Y = Y * weight.reshape(-1)
     elif weight is not None and bias is not None:
         Y = Y * weight.reshape(-1) + bias.reshape(-1)
-    return Y.reshape(*inp.shape)
+    axis = inp.ndim - len(normalized_shape)
+    stat_shape = inp.shape[:axis] + (1,) * len(normalized_shape)
+    return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
+
 
 def reference_group_norm(inp: np.ndarray, num_groups: int, weight=None, bias=None, eps=1e-5):
     inp_view = inp
@@ -11098,7 +11182,6 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_symeig,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
@@ -12340,7 +12423,6 @@ op_db: List[OpInfo] = [
            skips=(
                # AssertionError: Scalars are not equal!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                # Forward-over-reverse gradgrad might be incorrect
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
@@ -12390,15 +12472,12 @@ op_db: List[OpInfo] = [
                # Forward-over-reverse gradgrad might be incorrect
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=complex_types()),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # Could not run 'aten::linalg_eigh' with arguments from the 'AutogradMeta' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -13291,10 +13370,6 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values'),
-                        # Problem due to internal inplace operations
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestCompositeCompliance',
-                                     'test_operator'),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
@@ -13437,6 +13512,26 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_grad'),
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                DecorateInfo(unittest.skip('Passes on complex128 and float64 only'), 'TestGradients', 'test_fn_fwgrad_bwgrad'),)),
+    OpInfo('native_layer_norm',
+           aten_name='native_layer_norm',
+           ref=reference_native_layer_norm,
+           dtypes=floating_types_and(torch.bfloat16),
+           dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+           supports_out=False,
+           assert_jit_shape_analysis=True,
+           sample_inputs_func=sample_inputs_native_layer_norm,
+           error_inputs_func=error_inputs_native_layer_norm,
+           skips=(
+               # IndexError: tuple index out of range
+               DecorateInfo(unittest.skip('Skipped!'), 'TestGradients', 'test_forward_mode_AD'),
+               # Tests fail when weight=None and bias is defined
+               # https://github.com/pytorch/pytorch/issues/79705
+               DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
+               # JIT test also tries to compute double backward, which fails
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # RuntimeError: vector::_M_range_check: __n (which is 2) >= this->size() (which is 2)
+               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
+           )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
            dtypes=floating_types_and(torch.bfloat16),
@@ -17826,14 +17921,14 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.l1_loss",
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
+        aten_backward_name='l1_loss_backward',
         sample_inputs_func=sample_inputs_l1_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # fwgrad_bwgrad for abs is wrong
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=complex_types()),
             # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
             # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
             DecorateInfo(
@@ -19499,6 +19594,25 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
+    OpInfo(
+        'segment_reduce',
+        variant_test_name='offsets',
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
+        supports_gradgrad=False,
+        sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
+        skips=(
+            # FIXME: CUDA driver API confirmed a leak in
+            # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cuda",
+            ),
+        ),
+    ),
     UnaryUfuncInfo(
         'special.bessel_j0',
         decorators=(
@@ -20107,6 +20221,10 @@ python_ref_db = [
         torch_opinfo_name="round",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.rsqrt",
+        torch_opinfo_name="rsqrt",
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.sigmoid",
         torch_opinfo_name="sigmoid",
         # Reference: https://github.com/pytorch/pytorch/issues/56012
@@ -20255,6 +20373,18 @@ python_ref_db = [
         skips=(
             # RuntimeError: TypeError: _traced() got an unexpected keyword argument 'approximate'
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.layer_norm",
+        torch_opinfo_name="nn.functional.layer_norm",
+        skips=(
+            # TypeError: make_traced.<locals>._traced() got an unexpected keyword argument 'eps'
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # Reference result was farther (3.5762786809723224e-07) from the precise computation
+            # than the torch result was (2.5068410824946596e-07)!
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.float32,), device_type='cpu'),
         ),
     ),
     PythonRefInfo(
@@ -20798,6 +20928,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.narrow",
         torch_opinfo_name="narrow",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.native_layer_norm",
+        torch_opinfo_name="native_layer_norm",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
