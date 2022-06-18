@@ -197,11 +197,12 @@ def meta_conv2d(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
     bias: torch.Tensor,
-    stride: list[int],
-    padding: list[int],
-    dilation: list[int],
+    stride: List[int],
+    padding: List[int],
+    dilation: List[int],
     *args,
 ):
+    print(f"Weight: {weight}")
     def calc_conv_return_shape(dim, kernel_size, stride, padding, dilation):
         h_out = math.floor(
             (dim[0] + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1)
