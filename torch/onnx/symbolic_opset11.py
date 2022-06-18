@@ -1063,8 +1063,6 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
             keepdim = 0
-        else:
-            keepdim = int(keepdim)
 
         cond_op = g.op(
             "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
