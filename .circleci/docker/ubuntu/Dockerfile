@@ -6,8 +6,6 @@ ARG UBUNTU_VERSION
 
 ENV DEBIAN_FRONTEND noninteractive
 
-ARG CLANG_VERSION
-
 # Install common dependencies (so that this step can be cached separately)
 ARG EC2
 ADD ./common/install_base.sh install_base.sh
@@ -15,6 +13,7 @@ RUN bash ./install_base.sh && rm install_base.sh
 
 # Install clang
 ARG LLVMDEV
+ARG CLANG_VERSION
 ADD ./common/install_clang.sh install_clang.sh
 RUN bash ./install_clang.sh && rm install_clang.sh
 
@@ -50,13 +49,6 @@ RUN bash ./install_gcc.sh && rm install_gcc.sh
 # Install lcov for C++ code coverage
 ADD ./common/install_lcov.sh install_lcov.sh
 RUN  bash ./install_lcov.sh && rm install_lcov.sh
-
-# Install cuda and cudnn
-ARG CUDA_VERSION
-RUN wget -q https://raw.githubusercontent.com/pytorch/builder/main/common/install_cuda.sh -O install_cuda.sh
-RUN bash ./install_cuda.sh ${CUDA_VERSION} && rm install_cuda.sh
-ENV DESIRED_CUDA ${CUDA_VERSION}
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:$PATH
 
 # (optional) Install protobuf for ONNX
 ARG PROTOBUF
@@ -119,8 +111,6 @@ RUN rm install_ninja.sh
 ADD ./common/install_openssl.sh install_openssl.sh
 RUN bash ./install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
-ENV OPENSSL_DIR /opt/openssl
-RUN rm install_openssl.sh
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 ADD ./common/install_cache.sh install_cache.sh
@@ -132,19 +122,12 @@ ADD ./common/install_jni.sh install_jni.sh
 ADD ./java/jni.h jni.h
 RUN bash ./install_jni.sh && rm install_jni.sh
 
-# Install Open MPI for CUDA
-ADD ./common/install_openmpi.sh install_openmpi.sh
-RUN if [ -n "${CUDA_VERSION}" ]; then bash install_openmpi.sh; fi
-RUN rm install_openmpi.sh
-
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
-# AWS specific CUDA build guidance
-ENV TORCH_CUDA_ARCH_LIST Maxwell
-ENV TORCH_NVCC_FLAGS "-Xfatbin -compress-all"
-ENV CUDA_PATH /usr/local/cuda
+# Install LLVM dev version (Defined in the pytorch/builder github repository)
+COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 USER jenkins
 CMD ["bash"]
