@@ -17,7 +17,7 @@ import torch
 import torch.distributed as dist
 # Import the entire FSDP file to avoid circular imports
 import torch.distributed.fsdp.fully_sharded_data_parallel as FSDP
-from torch.distributed.fsdp._flat_param import (
+from torch.distributed.fsdp.flat_param import (
     FlatParameter,
     FlatParamHandle,
 )

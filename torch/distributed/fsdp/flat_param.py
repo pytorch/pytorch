@@ -17,6 +17,11 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+__all__ = [
+    "FlatParameter", "FlatParamHandle", "FlatParamShardMetadata",
+    "ParamInfo", "SharedParamInfo",
+]
+
 
 class ParamInfo(NamedTuple):
     """Information for an original module parameter."""

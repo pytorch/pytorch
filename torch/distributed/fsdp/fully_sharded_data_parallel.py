@@ -45,7 +45,6 @@ from torch.distributed.utils import (
 )
 from torch.nn.parameter import Parameter
 
-from ._flat_param import FlatParameter, FlatParamHandle
 from ._optim_utils import (
     _broadcast_pos_dim_tensor_states,
     _broadcast_processed_optim_state_dict,
@@ -64,6 +63,7 @@ from ._utils import (
     _contains_batchnorm,
     _override_batchnorm_mixed_precision,
 )
+from .flat_param import FlatParameter, FlatParamHandle
 from .flatten_params_wrapper import (
     FLAT_PARAM,
     FPW_MODULE,

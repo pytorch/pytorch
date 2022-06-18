@@ -12,7 +12,7 @@ from typing import Any, Dict, Generator, List
 import torch.nn as nn
 from torch.distributed.utils import _replace_by_prefix
 
-from ._flat_param import FlatParamHandle
+from .flat_param import FlatParamHandle
 
 FLAT_PARAM = "flat_param"
 FPW_MODULE = "_fpw_module"
