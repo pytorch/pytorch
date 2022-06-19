@@ -195,8 +195,11 @@ void initNvFuserPythonBindings(PyObject* module) {
           py::arg("dtype") = torch::jit::fuser::cuda::DataType::Float,
           py::return_value_policy::reference)
       .def(
+          // TODO: Should the inernals of this function live more explicitly in
+          // TensorViewBuilder?
           "define_tensor",
           [](FusionDefinitionContextManager& self,
+             // TODO: This should come in as int64_t not int
              std::vector<int> sizes,
              std::vector<int> strides,
              torch::jit::fuser::cuda::DataType dtype =
@@ -207,17 +210,23 @@ void initNvFuserPythonBindings(PyObject* module) {
                 sizes.size(),
                 strides.size());
 
-            std::vector<IterDomain*> domain_sizes;
+            // TensorViewBuilder assumes any dim with a compile time constant
+            // size == 1 is a "maybe broadcast" axis, symbolic sizes are
+            // identified by -1, and size == 0 is not supported.
+
+            // Translate to TensorViewBuilder's view of the world.
+            std::vector<int64_t> maybe_symbolic_sizes;
+            maybe_symbolic_sizes.reserve(sizes.size());
             for (const auto i : c10::irange(sizes.size())) {
+              TORCH_INTERNAL_ASSERT(
+                  sizes[i] > 0,
+                  "Size of ",
+                  sizes[i],
+                  " is not supported in nvFuser. Expected size > 0.");
               if (sizes[i] == 1) {
-                domain_sizes.push_back(IrBuilder::create<IterDomain>(
-                    self.fusionPtr()->zeroVal(),
-                    self.fusionPtr()->oneVal(),
-                    ParallelType::Serial,
-                    IterType::BroadcastWithStride));
+                maybe_symbolic_sizes.push_back(1);
               } else {
-                domain_sizes.push_back(IrBuilder::create<IterDomain>(
-                    self.fusionPtr()->zeroVal(), IrBuilder::create<Int>()));
+                maybe_symbolic_sizes.push_back(-1);
               }
             }
 
@@ -231,9 +240,12 @@ void initNvFuserPythonBindings(PyObject* module) {
               }
             }
 
-            return IrBuilder::create<TensorView>(
-                IrBuilder::create<TensorDomain>(domain_sizes, contig_info),
-                dtype);
+            return TensorViewBuilder()
+                .ndims(maybe_symbolic_sizes.size())
+                .contiguity(contig_info)
+                .shape(maybe_symbolic_sizes)
+                .dtype(dtype)
+                .build();
           },
           py::arg("sizes"),
           py::arg("strides"),
