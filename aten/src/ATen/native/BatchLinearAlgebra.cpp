@@ -7,7 +7,6 @@
 
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/Parallel.h>
@@ -410,47 +409,6 @@ TORCH_META_FUNC(triangular_solve)(const Tensor& self, const Tensor& A, bool uppe
   } else {
     TORCH_INTERNAL_ASSERT(false, "triangular_solve: Got an unexpected layout.");
   }
-}
-
-TORCH_META_FUNC(_linalg_det)(const Tensor& A) {
-  at::native::squareCheckInputs(A, "linalg.det");
-  at::native::checkFloatingOrComplex(A, "linalg.det");
-
-  auto shape= A.sizes();
-  auto ndim = shape.size();
-
-  // det
-  set_output_contiguous(0, shape.slice(0, ndim - 2), A.options());
-
-  // LU
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
-  set_output_strided(1, shape, LU_strides, A.options());
-
-  // pivots
-  set_output_contiguous(2, shape.slice(0, ndim - 1), A.options().dtype(kInt));
-}
-
-TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
-  at::native::squareCheckInputs(A, "linalg.slogdet");
-  at::native::checkFloatingOrComplex(A, "linalg.slogdet", /*low_precision*/false);
-
-  auto shape= A.sizes();
-  auto ndim = shape.size();
-
-  auto shape_outputs = shape.slice(0, ndim - 2);
-
-  // sign
-  set_output_contiguous(0, shape_outputs, A.options());
-
-  // logabsdet
-  set_output_contiguous(1, shape_outputs, A.options().dtype(toRealValueType(A.scalar_type())));
-
-  // LU
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
-  set_output_strided(2, shape, LU_strides, A.options());
-
-  // pivots
-  set_output_contiguous(3, shape.slice(0, ndim - 1), A.options().dtype(kInt));
 }
 
 TORCH_META_FUNC(_linalg_solve)(const Tensor& A,
@@ -2021,101 +1979,6 @@ Tensor cholesky_inverse(const Tensor &input, bool upper) {
   return result;
 }
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.det ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// As P is a permutation matrix
-// det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
-Tensor lu_det_P(const Tensor& pivs) {
-  return (at::arange(1, pivs.size(-1) + 1, pivs.options()) != pivs)
-    .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
-    .fmod_(2)
-    // take 0 to 1 and 1 to -1
-    .mul_(-2)
-    .add_(1);
-}
-
-
-// Auxiliary function that returns the LU decomposition to use it in the backward
-TORCH_IMPL_FUNC(_linalg_det_out)(const Tensor& A, const Tensor& result, const Tensor& LU, const Tensor& pivs) {
-  // info is an aux tensor
-  auto info = at::empty({0}, A.options().dtype(kInt));
-  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivs), const_cast<Tensor&>(info), A);
-
-  // det = det_P
-  result.copy_(lu_det_P(pivs));
-  // det_P * prod(diag(LU))
-  at::mul_out(const_cast<Tensor&>(result), result, at::prod(LU.diagonal(0, -2 ,-1), /*dim=*/-1));
-}
-
-Tensor linalg_det(const Tensor& A) {
-  return std::get<0>(at::_linalg_det(A));
-}
-
-Tensor& linalg_det_out(const Tensor& A, Tensor& result) {
-  auto LU = at::empty({0}, A.options());
-  auto pivots = at::empty({0}, A.options().dtype(kInt));
-  at::_linalg_det_out(result, LU, pivots, A);
-  return result;
-}
-
-// torch.det, alias for torch.linalg.det
-Tensor det(const Tensor& self) {
-  return at::linalg_det(self);
-}
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.slogdet ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-// Auxiliary function that returns the LU decomposition to use it in the backward
-TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const Tensor& logabsdet, const Tensor& LU, const Tensor& pivots) {
-  // info is an aux tensor
-  auto info = at::empty({0}, A.options().dtype(kInt));
-  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A);
-
-  auto diag_U = LU.diagonal(0, -2, -1);
-  // sign
-  at::mul_out(const_cast<Tensor&>(sign), diag_U.sgn().prod(-1), lu_det_P(pivots));
-
-  // logabsdet
-  auto abs_log = diag_U.is_complex() ? diag_U.abs().log_() : diag_U.abs_().log_();
-  at::sum_out(const_cast<Tensor&>(logabsdet), abs_log, -1);
-}
-
-std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& A) {
-  auto out = at::_linalg_slogdet(A);
-  return std::make_tuple(std::move(std::get<0>(out)), std::move(std::get<1>(out)));
-}
-
-std::tuple<Tensor&, Tensor&> linalg_slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
-  auto LU = at::empty({0}, A.options());
-  auto pivots = at::empty({0}, A.options().dtype(kInt));
-  at::_linalg_slogdet_out(sign, logabsdet, LU, pivots, A);
-  return std::tie(sign, logabsdet);
-}
-
-// Alias
-std::tuple<Tensor, Tensor> slogdet(const Tensor& A) {
-  return at::linalg_slogdet(A);
-}
-
-std::tuple<Tensor&, Tensor&> slogdet_out(const Tensor& A, Tensor& sign, Tensor& logabsdet) {
-  return at::linalg_slogdet_out(sign, logabsdet, A);
-}
-
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logdet ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Tensor logdet(const Tensor& A) {
-  squareCheckInputs(A, "logdet");
-  checkFloatingOrComplex(A, "logdet", /*low_precision*/false);
-  Tensor sign, logabsdet;
-  std::tie(sign, logabsdet) = at::linalg_slogdet(A);
-
-  if (A.is_complex()) {
-    return sign.log() + logabsdet;
-  } else {
-    return at::where(sign == -1., NAN, logabsdet);
-  }
-}
-
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.solve ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Auxiliary function that returns the LU decomposition to use it in the backward
@@ -2133,9 +1996,7 @@ TORCH_IMPL_FUNC(_linalg_solve_out)(const Tensor& A,
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU),
                               const_cast<Tensor&>(pivots),
                               const_cast<Tensor&>(info),
-                              use_A_T ? A.mT() : A,
-                              /*pivot=*/true,
-                              /*check_errors=*/false);
+                              use_A_T ? A.mT() : A);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
 
   // [numpy-compat] Handle vectors on the rhs
