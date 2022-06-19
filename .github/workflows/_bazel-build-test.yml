@@ -102,7 +102,7 @@ jobs:
       - name: Test
         id: test
         # Time out the test phase after 3.5 hours
-        timeout-minutes: 210
+        timeout-minutes: 410
         env:
           JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
