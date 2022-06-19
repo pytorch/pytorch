@@ -1432,6 +1432,7 @@ cc_library(
         "@gloo",
         "@onnx",
         "@fmt",
+        "@kineto",
     ] + if_cuda(
         [
             ":caffe2_cuda_cpp",
