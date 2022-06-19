@@ -1128,5 +1128,35 @@ class TestProfiler(TestCase):
                 ]))
 
 
+    def test_extra_fields(self):
+        with profile(with_stack=True, profile_memory=True) as p:
+            _ = torch.ones((1,))
+
+        def find_ones(nodes):
+            for n in nodes:
+                if n.name() == "aten::ones":
+                    return n
+                result = find_ones(n.children)
+                if result:
+                    return result
+
+        node = find_ones(p.profiler.kineto_results.experimental_event_tree())
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._autograd._ExtraFields_TorchOp)
+
+        self.assertIsInstance(
+            node.parent.extra_fields,
+            torch._C._autograd._ExtraFields_PyCCall)
+
+        self.assertEqual(node.children[0].name(), "aten::empty")
+        self.assertEqual(node.children[0].children[0].name(), "[memory]")
+        self.assertIsInstance(
+            node.children[0].children[0].extra_fields,
+            torch._C._autograd._ExtraFields_Allocation)
+
+
 if __name__ == '__main__':
     run_tests()
