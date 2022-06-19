@@ -337,10 +337,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
         int64_t start_us = e->start_time_ns_ / 1000;
         int64_t end_us = e->endTimeNS() / 1000;
 
-        const auto is_python = c10::visit(c10::overloaded(
-          [](const torch::profiler::impl::PyExtraFieldsBase&){ return true; },
-          [](const auto&){ return false; }
-        ), e->extra_fields_);
+        const auto is_python = c10::visit(
+            c10::overloaded(
+                [](const torch::profiler::impl::PyExtraFieldsBase&) {
+                  return true;
+                },
+                [](const auto&) { return false; }),
+            e->extra_fields_);
 
         kineto_events_.emplace_back(is_python);
         kineto_events_.back()
