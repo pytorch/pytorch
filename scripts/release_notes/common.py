@@ -182,7 +182,10 @@ def github_data(pr_number):
     labels = [edge['node']['name'] for edge in edges]
     author = query['data']['repository']['pullRequest']['author']['login']
     nodes = query['data']['repository']['pullRequest']['reviews']['nodes']
-    accepters = tuple(sorted(node["author"]["login"] for node in nodes))
+
+    # using set to dedup multiple accepts from same accepter
+    accepters = {node["author"]["login"] for node in nodes}
+    accepters = tuple(sorted(accepters))
 
     return labels, author, accepters
 
