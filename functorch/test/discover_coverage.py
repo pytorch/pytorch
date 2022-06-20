@@ -628,6 +628,7 @@ JVP_EXEMPTIONS = {
     'nn.functional.rrelu',  # not actually problem, randomness testing artifact
     'normal',  # not actually problem, randomness testing artifact
     'bernoulli',  # not actually problem, randomness testing artifact
+    'torch.nn.functional.embedding',  # max_norm causes testing to be weird
     # 'multinomial',
 }
 
