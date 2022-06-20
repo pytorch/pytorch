@@ -60,8 +60,7 @@ class TestPrintCommits(TestCase):
         workflow_checks = mock_get_commit_results()
         workflow_checks = set_workflow_job_status(workflow_checks, "pull", "skipped")
         result = isGreen("sha", workflow_checks)
-        self.assertFalse(result[0])
-        self.assertEqual(result[1], "pull checks were not successful")
+        self.assertTrue(result[0])
 
     @mock.patch('print_latest_commits.get_commit_results', return_value=TestChecks().make_test_checks())
     def test_skippable_skipped(self, mock_get_commit_results: Any) -> None:

@@ -19,8 +19,11 @@ jobs:
           python-version: 3.8
           architecture: x64
 
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Checkout repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.MERGEBOT_TOKEN }}
 
       - name: Install Python Packages
         run: |
@@ -32,7 +35,7 @@ jobs:
         env:
           ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
         run: |
-          output=$(python3.8 .github/scripts/print_latest_commits.py)
+          output=$(python3 .github/scripts/print_latest_commits.py)
           echo "::set-output name=latest_viable_sha::$output"
         id: get-latest-commit
 
@@ -42,4 +45,5 @@ jobs:
         run: |
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
           git config --global user.name "PyTorch MergeBot"
-          echo "::debug::Set the latest sha variable to be ${{ steps.get-latest-commit.outputs.latest_viable_sha }}"
+          echo "Set the latest sha variable to be ${{ steps.get-latest-commit.outputs.latest_viable_sha }}"
+          git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict
