@@ -1,6 +1,6 @@
-#include <torch/script.h>
 #include <gtest/gtest.h>
 #include <test/cpp/api/support.h>
+#include <torch/script.h>
 
 using namespace torch::autograd;
 using namespace torch::test;
@@ -38,15 +38,17 @@ TEST(GradModeTest, TestRequiresGradViewOp) {
 }
 
 TEST(GradModeTest, TestRequiresGradViewOpExiting) {
-  for (bool requires_grad: {true, false}) {
+  for (bool requires_grad : {true, false}) {
     torch::Tensor s = torch::ones({1, 2, 3}).set_requires_grad(requires_grad);
     torch::Tensor a = s.clone();
     torch::Tensor view_out, tmp;
 
     {
       torch::AutoGradMode mode(false);
-      view_out = a.view({2, 3});  // go through kernels: VariableType, ADInplaceOrView, CPU
-      assert_tensor_creation_meta(view_out, torch::autograd::CreationMeta::NO_GRAD_MODE);
+      view_out = a.view(
+          {2, 3}); // go through kernels: VariableType, ADInplaceOrView, CPU
+      assert_tensor_creation_meta(
+          view_out, torch::autograd::CreationMeta::NO_GRAD_MODE);
       ASSERT_EQ(view_out.requires_grad(), requires_grad);
       ASSERT_TRUE(view_out.is_leaf());
     }
@@ -60,14 +62,17 @@ TEST(GradModeTest, TestRequiresGradViewOpExiting) {
     }
 
     if (requires_grad) {
-      ASSERT_THROWS_WITH(view_out.mul_(2),  // go through kernels: VariableType, ADInplaceOrView, CPU
-        "A view was created in no_grad mode and is being modified inplace");
+      ASSERT_THROWS_WITH(
+          view_out.mul_(
+              2), // go through kernels: VariableType, ADInplaceOrView, CPU
+          "A view was created in no_grad mode and is being modified inplace");
     } else {
-        view_out.mul_(2);
+      view_out.mul_(2);
     }
 
     tmp = view_out.view({2, 3});
     ASSERT_EQ(tmp.requires_grad(), requires_grad);
-    assert_tensor_creation_meta(tmp, torch::autograd::CreationMeta::NO_GRAD_MODE);
+    assert_tensor_creation_meta(
+        tmp, torch::autograd::CreationMeta::NO_GRAD_MODE);
   }
 }

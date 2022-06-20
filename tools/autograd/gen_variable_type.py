@@ -243,7 +243,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "addcdiv",
     "matrix_exp",
     "linalg_matrix_exp",
-    "linalg_eigh",
+    "_linalg_eigh",
     "cholesky_solve",
     "linalg_qr",
     "_linalg_svd",
@@ -337,6 +337,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "pixel_shuffle",
     "pixel_unshuffle",
     "linalg_lu_solve",
+    "_linalg_solve",
     "_spdiags",
 }
 
@@ -510,6 +511,9 @@ DONT_ENFORCE_TENSOR_IMPL_USE_COUNT = {
     "dequantize_self",
     # lift() should never actually be called with a requires_grad=True tensor,
     "lift",
+    # Nested Tensors related functions
+    # _nested_tensor_size() should never actually be called with requires_grad=True tensor
+    "_nested_tensor_size",
 }
 
 DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
@@ -517,8 +521,6 @@ DONT_ENFORCE_STORAGE_IMPL_USE_COUNT = {
     "_slow_conv2d_forward",
     "slow_conv3d_forward",
     "channel_shuffle",
-    # lift() should never actually be called with a requires_grad=True tensor,
-    "lift",
     # If an input is returned as-is in output, we cannot guarantee its storage_impl
     # use count to be 1 either.
     *DONT_ENFORCE_TENSOR_IMPL_USE_COUNT,
