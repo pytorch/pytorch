@@ -146,12 +146,12 @@ at::Tensor rad2deg_backward(const at::Tensor& grad);
 at::Tensor deg2rad_backward(const at::Tensor& grad);
 at::Tensor unsqueeze_multiple(
     const at::Tensor& t,
-    at::OptionalIntArrayRef opt_dim,
+    at::IntArrayRef dim,
     size_t n_dims);
 at::Tensor sum_backward(
     const at::Tensor& grad,
     at::IntArrayRef sizes,
-    at::OptionalIntArrayRef opt_dims,
+    at::IntArrayRef dims,
     bool keepdim);
 at::Tensor nansum_backward(
     const at::Tensor& grad,
