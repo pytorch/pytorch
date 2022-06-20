@@ -933,7 +933,8 @@ def check_for_sev(org: str, project: str, force: bool) -> None:
             if "merge blocking" in item["body"].lower():
                 raise RuntimeError(
                     "Not merging any PRs at the moment because there is a "
-                    + f"merge blocking ci: sev issue open at `{item['html_url']}`"
+                    + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
+                    + f"{item['html_url']}"
                 )
     return
 
