@@ -109,9 +109,7 @@ def make_traced(fn: Callable):
     def _traced(*args, executor="aten", **kwargs):
         # TODO: caching
         nargs = len(args)
-        fn_kwargs = {}
-        for k, v in kwargs.items():
-            fn_kwargs[k] = v
+        fn_kwargs = kwargs
         flat_fn_kwargs = list(fn_kwargs.values())
         all_args = list(args) + flat_fn_kwargs
 
