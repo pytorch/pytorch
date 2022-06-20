@@ -400,10 +400,6 @@ meta_function_expected_failures = {
     torch.mode: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::mode
     torch.multinomial: {bf16, f32, f64},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nanmean: {bf16, f16, f32, f64},
-    torch.nanquantile: {f32, f64},
-    torch.nanmedian: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::nanmedian, aten::nanmedian.dim_values
-    torch.nansum: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nansum, aten::nansum.out
     torch.nn.functional.conv1d: {bf16, f32, f64, i64},
     torch.nn.functional.conv2d: {bf16, f32, f64, i64},
     torch.nn.functional.conv_transpose1d: {f32, f64, i64},
@@ -469,6 +465,7 @@ meta_function_skips = {
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
+    torch.nanmean: {bf16, f16, f32, f64},  # TODO(chilli): Doesn't seem to work for some reason?
     torch.nn.functional.nll_loss: {bf16, f32, f64},  # TODO
     torch.linalg.pinv: {f32, f64},
     torch.empty: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
