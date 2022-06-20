@@ -264,14 +264,15 @@ class Module:
     def __init__(self) -> None:
         """
         Initializes internal Module state, shared by both nn.Module and ScriptModule.
+        """
+        torch._C._log_api_usage_once("python.nn_module")
 
+        """
         Calls object.__setattr__(self, 'a', a) instead of the typical self.a = a
         to avoid Module.__setattr__ overhead. Module's __setattr__ has special
         handling for parameters, submodules, and buffers but simply calls into
         object.__setattr__ for all other attributes.
         """
-        torch._C._log_api_usage_once("python.nn_module")
-
         object.__setattr__(self, 'training', True)
         object.__setattr__(self, '_parameters', OrderedDict())
         object.__setattr__(self, '_buffers', OrderedDict())
