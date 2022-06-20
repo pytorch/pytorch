@@ -1,63 +1,9 @@
-from functools import wraps
-from inspect import unwrap
+import inspect
 from typing import Callable, List
 
 
-# for callables which modify object inplace and return something other than
-# the object on which they act
-def inplace_wrapper(fn: Callable) -> Callable:
-    """
-    Convenience wrapper for passes which modify an object inplace. This
-    wrapper makes them return the modified object instead.
-
-    Args:
-        fn (Callable[Object, Any])
-
-    Returns:
-        wrapped_fn (Callable[Object, Object])
-    """
-
-    @wraps(fn)
-    def wrapped_fn(gm):
-        fn(gm)
-        return gm
-
-    return wrapped_fn
-
-
-def loop_pass(base_pass: Callable, n_iter: int = None, predicate: Callable = None):
-    """
-    Convenience wrapper for passes which need to be applied multiple times.
-
-    Exactly one of `n_iter`or `predicate` must be specified.
-
-    Args:
-        base_pass (Callable[Object, Object]): pass to be applied in loop
-        n_iter (int, optional): number of times to loop pass
-        predicate (Callable[Object, bool], optional):
-
-    """
-    assert (n_iter is not None) ^ (
-        predicate is not None
-    ), "Exactly one of `n_iter`or `predicate` must be specified."
-
-    @wraps(base_pass)
-    def new_pass(source):
-        output = source
-        if n_iter is not None and n_iter > 0:
-            for _ in range(n_iter):
-                output = base_pass(output)
-        elif predicate is not None:
-            while predicate(output):
-                output = base_pass(output)
-        else:
-            raise RuntimeError(
-                f"loop_pass must be given positive int n_iter (given "
-                f"{n_iter}) xor predicate (given {predicate})"
-            )
-        return output
-
-    return new_pass
+from torch.fx import GraphModule
+from pass_base import PassManagerParams
 
 
 # Pass Schedule Constraints:
@@ -66,7 +12,7 @@ def loop_pass(base_pass: Callable, n_iter: int = None, predicate: Callable = Non
 # has a valid partial ordering according to this comparison operator.
 def _validate_pass_schedule_constraint(
     constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
-):
+) -> None:
     for i, a in enumerate(passes):
         for j, b in enumerate(passes[i + 1 :]):
             if constraint(a, b):
@@ -78,47 +24,30 @@ def _validate_pass_schedule_constraint(
             )
 
 
-def this_before_that_pass_constraint(this: Callable, that: Callable):
+def this_before_that_pass_constraint(this: Callable, that: Callable) -> None:
     """
     Defines a partial order ('depends on' function) where `this` must occur
     before `that`.
-    """
-
-    def depends_on(a: Callable, b: Callable):
-        if a == that and b == this:
-            return False
-        return True
-
-    return depends_on
-
-
-def these_before_those_pass_constraint(these: Callable, those: Callable):
-    """
-    Defines a partial order ('depends on' function) where `these` must occur
-    before `those`. Where the inputs are 'unwrapped' before comparison.
-
+    
     For example, the following pass list and constraint list would be invalid.
     ```
-    passes = [
-        loop_pass(pass_b, 3),
-        loop_pass(pass_a, 5),
-    ]
+    passes = [pass_b, pass_a]
 
     constraints = [
-        these_before_those_pass_constraint(pass_a, pass_b)
+        this_before_that_pass_constraint(pass_a, pass_b)
     ]
     ```
-
+    
     Args:
-        these (Callable): pass which should occur first
-        those (Callable): pass which should occur later
+        this (Callable): pass which should occur first
+        that (Callable): pass which should occur later
 
     Returns:
         depends_on (Callable[[Object, Object], bool]
     """
 
     def depends_on(a: Callable, b: Callable):
-        if unwrap(a) == those and unwrap(b) == these:
+        if a == that and b == this:
             return False
         return True
 
@@ -139,6 +68,9 @@ class PassManager:
             constraint is a callable which takes two passes (A, B) and returns
             True if A depends on B and False otherwise. See implementation of
             `this_before_that_pass_constraint` for example.
+        enable_debug_pass (bool): set to true to enable the debug passes
+        run_checks_after_each_pass (bool): whether to run checks and linting
+            after each pass
     """
 
     passes: List[Callable] = []
@@ -149,27 +81,34 @@ class PassManager:
         self,
         passes=None,
         constraints=None,
+        enable_debug_pass: bool = False,
+        run_checks_after_each_pass: bool = False,
     ):
         if passes:
             self.passes = passes
         if constraints:
             self.constraints = constraints
-
-    @classmethod
-    def build_from_passlist(cls, passes):
-        pm = PassManager(passes)
-        # TODO(alexbeloi): add constraint management/validation
-        return pm
+        
+        self.params = PassManagerParams(
+            enable_debug_pass=enable_debug_pass,
+            run_checks_after_each_pass=run_checks_after_each_pass,
+        )
 
     def add_pass(self, _pass: Callable):
+        """
+        Adds a pass into the current list of passes.
+        """
         self.passes.append(_pass)
         self._validated = False
 
-    def add_constraint(self, constraint):
+    def add_constraint(self, constraint: Callable):
+        """
+        Adds a constraint into the current list of constraints.
+        """
         self.constraints.append(constraint)
         self._validated = False
 
-    def validate(self):
+    def validate_constraints(self):
         """
         Validates that current pass schedule defined by `self.passes` is valid
         according to all constraints in `self.constraints`
@@ -179,10 +118,50 @@ class PassManager:
         for constraint in self.constraints:
             _validate_pass_schedule_constraint(constraint, self.passes)
         self._validated = True
+    
+    def add_checks(self, check: Callable) -> None:
+        """
+        Adds a function which takes runs various checks on a given graph module.
+        This function is run before and after each pass if the
+        `run_checks_after_each_pass` flag is enabled.
+        """
+        sig = inspect.signature(check)
 
-    def __call__(self, source):
-        self.validate()
-        out = source
-        for _pass in self.passes:
-            out = _pass(out)
-        return out
+        params = [p for p in sig.parameters.values()]
+        if len(params) != 1:
+            raise TypeError("PassManager check function should only take in one variable, a graph_module")
+
+        if sig.return_annotation: 
+            raise TypeError("PassManager check function should return None")
+
+        self.assert_invariants = check
+
+    def assert_invariants(self, graph_module: GraphModule) -> None:
+        pass
+
+    def __call__(self, graph_module: GraphModule) -> None:
+        """
+        Runs a list of passes in the order based on `self.passes` on the given
+        graph module. Each time a pass is run, checks and linting will be run on
+        the graph module to ensure that it still maintains the same required
+        invariants.
+        """
+        # Check constraints 
+        self.validate_constraints()
+
+        # Lint and check graph invariants
+        graph_module.graph.lint()
+        self.assert_invariants(graph_module)
+
+        # TODO(angelayi): run these passes multiple times until the graph
+        # converts, set max iteration number too
+
+        for fn in self.passes:
+            fn(self.params, graph_module)
+
+            if self.params.run_checks_after_each_pass:
+                # Lint and check graph invariants
+                graph_module.graph.lint()
+                self.assert_invariants(graph_module)
+
+        graph_module.recompile()
