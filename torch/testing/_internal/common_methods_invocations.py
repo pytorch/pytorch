@@ -8487,8 +8487,8 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
         for args, include_self in product(smaller_src_test_cases, [True, False]):
             inp_shape, dim, index, src_shape = args
             yield SampleInput(_tensor(inp_shape),
-                            args=(dim, index, _tensor(src_shape), reduce),
-                            kwargs={'include_self': include_self})
+                              args=(dim, index, _tensor(src_shape), reduce),
+                              kwargs={'include_self': include_self})
     elif reduce == 'prod':
         # Sample inputs to test edge cases for backward
         # Check that gradients are propagated correctly for prod when zeros in self/src are reduced
