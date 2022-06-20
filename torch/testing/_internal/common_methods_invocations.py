@@ -8449,9 +8449,19 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
         inp_shape, dim, lengths, unsafe = args
         lengths_t = torch.tensor(lengths, dtype=torch.long, device=device)
+        sample_input_kwargs = {'axis': dim, 'unsafe': unsafe, 'initial': initial}
+        if mode == 'lengths':
+            sample_input_kwargs['lengths'] = lengths_t
+        elif mode == 'offsets':
+            zeros_shape = list(lengths_t.shape)
+            zeros_shape[dim] = 1
+            offsets_t = torch.cat((lengths_t.new_zeros(zeros_shape), lengths_t), dim).cumsum_(dim)
+            sample_input_kwargs['offsets'] = offsets_t
+        else:
+            raise RuntimeError(f"mode most be one of 'offsets' or 'lengths' got '{mode}'.")
         yield SampleInput(_tensor(inp_shape),
                           args=(reduce,),
-                          kwargs={'lengths': lengths_t, 'axis': dim, 'unsafe': unsafe, 'initial': initial})
+                          kwargs=sample_input_kwargs)
 
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
@@ -12468,8 +12478,6 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # Could not run 'aten::linalg_eigh' with arguments from the 'AutogradMeta' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -17913,14 +17921,14 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.l1_loss",
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
+        aten_backward_name='l1_loss_backward',
         sample_inputs_func=sample_inputs_l1_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
-            # fwgrad_bwgrad for abs is wrong
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=complex_types()),
             # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
             # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
             DecorateInfo(
@@ -19575,6 +19583,25 @@ op_db: List[OpInfo] = [
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
         sample_inputs_func=sample_inputs_segment_reduce,
+        skips=(
+            # FIXME: CUDA driver API confirmed a leak in
+            # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cuda",
+            ),
+        ),
+    ),
+    OpInfo(
+        'segment_reduce',
+        variant_test_name='offsets',
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
+        supports_gradgrad=False,
+        sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
         skips=(
             # FIXME: CUDA driver API confirmed a leak in
             # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
