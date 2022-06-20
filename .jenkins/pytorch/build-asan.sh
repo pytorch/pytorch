@@ -4,9 +4,6 @@
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
@@ -35,5 +32,7 @@ tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
 cd torch-*
 python setup.py build --cmake-only
 popd
+
+print_sccache_stats
 
 assert_git_not_dirty

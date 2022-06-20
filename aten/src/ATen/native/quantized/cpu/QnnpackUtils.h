@@ -5,9 +5,8 @@
 #include <c10/util/irange.h>
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
-
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/utils/Factory.h>
 
 #include <utility>
@@ -100,7 +99,7 @@ struct PackedLinearWeightsQnnp : public LinearPackedParamsBase {
       int64_t output_zero_point);
 
   template <bool ReluFused>
-  at::Tensor apply_dynamic_impl(at::Tensor input);
+  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range);
 };
 
 template <int kSpatialDim = 2>
