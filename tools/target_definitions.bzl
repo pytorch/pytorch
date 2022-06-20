@@ -253,13 +253,13 @@ def add_torch_libs():
             "//caffe2/torch/lib/libshm:libshm",
             "//gloo:gloo_gpu_cuda",
             "//tensorpipe:tensorpipe_cuda",
-        ],
+        ] + get_nccl_dependency(),
         exported_external_deps = [
             ("cudnn", None, "cudnn-lazy"),
             ("cuda", None, "nvToolsExt-lazy"),
             ("cuda", None, "nvrtc-lazy"),
             ("cuda", None, "nvrtc-builtins-lazy"),
-        ] + get_nccl_dependency(),
+        ],
         compiler_flags = compiler_flags_cpu + compiler_flags_cuda,
         **common_flags
     )
