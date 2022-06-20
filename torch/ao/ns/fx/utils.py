@@ -257,7 +257,6 @@ def return_first_non_observer_node(
     if node.op == "call_module":
         node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
         if is_activation_post_process(node_obj):
-            all_node_args = node.args
             assert len(node.args) == 1
             assert isinstance(node.args[0], Node)
             node = node.args[0]

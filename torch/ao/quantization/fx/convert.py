@@ -116,8 +116,6 @@ def run_weight_observers(observed: GraphModule) -> None:
             if i not in WEIGHT_INDEX_DICT[node.target]:
                 continue
             # node_arg is weight
-            if not isinstance(node_arg, Node):
-                continue
             weight_observer_nodes = collect_producer_nodes(node_arg)
             if weight_observer_nodes is None:
                 continue

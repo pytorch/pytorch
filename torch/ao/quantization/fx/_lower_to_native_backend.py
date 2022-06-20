@@ -803,6 +803,7 @@ def _lower_quantized_binary_op(
             if not is_dequantize_node(arg):
                 continue
             dq_node = arg
+            assert(isinstance(dq_node, Node))
             dn_input = dq_node.args[0]
             dq_node.replace_all_uses_with(dn_input)
             model.graph.erase_node(dq_node)
