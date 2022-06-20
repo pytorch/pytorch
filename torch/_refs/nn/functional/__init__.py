@@ -20,7 +20,7 @@ from torch._refs import (
     _make_elementwise_binary_reference,
 )
 
-from typing import Optional
+from typing import Optional, Union
 
 __all__ = [
     "celu",
@@ -364,7 +364,10 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def threshold(
-    a: TensorLikeType, threshold: NumberType, value: NumberType, inplace: bool = False
+    a: TensorLikeType,
+    threshold: NumberType,
+    value: Union[bool, int, float],
+    inplace: bool = False,
 ) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.threshold
@@ -373,10 +376,7 @@ def threshold(
     if inplace:
         raise NotImplementedError
 
-    # the straightforward computation drops nan's from input in some cases
-    partial = torch.where(a > threshold, a, value)
-    # so we explicitly restore them
-    return torch.where(torch.isnan(a), a, partial)
+    return torch.where(a <= threshold, value, a)
 
 
 @register_decomposition(torch.ops.aten.hardtanh)
