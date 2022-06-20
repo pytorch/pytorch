@@ -318,32 +318,6 @@ def to_real_dtype(dtype: torch.dtype):
 # perform the pointwise portion in opmath, but don't maintain it between the
 # pointwise portion and the reduction
 
-@register_decomposition(aten.l1_loss)
-def l1_loss(
-    self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
-) -> Tensor:
-    loss = (self - target).abs()
-    # PyTorch semantics result in the output of l1_loss having the corresponding
-    # real dtype to self.  This may not happen without explicit casting if say
-    # self: complex64 and target: float64, which results in loss: float64
-    float_type = to_real_dtype(self.dtype)
-    return apply_loss_reduction(loss, reduction).to(float_type)
-
-
-@register_decomposition(aten.l1_loss_backward)
-@pw_cast_for_opmath
-def l1_loss_backward(
-    grad_output: Tensor,
-    self: Tensor,
-    target: Tensor,
-    reduction: int = Reduction.MEAN.value,
-):
-    sign = torch.sign(self - target)
-
-    norm = sign / self.numel() if reduction == Reduction.MEAN.value else sign
-    return grad_output * norm
-
-
 @register_decomposition(aten.mse_loss)
 @pw_cast_for_opmath
 def mse_loss(
@@ -1031,11 +1005,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-@register_decomposition(aten.logical_not)
-def logical_not(self: Tensor) -> Tensor:
-    return ~self.to(dtype=torch.bool)
-
-
 @register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
@@ -1190,11 +1159,6 @@ def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
     maxes_squeezed = torch.masked_fill(maxes_squeezed, maxes_squeezed.abs() == float('inf'), 0)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
-
-
-@register_decomposition(aten.trace.default)
-def trace(self: Tensor) -> Tensor:
-    return torch.sum(torch.diag(self))
 
 
 # nb: Should use acc_t, not op_math
