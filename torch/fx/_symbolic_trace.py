@@ -155,7 +155,8 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def __init__(self, autowrap_modules: Tuple[ModuleType] = (math, ),
                  autowrap_functions: Tuple[Callable, ...] = (),
-                 param_shapes_constant: bool = False) -> None:
+                 param_shapes_constant: bool = False,
+                 parameter_proxy_cls = None) -> None:
         # This method's signature is overridden by the first line of this class'
         # docstring. If this method's signature is modified, the signature that
         # overrides it also should be modified accordingly.
@@ -180,6 +181,8 @@ class Tracer(TracerBase):
                 will be evaluted directly, rather than returning a new Proxy value
                 for an attribute access. Backward compatibility for this parameter
                 is guaranteed.
+
+            parameter_proxy_cls: defaults to `None`, Allows passing a custom class to invoke when creating a new ParameterProxy
         """
 
         super().__init__()
@@ -197,6 +200,7 @@ class Tracer(TracerBase):
         self.param_shapes_constant = param_shapes_constant
 
         self.submodule_paths: Optional[Dict[torch.nn.Module, str]] = None
+        self.parameter_proxy_cls = parameter_proxy_cls if not None else ParameterProxy
 
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> 'Argument':
@@ -471,6 +475,7 @@ class Tracer(TracerBase):
 
 
     def _module_getattr(self, attr, attr_val, parameter_proxy_cache):
+
         def maybe_get_proxy_for_attr(attr_val, collection_to_search, parameter_proxy_cache):
             for n, p in collection_to_search:
                 if attr_val is p:
@@ -478,7 +483,7 @@ class Tracer(TracerBase):
                         kwargs = {}
                         if 'proxy_factory_fn' in inspect.signature(self.create_proxy).parameters:
                             kwargs['proxy_factory_fn'] = (None if not self.param_shapes_constant else
-                                                          lambda node : ParameterProxy(self, node, n, attr_val))
+                                                          lambda node : self.parameter_proxy_cls(self, node, n, attr_val))
                         val_proxy = self.create_proxy('get_attr', n, (), {}, **kwargs)  # type: ignore[arg-type]
                         parameter_proxy_cache[n] = val_proxy
                     return parameter_proxy_cache[n]

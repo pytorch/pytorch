@@ -123,8 +123,10 @@ class ProxyTensor(torch.Tensor):
 
 
 class PythonKeyTracer(Tracer):
-    def __init__(self):
+    def __init__(self, proxy_tensor_cls = None):
         super().__init__()
+        self.proxy_tensor_cls = proxy_tensor_cls if proxy_tensor_cls is not None else ProxyTensor
+
 
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
