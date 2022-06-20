@@ -107,7 +107,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
-    # 'gcd',
+    "gcd",
     "ge",
     "gt",
     # 'heaviside',
@@ -115,7 +115,7 @@ __all__ = [
     "igamma",
     "igammac",
     "isclose",
-    # 'lcm',
+    "lcm",
     # 'ldexp',
     "le",
     "logical_and",
@@ -131,7 +131,7 @@ __all__ = [
     "nextafter",
     # 'polar',  # abs, cos, sin
     "pow",
-    # 'remainder',
+    "remainder",
     # 'rsub', # unblocked
     # # special.xlog1py
     # # special.zeta
@@ -873,6 +873,15 @@ fmod = _make_elementwise_binary_reference(
 )
 
 # TODO: add docstring
+gcd = _make_elementwise_binary_reference(
+    prims.gcd,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.gcd,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+
+# TODO: add docstring
 ge = _make_elementwise_binary_reference(
     prims.ge,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -960,6 +969,21 @@ def isclose(
     )
 
     return result
+
+
+def _lcm(a: TensorLikeType, b: TensorLikeType):
+    g = gcd(a, b)
+    return where(eq(g, 0), 0, abs(mul(true_divide(a, g), b)))
+
+
+# TODO: add docstring
+lcm = _make_elementwise_binary_reference(
+    _lcm,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.lcm,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
 
 
 # TODO: add docstring
@@ -1060,6 +1084,13 @@ nextafter = _make_elementwise_binary_reference(
 pow = _make_elementwise_binary_reference(
     prims.pow,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+)
+
+# TODO: add docstring
+remainder = _make_elementwise_binary_reference(
+    prims.remainder,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.remainder,
 )
 
 # TODO: add docstring

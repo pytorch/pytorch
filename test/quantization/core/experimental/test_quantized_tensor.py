@@ -67,6 +67,37 @@ class TestQuantizedTensor(unittest.TestCase):
 
         self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
 
+    r""" Tests quantize_APoT for k != 1.
+        Tests quantize_APoT result (reduced precision fp representation) on
+        random 1-dim tensor and hardcoded values for b=4, k=2 by comparing results to
+        hand-calculated error bound (+/- 0.25 between reduced precision fp representation
+        and original input tensor values because max difference between quantization levels
+        for b=4, k=2 is 0.25).
+        * tensor2quantize: Tensor
+        * b: 4
+        * k: 2
+    """
+    def test_quantize_APoT_k2(self):
+        # generate random size of tensor2dequantize between 1 -> 20
+        size = random.randint(1, 20)
+
+        # generate tensor with random fp values
+        tensor2quantize = torch.rand((size), dtype=torch.float)
+
+        qtensor = TensorAPoT(4, 2, False)
+
+        # get apot quantized tensor result
+        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=False)
+        qtensor_data = torch.tensor(qtensor.data).type(torch.float)
+
+        expectedResult = True
+
+        for result, orig in zip(qtensor_data, tensor2quantize):
+            if abs(result - orig) > 0.25:
+                expectedResult = False
+
+        self.assertTrue(expectedResult)
+
     r""" Tests quantize_APoT result (reduced precision fp representation) on random 1-dim tensor
         and hardcoded values for b, k by comparing to int representation
         * tensor2quantize: Tensor
