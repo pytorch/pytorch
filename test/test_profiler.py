@@ -1116,8 +1116,8 @@ class TestProfiler(TestCase):
             y = torch.ones(1)
             loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
             loss.backward()
-        metrics = dict()
-        _utils.compute_self_time(prof.profiler, metrics)
+        basic_eval = _utils.BasicEvaluation(prof.profiler)
+        metrics = basic_eval.metrics
         self.assertTrue(len(metrics) > 0)
         for event_key, event_metrics in metrics.items():
             self.assertEqual(
@@ -1126,6 +1126,28 @@ class TestProfiler(TestCase):
                     child.duration_time_ns
                     for child in event_key.event.children
                 ]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_utils_basic_evaluation(self):
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        ).to('cuda')
+        inputs = torch.randn(40, 16, 18, 260).to('cuda')
+        with profile() as prof:
+            model(inputs)
+            for i in range(260):
+                inputs[0,0,0,i] = i
+            model(inputs)
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        for _, event_metrics in basic_evaluation.metrics.items():
+            self.assertTrue(
+                event_metrics.fraction_idle_time() >= 0.0 and
+                event_metrics.fraction_idle_time() <= 1.0
+            )
+        self.assertTrue(isinstance(basic_evaluation.rank_events(10), list))
 
 
 if __name__ == '__main__':
