@@ -1,14 +1,13 @@
-from typing import Any, Dict, Set, Tuple
+from typing import Any, Dict, Set, Tuple, Union
 
+import torch
 import torch.nn as nn
 import torch.nn.qat as nnqat
-from abc import ABCMeta, abstractmethod
+from abc import ABC, abstractmethod
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 from torch.ao.quantization.qconfig import QConfig
-
-ABC: Any = ABCMeta(str("ABC"), (object,), {})
 
 # Adding base class for detectors
 class DetectorBase(ABC):
@@ -26,7 +25,7 @@ class DetectorBase(ABC):
         super().__init__()
 
     @abstractmethod
-    def determine_observer_insert_points(self, model):
+    def determine_observer_insert_points(self, model) -> Union[None, Tuple[Set[str], Any]]:
         r"""
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -38,12 +37,12 @@ class DetectorBase(ABC):
         pass
 
     @abstractmethod
-    def get_detector_name(self):
+    def get_detector_name(self) -> str:
         r""" Returns the name of the current detector """
         pass
 
     @abstractmethod
-    def generate_detector_report(self, model):
+    def generate_detector_report(self, model) -> Tuple[str, Dict[str, Any]]:
         r"""
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -62,8 +61,8 @@ class PerChannelDetector(DetectorBase):
         Therefore, if the backend used by the user supports it, it is recommended to use
 
         Args:
-            backend (str): the backend the user wishes to use in production
-                If the user wishes to use the current backend, they should set backend = torch.backends.quantized.engine
+            backend (str, optional): the backend the user wishes to use in production
+                Default value is current torch.backends.quantized.engine
     """
 
     # Default map for representing supported per channel quantization modules for different backends
@@ -73,7 +72,7 @@ class PerChannelDetector(DetectorBase):
         "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
     }
 
-    def __init__(self, backend):
+    def __init__(self, backend=torch.backends.quantized.engine):
         super().__init__()
 
         # store the backend information
@@ -95,7 +94,7 @@ class PerChannelDetector(DetectorBase):
         raise NotImplementedError("No observers are inserted in the PerChannelDetector.")
 
 
-    def __detect_per_channel_helper(self, model: nn.Module, per_channel_info: Dict):
+    def _detect_per_channel_helper(self, model: nn.Module, per_channel_info: Dict):
         r"""
         determines if per_channel quantization is supported in modules and submodules.
 
@@ -174,7 +173,7 @@ class PerChannelDetector(DetectorBase):
         per_channel_info = {"backend": self.backend_chosen, "per_channel_status": {}}
 
         # run the helper function to populate the dictionary
-        per_channel_info = self.__detect_per_channel_helper(model, per_channel_info)
+        per_channel_info = self._detect_per_channel_helper(model, per_channel_info)
 
         # String to let the user know of further optimizations
         further_optims_str = "Further Optimizations for backend {}: \n".format(self.backend_chosen)
@@ -227,6 +226,14 @@ class DynamicStaticDetector(DetectorBase):
     DEFAULT_STATIONARY = "stationary"
     DEFAULT_NON_STATIONARY = "non-stationary"
 
+    # naming conventions for the keys of the return module info
+    DEFAULT_TOLERANCE_KEY = "tolerance"
+    DEFAULT_DYNAMIC_REC_KEY = "dynamic_recommended"
+    DEFAULT_PRE_OBS_COMP_STAT_KEY = "pre_observer_comp_stat"
+    DEFAULT_POST_OBS_COMP_STAT_KEY = "post_observer_comp_stat"
+    DEFAULT_PRE_OBS_DATA_DIST_KEY = "pre_observer_data_dist"
+    DEFAULT_POST_OBS_DATA_DIST_KEY = "post_observer_data_dist"
+
     # modules that are supported both dynamic and static for this report function
     DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED = set([nn.Linear])
 
@@ -245,7 +252,7 @@ class DynamicStaticDetector(DetectorBase):
         r""" returns the string name of this detector"""
         return "dynamic_vs_static_detector"
 
-    def __generate_dict_info(self, model: GraphModule) -> Dict[str, Any]:
+    def _generate_dict_info(self, model: GraphModule) -> Dict[str, Any]:
         r"""
         Helper function for generate_detector_report that does the generation of the dictionary.
         This process is done as specified in generate_detector_report documentation
@@ -298,12 +305,12 @@ class DynamicStaticDetector(DetectorBase):
 
                 # store the set of important information for this module
                 module_info = {
-                    "tolerance": self.tolerance,
-                    "dynamic_recommended": dynamic_recommended,
-                    "pre_observer_comp_stat": pre_stat,
-                    "pre_observer_data_dist": pre_obs_dist_classif,
-                    "post_observer_comp_stat": post_stat,
-                    "post_observer_data_dist": post_obs_dist_classif,
+                    self.DEFAULT_TOLERANCE_KEY: self.tolerance,
+                    self.DEFAULT_DYNAMIC_REC_KEY: dynamic_recommended,
+                    self.DEFAULT_PRE_OBS_COMP_STAT_KEY: pre_stat,
+                    self.DEFAULT_PRE_OBS_DATA_DIST_KEY: pre_obs_dist_classif,
+                    self.DEFAULT_POST_OBS_COMP_STAT_KEY: post_stat,
+                    self.DEFAULT_POST_OBS_DATA_DIST_KEY: post_obs_dist_classif,
                 }
 
                 module_dynamic_static_info[fqn] = module_info
@@ -341,7 +348,7 @@ class DynamicStaticDetector(DetectorBase):
         """
 
         # get the dictionary of the information to format the string report
-        module_dynamic_static_info = self.__generate_dict_info(model)
+        module_dynamic_static_info = self._generate_dict_info(model)
 
         dynamic_vs_static_string = "Dynamic vs. Static Quantization suggestions: \n"
 
@@ -371,7 +378,7 @@ class DynamicStaticDetector(DetectorBase):
             )
 
             # start composing explanation
-            if module_info["dynamic_recommended"]:
+            if module_info[self.DEFAULT_DYNAMIC_REC_KEY]:
                 quantization_type = "dynamic"
                 benefit_str = dynamic_benefit
             else:
@@ -381,7 +388,7 @@ class DynamicStaticDetector(DetectorBase):
             # now set the quantization explanation string
             quantization_reasoning = (
                 quantization_reasoning.format(
-                    module_fqn, module_info["pre_observer_data_dist"], module_info["post_observer_data_dist"]
+                    module_fqn, module_info[self.DEFAULT_PRE_OBS_DATA_DIST_KEY], module_info[self.DEFAULT_POST_OBS_DATA_DIST_KEY]
                 )
                 + benefit_str
             )
@@ -389,8 +396,8 @@ class DynamicStaticDetector(DetectorBase):
             # if we have a non-stationary input -> linear -> stationary we suggested static
             # however, we want to also recommend they add a dynamic quantize per tensor right if this change is made
             if (
-                module_info["pre_observer_data_dist"] == self.DEFAULT_NON_STATIONARY
-                and module_info["post_observer_data_dist"] == self.DEFAULT_STATIONARY
+                module_info[self.DEFAULT_PRE_OBS_DATA_DIST_KEY] == self.DEFAULT_NON_STATIONARY
+                and module_info[self.DEFAULT_POST_OBS_DATA_DIST_KEY] == self.DEFAULT_STATIONARY
             ):
                 quantization_reasoning = (
                     quantization_reasoning + dynamic_per_tensor_string + dynamic_per_tensor_reasoning_string
