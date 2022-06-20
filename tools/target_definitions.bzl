@@ -153,7 +153,7 @@ def add_torch_libs():
         ] if enable_flatbuffer else []),
         link_whole = True,
         include_directories = include_directories,
-        propagated_pp_flags = propagated_pp_flags_cpu + (["-DENABLE_FLATBUFFER"] if enable_flatbuffer else []),
+        propagated_pp_flags = propagated_pp_flags_cpu,
         exported_deps = (
             [
                 ":ATen-cpu",
