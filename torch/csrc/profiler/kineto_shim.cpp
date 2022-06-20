@@ -61,14 +61,9 @@ TraceWrapper::TraceWrapper(const int64_t start_time, const std::string& name)
 }
 #endif // USE_KINETO
 
-ActivityType toActivityType(const std::string& str) {
-  return static_cast<ActivityType>(
-      static_cast<int>(libkineto::toActivityType(str)));
-}
-
 void TraceWrapper::addCPUActivity(
     const std::string& name,
-    const ActivityType kineto_type,
+    const ActivityTypeAlias kineto_type,
     const DeviceAndResource device_and_resource,
     const uint64_t correlation_id,
     const int64_t start_time,

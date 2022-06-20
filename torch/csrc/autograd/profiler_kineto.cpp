@@ -293,7 +293,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     event_post_process_cb_ = std::move(cb);
   }
 
-  std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper> finalizeTrace() {
+  std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
+  finalizeTrace() {
     auto end_time = getTimeUs();
     record_queue_.stop();
     materializeOpEvents();
@@ -318,7 +319,9 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
       auto trace = torch::profiler::impl::kineto::stopTrace();
       TORCH_CHECK(trace || !torch::profiler::kKinetoAvailable);
       addTraceEvents(trace);
-      return std::make_unique<torch::profiler::impl::kineto::ActivityTraceWrapper>(std::move(trace));
+      return std::make_unique<
+          torch::profiler::impl::kineto::ActivityTraceWrapper>(
+          std::move(trace));
     } else {
       return nullptr;
     }

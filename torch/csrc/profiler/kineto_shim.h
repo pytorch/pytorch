@@ -62,10 +62,8 @@ using interface_trace_t = DummyTraceBuffer;
 #endif // USE_KINETO
 
 // Stores `libkineto::ActivityType`
-using ActivityType =
-    strong::type<int, struct ActivityType_, strong::convertible_to<int>>;
-
-ActivityType toActivityType(const std::string& str);
+using ActivityTypeAlias =
+    strong::type<int, struct ActivityTypeAlias_, strong::convertible_to<int>>;
 
 using annotation_t = std::vector<std::pair<std::string, std::string>>;
 
@@ -78,7 +76,7 @@ struct TraceWrapper {
   // The caller is expected to hold a mutex when calling `addCPUActivity`.
   void addCPUActivity(
       const std::string& name,
-      const ActivityType kineto_type,
+      const ActivityTypeAlias kineto_type,
       const DeviceAndResource device_and_resource,
       const uint64_t correlation_id,
       const int64_t start_time,
