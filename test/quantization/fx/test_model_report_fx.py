@@ -871,6 +871,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         for value in model_report.get_observers_of_interest().values():
             self.assertEqual(len(value), 0)
 
+    @skipIfNoFBGEMM
     def test_prepare_model_callibration(self):
         """
         Tests model_report.prepare_detailed_calibration that prepares the model for callibration
@@ -883,6 +884,7 @@ class TestFxModelReportClass(QuantizationTestCase):
 
         # create model report object
         # make an example set of detectors
+        torch.backends.quantized.engine = "fbgemm"
         backend = torch.backends.quantized.engine
         test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
         # initialize with an empty detector
@@ -966,6 +968,7 @@ class TestFxModelReportClass(QuantizationTestCase):
 
         return (modules_observer_cnt, graph_observer_cnt)
 
+    @skipIfNoFBGEMM
     def test_generate_report(self):
         """
             Tests model_report.generate_model_report to ensure report generation
@@ -975,6 +978,9 @@ class TestFxModelReportClass(QuantizationTestCase):
             - Whether observers are being properly removed if specified
             - Whether correct blocking from generating report twice if obs removed
         """
+
+        # set the backend for this test
+        torch.backends.quantized.engine = "fbgemm"
 
         # check whether the correct number of reports are being generated
         filled_detector_set = set([DynamicStaticDetector(), PerChannelDetector(torch.backends.quantized.engine)])
