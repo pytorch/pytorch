@@ -611,7 +611,7 @@ class TestNestedTensorAutograd(TestCase):
     def test_nested_tensor_from_mask_and_to_padded(self):
         N, L, D = 2, 4, 4
         mask = torch.ones(N, L)
-        for i in range(N):
+        for i in range(1, N):
             end = torch.randint(1, L - 1, (1,))
             mask[i, end:] = 0
 
@@ -622,7 +622,7 @@ class TestNestedTensorAutograd(TestCase):
 
         def grad_test_func(inpt):
             nt = torch._nested_tensor_from_mask(inpt, mask)
-            # This implictily tests to_padded_tensor grads
+            # This implicitly tests to_padded_tensor grads
             return nt.to_padded_tensor(0)
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
@@ -634,7 +634,7 @@ class TestNestedTensorAutograd(TestCase):
 
         def grad_test_func(tensor, nested_size):
             nt = torch._nested_from_padded(tensor, nested_size, fuse_transform_0213=False)
-            # This implictily tests to_padded_tensor grads
+            # This implicitly tests to_padded_tensor grads
             return nt.to_padded_tensor(0)
 
         data = (padded_tensor, nested_size)
@@ -648,7 +648,7 @@ class TestNestedTensorAutograd(TestCase):
 
         def grad_test_func(tensor, nested_size):
             nt = torch._nested_from_padded(tensor, nested_size, fuse_transform_0213=True)
-            # This implictily tests to_padded_tensor grads
+            # This implicitly tests to_padded_tensor grads
             return nt.to_padded_tensor(0)
         data = (padded_tensor, nested_size)
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
