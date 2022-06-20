@@ -58,6 +58,8 @@ topics = [
     'docs',
     'devs',
     'Untopiced',
+    "not user facing",
+    "security",
 ]
 
 
