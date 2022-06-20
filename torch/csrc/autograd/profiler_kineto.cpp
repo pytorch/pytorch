@@ -765,7 +765,7 @@ ProfilerResult::ProfilerResult(
     uint64_t start_time,
     std::vector<KinetoEvent> events,
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
-    trace,
+        trace,
     std::vector<experimental_event_t>&& event_tree)
     : trace_start_us_(start_time),
       events_(std::move(events)),
