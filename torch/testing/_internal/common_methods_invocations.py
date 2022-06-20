@@ -20525,7 +20525,7 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # RuntimeError: Expected divisor (b) to be on the same device (cuda:0) as dividend (a), but it is found on cpu!
-            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
