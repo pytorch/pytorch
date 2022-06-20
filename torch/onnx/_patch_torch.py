@@ -12,7 +12,7 @@ from torch.onnx._globals import GLOBALS
 def _graph_op(
     g: torch._C.Graph,
     opname: str,
-    *raw_args: torch._C.Node,
+    *raw_args: torch._C.Value,
     outputs: int = 1,
     **kwargs,
 ) -> Union[torch._C.Value, Tuple[torch._C.Value, ...]]:
