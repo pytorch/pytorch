@@ -13362,10 +13362,6 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"),
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values'),
-                        # Problem due to internal inplace operations
-                        DecorateInfo(unittest.expectedFailure,
-                                     'TestCompositeCompliance',
-                                     'test_operator'),
                     )),
     # `softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
