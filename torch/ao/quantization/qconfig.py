@@ -335,52 +335,17 @@ default_per_channel_symmetric_qnnpack_qat_qconfig = QConfig(
                                                        eps=2 ** -12),
     weight=fused_per_channel_wt_fake_quant_range_neg_127_to_127)
 
-def _get_default_qconfig_dict_helper(qconfig, qconfig_transpose):
-    return {
-        "": qconfig,
-        "object_type": [("reshape", default_reuse_input_qconfig),
-                        (torch.nn.Conv1d, qconfig),
-                        (torch.nn.Conv2d, qconfig),
-                        (torch.nn.Conv3d, qconfig),
-                        (torch.nn.ConvTranspose1d, qconfig_transpose),
-                        (torch.nn.ConvTranspose2d, qconfig_transpose),
-                        (torch.nn.ConvTranspose3d, qconfig_transpose),
-                        (torch.nn.Linear, qconfig),
-                        (torch.nn.functional.conv1d, qconfig),
-                        (torch.nn.functional.conv2d, qconfig),
-                        (torch.nn.functional.conv3d, qconfig),
-                        (torch.nn.functional.conv_transpose1d, qconfig_transpose),
-                        (torch.nn.functional.conv_transpose2d, qconfig_transpose),
-                        (torch.nn.functional.conv_transpose3d, qconfig_transpose),
-                        (torch.nn.functional.linear, qconfig),
-                        (torch.nn.ReLU, qconfig),
-                        (torch.nn.functional.relu, qconfig),
-                        (torch.relu, qconfig),
-                        (torch.nn.BatchNorm1d, qconfig),
-                        (torch.nn.BatchNorm2d, qconfig),
-                        (torch.nn.BatchNorm3d, qconfig)]}
-
 def get_default_qconfig_dict(backend='fbgemm', version=0):
-    qconfig = get_default_qconfig(backend, version)
-    qconfig_transpose = qconfig
-    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer.
-    # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_observer)
-    return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
+    warnings.warn(
+        "torch.ao.quantization.get_default_qconfig_dict is deprecated and will be removed in "
+        "a future version. Please use torch.ao.quantization.get_default_qconfig_mapping instead.")
+    return torch.ao.quantization.get_default_qconfig_mapping(backend, version).to_dict()
 
 def get_default_qat_qconfig_dict(backend='fbgemm', version=1):
-    qconfig = get_default_qat_qconfig(backend, version)
-    qconfig_transpose = qconfig
-    # default_per_channel_weight_observer is not currently compatible with fbgemm backend
-    # so we have to modify the weight observer to default_weight_observer or another
-    # per tensor supported observer
-    # see https://github.com/pytorch/pytorch/issues/47535
-    if backend == "fbgemm":
-        qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight_fake_quant)
-    return _get_default_qconfig_dict_helper(qconfig, qconfig_transpose)
+    warnings.warn(
+        "torch.ao.quantization.get_default_qat_qconfig_dict is deprecated and will be removed in "
+        "a future version. Please use torch.ao.quantization.get_default_qat_qconfig_mapping instead.")
+    return torch.ao.quantization.get_default_qat_qconfig_mapping(backend, version).to_dict()
 
 def assert_valid_qconfig(qconfig: Optional[QConfig],
                          mod: torch.nn.Module) -> None:
