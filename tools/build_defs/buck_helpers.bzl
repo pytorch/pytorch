@@ -1,4 +1,5 @@
 # Only used for PyTorch open source BUCK build
+load("//tools/build_defs:type_defs.bzl", "is_dict", "is_list")
 
 IGNORED_ATTRIBUTE_PREFIX = [
     "apple",
@@ -26,20 +27,23 @@ def filter_attributes(kwgs):
                     kwgs.pop(key)
     return kwgs
 
-# maps known fbsource deps to OSS deps
-DEPS_MAP = {
-    "//third-party/FP16:FP16": "//third_party:FP16",
-    "//third-party/FXdiv:FXdiv": "//third_party:FXdiv",
-    "//third-party/XNNPACK:XNNPACK": "//third_party:XNNPACK",
-    "//third-party/clog:clog": "//third_party:clog",
-    "//third-party/cpuinfo:cpuinfo": "//third_party:cpuinfo",
-    "//third-party/fmt:fmt": "//third_party:fmt",
-    "//third-party/glog:glog": "//third_party:glog",
-    "//third-party/psimd:psimd": "//third_party:psimd",
-    "//third-party/pthreadpool:pthreadpool": "//third_party:pthreadpool",
-    "//third-party/pthreadpool:pthreadpool_header": "//third_party:pthreadpool_header",
-    "//third-party/ruy:ruy_xplat_lib": "//third_party:ruy_lib",
-}
+def filter_files(files):
+    print(files)
+    if is_list(files):
+        new_files = []
+        for file in files:
+            if file.startswith("fb/") or file.startswith("caffe2/fb/") or file.startswith("torch/fb/"):
+                continue
+            else:
+                new_files.append(file)
+    else:
+        new_files = {}
+        for key, file in files.items():
+            if file.startswith("fb/") or file.startswith("caffe2/fb/") or file.startswith("torch/fb/"):
+                continue
+            else:
+                new_files[key] = file
+    return new_files
 
 # map fbsource deps to OSS deps
 def to_oss_deps(deps = []):
@@ -49,25 +53,29 @@ def to_oss_deps(deps = []):
     return new_deps
 
 def map_deps(dep):
+    # keep relative root targets
+    if dep.startswith(":"):
+        return [dep]
+
     # remove @fbsource prefix
     if dep.startswith("@fbsource"):
         dep = dep[len("@fbsource"):]
 
+    # remove xplat/caffe2 prefix
+    if dep.startswith("//xplat/caffe2:"):
+        dep = dep[len("//xplat/caffe2"):]
+
+    # remove xplat/caffe2/ prefix
+    if dep.startswith("//xplat/caffe2/"):
+        dep = dep[len("//xplat/caffe2/"):]
+
     # ignore all fbsource linker_lib targets
-    if dep.startswith("//xplat/third-party/linker_lib"):
+    if dep.startswith("//xplat/third-party/linker_lib:"):
         return []
 
-    # map targets in caffe2 root folder. Just use relative path
-    if dep.startswith("//xplat/caffe2:"):
-        return [dep[len("//xplat/caffe2"):]]
+    # ignore all folly libraries
+    if dep.startswith("//xplat/folly:"):
+        return []
 
-    # map targets in caffe2 subfolders
-    if dep.startswith("//xplat/caffe2/"):
-        return ["//" + dep[len("//xplat/caffe2/"):]]
-
-    # map other known targets
-    if dep in DEPS_MAP:
-        return DEPS_MAP[dep]
-
-    # drop other unknown deps
-    return []
+    # return unknown deps for easy debugging
+    return [dep]
