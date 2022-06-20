@@ -368,14 +368,18 @@ class _ExecOrderData():
     def init(self, root_module: "FullyShardedDataParallel"):
         assert root_module._is_root, "This data structure should only be " \
             "initialized on an FSDP root module"
-        # Save `root_modules.parameters()` to `_all_flat_params` instead of
-        # re-materializing each time to avoid the result depending on the
-        # calling context (e.g. when some parameters have been rebuilt)
-        self._all_flat_params = list(root_module.parameters())
+        # Save all `FlatParameter`s in `root_module`'s hierarchy to
+        # `_all_flat_params` instead of re-materializing each time to avoid the
+        # result depending on the calling context (e.g. when some parameters
+        # have been rebuilt)
+        self._all_flat_params = [
+            param for param in root_module.parameters()
+            if isinstance(param, FlatParameter)
+        ]
         self._param_to_unflat_param_names = cast(
             Dict[FlatParameter, List[str]],
             _get_param_to_unflat_param_names(root_module)
-        )  # `root_module.parameters()` should only contain `FlatParameter`s
+        )
 
     def get_param_index(self, param: FlatParameter) -> int:
         """Returns a unique non-negative parameter index for ``param`` if it is
@@ -1458,7 +1462,9 @@ class FullyShardedDataParallel(nn.Module):
         self._streams: Dict[str, torch.cuda.Stream] = {}
         self._fsdp_graph_order: List[nn.Module] = []
         self._my_fsdp_idx_in_graph: Optional[int] = None
+        self._pre_backward_hook_full_params_prefetched: bool = False
         self._forward_full_params_prefetched: bool = False
+
         for p in self.params:
             if hasattr(p, "_local_shard"):
                 # reset attributes that are added in _init_param_attributes, as
@@ -2652,7 +2658,7 @@ class FullyShardedDataParallel(nn.Module):
                 if self._is_root:
                     self._queue_wait_for_post_backward()
 
-                if self._need_prefetch_full_params(TrainingState_.BACKWARD_PRE):
+                if self._pre_backward_hook_full_params_prefetched:
                     # Always wait for all_gather before rebuilding full params, just
                     # in case full params have already been prefetched in previous layer's
                     # pre-backward hook.
@@ -2665,6 +2671,7 @@ class FullyShardedDataParallel(nn.Module):
                 # All-gather full parameters, moving them to compute device if
                 # necessary.
                 self._rebuild_full_params()
+                self._pre_backward_hook_full_params_prefetched = False
                 # Wait for all_gather to finish before computation
                 torch.cuda.current_stream().wait_stream(self._streams["all_gather"])
 
@@ -2672,6 +2679,7 @@ class FullyShardedDataParallel(nn.Module):
                 # since it is prefetching, no need to wait for all_gather stream.
                 if self._need_prefetch_full_params(self.training_state):
                     self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._rebuild_full_params()  # type: ignore[operator]
+                    self._fsdp_graph_order[self._my_fsdp_idx_in_graph - 1]._pre_backward_hook_full_params_prefetched = True
 
                 self._pre_backward_hook_has_run = True
                 # Prepare p.grad so that it is in the right shape, device, accumulated values, etc.
