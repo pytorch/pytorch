@@ -261,8 +261,7 @@ Args:
         casted to :attr:`dtype` before the operation is
         performed. This is useful for preventing data type
         overflows. Default: None
-""",
-)
+""")
 
 
 spdiags = _add_docstr(
@@ -362,5 +361,4 @@ Specifying a positive offset::
             [0, 0, 3, 0, 0],
             [0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0]])
-""",
-)
+""")
