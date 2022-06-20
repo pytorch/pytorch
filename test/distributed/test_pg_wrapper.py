@@ -97,18 +97,17 @@ class AbstractProcessGroupWrapperTest(MultiProcessTestCase):
         # Simulate mismatch: allreduce vs reduce.
         # Error including info about inconsistent collective, rank, tensor
         # shape, device, and dtype should be raised.
-        # test
-        # with self.assertRaisesRegex(RuntimeError, ".*") as cm:
-        if self.rank == 0:
-            wrapper_pg.allreduce([tensor])
-        else:
-            wrapper_pg.reduce([tensor])
-        # self._validate_error(
-        #     exception=cm.exception,
-        #     op_type="ALLREDUCE" if self.rank == 0 else "REDUCE",
-        #     rank=self.rank,
-        #     tensor=tensor,
-        # )
+        with self.assertRaisesRegex(RuntimeError, ".*") as cm:
+            if self.rank == 0:
+                wrapper_pg.allreduce([tensor])
+            else:
+                wrapper_pg.reduce([tensor])
+        self._validate_error(
+            exception=cm.exception,
+            op_type="ALLREDUCE" if self.rank == 0 else "REDUCE",
+            rank=self.rank,
+            tensor=tensor,
+        )
 
         with self.assertRaisesRegex(RuntimeError, ".*") as cm:
             if self.rank == 0:
