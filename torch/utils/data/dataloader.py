@@ -561,21 +561,28 @@ class DataLoader(Generic[T_co]):
 
     def _get_shared_seed(self):
         if isinstance(self.dataset, IterDataPipe):
-            _shared_tensor_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator)
+            _shared_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator).item()
             if dist.is_available() and dist.is_initialized():
                 rank = dist.get_rank()
+                ws = dist.get_world_size()
+                store = dist.distributed_c10d._get_default_store()
                 if rank == 0:
-                    ws = dist.get_world_size()
-                    reqs = []
-                    for rank_id in range(1, ws):
-                        req = dist.isend(tensor=_shared_tensor_seed, dst=rank_id, tag=rank_id)
-                        reqs.append(req)
-                    for req in reqs:
-                        req.wait()
+                    store.set("_dl_shared_seed", str(_shared_seed))
+                    # Reset after all distributed processes have received the shared seed
+                    store.add("_dl_shared_seed_recv_cnt", 1)
+                    _shared_seed_recv_cnt = 1
+                    while _shared_seed_recv_cnt != ws:
+                        _shared_seed_recv_cnt = int(store.get("_dl_shared_seed_recv_cnt"))
+                    store.set("_dl_shared_seed", "")
+                    store.add("_dl_shared_seed_recv_cnt", -ws)
+                    assert int(store.get("_dl_shared_seed_recv_cnt")) == 0
                 else:
-                    dist.recv(tensor=_shared_tensor_seed, src=0, tag=rank)
-            _shared_seed = _shared_tensor_seed.item()
-            del _shared_tensor_seed
+                    _shared_seed_str = ""
+                    store.wait(["_dl_shared_seed"], _utils.MP_STATUS_CHECK_INTERVAL)
+                    while len(_shared_seed_str) == 0:
+                        _shared_seed_str = store.get("_dl_shared_seed")
+                    store.add("_dl_shared_seed_recv_cnt", 1)
+                    _shared_seed = int(_shared_seed_str)
             return _shared_seed
         else:
             return None
