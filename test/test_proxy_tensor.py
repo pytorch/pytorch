@@ -7,7 +7,7 @@ import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
-from torch._subclasses.fake_tensor import CPUFallbackException, DynamicOutputShapeException
+from torch._subclasses.fake_tensor import  DynamicOutputShapeException
 
 from torch.testing._internal.common_device_type import ops
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -185,7 +185,7 @@ make_fx_failures = {
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
 
-    # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
+    # ???
     xfail('nn.functional.ctc_loss'),
     # Sparse tensors are not supported with faketensors for now
     xfail('to_sparse'),
@@ -193,6 +193,14 @@ make_fx_failures = {
     skip('block_diag'),
     # https://github.com/pytorch/pytorch/issues/79670
     xfail('nanmean'),
+    # FakeTensor fallback doesn't work
+    xfail('segment_reduce', 'lengths'),
+    xfail('multinomial'),
+    xfail('mvlgamma', 'mvlgamma_p_1'),
+    xfail('mvlgamma', 'mvlgamma_p_3'),
+    xfail('mvlgamma', 'mvlgamma_p_5'),
+    xfail('cholesky'),
+    xfail('cholesky_inverse'),
 }
 
 
@@ -214,8 +222,6 @@ class TestProxyTensorOpInfo(TestCase):
                 new_f = make_fx(f, trace_factory_functions=True)(args, kwargs)
             except DynamicOutputShapeException as e:
                 self.skipTest("Dynamic output shape operation in trace")
-            except CPUFallbackException as e:
-                self.skipTest("Meta CPU fallback doesn't work for operator")
 
             for arg in args:
                 if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
@@ -224,6 +230,7 @@ class TestProxyTensorOpInfo(TestCase):
                 old_out = f(args, kwargs)
             except Exception:
                 continue
+            print(new_f.code)
             new_out = wrapper_set_seed(new_f, args, kwargs)
             self.assertEqual(new_out, old_out)
 
