@@ -1195,11 +1195,8 @@ class TestNamedTensor(TestCase):
             check_output(op(t, 1), ['N', 'L'])
             check_output(op(t, -1), ['N', 'C'])
             check_output(op(t, 'C'), ['N', 'L'])
-            if op.__name__ in ['sum']:
-                check_output(op(t, None), [])
-            else:
-                with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
-                    op(t, None)
+            with self.assertRaisesRegex(RuntimeError, 'Please look up dimensions by name'):
+                op(t, None)
             with self.assertRaisesRegex(RuntimeError, 'Name \'H\' not found'):
                 op(t, 'H')
 
