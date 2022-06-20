@@ -93,7 +93,7 @@ Validate the release jobs for pytorch and domain libraries should be green. Vali
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
   * [TorchText](https://hud.pytorch.org/hud/pytorch/text/release%2F1.12)
 
-Validate that the document build has completed and generated following [git tree](https://github.com/pytorch/pytorch.github.io/tree/site/docs/1.12)
+Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
 
 ### Making release branch specific changes for PyTorch
 
