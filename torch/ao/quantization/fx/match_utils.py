@@ -222,9 +222,3 @@ def find_matches(
                 QuantizeHandler(node, modules, is_standalone_module=True))
 
     return match_map
-
-__all__ = [
-    "MatchResult",
-    "is_match",
-    "find_matches",
-]
