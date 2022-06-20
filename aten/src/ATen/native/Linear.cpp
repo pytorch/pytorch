@@ -29,6 +29,9 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   if (input.is_mps()) {
    return at::_mps_linear(input, weight, *bias);
   }
+  if (input.is_nested()){
+    return at::_nested_linear(input, weight, *bias);
+  }
 #if defined(C10_MOBILE)
   if (xnnpack::use_linear(input, weight, *bias)) {
     return xnnpack::linear(input, weight, *bias);
