@@ -75,14 +75,22 @@ class BaseDataScheduler(object):
         self.verbose = verbose
 
         # Housekeeping
-        self._get_sl_called_within_step: bool = False
+        self._get_sp_called_within_step: bool = False
 
     @abc.abstractmethod
-    def get_hyperparam(self):
+    def get_schedule_param(self):
         r"""Abstract method that needs to be implemented by the child class.
             Returns: Dictionary of mapping from name -> sparsifier_hyperparam value
         """
         raise NotImplementedError
+
+    def __repr__(self):
+        format_string = self.__class__.__name__ + ' ('
+        format_string += '\n'
+        format_string += 'Data Sparsifier {0}\n'.format(self.data_sparsifier)
+        format_string += '    {0}: {1}\n'.format(self.schedule_param, self.base_param)
+        format_string += ')'
+        return format_string
 
     def step(self, epoch=None):
         pass
