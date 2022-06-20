@@ -597,6 +597,17 @@ class TestNestedTensorAutograd(TestCase):
         self.nt_equal(nt_1.grad, grad_output)
 
     # Test Factory Functions
+    def test_nested_tensor_to_padded_tensor(self):
+        for padding_val in [0, 1]:
+            nt = torch.nested_tensor([torch.randn(1, 2), torch.randn(7, 8)])
+            nt.requires_grad_()
+
+            out = nt.to_padded_tensor(padding_val)
+            grad_output = torch.ones(out.shape)
+            out.backward(grad_output)
+
+            self.nt_equal(nt.grad, torch.nested_tensor([torch.ones(1, 2), torch.ones(7, 8)]))
+
     def test_nested_tensor_from_mask_and_to_padded(self):
         N, L, D = 2, 4, 4
         mask = torch.ones(N, L)
