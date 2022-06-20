@@ -9,6 +9,7 @@
     - [`pytorch/builder` / PyTorch domain libraries](#pytorchbuilder--pytorch-domain-libraries)
     - [Making release branch specific changes for PyTorch](#making-release-branch-specific-changes-for-pytorch)
     - [Making release branch specific changes for domain libraries](#making-release-branch-specific-changes-for-domain-libraries)
+    - [RC cut health validation](#rc-cut-health-validation)
   - [Drafting RCs (Release Candidates) for PyTorch and domain libraries](#drafting-rcs-release-candidates-for-pytorch-and-domain-libraries)
     - [Release Candidate Storage](#release-candidate-storage)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
@@ -84,6 +85,16 @@ Builder branch cut should be performed at the same time as Pytorch core branch c
 ```bash
 DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/release/cut-release-branch.sh
 ```
+
+### RC cut health validation
+
+Validate the release jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
+  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
+  * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
+  * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
+  * [TorchText](https://hud.pytorch.org/hud/pytorch/text/release%2F1.12)
+
+Validate that the document build has completed and generated following [git tree](https://github.com/pytorch/pytorch.github.io/tree/site/docs/1.12)
 
 ### Making release branch specific changes for PyTorch
 
