@@ -172,7 +172,7 @@ class TransformerEncoder(Module):
         norm: the layer normalization component (optional).
         enable_nested_tensor: if True, input will automatically convert to nested tensor
             (and convert back on output). This will improve the overall performance of
-            TransformerEncoder when padding rate is high. Default: ``True`` (enabled).
+            TransformerEncoder when padding rate is high. Default: ``False`` (disabled).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -182,7 +182,7 @@ class TransformerEncoder(Module):
     """
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True):
+    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=False):
         super(TransformerEncoder, self).__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
