@@ -2668,6 +2668,9 @@
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
 
+- name: _nested_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  self, weight, bias: NestedTensor_linear_backward(grad, self, weight, bias)
+
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))

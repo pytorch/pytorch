@@ -4909,6 +4909,10 @@
   dispatch:
     NestedTensorCPU, NestedTensorCUDA: NestedTensor_get_nested_size_tensor
 
+- func: _nested_linear(Tensor self, Tensor weight, Tensor? bias=None) -> Tensor
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: NestedTensor_linear
+
 # _nested_from_padded is not usable from Python, so
 # _nested_from_padded_and_nested_example is available for testing.
 - func: _nested_from_padded_and_nested_example(Tensor padded, Tensor nt_example) -> Tensor
