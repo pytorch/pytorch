@@ -113,6 +113,9 @@ def checkUplo(uplo: str):
     ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
 
 
+# Keeping this meta impl around, but we don't want to register it directly to the meta key
+# because `aten::linalg_eigh` is composite.
+# `_linalg_eigh` is implemented internally as a structured kernel, so we have meta support.
 def meta_linalg_eigh(self, uplo="L"):
     squareCheckInputs(self, "linalg_eigh")
     checkUplo(uplo)
