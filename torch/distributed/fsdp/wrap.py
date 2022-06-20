@@ -315,7 +315,7 @@ class ParamExecOrderWrapPolicy:
             wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
             within each transformer layer.
     """
-    init_policy : Callable = always_wrap_policy
+    init_policy: Callable = always_wrap_policy
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
