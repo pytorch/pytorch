@@ -41,6 +41,8 @@ class Commit:
     def __repr__(self):
         return f'Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})'
 
+commit_fields = tuple(f.name for f in dataclasses.fields(Commit))
+
 class CommitList:
     # NB: Private ctor. Use `from_existing` or `create_new`.
     def __init__(self, path: str, commits: List[Commit]):
@@ -62,11 +64,12 @@ class CommitList:
     @staticmethod
     def read_from_disk(path) -> List[Commit]:
         with open(path) as csvfile:
-            reader = csv.reader(csvfile)
-            rows = list(row for row in reader)
-        rows = rows[1:]  # Discard the header row
-        assert all(len(row) >= 4 for row in rows)
-        return [Commit(*row) for row in rows]
+            reader = csv.DictReader(csvfile)
+            rows = []
+            for row in reader:
+                filtered_rows = {k: row[k] for k in commit_fields}
+                rows.append(Commit(**filtered_rows))
+        return rows
 
     def write_result(self):
         self.write_to_disk_static(self.path, self.commits)
@@ -76,7 +79,7 @@ class CommitList:
         os.makedirs(Path(path).parent, exist_ok=True)
         with open(path, 'w') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(f.name for f in dataclasses.fields(Commit))
+            writer.writerow(commit_fields)
             for commit in commit_list:
                 writer.writerow(dataclasses.astuple(commit))
 
