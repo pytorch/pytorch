@@ -1,3 +1,4 @@
+import copy
 from queue import SimpleQueue
 from typing import List, Dict
 
@@ -138,7 +139,10 @@ def fuse_partition(gm: GraphModule,
 
         if x not in node_to_placeholder:
             # x is not in subgraph, create a new placeholder for subgraph
-            node_to_placeholder[x] = subgraph.placeholder(x.name, type_expr=x.type)
+            placeholder_node = subgraph.placeholder(x.name, type_expr=x.type)
+            # copy all meta fields, even if some fields might be irrelvant for the placeholder node
+            placeholder_node.meta = copy.copy(x.meta)
+            node_to_placeholder[x] = placeholder_node
 
         return node_to_placeholder[x]
 
