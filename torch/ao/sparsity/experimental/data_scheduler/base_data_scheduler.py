@@ -76,16 +76,28 @@ class BaseDataScheduler(object):
         self.verbose = verbose
 
         # Housekeeping
-        self._get_sl_called_within_step: bool = False
+        self._get_sp_called_within_step: bool = False  # sp -> schedule parameter
+        self.step()
 
     @abc.abstractmethod
-    def get_hyperparam(self):
+    def get_schedule_param(self):
         r"""Abstract method that needs to be implemented by the child class.
             Returns: Dictionary of mapping from name -> sparsifier_hyperparam value
         """
         raise NotImplementedError
 
-    def step(self, epoch=None):
+    def __repr__(self):
+        format_string = self.__class__.__name__ + ' ('
+        format_string += '\n'
+        format_string += 'Data Sparsifier {0}\n'.format(self.data_sparsifier)
+        format_string += '    {0}: {1}\n'.format(self.schedule_param, self.base_param)
+        format_string += ')'
+        return format_string
+
+    def get_last_param(self):
+        return self._last_param
+
+    def step(self):
         # Raise warning if trying to call scheduler step before the sparsifier.
         # https://github.com/pytorch/pytorch/issues/20124
         if self._step_count == 1:
@@ -101,24 +113,26 @@ class BaseDataScheduler(object):
                               "calls to the scheduer.step().", UserWarning)
         self._step_count += 1
 
-        class _enable_get_sl_call:
+        class _enable_get_sp_call:
 
             def __init__(self, o):
                 self.o = o
 
             def __enter__(self):
-                self.o._get_sl_called_within_step = True
+                self.o._get_sp_called_within_step = True
                 return self
 
             def __exit__(self, type, value, traceback):
-                self.o._get_sl_called_within_step = False
+                self.o._get_sp_called_within_step = False
 
-        with _enable_get_sl_call(self):
+        with _enable_get_sp_call(self):
             self.last_epoch += 1
-            updated_scheduler_params = self.get_hyperparam()
+            updated_scheduler_params = self.get_schedule_param()
 
         for name, param in updated_scheduler_params.items():
             self.data_sparsifier.data_groups[name][self.schedule_param] = param
+            if self.verbose:
+                print(f"Adjusting {self.schedule_param} for group {name} to {param}")
 
         self._last_param = {
             name: config.get(self.schedule_param, None)
