@@ -15,7 +15,7 @@ class ImplementedDataScheduler(BaseDataScheduler):
     def __init__(self, sparsifier, sparsifier_hyperparam, last_epoch=-1, verbose=False):
         super().__init__(sparsifier, sparsifier_hyperparam, last_epoch, verbose)
 
-    def get_hyperparam(self):
+    def get_schedule_param(self):
         pass
 
 
