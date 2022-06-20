@@ -487,7 +487,7 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
   TORCH_CHECK(
       input.sizes().size() >= 2,
       "Input tensor must have at least batch and channel dimensions!");
-  int64_t num_features = input.sizes().vec()[1];
+  int64_t num_features = input.size(1);
 
   if (running_mean.has_value()) {
     shapes.emplace_back(
