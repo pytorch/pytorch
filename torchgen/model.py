@@ -834,7 +834,7 @@ class NativeFunction:
         return self.func.name.name.base
 
 
-SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable"))
+SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
@@ -1201,7 +1201,15 @@ class FunctionSchema:
                 ), "out= ops that accept tensor lists as out arguments "
                 "are expected to have no return type (since you can't do method chaining on them)"
             else:
-                assert len(self.arguments.out) == len(
+                # mutable keyward arguments whose name has _scratch_ prefix are
+                # scratch tensors for memory planning and should not be returned
+                assert len(
+                    [
+                        arg
+                        for arg in self.arguments.out
+                        if not arg.name.startswith("_scratch_")
+                    ]
+                ) == len(
                     self.returns
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
@@ -1277,6 +1285,9 @@ class FunctionSchema:
         the result into an explicitly provided out argument.
         """
         is_out = bool(self.arguments.out)
+        is_scratch = bool(
+            [arg for arg in self.arguments.out if arg.name.startswith("_scratch_")]
+        )
         is_inplace = self.name.name.inplace
         is_mutable = any(
             a.annotation is not None and a.annotation.is_write
@@ -1292,7 +1303,15 @@ class FunctionSchema:
         # we can probably manually write code for them instead of forcing the codegen to handle them.
         if is_inplace:
             return SchemaKind.inplace
+        elif is_scratch:
+            assert (
+                is_out
+            ), "invariant: all scratch operators are expected to be out= operators too"
+            return SchemaKind.scratch
         elif is_out:
+            assert (
+                not is_scratch
+            ), "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
