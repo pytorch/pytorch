@@ -18,6 +18,7 @@ from torch.overrides import (
     is_tensor_method_or_property,
     TorchFunctionMode
 )
+from torch.utils._mode_utils import find_outermost_mode, all_same_mode, all_same_mode_scope
 from functools import partial
 
 Tensor = torch.Tensor
@@ -1303,7 +1304,7 @@ class TestTorchFunctionMode(TestCase):
 
         x = A()
         with x:
-            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode"):
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
                 with x:
                     pass
 
@@ -1317,6 +1318,124 @@ class TestTorchFunctionMode(TestCase):
         with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
             with A():
                 x + x
+
+    def test_error_with_ancestor(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        with x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
+                pass
+
+    def test_restore_errors(self):
+        class A(TorchFunctionMode):
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with A().restore():
+                pass
+
+        x = A()
+        with A():
+            with x:
+                pass
+
+        with A():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
+
+
+    def test_restore_ancestor_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        y = A()
+        with x:
+            with y:
+                pass
+
+        z = A()
+        with y.restore():
+            with z:
+                pass
+
+        with x.restore():
+            with z.restore():
+                pass
+
+    def test_find_outermost_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        self.assertIsNone(find_outermost_mode([None, None]))
+
+        x = A()
+        y = A()
+        with x:
+            with y:
+                pass
+
+        self.assertEqual(find_outermost_mode([x, y]), y)
+
+        z = A()
+        with y.restore():
+            with z:
+                pass
+
+        self.assertEqual(find_outermost_mode([z, x]), z)
+        i = A()
+
+        with self.assertRaisesRegex(RuntimeError, "doesn't have ancestors set so the ordering with other modes"):
+            find_outermost_mode([i, x, y, z])
+
+        k = A()
+        with k:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "don't come from the same scope"):
+            find_outermost_mode([k, x, y, z])
+
+    def test_all_same_mode(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        y = A()
+        self.assertTrue(all_same_mode([x, x, x]))
+        self.assertFalse(all_same_mode([x, None]))
+        self.assertFalse(all_same_mode([x, y]))
+
+    def test_all_same_mode_scope(self):
+        class A(TorchFunctionMode):
+            pass
+
+        x = A()
+        y = A()
+        z = A()
+        with x:
+            with y:
+                pass
+
+        with x.restore():
+            with z:
+                pass
+
+        i = A()
+
+        self.assertTrue(all_same_mode_scope([x, y], y))
+        self.assertTrue(all_same_mode_scope([x, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, z], y))
+        self.assertFalse(all_same_mode_scope([x, y, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, i], y))
+
+        no_ancestor = A()
+        self.assertFalse(all_same_mode_scope([x, y, z], no_ancestor))
 
     def test_reentrant_mode_idiom(self):
         log = []
