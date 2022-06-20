@@ -3128,6 +3128,7 @@
   structured: True
   dispatch:
     CPU, CUDA: amax_out
+    MPS: amax_out_mps
 
 # Return: (Tensor output, Tensor indices)
 - func: max_pool1d_with_indices(Tensor self, int[1] kernel_size, int[1] stride=[], int[1] padding=0, int[1] dilation=1, bool ceil_mode=False) -> (Tensor, Tensor)
@@ -3284,6 +3285,7 @@
   structured: True
   dispatch:
     CPU, CUDA: amin_out
+    MPS: amin_out_mps
 
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
 # native_functions.yaml
