@@ -6,9 +6,6 @@
 
 set -ex
 
-# shellcheck disable=SC2034
-COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}"
-
 TORCH_INSTALL_DIR=$(python -c "import site; print(site.getsitepackages()[0])")/torch
 TORCH_BIN_DIR="$TORCH_INSTALL_DIR"/bin
 TORCH_LIB_DIR="$TORCH_INSTALL_DIR"/lib
@@ -25,12 +22,15 @@ fi
 
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
-  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}")
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
 fi
 
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+echo "Environment variables"
+env
 
 echo "Testing pytorch"
 
@@ -90,8 +90,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   fi
 fi
 
-# --user breaks ppc64le builds and these packages are already in ppc64le docker
-if [[ "$BUILD_ENVIRONMENT" != *ppc64le* ]] && [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
+if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]] ; then
   # JIT C++ extensions require ninja.
   pip_install --user ninja
   # ninja is installed in $HOME/.local/bin, e.g., /var/lib/jenkins/.local/bin for CI user jenkins
@@ -141,7 +140,9 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     # it to be loaded globally.  This isn't really a good idea though, because
     # it depends on a ton of dynamic libraries that most programs aren't gonna
     # have, and it applies to child processes.
-    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.1.0/lib/linux/libclang_rt.asan-x86_64.so
+
+    # TODO: get rid of the hardcoded path
+    export LD_PRELOAD=/usr/lib/llvm-7/lib/clang/7.0.1/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
@@ -206,10 +207,6 @@ test_aten() {
     # NB: the ATen test binaries don't have RPATH set, so it's necessary to
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
-    if [[ "$BUILD_ENVIRONMENT" == *ppc64le* ]]; then
-      SUDO=sudo
-    fi
-
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libc10* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libcaffe2* "$TEST_BASE_DIR"
     ${SUDO} ln -sf "$TORCH_LIB_DIR"/libmkldnn* "$TEST_BASE_DIR"
@@ -456,10 +453,15 @@ test_forward_backward_compatibility() {
   set -x
   # create a dummy ts model at this version
   python test/create_dummy_torchscript_model.py /tmp/model_new.pt
+  REPO_DIR=$(pwd)
   pushd test/forward_backward_compatibility
   python -m venv venv
   # shellcheck disable=SC1091
   . venv/bin/activate
+  # install the nightly before the base commit -- fallback to most recent nightly in case of error
+  VERSION=$(cat "${REPO_DIR}/version.txt")
+  DATE_OF_BASE=$(git show -s --format=%cd --date=short "${BASE_SHA}")
+  pip_install --pre "torch<${VERSION::-2}.dev${DATE_OF_BASE//-/}" -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html || \
   pip_install --pre torch -f https://download.pytorch.org/whl/nightly/cpu/torch_nightly.html
   pip show torch
   python dump_all_function_schemas.py --filename nightly_schemas.txt
