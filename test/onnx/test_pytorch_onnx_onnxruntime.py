@@ -159,11 +159,10 @@ class _TestONNXRuntime:
     keep_initializers_as_inputs = True  # For IR version 3 type export.
 
     def setUp(self):
-        torch.manual_seed(0)
+        set_rng_seed(0)
         onnxruntime.set_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
-        np.random.seed(seed=0)
         os.environ["ALLOW_RELEASED_ONNX_OPSET_ONLY"] = "0"
         self.is_script_test_enabled = True
 
