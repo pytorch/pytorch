@@ -14,9 +14,13 @@ from itertools import combinations
 class SchemaCheckMode(TorchDispatchMode):
     def __init__(self):
         self.ops = []
+        self.mutated = []
+        self.aliasing = []
 
     def reset_cache(self):
         self.ops.clear()
+        self.mutated.clear()
+        self.aliasing.clear()
 
     def display_ops(self):
         print(*self.ops, sep=",")
@@ -73,6 +77,9 @@ class SchemaCheckMode(TorchDispatchMode):
         out = func(*args, **kwargs)
 
         arg_alias_pairs_map = {arg.name : [arg] for arg in func._schema.arguments}
+        out_alias_pairs_map = [set() for arg in func._schema.returns]
+
+        # Aliasing between arguments
         for i_arg, j_arg in combinations(func._schema.arguments, 2):
             i_values = tree_map(
                 unwrap,
@@ -84,6 +91,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 arg_alias_pairs_map[i_arg.name].append(j_arg)
                 arg_alias_pairs_map[j_arg.name].append(i_arg)
 
+        # Process arguments with outputs
         for arg in func._schema.arguments:
             name = standardize_name(arg.name)
             if arguments.get(name) is not None:
@@ -93,11 +101,29 @@ class SchemaCheckMode(TorchDispatchMode):
                 u_values = tree_map(unwrap, after)
                 u_out = tree_map(unwrap, out)
                 u_out = u_out if isinstance(u_out, tuple) else (u_out, )
-                if any([has_mutated(i, j) for i, j in zip(before, after)]) and not is_mutable(arg_alias_pairs):
-                    raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
+                if any([has_mutated(i, j) for i, j in zip(before, after)]):
+                    if not is_mutable(arg_alias_pairs):
+                        raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
+                    else:
+                        self.mutated.append((func._schema.name, name))
                 for v in u_values:
                     for j in range(len(u_out)):
-                        if has_aliased(v, u_out[j]) and not is_aliasing(func._schema.returns[j].alias_info, arg_alias_pairs):
-                            raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
+                        if has_aliased(v, u_out[j]):
+                            if not is_aliasing(func._schema.returns[j].alias_info, arg_alias_pairs):
+                                raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
+                            else:
+                                self.aliasing.append((func._schema.name, name, f"output_{j}"))
+                                out_alias_pairs_map[j].add(name)
+
+        # Aliasing between outputs
+        for i, j in combinations(range(len(func._schema.returns)), 2):
+            i_values = tree_map(
+                unwrap,
+                tree_flatten(out[i])[0])
+            j_values = tree_map(
+                unwrap,
+                tree_flatten(out[j])[0])
+            if are_args_aliasing(i_values, j_values) and not bool(len(out_alias_pairs_map[i] & out_alias_pairs_map[j])):
+                raise RuntimeError(f'Outputs {i} and {j} alias unexpectedly')
 
         return out
