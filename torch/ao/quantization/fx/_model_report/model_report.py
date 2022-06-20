@@ -5,11 +5,6 @@ from torch.ao.quantization.fx._model_report.detector import DetectorBase
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
 
-
-DEFAULT_MODEL_REPORT_OBSERVER_PRE_EXTENSION = ".model_report_pre_observer"
-DEFAULT_MODEL_REPORT_OBSERVER_POST_EXTENSION = ".model_report_post_observer"
-
-
 class ModelReport:
     r"""
     Generates report and collects statistics
@@ -36,28 +31,28 @@ class ModelReport:
             raise ValueError("Should include at least 1 desired report")
 
         # keep the reports private so they can't be modified
-        self.__desired_report_detectors = desired_report_detectors
-        self.__desired_reports = set([detector.get_detector_name() for detector in desired_report_detectors])
+        self._desired_report_detectors = desired_report_detectors
+        self._desired_reports = set([detector.get_detector_name() for detector in desired_report_detectors])
 
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set
         # this set can then be used to traverse the graph and remove added observers
-        self.__report_to_observers_of_interest: Dict[str, Set[str]] = {}
+        self._report_name_to_observer_fqns: Dict[str, Set[str]] = {}
 
         # initialize each report to have empty set of observers of interest
-        for desired_report in self.__desired_reports:
-            self.__report_to_observers_of_interest[desired_report] = set([])
+        for desired_report in self._desired_reports:
+            self._report_name_to_observer_fqns[desired_report] = set([])
 
         # flags to ensure that we can only prepare once
-        self.__prepared_flag = False
+        self._prepared_flag = False
 
-    def get_desired_reports(self) -> Set[str]:
+    def get_desired_reports_names(self) -> Set[str]:
         """ Returns a copy of the desired reports for viewing """
-        return self.__desired_reports.copy()
+        return self._desired_reports.copy()
 
     def get_observers_of_interest(self) -> Dict[str, Set[str]]:
         """ Returns a copy of the observers of interest for viewing """
-        return self.__report_to_observers_of_interest.copy()
+        return self._report_name_to_observer_fqns.copy()
 
     def prepare_detailed_calibration(self, prepared_fx_model: GraphModule) -> GraphModule:
         r"""
@@ -66,7 +61,7 @@ class ModelReport:
 
         Each observer is inserted based on the desired_reports into the relavent locations
 
-        Right now, each report in self.__desired_reports has independent insertions
+        Right now, each report in self._desired_reports has independent insertions
             However, if a module already has a Observer of the same type, the insertion will not occur
             This is because all of the same type of Observer collect same information, so redundant
 
@@ -77,19 +72,19 @@ class ModelReport:
         """
 
         # if already prepared once, cannot prepare again
-        if self.__prepared_flag:
+        if self._prepared_flag:
             raise ValueError("Already ran preparing detailed callibration. Run the report generation next after callibration.")
 
         # loop through each detector, find where placements should be, and keep track
         insert_observers_fqns: Dict[str, Any] = {}
 
-        for detector in self.__desired_report_detectors:
+        for detector in self._desired_report_detectors:
             # determine observer points for each detector
             obs_fqn_to_info = detector.determine_observer_insert_points(prepared_fx_model)
             # map each insert point to the observer to use
             insert_observers_fqns.update(obs_fqn_to_info)
             # update the set of observers this report cares about
-            self.__report_to_observers_of_interest[detector.get_detector_name()] = set(obs_fqn_to_info.keys())
+            self._report_name_to_observer_fqns[detector.get_detector_name()] = set(obs_fqn_to_info.keys())
 
         # now insert all the observers at their desired locations
         for observer_fqn in insert_observers_fqns:
@@ -97,15 +92,15 @@ class ModelReport:
             insert_obs = insert_observers_fqns[observer_fqn]["insert_observer"]
             insert_post = insert_observers_fqns[observer_fqn]["insert_post"]
             observer_args = insert_observers_fqns[observer_fqn]["observer_args"]
-            self.__insert_observer_around_module(
+            self._insert_observer_around_module(
                 prepared_fx_model, observer_fqn, target_node, insert_obs, observer_args, insert_post
             )
 
-        self.__prepared_flag = True
+        self._prepared_flag = True
 
         return prepared_fx_model
 
-    def __insert_observer_around_module(
+    def _insert_observer_around_module(
         self,
         prepared_fx_model: GraphModule,
         obs_fqn: str,
@@ -137,7 +132,7 @@ class ModelReport:
         # recompile model after inserts are made
         prepared_fx_model.recompile()
 
-    def __get_node_from_fqn(self, fx_model: GraphModule, node_fqn: str) -> torch.fx.node.Node:
+    def _get_node_from_fqn(self, fx_model: GraphModule, node_fqn: str) -> torch.fx.node.Node:
         r"""
         Takes in a graph model and returns the node based on the fqn
 
