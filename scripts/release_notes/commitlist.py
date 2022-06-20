@@ -38,6 +38,8 @@ class Commit:
     accepter_2: str
     accepter_3: str
 
+    merge_into: str = None
+
     def __repr__(self):
         return f'Commit({self.commit_hash}, {self.category}, {self.topic}, {self.title})'
 
@@ -67,7 +69,9 @@ class CommitList:
             reader = csv.DictReader(csvfile)
             rows = []
             for row in reader:
-                filtered_rows = {k: row[k] for k in commit_fields}
+                if row.get("new_title", "") != "":
+                    row["title"] = row["new_title"]
+                filtered_rows = {k: row.get(k, "") for k in commit_fields}
                 rows.append(Commit(**filtered_rows))
         return rows
 
@@ -262,12 +266,30 @@ def rerun_with_new_filters(path):
             current_commits.commits[i] = CommitList.categorize(c.commit_hash, c.title)
     current_commits.write_result()
 
-def to_markdown(commit_list, category):
+def get_hash_or_pr_url(commit: Commit):
+    # cdc = get_commit_data_cache()
+    pr_link = commit.pr_link
+    if pr_link is None:
+        return commit.commit_hash
+    else:
+        regex = r'https://github.com/pytorch/pytorch/pull/([0-9]+)'
+        matches = re.findall(regex, pr_link)
+        if len(matches) == 0:
+            return commit.commit_hash
+
+        return f'[#{matches[0]}]({pr_link})'
+
+def to_markdown(commit_list: CommitList, category):
     def cleanup_title(commit):
         match = re.match(r'(.*) \(#\d+\)', commit.title)
         if match is None:
             return commit.title
         return match.group(1)
+
+    merge_mapping = defaultdict(list)
+    for commit in commit_list.commits:
+        if commit.merge_into:
+            merge_mapping[commit.merge_into].append(commit)
 
     cdc = get_commit_data_cache()
     lines = [f'\n## {category}\n']
@@ -275,12 +297,11 @@ def to_markdown(commit_list, category):
         lines.append(f'### {topic}\n')
         commits = commit_list.filter(category=category, topic=topic)
         for commit in commits:
-            result = cleanup_title(commit)
-            maybe_pr_number = cdc.get(commit.commit_hash).pr_number
-            if maybe_pr_number is None:
-                result = f'- {result} ({commit.commit_hash})\n'
-            else:
-                result = f'- {result} ([#{maybe_pr_number}](https://github.com/pytorch/pytorch/pull/{maybe_pr_number}))\n'
+            if commit.merge_into:
+                continue
+            all_related_commits = merge_mapping[commit.commit_hash] + [commit]
+            commit_list_md = ", ".join(get_hash_or_pr_url(c) for c in all_related_commits)
+            result = f'- {cleanup_title(commit)} ({commit_list_md})\n'
             lines.append(result)
     return lines
 
