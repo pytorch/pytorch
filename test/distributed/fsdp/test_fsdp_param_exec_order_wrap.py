@@ -34,10 +34,10 @@ class Model(torch.nn.Module):
         return z
 
     def get_input(self, device: torch.device):
-        return torch.randn((8, 6)).to(device)
+        return (torch.randn((8, 6)).to(device), )
 
     def get_loss(self, input, output):
-        return (output - input).sum()
+        return (output - input[0]).sum()
 
     @staticmethod
     def wrap(sharding_strategy: ShardingStrategy, device: torch.device, init_policy=always_wrap_policy):
@@ -61,23 +61,26 @@ class TestFSDPExecOrder(FSDPTest):
     def test_fsdp_flatten_params_exec_order(self, sharding_strategy: ShardingStrategy, iters: int):
         """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
         fsdp_model = Model.wrap(sharding_strategy, self.device)
-        assert fsdp_model._is_param_exec_order_prep_stage()
+        self.assertTrue(fsdp_model._is_param_exec_order_prep_stage())
         for _ in range(iters):
             input = fsdp_model.module.get_input(self.device)
-            output = fsdp_model(input)
+            output = fsdp_model(*input)
             loss = fsdp_model.module.get_loss(input, output).to(self.device)
             loss.backward()
         params_list = list(fsdp_model.parameters())
         # Since the forward execution order is NOT consistent with the model definition order,
         # the ordering in flatten_named_params_exec_order should be different from named_parameters
-        assert fsdp_model._fsdp_params_exec_order == [
-            params_list[0],
-            params_list[2],
-            params_list[3],
-            params_list[1]
-        ]
-        assert fsdp_model._use_param_exec_order_policy()
-        assert not fsdp_model._is_param_exec_order_prep_stage()
+        self.assertEqual(
+            fsdp_model._fsdp_params_exec_order,
+            [
+                params_list[0],
+                params_list[2],
+                params_list[3],
+                params_list[1]
+            ]
+        )
+        self.assertTrue(fsdp_model._use_param_exec_order_policy())
+        self.assertTrue(not fsdp_model._is_param_exec_order_prep_stage())
 
 
 instantiate_parametrized_tests(TestFSDPExecOrder)

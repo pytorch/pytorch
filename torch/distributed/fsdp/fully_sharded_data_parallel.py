@@ -649,7 +649,7 @@ class FullyShardedDataParallel(nn.Module):
                 process_group=process_group,
                 sharding_strategy=sharding_strategy,
                 cpu_offload=cpu_offload,
-                auto_wrap_policy=auto_wrap_policy,
+                auto_wrap_policy=auto_wrap_policy.init_policy,
                 backward_prefetch=backward_prefetch,
                 mixed_precision=mixed_precision,
                 ignored_modules=ignored_modules,
@@ -927,38 +927,13 @@ class FullyShardedDataParallel(nn.Module):
         # For validating execution order across ranks
         self._exec_order_data = _ExecOrderData()
 
-    def _init_param_exec_order_wrap_policy(
-        self,
-        module: nn.Module,
-        process_group: Optional[ProcessGroup] = None,
-        sharding_strategy: Optional[ShardingStrategy] = None,
-        cpu_offload: Optional[CPUOffload] = None,
-        auto_wrap_policy: Optional[Callable] = None,
-        backward_prefetch: Optional[BackwardPrefetch] = None,
-        mixed_precision: Optional[MixedPrecision] = None,
-        ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
-        param_init_fn: Optional[Callable[[nn.Module], None]] = None,
-        device_id: Optional[Union[int, torch.device]] = None,
-        sync_module_states: bool = False,
-    ) -> None:
+    def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
-        self.__init__(
-            module=module,
-            process_group=process_group,
-            sharding_strategy=sharding_strategy,
-            cpu_offload=cpu_offload,
-            auto_wrap_policy=auto_wrap_policy.init_policy,
-            backward_prefetch=backward_prefetch,
-            mixed_precision=mixed_precision,
-            ignored_modules=ignored_modules,
-            param_init_fn=param_init_fn,
-            device_id=device_id,
-            sync_module_states=sync_module_states,
-        )
-        self._param_exec_order_policy : bool = True
+        self.__init__(*args, **kwargs)
+        self._param_exec_order_policy: bool = True
         # self._param_exec_order_prep_stage is set to True in the first forward and backward iteration,
         # and set to False otherwise.
-        self._param_exec_order_prep_stage : bool = True
+        self._param_exec_order_prep_stage: bool = True
         # A list that stores the flatten parameters and its name based on the parameter execution order
         self._fsdp_params_exec_order: List[FlatParameter] = []
         for m in self.modules():
@@ -2861,7 +2836,7 @@ class FullyShardedDataParallel(nn.Module):
             self._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.BACKWARD_POST])
             self.training_state = TrainingState_.BACKWARD_POST
 
-            if (self._use_param_exec_order_policy() and self._param_exec_order_prep_stage):
+            if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
                 # In self._fsdp_params_exec_order, the parameters are ordered based on
                 # the execution order in the backward pass in the first iteration.
                 self._fsdp_params_exec_order.append(param)
@@ -3149,7 +3124,7 @@ class FullyShardedDataParallel(nn.Module):
                     # reset this flag for cases like "one forward pass + multiple backward passes"
                     self._post_backward_callback_queued = False
 
-        if (self._use_param_exec_order_policy() and self._param_exec_order_prep_stage):
+        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
             self._param_exec_order_policy_second_iter_init()
 
     def _param_exec_order_policy_second_iter_init(self) -> None:
