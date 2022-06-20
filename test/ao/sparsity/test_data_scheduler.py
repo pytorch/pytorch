@@ -122,3 +122,25 @@ class TestBaseDataScheduler(TestCase):
         for some_data in all_data:
             name, _, config = self._get_name_data_config(some_data, defaults)
             assert sparsifier.data_groups[name][scheduler_param] == config[scheduler_param] * 0.5
+
+    def test_state_dict(self):
+        sparsifier, data_list, defaults, data_with_config = self._get_sparsifier(return_data=True)
+        scheduler1 = self._get_scheduler(sparsifier)
+
+        sparsifier.step()
+        scheduler1.step()
+
+        scheduler2 = self._get_scheduler(sparsifier)
+        all_data = data_list + data_with_config
+        for some_data in all_data:
+            name, _, _ = self._get_name_data_config(some_data, defaults)
+            assert scheduler1.base_param[name] != scheduler2.base_param[name]
+            assert scheduler1._last_param[name] == scheduler2.base_param[name]
+
+        scheduler1_state = scheduler1.state_dict()
+        scheduler2.load_state_dict(scheduler1_state)
+
+        for some_data in all_data:
+            name, _, _ = self._get_name_data_config(some_data, defaults)
+            assert scheduler1.base_param[name] == scheduler2.base_param[name]
+            assert scheduler1._last_param[name] == scheduler2._last_param[name]
