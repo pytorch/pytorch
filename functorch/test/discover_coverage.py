@@ -628,7 +628,7 @@ JVP_EXEMPTIONS = {
     'nn.functional.rrelu',  # not actually problem, randomness testing artifact
     'normal',  # not actually problem, randomness testing artifact
     'bernoulli',  # not actually problem, randomness testing artifact
-    'torch.nn.functional.embedding',  # max_norm causes testing to be weird
+    'nn.functional.embedding',  # max_norm causes testing to be weird
     # 'multinomial',
 }
 
@@ -741,13 +741,13 @@ class Operator:
     def _supports_vmapjvp_base(self, test):
         if self.name in FACTORY_FNS:
             return Support.YES
-        if self.name in JVP_EXEMPTIONS:
-            return Support.YES
         VMAPJVP_EXEMPTIONS = {
             'prod',  # dynamic (backward)
             'nn.functional.batch_norm',  # testing problem
             'normal',  # not actually problem, randomness testing artifact
             'bernoulli',  # not actually problem, randomness testing artifact
+            'dropout2d',  # not actually problem, randomness testing artifact
+            'dropout',  # not actually problem, randomness testing artifact
         }
         if self.name in VMAPJVP_EXEMPTIONS:
             return Support.YES
