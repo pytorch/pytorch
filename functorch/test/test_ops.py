@@ -755,8 +755,9 @@ class TestOperators(TestCase):
         # Causing issues with multiple cpu levels of forward mode AD
         xfail('nn.functional.batch_norm', device_type='cpu'),
 
-        # https://github.com/pytorch/functorch/issues/857
-        skip('nn.functional.embedding', ''),
+        # Not actually a problem: embedding with max_norm mutates the weight
+        # and causes different runs to produce different results.
+        xfail('nn.functional.embedding', ''),
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('linalg.householder_product'),
