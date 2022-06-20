@@ -210,8 +210,9 @@ std::string toString(const ExtraFields<EventType::PyCall>& e) {
       e.callsite_.funcname_.str());
 }
 
-#define CAST_ACTIVITY(x) \
-  static_cast<torch::profiler::impl::kineto::ActivityTypeAlias>(static_cast<int>(x))
+#define CAST_ACTIVITY(x)                                         \
+  static_cast<torch::profiler::impl::kineto::ActivityTypeAlias>( \
+      static_cast<int>(x))
 
 namespace {
 auto scopeToType(at::RecordScope scope) {
