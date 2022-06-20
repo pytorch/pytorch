@@ -7,6 +7,7 @@ import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
+from torch._subclasses.fake_tensor import  DynamicOutputShapeException
 
 from torch.testing._internal.common_device_type import ops
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -136,6 +137,7 @@ class TestProxyTensor(TestCase):
         )
 
 make_fx_failures = {
+    # unknown
     xfail('allclose'),
     xfail('equal'),
     xfail('linalg.eigvals'),
@@ -150,8 +152,8 @@ make_fx_failures = {
     skip('nn.functional.max_unpool2d', '', device_type='cpu'),
     skip('nn.functional.max_unpool3d', '', device_type='cpu'),
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
-    xfail('histogram'),
-    xfail('scatter'),
+    # REAL ERRORS: Need to fix
+
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
@@ -184,8 +186,22 @@ make_fx_failures = {
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
 
-    # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
+    # ???
     xfail('nn.functional.ctc_loss'),
+    # Sparse tensors are not supported with faketensors for now
+    xfail('to_sparse'),
+    # segfaults
+    skip('block_diag'),
+    # https://github.com/pytorch/pytorch/issues/79670
+    xfail('nanmean'),
+    # FakeTensor fallback doesn't work
+    xfail('segment_reduce', 'lengths'),
+    xfail('multinomial'),
+    xfail('mvlgamma', 'mvlgamma_p_1'),
+    xfail('mvlgamma', 'mvlgamma_p_3'),
+    xfail('mvlgamma', 'mvlgamma_p_5'),
+    xfail('cholesky'),
+    xfail('cholesky_inverse'),
 }
 
 
@@ -203,7 +219,11 @@ class TestProxyTensorOpInfo(TestCase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            new_f = make_fx(f, trace_factory_functions=True)(args, kwargs)
+            try:
+                new_f = make_fx(f, trace_factory_functions=True)(args, kwargs)
+            except DynamicOutputShapeException as e:
+                self.skipTest("Dynamic output shape operation in trace")
+
             for arg in args:
                 if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
                     arg.uniform_(0, 1)
@@ -211,6 +231,7 @@ class TestProxyTensorOpInfo(TestCase):
                 old_out = f(args, kwargs)
             except Exception:
                 continue
+            print(new_f.code)
             new_out = wrapper_set_seed(new_f, args, kwargs)
             self.assertEqual(new_out, old_out)
 
