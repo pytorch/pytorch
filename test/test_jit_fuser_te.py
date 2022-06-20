@@ -2624,6 +2624,9 @@ def f({', '.join(param_names)}):
     @onlyCPU
     @ops(op_db, dtypes=OpDTypes.supported)
     def test_nnc_correctness(self, device, dtype, op):
+        if not op.supports_tracing:
+            self.skipTest("Requires tracing support")
+
         with NoTracerWarnContextManager() as no_warn:
             variant_sample_pairs = get_traced_sample_variant_pairs(device, dtype, op)
 

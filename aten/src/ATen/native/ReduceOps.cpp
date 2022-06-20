@@ -1987,7 +1987,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       char* other_data = data[1];
       for (const auto i : c10::irange(dim_size)) {
         (void)i; //Suppress unused variable warning
-        if (*((scalar_t*)self_data) != *((scalar_t*)other_data)) {
+        if (c10::load<scalar_t>(self_data) != c10::load<scalar_t>(other_data)) {
           result = false;
           return;
         }
