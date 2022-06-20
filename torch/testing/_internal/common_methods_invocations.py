@@ -17921,14 +17921,14 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.l1_loss",
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
-        aten_backward_name='l1_loss_backward',
         sample_inputs_func=sample_inputs_l1_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         skips=(
+            # fwgrad_bwgrad for abs is wrong
+            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad', dtypes=complex_types()),
             # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
             # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
             DecorateInfo(
@@ -20564,6 +20564,11 @@ python_ref_db = [
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.gcd",
+        torch_opinfo_name="gcd",
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
         torch_opinfo_name="ge",
         supports_nvfuser=False,
@@ -20592,6 +20597,11 @@ python_ref_db = [
             # RuntimeError: Tracing expected 5 arguments but got 2 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.lcm",
+        torch_opinfo_name="lcm",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.le",
@@ -20721,6 +20731,17 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.remainder",
+        torch_opinfo_name="remainder",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.bfloat16,), device_type='cpu'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(

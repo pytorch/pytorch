@@ -1645,7 +1645,8 @@ cc_library(
         ],
     )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources + GENERATED_AUTOGRAD_CPP + [
         "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
+        "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
+        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
     ],
     copts = TORCH_COPTS,
     defines = [

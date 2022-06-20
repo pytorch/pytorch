@@ -35,16 +35,16 @@ const std::vector<int> ints {
   int_min,
   int_min + 1,
   int_min + 2,
-  static_cast<int>(-sqrt(static_cast<double>(int_max))),
+  static_cast<int>(-sqrt(int_max)),
   -3, -2, -1, 0, 1, 2, 3,
-  static_cast<int>(sqrt(static_cast<double>(int_max))),
+  static_cast<int>(sqrt(int_max)),
   int_max - 2,
   int_max - 1,
   int_max
 };
 const std::vector<int> non_neg_ints {
   0, 1, 2, 3,
-  static_cast<int>(sqrt(static_cast<double>(int_max))),
+  static_cast<int>(sqrt(int_max)),
   int_max - 2,
   int_max - 1,
   int_max
@@ -53,16 +53,16 @@ const std::vector<int64_t> longs {
   long_min,
   long_min + 1,
   long_min + 2,
-  static_cast<int64_t>(-sqrt(static_cast<double>(long_max))),
+  static_cast<int64_t>(-sqrt(long_max)),
   -3, -2, -1, 0, 1, 2, 3,
-  static_cast<int64_t>(sqrt(static_cast<double>(long_max))),
+  static_cast<int64_t>(sqrt(long_max)),
   long_max - 2,
   long_max - 1,
   long_max
 };
 const std::vector<int64_t> non_neg_longs {
   0, 1, 2, 3,
-  static_cast<int64_t>(sqrt(static_cast<double>(long_max))),
+  static_cast<int64_t>(sqrt(long_max)),
   long_max - 2,
   long_max - 1,
   long_max
@@ -128,7 +128,7 @@ void tensor_pow_scalar(const Vals vals, const Pows pows, const torch::ScalarType
 
   for (const auto pow : pows) {
     // NOLINTNEXTLINE(clang-diagnostic-implicit-const-int-float-conversion)
-    if ( dtype == kInt && pow > static_cast<float>(std::numeric_limits<int>::max())) {
+    if ( dtype == kInt && pow > std::numeric_limits<int>::max()) {
       // value cannot be converted to type int without overflow
       // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       EXPECT_THROW(tensor.pow(pow), std::runtime_error);
