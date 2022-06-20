@@ -8389,6 +8389,30 @@ def sample_inputs_scatter(op_info, device, dtype, requires_grad, **kwargs):
                     args=args, kwargs={'reduce': 'multiply'}
                 ))
 
+    if not requires_grad:
+        smaller_src_test_cases = (
+            (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S, S // 2)))),
+            (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S, S // 2)))),
+            (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S // 2, S)))),
+            (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S // 2, S)))),
+            (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S // 2, S // 2)))),
+            (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S // 2, S // 2)))),
+        )
+
+        for tensor, args in smaller_src_test_cases:
+            samples.append(SampleInput(tensor, args=args))
+
+            samples.append(SampleInput(
+                tensor.clone().detach(),
+                args=args, kwargs={'reduce': 'add'}
+            ))
+
+            if dtype.is_floating_point:
+                samples.append(SampleInput(
+                    tensor.clone().detach(),
+                    args=args, kwargs={'reduce': 'multiply'}
+                ))
+
     return samples
 
 def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
@@ -8409,7 +8433,21 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
         (_tensor(()), (0, zero.clone().detach(), _tensor(()))),
     )
 
-    return [SampleInput(tensor, args=args) for tensor, args in test_cases]
+    samples = [SampleInput(tensor, args=args) for tensor, args in test_cases]
+
+    if not requires_grad:
+        smaller_src_test_cases = (
+            (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S, S // 2)))),
+            (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S, S // 2)))),
+            (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S // 2, S)))),
+            (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S // 2, S)))),
+            (_tensor((M, S)), (0, _gather((S, S), 1, M), _tensor((S // 2, S // 2)))),
+            (_tensor((M, S)), (1, _gather((S, S), 0, S), _tensor((S // 2, S // 2)))),
+        )
+
+        samples = [*samples, *[SampleInput(tensor, args=args) for tensor, args in smaller_src_test_cases]]
+
+    return samples
 
 def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype, low=None, high=None):
@@ -8436,10 +8474,25 @@ def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs
                           args=(dim, index, _tensor(src_shape), reduce),
                           kwargs={'include_self': include_self})
 
+    if not requires_grad:
+        smaller_src_test_cases = (
+            ((M, S), 0, _gather((S, S), 1, M), (S, S // 2)),
+            ((M, S), 1, _gather((S, S), 0, S), (S, S // 2)),
+            ((M, S), 0, _gather((S, S), 1, M), (S // 2, S)),
+            ((M, S), 1, _gather((S, S), 0, S), (S // 2, S)),
+            ((M, S), 0, _gather((S, S), 1, M), (S // 2, S // 2)),
+            ((M, S), 1, _gather((S, S), 0, S), (S // 2, S // 2)),
+        )
 
-    # Sample inputs to test edge cases for backward
-    # Check that gradients are propagated correctly for prod when zeros in self/src are reduced
-    if requires_grad and reduce == 'prod':
+        for args, include_self in product(smaller_src_test_cases, [True, False]):
+            inp_shape, dim, index, src_shape = args
+            yield SampleInput(_tensor(inp_shape),
+                            args=(dim, index, _tensor(src_shape), reduce),
+                            kwargs={'include_self': include_self})
+    elif reduce == 'prod':
+        # Sample inputs to test edge cases for backward
+        # Check that gradients are propagated correctly for prod when zeros in self/src are reduced
+
         # This sample tests gradients for the following cases
         # (a) 1 zero reduced (from src (self[0, 1], self[1, 1]), from self (self[0, 0], self[2, 0]))
         # (b) 2 zeros reduced (1 from src and 1 from self (self[1, 0])
