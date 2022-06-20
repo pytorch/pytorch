@@ -2596,12 +2596,12 @@ class TestIterDataPipeCountSampleYielded(TestCase):
         res = list(datapipe)
         self.assertEqual(len(res), datapipe._number_of_samples_yielded)
 
-        # Functional Test: Check for DataPipe reset with iterator version
+        # Functional Test: Check for reset behavior and if iterator also works
         it = iter(datapipe)  # reset the DataPipe
         res = list(it)
         self.assertEqual(len(res), datapipe._number_of_samples_yielded)
 
-        # Functional Test: Check partially read
+        # Functional Test: Check if the count is correct when DataPipe is partially read
         it = iter(datapipe)
         res = []
         for i, value in enumerate(it):
@@ -2625,12 +2625,14 @@ class TestIterDataPipeCountSampleYielded(TestCase):
                 yield 2
                 raise RuntimeError("Custom test error after yielding 3 elements")
                 yield 3
+
+        # Functional Test: Ensure the count is correct even when exception is raised
         datapipe: IterDataPipe = _CustomGeneratorFnDataPipe()
         with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
             list(datapipe)
         self.assertEqual(3, datapipe._number_of_samples_yielded)
 
-        # Functional Test: Check for reset and iterator version
+        # Functional Test: Check for reset behavior and if iterator also works
         it = iter(datapipe)  # reset the DataPipe
         with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
             list(it)
@@ -2689,12 +2691,13 @@ class TestIterDataPipeCountSampleYielded(TestCase):
                 self.count = 0
                 self.source = iter(range(10))
 
+        # Functional Test: Ensure the count is correct even when exception is raised
         datapipe: IterDataPipe = _CustomNextDataPipe()
         with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
             list(datapipe)
         self.assertEqual(3, datapipe._number_of_samples_yielded)
 
-        # Functional Test: Check for reset and iterator version
+        # Functional Test: Check for reset behavior and if iterator also works
         it = iter(datapipe)  # reset the DataPipe
         with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
             list(it)

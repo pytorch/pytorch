@@ -94,27 +94,35 @@ def hook_iterator(namespace, profile_name):
         return torch.autograd.profiler.record_function(profile_name)
 
     class IteratorDecorator:
-        """Wrap the iterator and modifying its `__next__` method"""
+        r"""
+        Wrap the iterator and modifying its `__next__` method. This decorator is applied to
+        DataPipes of which `__iter__` method is NOT a generator function. Those `__iter__`
+        method commonly returns `self` but not necessarily.
+        """
         def __init__(self, iterator, source_dp, iterator_id, has_next_method):
             self.iterator = iterator
             self.source_dp = source_dp
             self.iterator_id = iterator_id
             self._profiler_enabled = torch.autograd._profiler_enabled()
-            self.has_next = has_next_method
+            # Check if `__iter__` returns `self` and `DataPipe` has `__next__`
+            self.self_and_has_next_method = self.iterator is self.source_dp and has_next_method
 
         def __iter__(self):
             return self
 
-        def _step(self):
+        def _get_next(self):
+            r"""
+            Return next with logic related to iterator validity, profiler, and incrementation of samples yielded.
+            """
             _check_iterator_valid(self.source_dp, self.iterator_id)
             try:
                 # Avoid double counting since if `__next__` is defined, it will be called
-                if not self.has_next:
+                if not self.self_and_has_next_method:
                     self.source_dp._number_of_samples_yielded += 1
                 return next(self.iterator)
             except Exception:
                 # If there is an exception,the element was not successfully returned, the count needs to -= 1.
-                if not self.has_next:
+                if not self.self_and_has_next_method:
                     self.source_dp._number_of_samples_yielded -= 1
                 raise
 
@@ -123,9 +131,9 @@ def hook_iterator(namespace, profile_name):
             # See: https://github.com/pytorch/data/issues/284
             if self._profiler_enabled:
                 with profiler_record_fn_context():
-                    return self._step()
+                    return self._get_next()
             else:  # Decided against using `contextlib.nullcontext` for performance reasons
-                return self._step()
+                return self._get_next()
 
         def __getattr__(self, name):
             return getattr(self.iterator, name)
