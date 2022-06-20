@@ -20516,7 +20516,7 @@ python_ref_db = [
         skips=(
             # Intentional xfail -- isclose does not type promote
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-            # RuntimeError: Tracing expected 5 arguments but got 2 concrete arguments
+            # class 'complex'
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.complex64, torch.complex128,)
                          ),
@@ -21101,13 +21101,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
+        supports_nvfuser=False,
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.chalf, torch.cfloat, torch.cdouble)),
-            # TypeError: where(): incompatible function arguments.
-            DecorateInfo(unittest.skip("Passes for aten executor but not nvfuser"), 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.float32, torch.int32)),
         )
     ),
     PythonRefInfo(
