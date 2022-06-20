@@ -643,5 +643,23 @@ Tensor clone_nested(
       get_buffer(self).clone(), get_nested_size_tensor(self).clone());
 }
 
+at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
+  return get_nested_size_tensor(self);
+}
+
+Tensor dropout_nested(const Tensor& input, double p, bool train) {
+  auto input_ptr = get_nested_tensor_impl(input);
+  const Tensor & input_buffer = input_ptr->get_buffer(),
+                 sizemat = input_ptr->get_nested_size_tensor();
+  Tensor output_buffer = at::dropout(input_buffer, p, train);
+  return wrap_buffer(output_buffer, sizemat.clone());
+}
+
+Tensor& dropout_nested_(Tensor& input, double p, bool train) {
+  Tensor input_buffer = get_buffer(input);
+  at::dropout_(input_buffer, p, train);
+  return input;
+}
+
 } // namespace native
 } // namespace at
