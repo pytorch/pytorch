@@ -2678,12 +2678,10 @@
 - name: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
   padded: _nested_from_padded_backward(grad, padded, fuse_transform_0213)
   cpu_nested_shape_example: non_differentiable
-  fuse_transform_0213: non_differentiable
 
 - name: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
   self: at::_nested_from_padded(grad, self._nested_tensor_size())
   padding: non_differentiable
-  output_size: non_differentiable
 
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
