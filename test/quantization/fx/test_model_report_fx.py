@@ -828,7 +828,8 @@ class TestFxModelReportClass(QuantizationTestCase):
         model_report = ModelReport(test_detector_set)
 
         # make sure internal valid reports matches
-        self.assertEqual(model_report.get_desired_reports(), set([detector.get_detector_name() for detector in test_detector_set]))
+        detector_name_set = set([detector.get_detector_name() for detector in test_detector_set])
+        self.assertEqual(model_report.get_desired_reports_names(), detector_name_set)
 
         # now attempt with no valid reports, should raise error
         with self.assertRaises(ValueError):
