@@ -1139,14 +1139,12 @@ class TestProfiler(TestCase):
         with profile() as prof:
             model(inputs)
             for i in range(260):
-                inputs[0,0,0,i] = i
+                inputs[0, 0, 0, i] = i
             model(inputs)
         basic_evaluation = _utils.BasicEvaluation(prof.profiler)
         for _, event_metrics in basic_evaluation.metrics.items():
-            self.assertTrue(
-                event_metrics.fraction_idle_time() >= 0.0 and
-                event_metrics.fraction_idle_time() <= 1.0
-            )
+            self.assertTrue(event_metrics.fraction_idle_time() >= 0.0
+                            and event_metrics.fraction_idle_time() <= 1.0)
         self.assertTrue(isinstance(basic_evaluation.rank_events(10), list))
 
 
