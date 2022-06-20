@@ -7,10 +7,8 @@ from torch import Tensor
 
 # A workaround to support both TorchScript and MyPy:
 from typing import TYPE_CHECKING
-
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
-
     DimOrDims = Optional[Union[int, Tuple[int], List[int]]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
@@ -19,17 +17,15 @@ else:
 
 
 __all__ = [
-    "addmm",
-    "mm",
-    "sum",
-    "softmax",
-    "log_softmax",
+    'addmm',
+    'mm',
+    'sum',
+    'softmax',
+    'log_softmax',
 ]
 
 
-addmm = _add_docstr(
-    _sparse._sparse_addmm,
-    r"""
+addmm = _add_docstr(_sparse._sparse_addmm, r"""
 sparse.addmm(mat, mat1, mat2, *, beta=1., alpha=1.) -> Tensor
 
 This function does exact same thing as :func:`torch.addmm` in the forward,
@@ -48,13 +44,10 @@ Args:
     mat2 (Tensor): a dense matrix to be multiplied
     beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
     alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
-""",
-)
+""")
 
 
-mm = _add_docstr(
-    _sparse._sparse_mm,
-    r"""
+mm = _add_docstr(_sparse._sparse_mm, r"""
     Performs a matrix multiplication of the sparse matrix :attr:`mat1`
     and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, if :attr:`mat1` is a
     :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
@@ -101,13 +94,10 @@ mm = _add_docstr(
                                [0, 1, 2, 0, 1, 2]]),
                values=tensor([ 0.1394, -0.6415, -2.1639,  0.1394, -0.6415, -2.1639]),
                size=(2, 3), nnz=6, layout=torch.sparse_coo)
-    """,
-)
+    """)
 
 
-sampled_addmm = _add_docstr(
-    _sparse.sparse_sampled_addmm,
-    r"""
+sampled_addmm = _add_docstr(_sparse.sparse_sampled_addmm, r"""
 sparse.sampled_addmm(input, mat1, mat2, *, beta=1., alpha=1., out=None) -> Tensor
 
 Performs a matrix multiplication of the dense matrices :attr:`mat1` and :attr:`mat2` at the locations
@@ -157,11 +147,11 @@ Examples::
         col_indices=tensor([0, 1, 2]),
         values=tensor([ 0.1423, -0.3903, -0.0950]), device='cuda:0',
         size=(3, 3), nnz=3, layout=torch.sparse_csr)
-""",
-)
+""")
 
 
-def sum(input: Tensor, dim: DimOrDims = None, dtype: Optional[DType] = None) -> Tensor:
+def sum(input: Tensor, dim: DimOrDims = None,
+        dtype: Optional[DType] = None) -> Tensor:
     r"""
     Returns the sum of each row of the sparse tensor :attr:`input` in the given
     dimensions :attr:`dim`. If :attr:`dim` is a list of dimensions,
@@ -228,9 +218,7 @@ def sum(input: Tensor, dim: DimOrDims = None, dtype: Optional[DType] = None) -> 
             return torch._sparse_sum(input, dtype=dtype)
 
 
-softmax = _add_docstr(
-    _sparse._sparse_softmax,
-    r"""
+softmax = _add_docstr(_sparse._sparse_softmax, r"""
 sparse.softmax(input, dim, *, dtype=None) -> Tensor
 
 Applies a softmax function.
@@ -255,13 +243,10 @@ Args:
         casted to :attr:`dtype` before the operation is
         performed. This is useful for preventing data type
         overflows. Default: None
-""",
-)
+""")
 
 
-log_softmax = _add_docstr(
-    _sparse._sparse_log_softmax,
-    r"""
+log_softmax = _add_docstr(_sparse._sparse_log_softmax, r"""
 sparse.log_softmax(input, dim, *, dtype=None) -> Tensor
 
 Applies a softmax function followed by logarithm.
