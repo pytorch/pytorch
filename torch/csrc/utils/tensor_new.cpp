@@ -467,6 +467,7 @@ void check_base_legacy_new(
         c10::DispatchKey::XPU,
         c10::DispatchKey::HPU,
         c10::DispatchKey::MPS,
+        c10::DispatchKey::Meta,
     });
     TORCH_CHECK(
         expected_key_set.has(dispatch_key),
