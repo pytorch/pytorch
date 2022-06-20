@@ -9700,6 +9700,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: softplus_backward_out
+    MPS: softplus_backward_out_mps
 
 - func: softplus_backward(Tensor grad_output, Tensor self, Scalar beta, Scalar threshold) -> Tensor
   structured_delegate: softplus_backward.grad_input
