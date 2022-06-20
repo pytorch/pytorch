@@ -619,7 +619,7 @@ static inline Tensor get_item(
           index.slice().step(),
           /*disable_slice_optimization=*/true,
           self_device,
-          *self_sizes);
+          self_sizes);
     } else if (index.is_none()) {
       return self.unsqueeze(0);
     } else if (index.is_ellipsis()) {
