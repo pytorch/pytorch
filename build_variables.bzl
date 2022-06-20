@@ -452,6 +452,7 @@ libtorch_core_sources = sorted(
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
+    "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
     "torch/csrc/distributed/c10d/ProcessGroup.cpp",
@@ -959,6 +960,7 @@ def glob_libtorch_python_sources(gencode_pattern = ":generate-code[{}]"):
         "torch/csrc/autograd/generated/python_nn_functions.cpp",
         "torch/csrc/autograd/generated/python_fft_functions.cpp",
         "torch/csrc/autograd/generated/python_linalg_functions.cpp",
+        "torch/csrc/autograd/generated/python_enum_tag.cpp",
         "torch/csrc/autograd/generated/python_return_types.cpp",
         "torch/csrc/autograd/generated/python_sparse_functions.cpp",
         "torch/csrc/autograd/generated/python_special_functions.cpp",
@@ -1212,6 +1214,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/FakeQuantPerChannelAffine.cpp",
     "aten/src/ATen/native/quantized/FakeQuantPerTensorAffine.cpp",
     "aten/src/ATen/native/quantized/library.cpp",
+    "aten/src/ATen/native/quantized/TensorAdvancedIndexing.cpp",
     "aten/src/ATen/native/quantized/cpu/RuyUtils.cpp",
     "aten/src/ATen/native/quantized/cpu/XnnpackUtils.cpp",
     "aten/src/ATen/native/quantized/qlinear_unpack.cpp",
