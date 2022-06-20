@@ -182,4 +182,3 @@ def generate_tests(
         class_.__module__ = module_name
         ret[name] = class_
     return ret
-#
