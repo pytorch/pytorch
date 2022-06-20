@@ -320,6 +320,7 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_grad', vjp_fail.union({
         skip('nn.functional.fractional_max_pool2d'),  # fails on cuda, runs okay on cpu
         skip('nn.functional.fractional_max_pool3d'),  # fails on cuda, runs okay on cpu
+        xfail('linalg.eig'),  # diagonal_scatter does not support complex
     }))
     @opsToleranceOverride('TestOperators', 'test_grad', (
         tol1('nn.functional.binary_cross_entropy_with_logits',
@@ -595,7 +596,6 @@ class TestOperators(TestCase):
         xfail('eig'),  # calls aten::item
         xfail('linalg.det', ''),  # calls .item()
         xfail('linalg.eig'),  # Uses aten::allclose
-        xfail('linalg.eigh'),  # needs diag_scatter
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('linalg.slogdet'),  # calls .item()
         xfail('logdet'),  # calls .item()
@@ -606,7 +606,6 @@ class TestOperators(TestCase):
         xfail('put'),
         xfail('quantile'),  # checks q via a .item() call
         xfail('stft'),
-        xfail('symeig'),  # would benefit from diag_scatter
         xfail('view_as_complex'),
 
         # required rank 4 tensor to use channels_last format
@@ -947,7 +946,6 @@ class TestOperators(TestCase):
         xfail('put'),
         xfail('quantile'),
         xfail('renorm'),
-        xfail('symeig'),
         xfail('take'),
         xfail('tensor_split'),
         xfail('to_sparse'),
@@ -1149,15 +1147,12 @@ class TestOperators(TestCase):
         xfail('logdet', ''),
         xfail('nanmean', ''),
         xfail('nansum', ''),
-        xfail('nn.functional.embedding'),
-        xfail('nn.functional.embedding', 'functorch'),
         xfail('nn.functional.embedding_bag', ''),
         xfail('nn.functional.grid_sample', ''),
         xfail('nn.functional.hardsigmoid', ''),
         xfail('nn.functional.huber_loss', ''),
         xfail('nn.functional.instance_norm', ''),
         xfail('nn.functional.logsigmoid', ''),
-        xfail('nn.functional.pad', 'circular'),
         xfail('nn.functional.softmin', ''),
         xfail('nn.functional.softmin', 'with_dtype'),
         xfail('renorm', ''),
