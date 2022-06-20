@@ -21,6 +21,9 @@ class Partition:
     def add_node(self, node: Node):
         self.nodes.add(node)
 
+    def remove_node(self, node: Node):
+        self.nodes.remove(node)
+
     def size(self):
         return len(self.nodes)
 
@@ -89,8 +92,14 @@ class CapabilityBasedPartitioner:
         partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
 
         def assign(node, id):
-            assignment[node] = id
+            # node has been assigned before, clean up and re-assign
+            if node in assignment:
+               original_id = assignment[node]
+               partitions_by_id[original_id].remove_node(node)
+               if partitions_by_id[original_id].size() == 0:
+                   del partitions_by_id[original_id]
 
+            assignment[node] = id
             if id not in partitions_by_id:
                 partitions_by_id[id] = Partition(id=id, nodes=[node])
             else:
@@ -151,6 +160,24 @@ class CapabilityBasedPartitioner:
 
                 id = partitions_size_by_id[0][1]
                 assign(node, id)
+
+
+        # post processing to re-assign "getitem" nodes into upstream partition
+        nodes_reassignment: Dict[Node, id] = {}
+        for id, partition in partitions_by_id.items():
+            for node in partition.nodes:
+                is_tuple_output = True
+                for user in node.users:
+                    if user.op != "call_function" or user.target.__name__ != "getitem":
+                        is_tuple_output = False
+                        break
+                # node has tuple outputs, re-assign all following getitem node into node's partition
+                if is_tuple_output:
+                    for user in node.users:
+                        if assignment[user] != id:
+                            nodes_reassignment[user] = id
+        for node, id in nodes_reassignment.items():
+            assign(node, id)
 
         return list(partitions_by_id.values())
 
