@@ -438,7 +438,6 @@ meta_function_expected_failures = {
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.linalg.det: {f32, f64},  # aten::_det_lu_based_helper
     torch.linalg.eig: {f32, f64},  # aten::linalg_eig
-    torch.linalg.eigh: {f32, f64},  # Could not run 'aten::linalg_eigh' with arguments from the 'AutogradMeta' backend
     torch.linalg.eigvals: {f32, f64},
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product
     torch.linalg.lstsq: {f32, f64},  # aten::linalg_lstsq.out
