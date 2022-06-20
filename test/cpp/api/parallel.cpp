@@ -230,65 +230,65 @@ TEST_F(ParallelTest, DataParallelUsesAllAvailableCUDADevices_CUDA) {
 
 TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
   struct M : torch::nn::Cloneable<M> {
-      M() {
-        reset();
-      }
-
-      void reset() override {
-        conv = register_module("conv",
-            torch::nn::Conv2d(torch::nn::Conv2dOptions(2, 2, /*kernel_size=*/2)));
-        fc = register_module("fc", torch::nn::Linear(8, 2));
-      }
-
-      torch::Tensor forward(torch::Tensor x) {
-        x = conv->forward(x);
-        x = torch::relu(x);
-        x = x.view({-1, 8});
-        x = fc->forward(x);
-        return torch::log_softmax(x, /*dim=*/1);
-      }
-
-      torch::nn::Conv2d conv{nullptr};
-      torch::nn::Linear fc{nullptr};
-    };
-
-    // prepare modules and inputs
-    auto input = torch::ones({16, 2, 3, 3});
-    auto input_dp = torch::ones({16, 2, 3, 3});
-    auto model = std::make_shared<M>();
-    auto model_dp = std::dynamic_pointer_cast<M>(model->clone());
-
-    // run 3 training iterations
-    for (const auto i : c10::irange(3)) {
-      input += i;
-      input_dp += i;
-
-      // non-prallel training
-      torch::optim::SGD optim(
-          model->parameters(), torch::optim::SGDOptions(0.1));
-      auto output = model->forward(input);
-      auto loss = torch::mse_loss(output, torch::zeros_like(output));
-      loss.backward();
-      optim.step();
-
-      // data-parallel training
-      torch::optim::SGD optim_dp(
-          model_dp->parameters(), torch::optim::SGDOptions(0.1));
-      auto output_dp = parallel::data_parallel(model_dp, input_dp);
-      auto loss_dp = torch::mse_loss(output_dp, torch::zeros_like(output_dp));
-      loss_dp.backward();
-      optim_dp.step();
-
-      // make sure that weights are the same
-      model->to(torch::kCPU);
-      model_dp->to(torch::kCPU);
-      auto params = model->parameters();
-      auto params_dp = model_dp->parameters();
-      ASSERT_EQ(params.size(), params_dp.size());
-      for (auto it = params.begin(), it_dp = params_dp.begin();
-          it != params.end() && it_dp != params.end();
-          ++it, ++it_dp) {
-        ASSERT_TRUE(torch::allclose(*it, *it_dp));
-      }
+    M() {
+      reset();
     }
+
+    void reset() override {
+      conv = register_module(
+          "conv",
+          torch::nn::Conv2d(torch::nn::Conv2dOptions(2, 2, /*kernel_size=*/2)));
+      fc = register_module("fc", torch::nn::Linear(8, 2));
+    }
+
+    torch::Tensor forward(torch::Tensor x) {
+      x = conv->forward(x);
+      x = torch::relu(x);
+      x = x.view({-1, 8});
+      x = fc->forward(x);
+      return torch::log_softmax(x, /*dim=*/1);
+    }
+
+    torch::nn::Conv2d conv{nullptr};
+    torch::nn::Linear fc{nullptr};
+  };
+
+  // prepare modules and inputs
+  auto input = torch::ones({16, 2, 3, 3});
+  auto input_dp = torch::ones({16, 2, 3, 3});
+  auto model = std::make_shared<M>();
+  auto model_dp = std::dynamic_pointer_cast<M>(model->clone());
+
+  // run 3 training iterations
+  for (const auto i : c10::irange(3)) {
+    input += i;
+    input_dp += i;
+
+    // non-prallel training
+    torch::optim::SGD optim(model->parameters(), torch::optim::SGDOptions(0.1));
+    auto output = model->forward(input);
+    auto loss = torch::mse_loss(output, torch::zeros_like(output));
+    loss.backward();
+    optim.step();
+
+    // data-parallel training
+    torch::optim::SGD optim_dp(
+        model_dp->parameters(), torch::optim::SGDOptions(0.1));
+    auto output_dp = parallel::data_parallel(model_dp, input_dp);
+    auto loss_dp = torch::mse_loss(output_dp, torch::zeros_like(output_dp));
+    loss_dp.backward();
+    optim_dp.step();
+
+    // make sure that weights are the same
+    model->to(torch::kCPU);
+    model_dp->to(torch::kCPU);
+    auto params = model->parameters();
+    auto params_dp = model_dp->parameters();
+    ASSERT_EQ(params.size(), params_dp.size());
+    for (auto it = params.begin(), it_dp = params_dp.begin();
+         it != params.end() && it_dp != params.end();
+         ++it, ++it_dp) {
+      ASSERT_TRUE(torch::allclose(*it, *it_dp));
+    }
+  }
 }
