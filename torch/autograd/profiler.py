@@ -441,29 +441,20 @@ class record_function(ContextDecorator):
         self.run_callbacks_on_exit: bool = True
         # Stores underlying RecordFunction as a tensor. TODO: move to custom
         # class (https://github.com/pytorch/pytorch/issues/35026).
-        if torch.jit.is_scripting():
-            # Torchscript doesn't read the type annotation well
-            # So fallback to creating an extra Tensor object
-            self.handle: Optional[torch.Tensor] = torch.zeros(())
-        else:
-            self.handle = None
+        # Workaround for torchscript typing limitation
+        _handle: Optional[torch.Tensor] = None
+        self.handle = _handle
 
     def __enter__(self):
-        if torch.jit.is_scripting():
-            # Slow code when scripting
-            self.handle = torch.ops.profiler._record_function_enter(self.name, self.args)
-        else:
-            self.handle = torch._C._record_function_enter_fast(self.name, self.args)
+        self.handle = torch._C._record_function_enter_fast(self.name, self.args)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if self.run_callbacks_on_exit:
-            assert self.handle is not None
-            if torch.jit.is_scripting():
-                # Slow code when scripting
-                torch.ops.profiler._record_function_exit(self.handle)
-            else:
-                torch._C._record_function_exit_fast(self.handle)
+            # Workaround for torchscript typing limitation
+            _handle = self.handle
+            assert _handle is not None
+            torch._C._record_function_exit_fast(_handle)
 
     def _call_end_callbacks_on_future(self, fut: Future[Any]) -> Future[Any]:
         """
@@ -490,7 +481,10 @@ class record_function(ContextDecorator):
         # We are scheduling to run this RecordFunction's end callbacks when the
         # passed in future completes, so don't run end callbacks on exit.
         self.run_callbacks_on_exit = False
-        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(self.handle, fut)
+        # Workaround for torchscript typing limitation
+        _handle = self.handle
+        assert _handle is not None
+        profiled_future = torch.ops.profiler._call_end_callbacks_on_jit_fut(_handle, fut)
         return profiled_future
 
 

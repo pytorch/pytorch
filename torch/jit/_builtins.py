@@ -105,6 +105,8 @@ _builtin_ops = [
     (torch._VF.nuclear_norm, "aten::nuclear_norm"),
     (torch._VF.frobenius_norm, "aten::frobenius_norm"),
     (torch._VF.tensordot, "aten::tensordot"),  # type: ignore[attr-defined]
+    (torch._C._record_function_enter_fast, "profiler::_record_function_enter"),
+    (torch._C._record_function_exit_fast, "profiler::_record_function_exit"),
 ]
 
 # ops in torch.functional are bound to torch
