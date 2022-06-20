@@ -76,6 +76,13 @@ bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
 IntArrayRef NestedTensorImpl::sizes_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
 }
+c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
+
+c10::SymIntArrayRef NestedTensorImpl::sym_sizes() const {
+  return sym_sizes_custom();
+}
 
 IntArrayRef NestedTensorImpl::strides_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");

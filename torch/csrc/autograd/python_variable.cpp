@@ -658,6 +658,10 @@ static PyObject* THPVariable_make_wrapper_subclass(
       "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
       "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
       "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
+      "_make_wrapper_subclass(PyObject* cls, SymIntArrayRef size, SymIntArrayRef strides, "
+      "int64_t? storage_offset=None, MemoryFormat? memory_format=None, ScalarType dtype=None, "
+      "Layout layout=torch.strided, Device device=None, bool pin_memory=False, bool requires_grad=False, "
+      "c10::string_view? dispatch_sizes_strides_policy=None, bool dispatch_device=False)",
   });
   ParsedArgs<12> parsed_args{};
   auto r = parser.parse(args, kwargs, parsed_args);
@@ -697,29 +701,64 @@ static PyObject* THPVariable_make_wrapper_subclass(
   // data
   // TODO: for_blob produces non-resizable tensors, we might want this to be
   // resizable (have to define a custom allocator in that case)
-  auto data =
-      at::for_blob(nullptr, r.intlist(1))
-          .strides(r.intlistOptional(2))
-          .storage_offset(r.toInt64Optional(3))
-          .context(nullptr, [](void* ctx) {})
-          .target_device(options.device()) // TODO: this shouldn't be necessary
-                                           // if it came from options
-          .options(options)
-          .make_tensor();
-  data.set_requires_grad(r.toBool(9));
+  Tensor tensor;
+  if (r.idx == 0) {
+    tensor = at::for_blob(nullptr, r.intlist(1))
+                 .strides(r.intlistOptional(2))
+                 .storage_offset(r.toInt64Optional(3))
+                 .context(nullptr, [](void* ctx) {})
+                 .target_device(
+                     options.device()) // TODO: this shouldn't be necessary if
+                                       // it came from options
+                 .options(options)
+                 .make_tensor();
 
-  const auto sizes_strides_policy = r.stringViewOptional(10);
-  if (sizes_strides_policy.has_value()) {
-    data.unsafeGetTensorImpl()->set_sizes_strides_policy(
-        parseSizesStridesPolicyArgument(*sizes_strides_policy));
+    const auto sizes_strides_policy = r.stringViewOptional(10);
+    if (sizes_strides_policy.has_value()) {
+      tensor.unsafeGetTensorImpl()->set_sizes_strides_policy(
+          parseSizesStridesPolicyArgument(*sizes_strides_policy));
+    }
+  } else {
+    AutoDispatchBelowADInplaceOrView guard{}; // TODO: Remove.
+    tracer::impl::NoTracerDispatchMode tracer_guard{};
+
+    // We shouldn't need storage
+    Storage storage{Storage::use_byte_size_t{}, 0, at::DataPtr{}};
+
+    tensor = at::detail::make_tensor<TensorImpl>(
+        std::move(storage), options.computeDispatchKey(), options.dtype());
+
+    auto sym_sizes = r.symintlist(1);
+    auto sym_strides = r.symintlist(2);
+
+    TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+
+    // TODO: this should probably be sym_sizes, sym_strides AND offset
+    tensor_impl->set_sym_sizes_and_strides(sym_sizes, sym_strides);
+
+    // TODO: this may need to be symbolic as well
+    auto storage_offset = r.toInt64Optional(3);
+    if (storage_offset) {
+      tensor_impl->set_storage_offset(*storage_offset);
+    }
+
+    const auto sizes_strides_policy = r.stringViewOptional(10);
+    if (sizes_strides_policy.has_value()) {
+      TORCH_CHECK(
+          false,
+          "Setting sizes_strides_policy isn't suppored for this overload")
+    }
   }
+
+  tensor.set_requires_grad(r.toBool(9));
+
   if (r.toBool(11)) {
-    data.unsafeGetTensorImpl()->set_custom_device(true);
+    tensor.unsafeGetTensorImpl()->set_custom_device(true);
   }
 
   return THPVariable_NewWithVar(
       (PyTypeObject*)cls,
-      std::move(data),
+      std::move(tensor),
       c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
   END_HANDLE_TH_ERRORS
 }
@@ -1166,6 +1205,7 @@ PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "shape");
   }
+  // return THPSize_NewFromSymSizes(THPVariable_Unpack(self));
   return THPSize_New(THPVariable_Unpack(self));
   END_HANDLE_TH_ERRORS
 }
