@@ -5,7 +5,6 @@
 #ifdef USE_KINETO
 #include <libkineto.h>
 #endif
-#include <ActivityType.h>
 
 namespace torch {
 namespace profiler {
