@@ -628,4 +628,5 @@ __all__ = [
     "maybe_get_next_module",
     "create_node_from_old_node_preserve_meta",
     "get_all_args_as_positional_args",
+    "NodeInfo",
 ]
