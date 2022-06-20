@@ -98,7 +98,7 @@ def main() -> None:
         cwd=f"{args.repo_name}",
     ).stdout.decode("utf-8")
     with open(f".github/ci_commit_pins/{args.repo_name}.txt", "w") as f:
-        f.write(hash.strip())
+        f.write(hash)
     git_diff = subprocess.run(
         f"git diff --exit-code .github/ci_commit_pins/{args.repo_name}.txt".split()
     )
