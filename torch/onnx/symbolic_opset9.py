@@ -1063,6 +1063,7 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     self_rank = symbolic_helper._get_tensor_rank(self)
+    original_self_rank = self_rank
     if self_rank is not None:
         if self_rank > 2:
             # make weight unidirectional broadcastable
@@ -1081,7 +1082,11 @@ def prelu(g, self, weight):
         assert (
             self_rank >= weight_rank
         ), f"rank(x) should be >= rank(slope) but got {self_rank} < {weight_rank}"
-    return g.op("PRelu", self, weight)
+    
+    ret = g.op("PRelu", self, weight)
+    if original_self_rank == 0:
+         ret = g.op("Squeeze", ret)
+    return ret
 
 
 def silu(g, input):
