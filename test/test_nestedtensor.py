@@ -637,6 +637,7 @@ class TestNestedTensorAutograd(TestCase):
         padded_tensor = torch.randn(2, 2, 2, 4, dtype=torch.float64)
         padded_tensor[0, 1, :] = 0
         padded_tensor.requires_grad_()
+
         def grad_test_func(tensor, nested_size):
             nt = torch._nested_from_padded(tensor, nested_size, fuse_transform_0213=True)
             # This implictily test to_padded_tensor grads
