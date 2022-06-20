@@ -1609,6 +1609,14 @@ Applies element-wise the function
 :math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
 learnable parameter.
 
+.. note::
+    `weight` is expected to be a scalar or 1-D tensor. If `weight` is 1-D,
+    it must have the same size as the size of `input`'s channel dim, usually the
+    2nd dim of input (or when input has dims < 2 the numbers of channels = 1).
+    In the 1-D case, note that when `input` has dim > 2, `weight` can be expanded
+    to the shape of `input` in a way that is not possible using normal
+    :ref:`broadcasting semantics<broadcasting-semantics>`.
+
 See :class:`~torch.nn.PReLU` for more details.
 """)
 
