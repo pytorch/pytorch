@@ -29,5 +29,11 @@ TORCH_API flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
     const ExtraFilesMap& jit_sources = ExtraFilesMap(),
     const std::vector<IValue>& jit_constants = {});
 
+// This function will make the capabilities to load and safe
+// Module as a flatbuffer file available for use by _load_for_mobile
+// and friends. This is NOT needed if using the other functions
+// in this file directly.
+TORCH_API bool register_flatbuffer_serializer();
+
 } // namespace jit
 } // namespace torch

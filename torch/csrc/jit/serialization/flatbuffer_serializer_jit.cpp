@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 
+#include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -72,6 +73,26 @@ flatbuffers::DetachedBuffer save_jit_module_to_bytes(
   mobile::Module mobilem = jitModuleToMobile(module, options);
   return save_mobile_module_to_bytes(mobilem, extra_files, jitfiles, constants);
 }
+
+void save_jit_module_to_write_func(
+    const Module& module,
+    const ExtraFilesMap& extra_files,
+    bool save_mobile_debug_info,
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  (void)save_mobile_debug_info;
+  auto buffer = save_jit_module_to_bytes(module, extra_files);
+  writer_func(reinterpret_cast<void*>(buffer.data()), buffer.size());
+}
+
+bool register_flatbuffer_all() {
+  (void)register_flatbuffer_loader();
+  (void)register_flatbuffer_serializer();
+  _save_jit_module_to = save_jit_module_to_write_func;
+  _load_jit_module_from_flatbuffer_bytes = parse_and_initialize_jit_module;
+  return true;
+}
+
+const bool kFlatbufferSerializerJitInitialized = register_flatbuffer_all();
 
 } // namespace jit
 } // namespace torch

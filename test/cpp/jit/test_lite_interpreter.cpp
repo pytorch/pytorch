@@ -635,7 +635,7 @@ void backportAllVersionCheck(
     std::vector<IValue>& expect_result_list,
     const uint64_t expect_from_version) {
   auto from_version = _get_model_bytecode_version(test_model_file_stream);
-  AT_ASSERT(from_version == expect_from_version);
+  EXPECT_EQ(from_version, expect_from_version);
   AT_ASSERT(from_version > 0);
 
   // Backport script_module_v5.ptl to an older version
@@ -717,15 +717,11 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
   torch::jit::Module module_freeze = freeze(module);
 
   std::stringstream input_model_stream;
-#if defined(ENABLE_FLATBUFFER)
   module_freeze._save_for_mobile(
       input_model_stream,
       /*extra_files=*/{},
       /*save_mobile_debug_info=*/false,
       /*use_flatbuffer=*/true);
-#else
-  module_freeze._save_for_mobile(input_model_stream);
-#endif
   std::vector<IValue> input_data =
       std::vector<IValue>({torch::ones({1, 1, 28, 28})});
   std::vector<IValue> expect_result_list;
@@ -748,7 +744,7 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       input_model_stream,
       input_data,
       expect_result_list,
-      caffe2::serialize::kProducedBytecodeVersion);
+      9); // flatbuffer starts at 9
 }
 #endif // !defined(FB_XPLAT_BUILD)
 
