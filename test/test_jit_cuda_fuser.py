@@ -2228,7 +2228,7 @@ class TestCudaFuser(JitTestCase):
             self.assertEqual(o.stride(), jit_o.stride())
         except Exception as e:
             warnings.warn(
-                "permutation propagatoin is broken, proper support should come after nvfuser permutation scheduler update")
+                "permutation propagation is broken, proper support should come after nvfuser permutation scheduler update")
         self.assertGraphContains(t_jit.graph_for(x, bias), FUSION_GUARD)
 
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
@@ -4844,7 +4844,7 @@ class TestCudaFuser(JitTestCase):
         self._run_helper(t2_jit, t2, x0, x1, x2, check_stride=True)
 
 
-class TestPassManagerCudaFuser(JitTestCase):
+class TestEnableDisableCudaFuser(JitTestCase):
     def setUp(self):
         super().setUp()
         if RUN_NVFUSER:
@@ -4912,6 +4912,14 @@ class TestPassManagerCudaFuser(JitTestCase):
         with self.assertRaises(RuntimeError):
             torch._C._jit_set_nvfuser_enabled(True)
             torch._C._jit_set_nvfuser_enabled(False)
+
+    def test_can_be_enabled_nvfuser(self):
+        if TEST_WITH_ROCM:
+            expected = False
+        else:
+            expected = RUN_CUDA
+
+        self.assertEqual(expected, torch._C._jit_nvfuser_can_be_enabled())
 
 # See TestNNCOpInfoParent
 class TestCudaFuserOpInfoParent(JitCommonTestCase):
