@@ -811,6 +811,7 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
 
 class TestFxModelReportClass(QuantizationTestCase):
 
+    @skipIfNoFBGEMM
     def test_constructor(self):
         """
         Tests the constructor of the ModelReport class.
@@ -819,7 +820,8 @@ class TestFxModelReportClass(QuantizationTestCase):
         - The desired reports
         - Ensures that the observers of interest are properly initialized
         """
-
+        # set the backend for this test
+        torch.backends.quantized.engine = "fbgemm"
         backend = torch.backends.quantized.engine
 
         # make an example set of detectors
