@@ -4052,15 +4052,28 @@ Tensor linalg_det_backward(
         LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
     return at::linalg_lu_solve(LU_, pivots, d, /*left=*/true, /*adjoint=*/true);
   } else {
-    // TODO In this case, the trick above just does not cut it
+    // TODO When the user wants higher derivatives, the trick above just does not cut it
     // The proper way of doing this is doing `auto mask = det == 0.;` and then
     // if any determinant is zero, use an SVD decomposition to compute the
     // derivative in those inputs (not all inputs). The derivative may be then
     // computed explicitly by noting that the gradient of the derivative of the
-    // determinant is given by adj(A^H)* grad where adj(A) is the adjugate of A.
+    // determinant is given in terms of the adjugate of a matrix.
     // Then, the adjugate of a singular matrix may be computed as per
     // https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
-    // adj(A) = conj(det(V)) * det(U) * (S[:-1].prod()) * U[-1] @ Vh[-1]
+    // The code may be implemented as follows:
+    //
+    // Tensor U, S, Vh;
+    // std::tie(U, S, Vh) = at::linalg_svd(A);
+    // auto alpha = (at::linalg_det(U) * at::linalg_det(Vh)).conj() * grad;
+    // auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
+    // return (U * D.unsqueeze(-2)).matmul(Vh);
+    //
+    // The issue with this code is that the derivative given by autograd of
+    // prod_safe_zeros_backward is not the second derivative of the product.
+    // It is not clear to me how to implement the second derivative of the product
+    // efficently.
+    // Note that this is also currently a problem when we compute higher
+    // derivatives of `x.prod()` and `x` has more than one zero.
     return at::linalg_solve(A.mH(), d);
   }
 }
