@@ -628,8 +628,6 @@ JVP_EXEMPTIONS = {
     'nn.functional.rrelu',  # not actually problem, randomness testing artifact
     'normal',  # not actually problem, randomness testing artifact
     'bernoulli',  # not actually problem, randomness testing artifact
-    'nn.functional.embedding',  # max_norm causes testing to be weird
-    # 'multinomial',
 }
 
 
@@ -746,8 +744,12 @@ class Operator:
             'nn.functional.batch_norm',  # testing problem
             'normal',  # not actually problem, randomness testing artifact
             'bernoulli',  # not actually problem, randomness testing artifact
-            'dropout2d',  # not actually problem, randomness testing artifact
-            'dropout',  # not actually problem, randomness testing artifact
+            'nn.functional.dropout2d',  # not actually problem, randomness testing artifact
+            'nn.functional.dropout',  # not actually problem, randomness testing artifact
+            # Not a problem.
+            # It's just that the max_norm testing mutates inputs...
+            # (we have our own functorch variant of the OpInfo without max_norm)
+            'nn.functional.embedding',
         }
         if self.name in VMAPJVP_EXEMPTIONS:
             return Support.YES

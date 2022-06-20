@@ -181,6 +181,8 @@ additional_op_db.append(
         op=lambda weight, idx, **kwargs: torch.nn.functional.embedding(idx, weight, **kwargs),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_embedding,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
         supports_out=False,
     ))
 
