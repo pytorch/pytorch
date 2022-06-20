@@ -20179,10 +20179,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        skips=(
-            # SyntaxError: cannot assign to False
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.log_softmax",
@@ -20348,9 +20345,8 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.layer_norm",
         torch_opinfo_name="nn.functional.layer_norm",
+        supports_nvfuser=False,
         skips=(
-            # SyntaxError: cannot assign to None
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             # Reference result was farther (3.5762786809723224e-07) from the precise computation
             # than the torch result was (2.5068410824946596e-07)!
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
@@ -20718,10 +20714,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
-        skips=(
-            # ValueError: Received type <class 'NoneType'> that is neither a tensor or a number!
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     #
     # Data Conversion & Data Movement Opinfos
@@ -20738,40 +20731,26 @@ python_ref_db = [
         "_refs.atleast_1d",
         torch_opinfo_name="atleast_1d",
         validate_view_consistency=False,
-        skips=(
-            # ValueError: only one element tensors can be converted to Python scalars
-            # There's a problem that the input tensor gets decomposed into a list of tensors
-            # It only happens with make_fx tracer of the reference op
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False
     ),
     PythonRefInfo(
         "_refs.atleast_2d",
         torch_opinfo_name="atleast_2d",
         validate_view_consistency=False,
-        skips=(
-            # ValueError: only one element tensors can be converted to Python scalars
-            # There's a problem that the input tensor gets decomposed into a list of tensors
-            # It only happens with make_fx tracer of the reference op
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False
     ),
     PythonRefInfo(
         "_refs.atleast_3d",
         torch_opinfo_name="atleast_3d",
         validate_view_consistency=False,
-        skips=(
-            # ValueError: only one element tensors can be converted to Python scalars
-            # There's a problem that the input tensor gets decomposed into a list of tensors
-            # It only happens with make_fx tracer of the reference op
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False
     ),
     PythonRefInfo(
         "_refs.as_strided",
         torch_opinfo_name="as_strided",
         # FIXME: doesn't support chalf
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_nvfuser=False,
         skips=(
             # TODO: fix and/or update to xfails
             DecorateInfo(unittest.skip("Errors when storage_offset is included"),
@@ -20780,25 +20759,17 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
-            # TypeError: _traced() got an unexpected keyword argument 'storage_offset'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",
         torch_opinfo_name="broadcast_shapes",
-        skips=(
-            # RuntimeError: Tracing expected 0 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_tensors",
         torch_opinfo_name="broadcast_tensors",
-        skips=(
-            # RuntimeError: Tracing expected 0 arguments but got 4 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_to",
@@ -20808,10 +20779,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.cat",
         torch_opinfo_name="cat",
-        skips=(
-            # SyntaxError: cannot assign to literal
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.chunk",
@@ -20899,28 +20867,18 @@ python_ref_db = [
         "_refs.roll",
         torch_opinfo_name="roll",
         validate_view_consistency=False,
-        skips=(
-            # ValueError: too many values to unpack (expected 5)
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.rot90",
         torch_opinfo_name="rot90",
         validate_view_consistency=False,
-        skips=(
-            # SyntaxError: cannot assign to literal
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.stack",
         torch_opinfo_name="stack",
-        skips=(
-            # TODO: Invalid generated code from tracing
-            # SyntaxError: cannot assign to literal
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
         validate_view_consistency=False,
     ),
     PythonRefInfo(
@@ -20991,18 +20949,12 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
-        skips=(
-            # SyntaxError: cannot assign to False
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
-        skips=(
-            # SyntaxError: cannot assign to False
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.any",
@@ -21015,37 +20967,34 @@ python_ref_db = [
         supports_out=True,
         supports_nvfuser=False,
         skips=(
-            # SyntaxError: cannot assign to False
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # class <complex>
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.complex64, torch.complex128)),
         )
     ),
     ReductionPythonRefInfo(
         "_refs.std",
         torch_opinfo_name="std",
         supports_out=True,
-        skips=(
-            # SyntaxError: cannot assign to None
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     # std_mean and var_mean are not ReductionInfos
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
         validate_view_consistency=False,
+        supports_nvfuser=False,
         skips=(
-            # SyntaxError: cannot assign to None
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # class <complex>
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.complex64, torch.complex128)),
         ),
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True,
-        skips=(
-            # SyntaxError: cannot assign to False
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.prod",
@@ -21057,10 +21006,7 @@ python_ref_db = [
         "_refs.var",
         torch_opinfo_name="var",
         supports_out=True,
-        skips=(
-            # SyntaxError: cannot assign to None
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.var_mean",
@@ -21115,8 +21061,8 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # TypeError: RuntimeError: Tracing expected 3 arguments but got 4 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # FIXME: shouldn't check empty results
+            DecorateInfo(unittest.skip("Can't check result for empty"), 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(

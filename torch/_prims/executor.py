@@ -8,8 +8,6 @@ from torch._prims.utils import getnvFuserDtype, Number
 from torch._prims.context import TorchRefsMode
 import torch.overrides
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
-import functools
-import inspect
 
 if torch.cuda.is_available():
     from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
@@ -23,7 +21,7 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
     """
 
     if executor == "aten":
-        return gm.forward(*args, **kwargs)
+        return gm.forward(*args)
     elif executor == "nvfuser":
         if not torch.cuda.is_available():
             raise RuntimeError(
@@ -47,7 +45,7 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                     args = tuple(map(_to_nvfuser_constant, args))
                     target = target.impl_nvfuser
                     args = (fd,) + args
-                    return target(*args, **kwargs)
+                    return target(*args)
 
             def to_nv(arg):
                 if isinstance(arg, torch.Tensor):
@@ -67,7 +65,8 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
             flat_out, unflatten_spec = tree_flatten(out)
             for o in flat_out:
                 fd.add_output(o)
-
+            assert len(args) == 1
+            args = args[0]  # we are passing a packed list of args
             return tree_unflatten(
                 fusion.execute(
                     tuple(arg for arg in args if isinstance(arg, torch.Tensor))
@@ -113,29 +112,17 @@ def make_traced(fn: Callable):
         fn_kwargs = {}
         for k, v in kwargs.items():
             fn_kwargs[k] = v
-        # populate default kwargs
-        # fx is going to unwrap function for analysis
-        # this matters because refs wrap function in out wrapper that adds out arg
-        # that will be stripped by fx. Currently functions that have `out` args supplied
-        # cannot be run in executor. Fixing this is beyond the scope of this PR
-        # adding arguments via wrappers is evil, cc @mruberry
-        fn_unwrapped = inspect.unwrap(fn)
-        sig = inspect.signature(fn_unwrapped)
-        bound_arguments = sig.bind(*args, **kwargs)
-        bound_arguments.apply_defaults()
-        args, fn_kwargs = bound_arguments.args, bound_arguments.kwargs
         flat_fn_kwargs = list(fn_kwargs.values())
         all_args = list(args) + flat_fn_kwargs
 
-        @functools.wraps(fn)
-        def wrapped(*args):
+        def wrapped(args):
             fn_args = args[:nargs]
             kwargs_keys = list(fn_kwargs.keys())
             kwargs = dict(zip(kwargs_keys, args[nargs:]))
             return fn(*fn_args, **kwargs)
 
         with TorchRefsMode.push():
-            gm = make_fx(wrapped)(*all_args)
-        return execute(gm, *all_args, executor=executor)
+            gm = make_fx(wrapped)(all_args)
+        return execute(gm, all_args, executor=executor)
 
     return _traced
