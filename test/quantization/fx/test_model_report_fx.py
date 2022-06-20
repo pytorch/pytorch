@@ -844,6 +844,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         for value in model_report.get_observers_of_interest().values():
             self.assertEqual(len(value), 0)
 
+    @skipIfNoFBGEMM
     def test_prepare_model_callibration(self):
         """
         Tests model_report.prepare_detailed_calibration that prepares the model for callibration
@@ -883,6 +884,7 @@ class TestFxModelReportClass(QuantizationTestCase):
 
         # create model report object
         # make an example set of detectors
+        torch.backends.quantized.engine = "fbgemm"
         backend = torch.backends.quantized.engine
         test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
         # initialize with an empty detector
