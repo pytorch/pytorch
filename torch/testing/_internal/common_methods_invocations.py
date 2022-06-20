@@ -771,6 +771,9 @@ class OpInfo(object):
     # only run tracing tests
     supports_scripting: bool = True
 
+    # if the operator can be traced
+    supports_tracing: bool = True
+
     # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
 
     # whether the op supports sparse csr inputs
@@ -2407,6 +2410,29 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
         yield SampleInput(
             lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input
         )
+
+def sample_inputs_equal(op, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = (
+        ((), ()),
+        ((S,), ()),
+        ((), (S,)),
+        ((S, 1), (S,)),
+        ((M, S), ()),
+        ((S, S), (S, S))
+    )
+
+    for shape_lhs, shape_rhs in shapes:
+        lhs = make_arg(shape_lhs)
+        rhs = make_arg(shape_rhs)
+        broadcasts_input = shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs)
+
+        yield SampleInput(lhs, args=(rhs,), broadcasts_input=broadcasts_input)
+        if shape_lhs == shape_rhs:
+            yield SampleInput(lhs, args=(lhs.clone().detach_(),))
+
 
 
 def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
@@ -11533,6 +11559,14 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+    OpInfo('equal',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           ref=lambda input, other: (input == other).all(),
+           sample_inputs_func=sample_inputs_equal,
+           supports_autograd=False,
+           supports_tracing=False,
+           skips=(
+           )),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
