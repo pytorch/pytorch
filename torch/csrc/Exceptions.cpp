@@ -9,6 +9,8 @@
 
 #include <torch/csrc/THP.h>
 
+#include <c10/util/StringUtil.h>
+
 PyObject *THPException_FatalError, *THPException_LinAlgError;
 
 #define ASSERT_TRUE(cond) \
@@ -53,87 +55,82 @@ could not be completed because the input matrix is singular.",
 
 namespace torch {
 
-void replaceAll(
-    std::string& str,
-    const std::string& old_str,
-    const std::string& new_str) {
-  std::string::size_type pos = 0u;
-  while ((pos = str.find(old_str, pos)) != std::string::npos) {
-    str.replace(pos, old_str.length(), new_str);
-  }
-}
-
 std::string processErrorMsg(std::string str) {
   // Translate Aten types to their respective pytorch ones
-  std::vector<std::pair<std::string, std::string>> changes{
-      {"Variable[SparseCUDAByteType]", "torch.cuda.sparse.ByteTensor"},
-      {"Variable[SparseCUDACharType]", "torch.cuda.sparse.CharTensor"},
-      {"Variable[SparseCUDADoubleType]", "torch.cuda.sparse.DoubleTensor"},
-      {"Variable[SparseCUDAFloatType]", "torch.cuda.sparse.FloatTensor"},
-      {"Variable[SparseCUDAIntType]", "torch.cuda.sparse.IntTensor"},
-      {"Variable[SparseCUDALongType]", "torch.cuda.sparse.LongTensor"},
-      {"Variable[SparseCUDAShortType]", "torch.cuda.sparse.ShortTensor"},
-      {"Variable[SparseCUDAHalfType]", "torch.cuda.sparse.HalfTensor"},
-      {"Variable[SparseCPUByteType]", "torch.sparse.ByteTensor"},
-      {"Variable[SparseCPUCharType]", "torch.sparse.CharTensor"},
-      {"Variable[SparseCPUDoubleType]", "torch.sparse.DoubleTensor"},
-      {"Variable[SparseCPUFloatType]", "torch.sparse.FloatTensor"},
-      {"Variable[SparseCPUIntType]", "torch.sparse.IntTensor"},
-      {"Variable[SparseCPULongType]", "torch.sparse.LongTensor"},
-      {"Variable[SparseCPUShortType]", "torch.sparse.ShortTensor"},
-      {"Variable[SparseCPUHalfType]", "torch.sparse.HalfTensor"},
-      {"Variable[CUDAByteType]", "torch.cuda.ByteTensor"},
-      {"Variable[CUDACharType]", "torch.cuda.CharTensor"},
-      {"Variable[CUDADoubleType]", "torch.cuda.DoubleTensor"},
-      {"Variable[CUDAFloatType]", "torch.cuda.FloatTensor"},
-      {"Variable[CUDAIntType]", "torch.cuda.IntTensor"},
-      {"Variable[CUDALongType]", "torch.cuda.LongTensor"},
-      {"Variable[CUDAShortType]", "torch.cuda.ShortTensor"},
-      {"Variable[CUDAHalfType]", "torch.cuda.HalfTensor"},
-      {"Variable[CPUByteType]", "torch.ByteTensor"},
-      {"Variable[CPUCharType]", "torch.CharTensor"},
-      {"Variable[CPUDoubleType]", "torch.DoubleTensor"},
-      {"Variable[CPUFloatType]", "torch.FloatTensor"},
-      {"Variable[CPUIntType]", "torch.IntTensor"},
-      {"Variable[CPULongType]", "torch.LongTensor"},
-      {"Variable[CPUShortType]", "torch.ShortTensor"},
-      {"Variable[CPUHalfType]", "torch.HalfTensor"},
-      {"SparseCUDAByteType", "torch.cuda.sparse.ByteTensor"},
-      {"SparseCUDACharType", "torch.cuda.sparse.CharTensor"},
-      {"SparseCUDADoubleType", "torch.cuda.sparse.DoubleTensor"},
-      {"SparseCUDAFloatType", "torch.cuda.sparse.FloatTensor"},
-      {"SparseCUDAIntType", "torch.cuda.sparse.IntTensor"},
-      {"SparseCUDALongType", "torch.cuda.sparse.LongTensor"},
-      {"SparseCUDAShortType", "torch.cuda.sparse.ShortTensor"},
-      {"SparseCUDAHalfType", "torch.cuda.sparse.HalfTensor"},
-      {"SparseCPUByteType", "torch.sparse.ByteTensor"},
-      {"SparseCPUCharType", "torch.sparse.CharTensor"},
-      {"SparseCPUDoubleType", "torch.sparse.DoubleTensor"},
-      {"SparseCPUFloatType", "torch.sparse.FloatTensor"},
-      {"SparseCPUIntType", "torch.sparse.IntTensor"},
-      {"SparseCPULongType", "torch.sparse.LongTensor"},
-      {"SparseCPUShortType", "torch.sparse.ShortTensor"},
-      {"SparseCPUHalfType", "torch.sparse.HalfTensor"},
-      {"CUDAByteType", "torch.cuda.ByteTensor"},
-      {"CUDACharType", "torch.cuda.CharTensor"},
-      {"CUDADoubleType", "torch.cuda.DoubleTensor"},
-      {"CUDAFloatType", "torch.cuda.FloatTensor"},
-      {"CUDAIntType", "torch.cuda.IntTensor"},
-      {"CUDALongType", "torch.cuda.LongTensor"},
-      {"CUDAShortType", "torch.cuda.ShortTensor"},
-      {"CUDAHalfType", "torch.cuda.HalfTensor"},
-      {"CPUByteType", "torch.ByteTensor"},
-      {"CPUCharType", "torch.CharTensor"},
-      {"CPUDoubleType", "torch.DoubleTensor"},
-      {"CPUFloatType", "torch.FloatTensor"},
-      {"CPUIntType", "torch.IntTensor"},
-      {"CPULongType", "torch.LongTensor"},
-      {"CPUShortType", "torch.ShortTensor"},
-      {"CPUHalfType", "torch.HalfTensor"},
-  };
+  constexpr std::array<std::pair<c10::string_view, c10::string_view>, 64>
+      changes{{
+          {"Variable[SparseCUDAByteType]", "torch.cuda.sparse.ByteTensor"},
+          {"Variable[SparseCUDACharType]", "torch.cuda.sparse.CharTensor"},
+          {"Variable[SparseCUDADoubleType]", "torch.cuda.sparse.DoubleTensor"},
+          {"Variable[SparseCUDAFloatType]", "torch.cuda.sparse.FloatTensor"},
+          {"Variable[SparseCUDAIntType]", "torch.cuda.sparse.IntTensor"},
+          {"Variable[SparseCUDALongType]", "torch.cuda.sparse.LongTensor"},
+          {"Variable[SparseCUDAShortType]", "torch.cuda.sparse.ShortTensor"},
+          {"Variable[SparseCUDAHalfType]", "torch.cuda.sparse.HalfTensor"},
+          {"Variable[SparseCPUByteType]", "torch.sparse.ByteTensor"},
+          {"Variable[SparseCPUCharType]", "torch.sparse.CharTensor"},
+          {"Variable[SparseCPUDoubleType]", "torch.sparse.DoubleTensor"},
+          {"Variable[SparseCPUFloatType]", "torch.sparse.FloatTensor"},
+          {"Variable[SparseCPUIntType]", "torch.sparse.IntTensor"},
+          {"Variable[SparseCPULongType]", "torch.sparse.LongTensor"},
+          {"Variable[SparseCPUShortType]", "torch.sparse.ShortTensor"},
+          {"Variable[SparseCPUHalfType]", "torch.sparse.HalfTensor"},
+          {"Variable[CUDAByteType]", "torch.cuda.ByteTensor"},
+          {"Variable[CUDACharType]", "torch.cuda.CharTensor"},
+          {"Variable[CUDADoubleType]", "torch.cuda.DoubleTensor"},
+          {"Variable[CUDAFloatType]", "torch.cuda.FloatTensor"},
+          {"Variable[CUDAIntType]", "torch.cuda.IntTensor"},
+          {"Variable[CUDALongType]", "torch.cuda.LongTensor"},
+          {"Variable[CUDAShortType]", "torch.cuda.ShortTensor"},
+          {"Variable[CUDAHalfType]", "torch.cuda.HalfTensor"},
+          {"Variable[CPUByteType]", "torch.ByteTensor"},
+          {"Variable[CPUCharType]", "torch.CharTensor"},
+          {"Variable[CPUDoubleType]", "torch.DoubleTensor"},
+          {"Variable[CPUFloatType]", "torch.FloatTensor"},
+          {"Variable[CPUIntType]", "torch.IntTensor"},
+          {"Variable[CPULongType]", "torch.LongTensor"},
+          {"Variable[CPUShortType]", "torch.ShortTensor"},
+          {"Variable[CPUHalfType]", "torch.HalfTensor"},
+          {"SparseCUDAByteType", "torch.cuda.sparse.ByteTensor"},
+          {"SparseCUDACharType", "torch.cuda.sparse.CharTensor"},
+          {"SparseCUDADoubleType", "torch.cuda.sparse.DoubleTensor"},
+          {"SparseCUDAFloatType", "torch.cuda.sparse.FloatTensor"},
+          {"SparseCUDAIntType", "torch.cuda.sparse.IntTensor"},
+          {"SparseCUDALongType", "torch.cuda.sparse.LongTensor"},
+          {"SparseCUDAShortType", "torch.cuda.sparse.ShortTensor"},
+          {"SparseCUDAHalfType", "torch.cuda.sparse.HalfTensor"},
+          {"SparseCPUByteType", "torch.sparse.ByteTensor"},
+          {"SparseCPUCharType", "torch.sparse.CharTensor"},
+          {"SparseCPUDoubleType", "torch.sparse.DoubleTensor"},
+          {"SparseCPUFloatType", "torch.sparse.FloatTensor"},
+          {"SparseCPUIntType", "torch.sparse.IntTensor"},
+          {"SparseCPULongType", "torch.sparse.LongTensor"},
+          {"SparseCPUShortType", "torch.sparse.ShortTensor"},
+          {"SparseCPUHalfType", "torch.sparse.HalfTensor"},
+          {"CUDAByteType", "torch.cuda.ByteTensor"},
+          {"CUDACharType", "torch.cuda.CharTensor"},
+          {"CUDADoubleType", "torch.cuda.DoubleTensor"},
+          {"CUDAFloatType", "torch.cuda.FloatTensor"},
+          {"CUDAIntType", "torch.cuda.IntTensor"},
+          {"CUDALongType", "torch.cuda.LongTensor"},
+          {"CUDAShortType", "torch.cuda.ShortTensor"},
+          {"CUDAHalfType", "torch.cuda.HalfTensor"},
+          {"CPUByteType", "torch.ByteTensor"},
+          {"CPUCharType", "torch.CharTensor"},
+          {"CPUDoubleType", "torch.DoubleTensor"},
+          {"CPUFloatType", "torch.FloatTensor"},
+          {"CPUIntType", "torch.IntTensor"},
+          {"CPULongType", "torch.LongTensor"},
+          {"CPUShortType", "torch.ShortTensor"},
+          {"CPUHalfType", "torch.HalfTensor"},
+      }};
 
+  // Avoid doing any work if no types need translated
+  if (str.find("Type") == str.npos) {
+    return str;
+  }
   for (const auto& it : changes) {
-    replaceAll(str, it.first, it.second);
+    c10::ReplaceAll(str, it.first, it.second);
   }
 
   return str;
