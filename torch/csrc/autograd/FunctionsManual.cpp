@@ -358,10 +358,9 @@ std::tuple<Tensor, Tensor, Tensor> NestedTensor_linear_backward(
     const Tensor& self,
     const Tensor& weight,
     const c10::optional<Tensor>& bias_opt) {
-  TORCH_CHECK(
-      grad.is_nested(), "The incoming gradient should be a nested tensor")
-  TORCH_CHECK(self.is_nested(), "Self should be a nested tensor")
-  TORCH_CHECK(!weight.is_nested(), "Weight should be a regular tensor")
+  if (!grad.defined()) {
+    return {Tensor(), Tensor(), Tensor()};
+  }
   auto* nt_grad = at::native::get_nested_tensor_impl_or_null(grad);
   auto* nt_self = at::native::get_nested_tensor_impl_or_null(self);
   TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_grad));
