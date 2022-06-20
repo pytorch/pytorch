@@ -214,9 +214,18 @@ def clone(fake_mode, func, input, memory_format=None):
         out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
-@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags)  # type: ignore[attr-defined]
+# index.Tensor data-dependent in only some conditions
+@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
+                  and func != aten.index.Tensor)
 def data_dep_op(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
+
+# Bool Indices get Expanded as Masks
+# See: IndexingUtils.h:expandTensors
+def check_no_bool_index_tensors(func, self, indices):
+    for index in indices:
+        if index is not None and index.dtype in (torch.bool, torch.uint8):
+            raise DynamicOutputShapeException(func)
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -437,6 +446,8 @@ class FakeTensorMode(TorchDispatchMode):
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
 
+            if func == aten.index.Tensor:
+                check_no_bool_index_tensors(func, *args, **kwargs)
 
             self.in_kernel_invocation = True
             try:
