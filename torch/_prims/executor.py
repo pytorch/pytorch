@@ -121,12 +121,9 @@ def make_traced(fn: Callable):
         # adding arguments via wrappers is evil, cc @mruberry
         fn_unwrapped = inspect.unwrap(fn)
         sig = inspect.signature(fn_unwrapped)
-        for i, (name, param) in enumerate(sig.parameters.items()):
-            if i < nargs:
-                continue  # parameter is already set as positional
-            if param.default is not param.empty and name not in fn_kwargs:
-                fn_kwargs[name] = param.default
-        # overwrite defaults if there are passed kwargs
+        bound_arguments = sig.bind(*args, **kwargs)
+        bound_arguments.apply_defaults()
+        args, fn_kwargs = bound_arguments.args, bound_arguments.kwargs
         flat_fn_kwargs = list(fn_kwargs.values())
         all_args = list(args) + flat_fn_kwargs
 
