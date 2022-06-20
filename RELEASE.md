@@ -85,7 +85,7 @@ Builder branch cut should be performed at the same time as Pytorch core branch c
 DRY_RUN=disabled GIT_BRANCH_TO_CUT_FROM=main RELEASE_VERSION=1.11 scripts/release/cut-release-branch.sh
 ```
 
-### RC cut health validation
+### Release Candidate health validation
 
 Validate the release jobs for pytorch and domain libraries should be green. Validate this using following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
