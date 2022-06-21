@@ -3,11 +3,35 @@ from torch.ao.quantization import FakeQuantizeBase
 from torch.ao.quantization.experimental.observer import APoTObserver
 
 class APoTFakeQuantize(FakeQuantizeBase):
-    def __init__(self, observer=APoTObserver):
-        super().__init__()
+    max_val: float
+    b: int
+    k: int
+    n: int
+    alpha: float
+    gamma: float
+    level_indices: torch.Tensor
+    quantization_levels: torch.Tensor
+    observer: APoTObserver
 
-    def calculate_qparams(self):
-        return APoTObserver.calculate_qparams
+    def __init__(self, observer=APoTObserver, max_val: float, b: int, k: int):
+        super().__init__()
+        self.b = b
+        self.k = k
+
+        # check for valid inputs of b, k
+        assert(self.k and self.k != 0)
+        assert(self.b % self.k == 0)
+
+        # compute n and store as member variable
+        self.n = self.b // self.k
+
+        self.alpha = max_val
+
+        self.observer = observer
+
+    def calculate_qparams(self, signed: bool):
+        self.gamma = self.observer.calculate_qparams(signed=signed)[0]
+        return self.observer.calculate_qparams(signed=signed)
 
     def forward():
         if self.observer_enabled[0] == 1:
