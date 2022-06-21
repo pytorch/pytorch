@@ -26,7 +26,6 @@ env:
   BUILD_ENVIRONMENT: linux-binary-conda
   BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
   PYTORCH_FINAL_PACKAGE_DIR: /artifacts
   PYTORCH_ROOT: /pytorch
