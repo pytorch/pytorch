@@ -258,18 +258,18 @@ jobs:
       build-environment: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
 
-  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single:
-    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+  linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single:
+    name: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
+      build-environment: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
-  pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit:
-    name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
+  linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit:
+    name: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
     uses: ./.github/workflows/_android-build-test.yml
     with:
-      build-environment: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
+      build-environment: linux-xenial-py3-clang5-android-ndk-r19c-gradle-custom-build-single-full-jit
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
 
   # https://github.com/pytorch/pytorch/issues/78540
