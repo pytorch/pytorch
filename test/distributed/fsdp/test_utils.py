@@ -1,26 +1,23 @@
 # Owner(s): ["oncall: distributed"]
 
-from collections import OrderedDict
 import random
 import sys
 import unittest
+from collections import OrderedDict
 
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp._utils import (
-    _apply_to_tensors,
-)
+from torch.distributed.fsdp._utils import _apply_to_tensors
 from torch.distributed.utils import _replace_by_prefix
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
+    TestCase,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
-    TestCase,
 )
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)

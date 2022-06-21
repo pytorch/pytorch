@@ -8,9 +8,12 @@ from unittest import mock
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-from torch.testing._internal.common_distributed import (
-    skip_if_lt_x_gpu,
+from torch.distributed.fsdp import CPUOffload, MixedPrecision
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    BackwardPrefetch,
+    ShardingStrategy,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DummyDDP,
     FSDPInitMode,
@@ -19,7 +22,7 @@ from torch.testing._internal.common_fsdp import (
     NestedWrappedModule,
     NestedWrappedModuleWithDelay,
     TransformerWithSharedParams,
-    subtest_name
+    subtest_name,
 )
 from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
@@ -27,10 +30,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
-
-from torch.distributed.fsdp import CPUOffload, MixedPrecision
-from torch.distributed.fsdp.fully_sharded_data_parallel import BackwardPrefetch, ShardingStrategy
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
