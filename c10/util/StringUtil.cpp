@@ -33,18 +33,33 @@ std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
   return out;
 }
 
-size_t ReplaceAll(std::string& s, const char* from, const char* to) {
-  TORCH_CHECK(from && *from, "");
-  TORCH_CHECK(to, "");
+size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
+  if (from.empty()) {
+    return 0;
+  }
 
   size_t numReplaced = 0;
-  std::string::size_type lenFrom = std::strlen(from);
-  std::string::size_type lenTo = std::strlen(to);
-  for (auto pos = s.find(from); pos != std::string::npos;
-       pos = s.find(from, pos + lenTo)) {
-    s.replace(pos, lenFrom, to);
-    numReplaced++;
+  std::string::size_type last_pos = 0u;
+  std::string::size_type cur_pos = 0u;
+  const c10::string_view input(s);
+  std::string buffer;
+
+  while ((cur_pos = s.find(from.data(), last_pos, from.size())) !=
+         std::string::npos) {
+    ++numReplaced;
+    // Append input between replaced sub-strings
+    buffer.append(input.begin() + last_pos, input.begin() + cur_pos);
+    // Append the replacement sub-string
+    buffer.append(to.begin(), to.end());
+    // Start search from next character after `from`
+    last_pos = cur_pos + from.size();
   }
+  if (numReplaced == 0) {
+    // If nothing was replaced, don't modify the input
+    return 0;
+  }
+  buffer.append(input.begin() + last_pos, input.end());
+  s = std::move(buffer);
   return numReplaced;
 }
 
