@@ -20219,13 +20219,6 @@ python_ref_db = [
         handles_complex_extremal_values=False,
         handles_large_floats=False,
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
@@ -20325,7 +20318,7 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # TypeError: _traced() got an unexpected keyword argument 'p'
+            # dropout is not comparable
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         )
     ),
@@ -20402,11 +20395,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        skips=(
-            # RuntimeError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.complex32, torch.complex64, torch.complex128,)),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
@@ -20436,13 +20424,6 @@ python_ref_db = [
         "_refs.eq",
         torch_opinfo_name="eq",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.float_power",
@@ -20451,11 +20432,6 @@ python_ref_db = [
         skips=(
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20516,10 +20492,6 @@ python_ref_db = [
         skips=(
             # Intentional xfail -- isclose does not type promote
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-            # class 'complex'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.complex64, torch.complex128,)
-                         ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20531,37 +20503,16 @@ python_ref_db = [
         "_refs.logical_and",
         torch_opinfo_name="logical_and",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
         torch_opinfo_name="logical_or",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_xor",
         torch_opinfo_name="logical_xor",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
@@ -20592,11 +20543,13 @@ python_ref_db = [
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128)
+                dtypes=(torch.complex32,),
             ),
+
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
@@ -20615,13 +20568,6 @@ python_ref_db = [
         "_refs.ne",
         torch_opinfo_name="ne",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.nextafter",
@@ -20633,10 +20579,11 @@ python_ref_db = [
         torch_opinfo_name="pow",
         supports_nvfuser=False,
         skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
+            # Reference result was farther (inf) from the precise
+            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32,),
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -20659,9 +20606,6 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         skips=(
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.complex32, torch.complex64, torch.complex128,)
-                         ),
             # Reference result was farther (nan) from the precise computation than
             # the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
@@ -20680,10 +20624,11 @@ python_ref_db = [
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32,),
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
@@ -20852,11 +20797,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.ravel",
         torch_opinfo_name="ravel",
-        skips=(
-            # TypeError: 'NoneType' object is not callable
-            DecorateInfo(unittest.skip("Passes on aten executor but fails on nvFuser executor"),
-                         'TestCommon', 'test_python_ref_executor', dtypes=(torch.float, torch.int32)),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.reshape",
@@ -20966,11 +20907,6 @@ python_ref_db = [
         torch_opinfo_name="mean",
         supports_out=True,
         supports_nvfuser=False,
-        skips=(
-            # class <complex>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.complex64, torch.complex128)),
-        )
     ),
     ReductionPythonRefInfo(
         "_refs.std",
@@ -20984,11 +20920,6 @@ python_ref_db = [
         torch_opinfo_name="std_mean",
         validate_view_consistency=False,
         supports_nvfuser=False,
-        skips=(
-            # class <complex>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.complex64, torch.complex128)),
-        ),
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
@@ -21013,11 +20944,6 @@ python_ref_db = [
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
         supports_nvfuser=False,
-        skips=(
-            # RuntimeError: Tracing expected 5 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.complex64, torch.complex128)),
-        ),
     ),
     #
     # Linear Algebra Operators
@@ -21028,9 +20954,6 @@ python_ref_db = [
         supports_nvfuser=False,
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.chalf, torch.cfloat, torch.cdouble)),
         ),
     ),
     #
@@ -21102,11 +21025,6 @@ python_ref_db = [
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.chalf, torch.cfloat, torch.cdouble)),
-        )
     ),
     PythonRefInfo(
         "_refs.where",
