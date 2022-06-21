@@ -3271,7 +3271,7 @@ class FullyShardedDataParallel(nn.Module):
                 self.module_fsdpwrap_map[module]._call_index += 1
             if self.module_fsdpwrap_map[module].training_state != TrainingState_.FORWARD:
                 self.module_fsdpwrap_map[module]._pre_forward(args, kwargs)
-            self.module_fsdpwrap_map[module]._fsdp_wrapped_module._unflatten_params_if_needed()
+                self.module_fsdpwrap_map[module]._fsdp_wrapped_module._unflatten_params_if_needed()
 
             outputs = unpatched_forward(*args, **kwargs)
 
