@@ -95,6 +95,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "gcd",
     "ge",
     "gt",
     "igamma",
@@ -107,6 +108,7 @@ __all__ = [
     "ne",
     "nextafter",
     "pow",
+    "remainder",
     "rsqrt",
     "shift_left",
     "shift_right_arithmetic",
@@ -919,6 +921,15 @@ fmod = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+gcd = _make_elementwise_binary_prim(
+    "gcd",
+    impl_aten=torch.gcd,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
 ge = _make_elementwise_binary_prim(
     "ge",
     impl_aten=torch.ge,
@@ -1045,6 +1056,20 @@ pow = _make_elementwise_binary_prim(
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _remainder_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.remainder(a, b)  # type: ignore[attr-defined]
+
+
+remainder = _make_elementwise_binary_prim(
+    "remainder",
+    impl_aten=torch.remainder,
+    impl_nvfuser=_remainder_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 
 shift_left = _make_elementwise_binary_prim(
     "shift_left",
