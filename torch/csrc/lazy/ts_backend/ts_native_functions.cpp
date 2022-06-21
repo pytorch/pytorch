@@ -577,7 +577,8 @@ at::Tensor& LazyNativeFunctions::logsumexp_out(
   auto curr_tls = c10::impl::tls_local_dispatch_key_set();
   auto tls_reenable_functionalize = c10::impl::PODLocalDispatchKeySet();
   tls_reenable_functionalize.set_included(curr_tls.included_);
-  tls_reenable_functionalize.set_excluded(curr_tls.excluded_.remove(c10::DispatchKey::Functionalize));
+  tls_reenable_functionalize.set_excluded(
+      curr_tls.excluded_.remove(c10::DispatchKey::Functionalize));
   c10::impl::ForceDispatchKeyGuard guard_(tls_reenable_functionalize);
   at::native::logsumexp_out(self_wrapped, dim, keepdim, out_wrapped);
   auto out_unwrapped =
