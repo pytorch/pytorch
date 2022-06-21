@@ -205,7 +205,7 @@ static void aminmax_kernel(
 }
 
 static void where_kernel_impl(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::Bool,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kHalf, kBFloat16, kBool,
     iter.dtype(), "where_cpu", [&] {
       cpu_kernel(
         iter,
