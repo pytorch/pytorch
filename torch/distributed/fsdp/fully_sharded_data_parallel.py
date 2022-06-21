@@ -1428,7 +1428,6 @@ class FullyShardedDataParallel(nn.Module):
                 self.world_size > 1
                 and self.sharding_strategy != ShardingStrategy.NO_SHARD
             )
-            p._orig_size = p.size()  # type: ignore[attr-defined]
 
             if not p._is_sharded:  # type: ignore[attr-defined]
                 self.numel_padded_per_param.append(0)
@@ -1578,14 +1577,13 @@ class FullyShardedDataParallel(nn.Module):
     @torch.no_grad()
     def _init_param_attributes(self, p: Parameter) -> None:
         """
-        We manage several attributes on each Parameter instance. The first two
-        are set by :func:`_shard_parameters`:
+        We manage several attributes on each Parameter instance. The first is
+        set by :func:`_shard_parameters`:
             ``_is_sharded``: ``True`` if the Parameter is sharded or ``False``
                 if the Parameter is intentionally not sharded (in which case we
                 will all-reduce grads for this param). Currently the way
                 `_is_sharded = False` is if world_size = 1 or sharding strategy
                 is NO_SHARD.
-            ``_orig_size``: the size of the original Parameter (before sharding)
         A few attributes are set here:
             ``_local_shard``: a single shard of the parameter. This is needed to
                 recover the shard after rebuilding full parameter in forward
@@ -1599,9 +1597,7 @@ class FullyShardedDataParallel(nn.Module):
             ``_shard_bwd_hook``: it holds the parameter's AccumulateGrad object
                 and the registered post hook handle.
         """
-        assert hasattr(p, "_is_sharded") and hasattr(
-            p, "_orig_size"
-        ), "Parameters should have been sharded during construction."
+        assert hasattr(p, "_is_sharded"), "Parameters should have been sharded during construction."
         # If _local_shard has been set in the first lazy init and
         # current parameter is pointed to _local_shard, no need to
         # set the _local_shard again.
@@ -3166,7 +3162,7 @@ class FullyShardedDataParallel(nn.Module):
         """
         p.data = output_tensor
         # Trim any padding and reshape to match original size.
-        p.data = p.data[: p._orig_size.numel()].view(p._orig_size)  # type: ignore[attr-defined]
+        p.data = p.data[:p._unsharded_size.numel()].view(p._unsharded_size)  # type: ignore[attr-defined]
 
     @torch.no_grad()
     def _rebuild_full_params(self) -> List[Tuple[torch.Tensor, bool]]:
@@ -3405,7 +3401,7 @@ class FullyShardedDataParallel(nn.Module):
         """Make sure p.grad has the correct size/device, otherwise set it to None."""
         for p in self.params:
             if p.grad is not None and (
-                p.grad.size() != p._orig_size  # type: ignore[attr-defined]
+                p.grad.size() != p._unsharded_size  # type: ignore[attr-defined]
                 or p.grad.device != p.device
             ):
                 offloaded: bool = p.grad.device != p.device
