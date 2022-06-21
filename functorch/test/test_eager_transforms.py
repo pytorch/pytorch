@@ -2995,7 +2995,8 @@ class TestFunctionalize(TestCase):
             return x
         # There's a copy_ in the graph, because the input (x) was mutated.
         # To preserve semantics, functionalize() needs to propagate the mutation.
-        out = make_fx(functionalize(f, remove='mutations_and_views'))(torch.zeros(4, 2, device=device))
+        fn = make_fx(functionalize(f, remove='mutations_and_views'), trace_factory_functions=False)
+        out = fn(torch.zeros(4, 2, device=device))
         self.assertExpectedInline((out.code), """\
 
 
@@ -3013,7 +3014,8 @@ def forward(self, x_1) -> torch.Tensor:
 
         def f(x: torch.Tensor) -> torch.Tensor:
             return x.transpose(1, 0)
-        out = make_fx(functionalize(f, remove='mutations_and_views'))(torch.zeros(4, 2, device=device))
+        fn = make_fx(functionalize(f, remove='mutations_and_views'), trace_factory_functions=False)
+        out = fn(torch.zeros(4, 2, device=device))
         self.assertExpectedInline(out.code, """\
 
 
@@ -3032,7 +3034,7 @@ def forward(self, x_1) -> torch.Tensor:
             out_view.add_(1)
             return out
 
-        fn = make_fx(functionalize(f, remove='mutations_and_views'))
+        fn = make_fx(functionalize(f, remove='mutations_and_views'), trace_factory_functions=False)
         out = fn(torch.arange(4, device=device, dtype=torch.float32))
         self.assertExpectedInline(out.code, """\
 
@@ -3057,7 +3059,7 @@ def forward(self, inpt_1) -> torch.Tensor:
             torch.aminmax(inpt_view, dim=0, out=(mins, maxs_view))
             return (maxs, mins)
 
-        fn = make_fx(functionalize(f, remove='mutations_and_views'))
+        fn = make_fx(functionalize(f, remove='mutations_and_views'), trace_factory_functions=False)
         out = fn(torch.arange(8, device=device, dtype=torch.float32))
         self.assertExpectedInline(out.code, """\
 
@@ -3080,7 +3082,7 @@ def forward(self, inpt_1) -> torch.Tensor:
             y.add_(tmp)
             return x
 
-        out = make_fx(functionalize(f))(torch.zeros(4, 2, device=device))
+        out = make_fx(functionalize(f), trace_factory_functions=False)(torch.zeros(4, 2, device=device))
         self.assertExpectedInline(out.code, """\
 
 
