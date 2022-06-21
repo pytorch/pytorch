@@ -1,14 +1,6 @@
 import abc
-import dataclasses
 
-import torch
-
-
-@dataclasses.dataclass
-class PassManagerParams:
-    enable_debug_pass: bool
-    run_checks_after_each_pass: bool
-    ignore_to_out_var_failure: bool
+import torch.fx as fx
 
 
 class PassBase(abc.ABC):
@@ -26,33 +18,27 @@ class PassBase(abc.ABC):
     def __init__(self) -> None:
         pass
 
-    def __call__(
-        self, pass_mgr_params: PassManagerParams, graph_module: torch.fx.GraphModule
-    ) -> None:
+    def __call__(self, graph_module: fx.GraphModule) -> None:
         """
         Runs the precondition check, the pass itself, and the postcondition check.
         """
 
         self.requires(graph_module)
-        self.call(pass_mgr_params, graph_module)
+        self.call(graph_module)
         self.ensures(graph_module)
 
     @abc.abstractmethod
-    def call(
-        self, pass_mgr_params: PassManagerParams, graph_module: torch.fx.GraphModule
-    ) -> None:
+    def call(self, graph_module: fx.GraphModule) -> None:
         """
         The pass that is run through the given graph module. To implement a
         pass, it is required to implement this function.
 
         Args:
-            pass_mgr_params: A set of parameters specifying global PassManager
-               flags
             graph_module: The graph module we will run a pass on
         """
         pass
 
-    def requires(self, graph_module: torch.fx.GraphModule) -> None:
+    def requires(self, graph_module: fx.GraphModule) -> None:
         """
         This function will be called before the pass is run and will check that
         the given graph module contains the preconditions needed to run the
@@ -63,7 +49,7 @@ class PassBase(abc.ABC):
         """
         pass
 
-    def ensures(self, graph_module: torch.fx.GraphModule) -> None:
+    def ensures(self, graph_module: fx.GraphModule) -> None:
         """
         This function will be called after the pass is run and will check that
         the given graph module contains the postconditions needed to run the

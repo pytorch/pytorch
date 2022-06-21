@@ -3,13 +3,8 @@ from typing import Callable, List
 
 
 from torch.fx import GraphModule
-from pass_base import PassManagerParams
 
 
-# Pass Schedule Constraints:
-#
-# Implemented as 'depends on' operators. A constraint is satisfied iff a list
-# has a valid partial ordering according to this comparison operator.
 def _validate_pass_schedule_constraint(
     constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
 ) -> None:
@@ -24,7 +19,7 @@ def _validate_pass_schedule_constraint(
             )
 
 
-def this_before_that_pass_constraint(this: Callable, that: Callable) -> None:
+def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
     """
     Defines a partial order ('depends on' function) where `this` must occur
     before `that`.
@@ -62,37 +57,38 @@ class PassManager:
     pass constraints and pass execution.
 
     Args:
-        passes (Optional[List[Callable]]): list of passes. A pass is a
+        passes (Optional[List[Callable]]): List of passes. A pass is a
             callable which modifies an object and returns modified object
-        constraint (Optional[List[Callable]]): list of constraints. A
+        constraint (Optional[List[Callable]]): List of constraints. A
             constraint is a callable which takes two passes (A, B) and returns
             True if A depends on B and False otherwise. See implementation of
             `this_before_that_pass_constraint` for example.
-        enable_debug_pass (bool): set to true to enable the debug passes
-        run_checks_after_each_pass (bool): whether to run checks and linting
+        steps (int): Max number of times we run the passes (default = 1).
+        enable_debug_pass (bool): Set to true to enable the debug passes
+        run_checks_after_each_pass (bool): Whether to run checks and linting
             after each pass
     """
 
     passes: List[Callable] = []
     constraints: List[Callable] = []
     _validated: bool = False
+    steps: int = 1
 
     def __init__(
         self,
         passes=None,
         constraints=None,
-        enable_debug_pass: bool = False,
+        steps=None,
         run_checks_after_each_pass: bool = False,
     ):
         if passes:
             self.passes = passes
         if constraints:
             self.constraints = constraints
+        if steps:
+            self.steps = steps
         
-        self.params = PassManagerParams(
-            enable_debug_pass=enable_debug_pass,
-            run_checks_after_each_pass=run_checks_after_each_pass,
-        )
+        self.run_checks_after_each_pass=run_checks_after_each_pass,
 
     def add_pass(self, _pass: Callable):
         """
@@ -118,7 +114,7 @@ class PassManager:
         for constraint in self.constraints:
             _validate_pass_schedule_constraint(constraint, self.passes)
         self._validated = True
-    
+
     def add_checks(self, check: Callable) -> None:
         """
         Adds a function which takes runs various checks on a given graph module.
@@ -131,12 +127,9 @@ class PassManager:
         if len(params) != 1:
             raise TypeError("PassManager check function should only take in one variable, a graph_module")
 
-        if sig.return_annotation: 
-            raise TypeError("PassManager check function should return None")
+        setattr(self, "check", check)
 
-        self.assert_invariants = check
-
-    def assert_invariants(self, graph_module: GraphModule) -> None:
+    def check(self, graph_module: GraphModule) -> None:
         pass
 
     def __call__(self, graph_module: GraphModule) -> None:
@@ -145,23 +138,33 @@ class PassManager:
         graph module. Each time a pass is run, checks and linting will be run on
         the graph module to ensure that it still maintains the same required
         invariants.
+
+        The list of passes will be run until the graph stops changing, or until
+        `steps` number of times.
         """
         # Check constraints 
         self.validate_constraints()
 
         # Lint and check graph invariants
         graph_module.graph.lint()
-        self.assert_invariants(graph_module)
+        self.check(graph_module)
+        
+        # Run the set of passes `steps` number of times or until the graph stops
+        # changing
+        for _ in range(self.steps):
+            orig_graph_module_code = graph_module.code
 
-        # TODO(angelayi): run these passes multiple times until the graph
-        # converts, set max iteration number too
+            # Run the set of passes on the graph module
+            for fn in self.passes:
+                fn(graph_module)
 
-        for fn in self.passes:
-            fn(self.params, graph_module)
+                if self.run_checks_after_each_pass:
+                    # Lint and check graph invariants
+                    graph_module.graph.lint()
+                    self.check(graph_module)
 
-            if self.params.run_checks_after_each_pass:
-                # Lint and check graph invariants
-                graph_module.graph.lint()
-                self.assert_invariants(graph_module)
+            graph_module.recompile()
 
-        graph_module.recompile()
+            # If the graph no longer changes, then we can stop running these passes
+            if orig_graph_module_code == graph_module.code:
+                break
