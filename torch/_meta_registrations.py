@@ -113,7 +113,9 @@ def checkUplo(uplo: str):
     ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
 
 
-@torch.library.impl(meta_lib, "linalg_eigh")
+# Keeping this meta impl around, but we don't want to register it directly to the meta key
+# because `aten::linalg_eigh` is composite.
+# `_linalg_eigh` is implemented internally as a structured kernel, so we have meta support.
 def meta_linalg_eigh(self, uplo="L"):
     squareCheckInputs(self, "linalg_eigh")
     checkUplo(uplo)
@@ -569,3 +571,18 @@ def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     return input.new_empty(output_shape), input.new_empty(
         output_shape, dtype=torch.long
     )
+
+
+@torch.library.impl(meta_lib, "nan_to_num")
+def meta_nan_to_num(self, nan=None, posinf=None, neginf=None):
+    return self.new_empty(self.shape)
+
+
+@torch.library.impl(meta_lib, "remainder.Scalar_Tensor")
+def meta_remainder_scalar(scalar, other):
+    return other % scalar
+
+
+@torch.library.impl(meta_lib, "logical_not_")
+def meta_logical_not_(self):
+    return self
