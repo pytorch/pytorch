@@ -1146,9 +1146,20 @@ class TestProfiler(TestCase):
         # so kernel will queued up.
         # But later tensor indexing is overhead bound, and there
         # is sleep to make sure kernel finished before next dispatch.
-        golden_queue_depth_list = [1, 2, 3, 4, 5, 1, 1, 1]
+        golden_queue_depth_list = [
+            1, 0, 1, 2, 3, 4, 3, 2, 1, 0, 1, 0, 1, 0, 1, 0
+        ]
         for entry, golden in zip(basic_evaluation.compute_queue_depth(),
                                  golden_queue_depth_list):
+            self.assertTrue(entry.queue_depth == golden)
+        golden_queue_depth_metrics_list = [
+            0, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+        ]
+
+        for entry, golden in zip([
+                basic_evaluation.metrics[k]
+                for k in basic_evaluation.event_keys
+        ], golden_queue_depth_metrics_list):
             self.assertTrue(entry.queue_depth == golden)
 
     def test_utils_compute_queue_depth_when_no_cuda_events(self):

@@ -4,7 +4,11 @@ from typing import Dict, List
 
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
-from torch.autograd import _KinetoEvent
+from torch.autograd import _KinetoEvent, _ProfilerEvent
+import numpy as np
+import os, re
+
+GENERATE_PLOT = True
 
 
 @dataclass
@@ -12,6 +16,7 @@ class EventMetrics:
     duration_time_ns: int = 0
     self_time_ns: int = 0
     idle_time_ns: int = 0
+    queue_depth: int = 0
 
     @property
     def fraction_idle_time(self):
@@ -45,9 +50,9 @@ class EventKey:
         overlap_time = 0
         intervals = sorted(intervals, key=lambda x: x.start)
         for i, interval in enumerate(intervals):
-            if i + 1 < len(intervals):
-                assert interval.end <= intervals[
-                    i + 1].start, "Intervals must be disjoint"
+            if i + 1 < len(intervals) and interval.end > intervals[i +
+                                                                   1].start:
+                interval.end = intervals[i + 1].start
             overlap_start = max(self.event.start_time_ns, interval.start)
             overlap_end = min(self.event.end_time_ns, interval.end)
 
@@ -62,6 +67,10 @@ class BasicEvaluation:
         self.profile = prof
         self.metrics: Dict[EventKey, EventMetrics] = {}
         self.compute_self_time()
+        self.event_keys = sorted((e for e in self.metrics.keys()),
+                                 key=lambda x: x.event.start_time_ns)
+        self.events = [e.event for e in self.event_keys]
+        self.queue_depth_list = self.compute_queue_depth()
 
     def compute_self_time(self):
         '''
@@ -88,9 +97,9 @@ class BasicEvaluation:
 
     def compute_queue_depth(self):
         '''
-        Computes event's idle time. Idle time is defined as the time when the CUDA kernel queue depth is 0.
-        It also return a Time series of the queue depth data.
-        qd = cuda kernel queue depth
+        Computes queue_depth at each event. This will calculate the queue depth data for
+        All the events in the tree.
+        This will return a list of Interval of queue depth data of cuda launch and kernels.
         '''
         assert (self.profile.kineto_results is not None)
         cuda_event_list = self.profile.kineto_results.events()
@@ -103,10 +112,6 @@ class BasicEvaluation:
             # TODO: find a better way to identify CUDA Kernel
             return e.device_type() == DeviceType.CUDA and "mem" not in e.name(
             ).lower()
-
-        # Record All the idle intervals
-        idle_interval: List[Interval] = []
-        queue_depth_list: List[Interval] = []
 
         cuda_launch_events = sorted(
             (e for e in cuda_event_list if is_cuda_launch_kernel(e)),
@@ -126,34 +131,44 @@ class BasicEvaluation:
             kernel_mapping[cuda_launch_event] = index
             last_mapped_kernel = index if index is not None else last_mapped_kernel
 
-        current_kernel_index = -1
-        spawned_kernel_index = None
-        for cuda_launch_event in cuda_launch_events:
+        current_kernel_index = 0
+        spawned_kernel_index = -1
+        all_events = cuda_launch_events + cuda_kernel_events + self.events
+
+        def new_old_event_comparator(event):
+            if isinstance(event, _KinetoEvent):
+                return event.start_us() * 1000
+            if isinstance(event, _ProfilerEvent):
+                return event.start_time_ns
+            raise "Unknow event type!"
+
+        queue_depth_list: List[Interval] = []
+        all_events.sort(key=new_old_event_comparator)
+        for event in all_events:
             # Find latest cuda kernel event
-            while (current_kernel_index + 1 < len(cuda_kernel_events) and
-                   cuda_kernel_events[current_kernel_index + 1].start_us() +
-                   cuda_kernel_events[current_kernel_index + 1].duration_us() <
-                   cuda_launch_event.start_us() +
-                   cuda_launch_event.duration_us()):
+            if isinstance(event, _KinetoEvent):
+                start_time = event.start_us() * 1000
+                end_time = (event.start_us() + event.duration_us()) * 1000
+                # Find current spawned cuda kernel event
+                if event in kernel_mapping and kernel_mapping[
+                        event] is not None:
+                    spawned_kernel_index = kernel_mapping[event]
+            elif isinstance(event, _ProfilerEvent):
+                start_time = event.start_time_ns
+                end_time = event.end_time_ns
+
+            while (current_kernel_index < len(cuda_kernel_events) and
+                   (cuda_kernel_events[current_kernel_index].start_us()) * 1000
+                   <= start_time):
                 current_kernel_index += 1
+            current_queue_depth = spawned_kernel_index - current_kernel_index + 1
 
-            # Find current spawned cuda kernel event
-            spawned_kernel_index = kernel_mapping[cuda_launch_event]
-            if spawned_kernel_index is None:
-                current_queue_depth = 0
-            else:
-                current_queue_depth = spawned_kernel_index - current_kernel_index
+            if isinstance(event, _KinetoEvent):
+                queue_depth_list.append(
+                    Interval(start_time, end_time, current_queue_depth))
 
-            queue_depth_list.append(
-                Interval(
-                    cuda_launch_event.start_us(),
-                    cuda_launch_event.start_us() +
-                    cuda_launch_event.duration_us(), current_queue_depth))
-
-        event_list = [e.event for e in self.metrics.keys()]
-        for event in event_list:
-            self.metrics[EventKey(event)].idle_time_ns = EventKey(
-                event).intervals_overlap(idle_interval)
+            if isinstance(event, _ProfilerEvent):
+                self.metrics[EventKey(event)].queue_depth = current_queue_depth
 
         return queue_depth_list
 
