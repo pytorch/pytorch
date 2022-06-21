@@ -926,10 +926,9 @@ def special_pattern_replacement(model: QuantizedGraphModule):
                 arg_indexes_to_skip = QOP_TO_ARG_INDEXES_TO_SKIP[qop]
                 new_args = [arg for index, arg in enumerate(args) if index not in arg_indexes_to_skip]
 
-            qparams = [qnode_qparams[1], qnode_qparams[2]]
             if qop in QOP_TO_QPARAMS_START_INDEX:
                 qparam_start_index = QOP_TO_QPARAMS_START_INDEX[qop]
-                new_args = new_args[:qparam_start_index] + qparams + new_args[qparam_start_index:]
+                new_args = new_args[:qparam_start_index] + qnode_qparams + new_args[qparam_start_index:]
             else:
                 new_args.extend(qparams)
 
