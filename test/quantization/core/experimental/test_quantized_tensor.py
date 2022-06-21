@@ -1,10 +1,6 @@
-
-
 # Owner(s): ["oncall: quantization"]
 
-import torch
-from torch import quantize_per_tensor
-from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
+from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 import unittest
 import random
 quantize_APoT = TensorAPoT.quantize_APoT
@@ -243,7 +239,7 @@ class TestQuantizedTensor(unittest.TestCase):
 
     def test_q_apot_alpha(self):
         with self.assertRaises(NotImplementedError):
-            TensorAPoT.q_apot_alpha(self)
+            quantizer.int_repr()
 
 if __name__ == '__main__':
     unittest.main()

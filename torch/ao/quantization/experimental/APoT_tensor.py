@@ -5,14 +5,9 @@ from torch.ao.quantization.experimental.apot_utils import float_to_apot, float_t
 
 # class to store APoT quantized tensor
 class TensorAPoT(torch.Tensor):
-    b: int
-    k: int
-    n: int
-    signed: bool
-    use_int_repr: bool
-    quantization_levels: torch.Tensor
-    level_indices: torch.Tensor
+    quantizer: APoTQuantizer
     data: torch.Tensor
+    dtype: torch.dtype
 
     def __init__(
         self,
@@ -80,5 +75,5 @@ class TensorAPoT(torch.Tensor):
         else:
             return self.data
 
-    def q_apot_alpha(self) -> float:
+    def int_repr(self):
         raise NotImplementedError
