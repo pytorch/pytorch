@@ -157,7 +157,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             #     "_operator.truediv": None,
         }
 
-        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))
+        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))   # type: ignore[attr-defined]
 
         ops_with_nvfuser_impl = {
             "torch.ops.prims." + name + ".default" : None
