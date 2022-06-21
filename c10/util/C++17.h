@@ -161,6 +161,24 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 
 #undef CUDA_HOST_DEVICE
 
+
+#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
+template <typename Functor, typename... Args>
+typename std::enable_if<
+    std::is_member_pointer<typename std::decay<Functor>::type>::value,
+    typename std::invoke_result<Functor && (Args && ...)>::type>::type
+invoke(Functor&& f, Args&&... args) {
+  return std::mem_fn(std::forward<Functor>(f))(std::forward<Args>(args)...);
+}
+
+template <typename Functor, typename... Args>
+typename std::enable_if<
+    !std::is_member_pointer<typename std::decay<Functor>::type>::value,
+    typename std::invoke_result<Functor && (Args && ...)>::type>::type
+invoke(Functor&& f, Args&&... args) {
+  return std::forward<Functor>(f)(std::forward<Args>(args)...);
+}
+#else
 template <typename Functor, typename... Args>
 typename std::enable_if<
     std::is_member_pointer<typename std::decay<Functor>::type>::value,
@@ -176,6 +194,7 @@ typename std::enable_if<
 invoke(Functor&& f, Args&&... args) {
   return std::forward<Functor>(f)(std::forward<Args>(args)...);
 }
+#endif
 
 namespace detail {
 struct _identity final {

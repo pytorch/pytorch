@@ -8,6 +8,8 @@
   See NOTE: [Tensor vs. TensorBase]
 #endif
 
+#include <type_traits>
+
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -568,10 +570,17 @@ class TORCH_API Tensor: public TensorBase {
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
+  template <typename T>
+  using hook_return_void_t = std::enable_if_t<std::is_void<std::invoke_result<T&(Tensor)>::type>::value, unsigned>;
+  template <typename T>
+  using hook_return_var_t = std::enable_if_t<std::is_same<std::invoke_result<T&(Tensor)>::type, Tensor>::value, unsigned>;
+#else
   template <typename T>
   using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(Tensor)>::type>::value, unsigned>;
   template <typename T>
   using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(Tensor)>::type, Tensor>::value, unsigned>;
+#endif
 
   /// Registers a backward hook.
   ///

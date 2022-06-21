@@ -3,6 +3,8 @@
 #include <c10/util/C++17.h>
 #include <c10/util/TypeTraits.h>
 
+#include <type_traits>
+
 namespace c10 {
 namespace guts {
 
@@ -496,6 +498,16 @@ struct map_types_to_values final {
       false_t<TypeList>::value,
       "In typelist::map_types_to_values<T>, the T argument must be typelist<...>.");
 };
+#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
+template <class... Types>
+struct map_types_to_values<typelist<Types...>> final {
+  template <class Func>
+  static std::tuple<std::invoke_result_t<Func(type_<Types>)>...> call(Func&& func) {
+    return std::tuple<std::invoke_result_t<Func(type_<Types>)>...>{
+        std::forward<Func>(func)(type_<Types>())...};
+  }
+};
+#else
 template <class... Types>
 struct map_types_to_values<typelist<Types...>> final {
   template <class Func>
@@ -504,6 +516,7 @@ struct map_types_to_values<typelist<Types...>> final {
         std::forward<Func>(func)(type_<Types>())...};
   }
 };
+#endif
 } // namespace detail
 
 template <class TypeList, class Func>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <mutex>
+#include <type_traits>
 
 namespace c10 {
 
@@ -42,7 +43,11 @@ class Synchronized final {
    * provided callback safely.
    */
   template <typename CB>
+#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
+  std::invoke_result<CB(T&)>::type withLock(CB cb) {
+#else
   typename std::result_of<CB(T&)>::type withLock(CB cb) {
+#endif
     std::lock_guard<std::mutex> guard(this->mutex_);
     return cb(this->data_);
   }
@@ -53,7 +58,11 @@ class Synchronized final {
    * the provided callback safely.
    */
   template <typename CB>
+#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
+  std::invoke_result<CB(T const&)>::type withLock(CB cb) const {
+#else
   typename std::result_of<CB(T const&)>::type withLock(CB cb) const {
+#endif
     std::lock_guard<std::mutex> guard(this->mutex_);
     return cb(this->data_);
   }
