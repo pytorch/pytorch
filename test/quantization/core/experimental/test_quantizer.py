@@ -17,7 +17,7 @@ class TestQuantizer(unittest.TestCase):
         * b: 4
         * k: 1
     """
-    def test_quantize_APoT_rand_1d(self):
+    def test_quantize_APoT_rand_k1(self):
         # generate random size of tensor2dequantize between 1 -> 20
         size = random.randint(1, 20)
 
