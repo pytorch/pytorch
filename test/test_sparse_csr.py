@@ -796,22 +796,51 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9, dtype=dtype), sparse.values())
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_sparse_csr_to_dense(self, device, dtype):
+    def _test_sparse_compressed_to_dense(self, device, dtype, layout):
+        compressed_format_str = str(layout)[-3:]
+
+        def to_compressed(t):
+            return getattr(t, f"to_sparse_{compressed_format_str}")()
+
+        def compressed_constructor(*input, **kwargs):
+            constructor = getattr(torch, f"sparse_{compressed_format_str}_tensor")
+            return constructor(*input, **kwargs)
+
+        def get_dense_shape(shape, batch_ndim):
+            if layout is torch.sparse_csc:
+                compressed_dims_slice = slice(batch_ndim + 1, batch_ndim - 1, -1)
+            else:
+                compressed_dims_slice = slice(batch_ndim, batch_ndim + 2)
+            return shape[:batch_ndim] + shape[compressed_dims_slice] + shape[batch_ndim + 2:]
+
+        def transpose(t, batch_ndim):
+            if layout is torch.sparse_csc:
+                return t.transpose(batch_ndim, batch_ndim + 1)
+            return t
+
         mn = [5, 2, 0]
         for (m, n) in itertools.product(mn, mn):
             size = (m, n)
             dense = make_tensor(size, dtype=dtype, device=device)
-            sparse = dense.to_sparse_csr()
+            sparse = to_compressed(dense)
             self.assertEqual(sparse.to_dense(), dense)
 
         batch_shape = (2, 3)
-        crow_indices = torch.tensor([0, 3, 5], device=device).repeat(6, 1).reshape(*batch_shape, -1)
-        col_indices = torch.tensor([0, 1, 2, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        compressed_indices = torch.tensor([0, 3, 5], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        plain_indices = torch.tensor([0, 1, 2, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
         values = torch.tensor([1, 2, 1, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1)
-        csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=dtype, device=device)
-        dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device).repeat(6, 1).reshape(csr.shape)
-        self.assertEqual(csr.to_dense(), dense)
+        sparse = compressed_constructor(compressed_indices, plain_indices, values, dtype=dtype, device=device)
+        dense_shape = get_dense_shape(sparse.shape, len(batch_shape))
+        dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device).repeat(6, 1).reshape(dense_shape)
+        self.assertEqual(sparse.to_dense(), transpose(dense, len(batch_shape)))
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_sparse_csr_to_dense(self, device, dtype):
+        self._test_sparse_compressed_to_dense(device, dtype, torch.sparse_csr)
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_sparse_csc_to_dense(self, device, dtype):
+        self._test_sparse_compressed_to_dense(device, dtype, torch.sparse_csc)
 
     @skipMeta
     @skipCPUIfNoMklSparse
