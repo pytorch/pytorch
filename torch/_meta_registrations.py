@@ -5,8 +5,11 @@ from torch._prims.utils import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     check,
     elementwise_dtypes,
+    corresponding_complex_dtype,
+    corresponding_real_dtype,
 )
 from torch._prims.wrappers import out_wrapper_multi, out_wrapper
+from torch._refs import _broadcast_shapes
 
 from typing import List, Optional
 
@@ -85,9 +88,12 @@ def meta_min(self):
 
 @torch.library.impl(meta_lib, "angle")
 def meta_angle(self):
-    _, result_dtype = elementwise_dtypes(
-        self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
-    )
+    if self.is_complex:
+        result_dtype = corresponding_real_dtype(self.dtype)
+    else:
+        _, result_dtype = elementwise_dtypes(
+            self, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT
+        )
     return self.new_empty(self.size(), dtype=result_dtype)
 
 
@@ -152,12 +158,16 @@ def meta_pad2d(self, padding):
         return self.new_empty((nbatch, nplane, output_h, output_w))
 
 
+def dot_check(self, other):
+    check(
+        self.dim() == 1 and other.dim() == 1,
+        lambda: f"1D tensors expected, but got {self.dim()}D and {other.dim()}D tensors",
+    )
+
+
 @torch.library.impl(meta_lib, "dot")
 def meta_dot(self, tensor):
-    check(
-        self.dim() == 1 and tensor.dim() == 1,
-        lambda: f"1D tensors expected, but got {self.dim()}D and {tensor.dim()}D tensors",
-    )
+    dot_check(self, tensor)
     return self.new_empty(())
 
 
@@ -216,6 +226,35 @@ def meta_repeat_interleave_Tensor(repeats, output_size=None):
     if output_size is None:
         raise RuntimeError("cannot repeat_interleave a meta tensor without output_size")
     return repeats.new_empty(output_size)
+
+
+@out_wrapper
+def meta_complex(real, imag):
+    assert real.dtype.is_floating_point
+    assert imag.dtype.is_floating_point
+    out_shape = _broadcast_shapes(real.shape, imag.shape)
+    return real.new_empty(out_shape, dtype=corresponding_complex_dtype(real.dtype))
+
+
+torch.library.impl(meta_lib, "complex")(meta_complex)
+torch.library.impl(meta_lib, "complex.out")(meta_complex)
+
+
+@torch.library.impl(meta_lib, "vdot")
+def vdot(self, other):
+    if not self.is_complex:
+        return torch.dot(self, other)
+
+    if self.is_conj():
+        if other.is_conj():
+            return torch.vdot(other.conj(), self.conj())
+        else:
+            return torch.dot(self.conj(), other)
+    elif other.is_conj():
+        return torch.dot(self, other.conj()).conj()
+
+    dot_check(self, other)
+    return self.new_empty(())
 
 
 # Leaving this function around because a python implementation
