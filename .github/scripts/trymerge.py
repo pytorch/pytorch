@@ -5,6 +5,7 @@ import json
 import os
 import re
 import time
+import urllib.parse
 from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
@@ -335,7 +336,7 @@ def fetch_json(url: str,
                data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={val}" for name, val in params.items())
+        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
     return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
 def fetch_json_dict(url: str,
@@ -343,7 +344,7 @@ def fetch_json_dict(url: str,
                     data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={val}" for name, val in params.items())
+        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
     return cast(Dict[str, Any], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
 def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
@@ -970,7 +971,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
-def validate_land_time_checks(repo: GitRepo, commit: str) -> bool:
+def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
     [owner, name] = repo.gh_owner_and_name()
     checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
     if checks['total_count'] == 0:
@@ -987,12 +988,9 @@ def validate_land_time_checks(repo: GitRepo, commit: str) -> bool:
             pending_jobs.append(name)
 
     if len(failed_jobs) > 0:
-        raise RuntimeError(f"Failed to merge: some checks failed: {', '.join(failed_jobs)}")
+        raise RuntimeError(f"Failed to merge; some land checks failed: {', '.join(failed_jobs)}")
     if len(pending_jobs) > 0:
-        raise MandatoryChecksMissingError(f"Refusing to merge as land time check(s) {', '.join(pending_jobs)} are not yet run")
-    if len(pending_jobs) == 0 and len(failed_jobs) == 0:
-        return True
-    return False
+        raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {', '.join(pending_jobs)} are not yet run")
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
@@ -1038,9 +1036,11 @@ def merge(pr_num: int, repo: GitRepo,
             if (not mandatory_only and on_green) and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
-            if land_checks and validate_land_time_checks(repo, commit):
+            if land_checks:
+                validate_land_time_checks(repo, commit)
                 return pr.merge_into(repo, dry_run=dry_run, force=force, already_merged=True, comment_id=comment_id)
-            return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+            else:
+                return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
