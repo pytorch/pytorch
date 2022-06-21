@@ -7,12 +7,14 @@ from typing import Callable, Union, Dict, Sequence, Tuple, NamedTuple
 from torch.utils._pytree import tree_map
 from collections import defaultdict
 import inspect
+from torch._decomp_tables import decomposition_table
 
 __all__ = ["decomposition_table", "register_decomposition", "get_decompositions"]
 
 # TODO: relax key type here; torch registrations should be possible to; but
 # right now this type is accurate
-decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
+
+# decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")

@@ -1211,8 +1211,7 @@ PyObject* THPVariable_get_shape(THPVariable* self, void* unused) {
   if (check_has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "shape");
   }
-  // return THPSize_NewFromSymSizes(THPVariable_Unpack(self));
-  return THPSize_New(THPVariable_Unpack(self));
+  return THPSize_NewFromSymSizes(THPVariable_Unpack(self));
   END_HANDLE_TH_ERRORS
 }
 

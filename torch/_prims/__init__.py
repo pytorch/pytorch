@@ -1274,7 +1274,7 @@ _broadcast_in_dim_doc = """
   """
 
 broadcast_in_dim = _make_prim(
-    schema="broadcast_in_dim(Tensor(a) a, int[] shape, int[] broadcast_dimensions) -> Tensor(a)",
+    schema="broadcast_in_dim(Tensor(a) a, SymInt[] shape, int[] broadcast_dimensions) -> Tensor(a)",
     meta=_broadcast_in_dim_meta,
     impl_aten=_broadcast_in_dim_aten,
     impl_nvfuser=_broadcast_in_dim_nvfuser,

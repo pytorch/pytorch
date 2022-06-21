@@ -305,7 +305,6 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             raise RuntimeError(
                 "Unexpected type when broadcasting: " + str(type(x)) + "!"
             )
-
     return tuple(__maybe_broadcast(x, common_shape) for x in args)
 
 
@@ -807,7 +806,6 @@ def add(
         raise ValueError(
             "Receive two Number inputs to an elementwise binary operation!"
         )
-
     a, b = _maybe_broadcast(a, b)
 
     if alpha is not None:
