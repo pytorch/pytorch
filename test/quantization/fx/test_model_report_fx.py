@@ -14,6 +14,7 @@ from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
     SingleLayerLinearModel,
+    override_quantized_engine,
     TwoLayerLinearModel,
     skipIfNoFBGEMM,
     skipIfNoQNNPACK,
@@ -819,26 +820,28 @@ class TestFxModelReportClass(QuantizationTestCase):
         - The desired reports
         - Ensures that the observers of interest are properly initialized
         """
-        # set the backend for this test
-        torch.backends.quantized.engine = "fbgemm"
-        backend = torch.backends.quantized.engine
 
-        # make an example set of detectors
-        test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
-        # initialize with an empty detector
-        model_report = ModelReport(test_detector_set)
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            backend = torch.backends.quantized.engine
 
-        # make sure internal valid reports matches
-        detector_name_set = set([detector.get_detector_name() for detector in test_detector_set])
-        self.assertEqual(model_report.get_desired_reports_names(), detector_name_set)
+            # make an example set of detectors
+            test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
+            # initialize with an empty detector
+            model_report = ModelReport(test_detector_set)
 
-        # now attempt with no valid reports, should raise error
-        with self.assertRaises(ValueError):
-            model_report = ModelReport(set([]))
+            # make sure internal valid reports matches
+            detector_name_set = set([detector.get_detector_name() for detector in test_detector_set])
+            self.assertEqual(model_report.get_desired_reports_names(), detector_name_set)
 
-        # number of expected obs of interest entries
-        num_expected_entries = len(test_detector_set)
-        self.assertEqual(len(model_report.get_observers_of_interest()), num_expected_entries)
+            # now attempt with no valid reports, should raise error
+            with self.assertRaises(ValueError):
+                model_report = ModelReport(set([]))
 
-        for value in model_report.get_observers_of_interest().values():
-            self.assertEqual(len(value), 0)
+            # number of expected obs of interest entries
+            num_expected_entries = len(test_detector_set)
+            self.assertEqual(len(model_report.get_observers_of_interest()), num_expected_entries)
+
+            for value in model_report.get_observers_of_interest().values():
+                self.assertEqual(len(value), 0)
