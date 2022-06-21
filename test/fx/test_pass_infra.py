@@ -1,6 +1,6 @@
-import unittest
 import torch
 
+from torch.testing._internal.common_utils import TestCase
 from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
@@ -27,7 +27,7 @@ class AddModule(torch.nn.Module):
         return z
 
 
-class TestPassManager(unittest.TestCase):
+class TestPassManager(TestCase):
     def test_pass_manager(self):
         """
         Tests that the pass manager runs the passes correctly.
@@ -86,8 +86,7 @@ class TestPassManager(unittest.TestCase):
         pm = PassManager()
         self.assertRaises(TypeError, pm.add_checks, check_bad_args)
 
-
-class TestPassPipelineManager(unittest.TestCase):
+class TestPassPipelineManager(TestCase):
     def test_pass_pipeline_manager(self):
         """
         Tests that the pass pipeline manager runs the pass managers correctly.
@@ -105,7 +104,3 @@ class TestPassPipelineManager(unittest.TestCase):
         for node in traced_m.graph.nodes:
             if node.op == "call_function":
                 self.assertEqual(node.target, torch.div)
-
-
-if __name__ == "__main__":
-    unittest.main()
