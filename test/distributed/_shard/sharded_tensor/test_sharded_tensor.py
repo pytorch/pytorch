@@ -19,10 +19,11 @@ from torch.distributed._shard.api import (
     _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    custom_sharded_op_impl,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
+    Shard
 )
 from torch.distributed._shard.sharding_spec import (
     ChunkShardingSpec,
@@ -174,7 +175,7 @@ class TestShardParameter(ShardedTensorTestBase):
         with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
             shard_parameter(fc, 'weight', spec, src_rank=self.rank)
 
-        with self.assertRaisesRegex(AttributeError, 'Linear have no attribute'):
+        with self.assertRaisesRegex(AttributeError, 'has no attribute'):
             shard_parameter(fc, 'foo', spec)
 
         with self.assertRaisesRegex(ValueError, 'Expected Linear.bias to be a Tensor, but found str'):
@@ -1097,7 +1098,11 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         # Test save
         m._register_state_dict_hook(state_dict_hook)
         buffer = io.BytesIO()
-        torch.save(m.state_dict(), buffer)
+        mod_state_dict = m.state_dict()
+        mod_state_keys = mod_state_dict.keys()
+        self.assertTrue("sharded_tensor1" in mod_state_keys)
+        self.assertTrue("submodule.sharded_tensor2" in mod_state_keys)
+        torch.save(mod_state_dict, buffer)
 
         # Test load.
         module_load = MyShardedModel1()
@@ -1107,6 +1112,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         state_dict_deser = torch.load(buffer)
         module_load.load_state_dict(state_dict_deser, strict=False)
 
+        module_load._register_state_dict_hook(state_dict_hook)
+        loaded_dict_keys = module_load.state_dict().keys()
+        self.assertTrue("sharded_tensor1" in loaded_dict_keys)
+        self.assertTrue("submodule.sharded_tensor2" in loaded_dict_keys)
         # Verify after load.
         self.assertTrue(torch.equal(m.sharded_tensor1, module_load.sharded_tensor1))
         self.assertTrue(torch.equal(m.submodule.sharded_tensor2, module_load.submodule.sharded_tensor2))
@@ -2463,7 +2472,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_custom_op(self):
 
-        @sharded_op_impl(torch.asin)
+        @custom_sharded_op_impl(torch.asin)
         def my_sharded_asin(types, args, kwargs, process_group):
             return torch.asin(args[0].local_shards()[0].tensor)
 
@@ -2491,7 +2500,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
         from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 
         @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
-        def my_sharded_linear(types, args, kwargs):
+        def my_sharded_linear(types, args, kwargs, process_group):
             return t
 
         spec = ChunkShardingSpec(
@@ -2515,15 +2524,39 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     def test_custom_op_errors(self):
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @sharded_op_impl(torch.nn.functional.linear)
+            @custom_sharded_op_impl(torch.nn.functional.linear)
             def my_op1(types, args, kwargs, process_group, random_param):
                 pass
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @sharded_op_impl(torch.nn.functional.linear)
+            @custom_sharded_op_impl(torch.nn.functional.linear)
             def my_op2(types):
                 pass
 
+class TestShardMetadata(ShardedTensorTestBase):
+    @with_comms
+    @requires_nccl()
+    def test_shard_metadata_init(self):
+        pg = dist.distributed_c10d._get_default_group()
+
+        md = ShardMetadata([10], [0])
+        self.assertIsNone(md.placement)
+        with self.assertRaisesRegex(ValueError, "remote device is None"):
+            _parse_and_validate_remote_device(pg, md.placement)
+
+        # String placement gets converted by ctor
+        md = ShardMetadata([10], [0], "rank:0/cpu")
+        self.assertEqual(md.placement, _remote_device("rank:0/cpu"))
+        rank, device = _parse_and_validate_remote_device(pg, md.placement)
+        self.assertEqual(0, rank)
+        self.assertEqual(device, torch.device("cpu"))
+
+    @with_comms
+    @requires_nccl()
+    def test_create_shard_with_no_placement(self):
+        md = ShardMetadata([0], [10])
+        shard = Shard(torch.zeros(10), md)
+        self.assertIsNone(shard.metadata.placement)
 
 if __name__ == '__main__':
     run_tests()

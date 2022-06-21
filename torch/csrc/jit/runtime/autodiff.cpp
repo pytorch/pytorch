@@ -356,6 +356,28 @@ static Value* createAutogradAdd(Value* a, Value* b) {
   return graph->insertNode(graph->create(prim::AutogradAdd, {a, b}))->output();
 }
 
+namespace {
+bool outputRequiresGrad(Value* output) {
+  if (output->type()->castRaw<TensorType>() == nullptr) {
+    return output->requires_grad();
+  }
+  c10::optional<bool> requiresGrad =
+      output->type()->expectRef<TensorType>().requiresGrad();
+  if (requiresGrad.has_value()) {
+    return *requiresGrad;
+  }
+
+  Node* n = output->node();
+  if (n->kind() != prim::profile) {
+    return true;
+  }
+  if (!n->hasAttribute(attr::profiled_type)) {
+    return true;
+  }
+  return n->ty(attr::profiled_type)->requires_grad();
+}
+} // namespace
+
 // Before:
 //   - grad_desc has field f initialized to the original 0-stage graph
 // After:
@@ -395,7 +417,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc) {
   auto outputs = graph.outputs();
   for (size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value* output = outputs[i];
-    if (!output->requires_grad())
+    if (!outputRequiresGrad(output))
       continue;
     Value* output_grad = reverse_block->addInput()->setType(output->type());
     GRAPH_DEBUG(
