@@ -35,7 +35,7 @@ from torch.utils.data.datapipes.iter import IterableWrapper
 from torch.utils.data.datapipes.map import SequenceWrapper
 from torch._utils import ExceptionWrapper
 from torch.testing._internal.common_utils import (TestCase, run_tests, TEST_NUMPY, IS_WINDOWS,
-                                                  IS_IN_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
+                                                  IS_CI, NO_MULTIPROCESSING_SPAWN, skipIfRocm, slowTest,
                                                   load_tests, TEST_WITH_ASAN, TEST_WITH_TSAN, IS_SANDCASTLE,
                                                   IS_MACOS)
 
@@ -47,7 +47,7 @@ except ImportError:
     HAS_PSUTIL = False
     err_msg = ("psutil not found. Some critical data loader tests relying on it "
                "(e.g., TestDataLoader.test_proper_exit) will not run.")
-    if IS_IN_CI:
+    if IS_CI:
         raise ImportError(err_msg) from None
     else:
         warnings.warn(err_msg)
@@ -133,9 +133,46 @@ class TestDatasetRandomSplit(TestCase):
         self.assertEqual(len(splits[0]), 2)
         self.assertEqual(len(splits[1]), 4)
 
+        splits = random_split([1, 2, 3, 4, 5, 6], [0.5, 0.5])
+        self.assertEqual(len(splits), 2)
+        self.assertEqual(len(splits[0]), 3)
+        self.assertEqual(len(splits[1]), 3)
+
+        # Odd size splits
+        self.assertEqual(
+            len(random_split(range(3), [0.5, 0.5], generator=torch.Generator().manual_seed(1))),
+            2
+        )
+
+        # Odd sized round-robin splits
+        splits = random_split(range(106), [0.1, 0.2, 0.3, 0.4],
+                              generator=torch.Generator().manual_seed(1))
+        self.assertEqual(len(splits[0]), 11)
+        self.assertEqual(len(splits[1]), 22)
+        self.assertEqual(len(splits[2]), 31)
+        self.assertEqual(len(splits[3]), 42)
+
+
     def test_splits_are_mutually_exclusive(self):
         data = [5, 2, 3, 4, 1, 6]
         splits = random_split(data, [2, 4])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
+
+        splits = random_split(data, [0.33, 0.67])
+        all_values = []
+        all_values.extend(list(splits[0]))
+        all_values.extend(list(splits[1]))
+        data.sort()
+        all_values.sort()
+        self.assertListEqual(data, all_values)
+
+        data = [1, 2, 3, 4]
+        splits = random_split(data, [0.25, 0.75])
         all_values = []
         all_values.extend(list(splits[0]))
         all_values.extend(list(splits[1]))
@@ -166,6 +203,13 @@ class TestDatasetRandomSplit(TestCase):
         for batch in data_loader:
             pass
 
+        # fractional splitting
+        dataset = CustomDataset(self, x)
+        dataset = random_split(dataset, [1.0])[0]
+        data_loader = DataLoader(dataset)
+        for batch in data_loader:
+            pass
+
     def test_splits_reproducibility(self):
         self.assertEqual(
             [list(x) for x in random_split(range(10), [3, 7], generator=torch.Generator().manual_seed(1))],
@@ -175,6 +219,23 @@ class TestDatasetRandomSplit(TestCase):
             random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),
             random_split(range(100), [60, 40], generator=torch.Generator().manual_seed(42)),
         )
+        self.assertEqual(
+            random_split(range(100), [0.5, 0.5], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [0.5, 0.5], generator=torch.Generator().manual_seed(42)),
+        )
+        self.assertEqual(
+            random_split(range(100), [0.33, 0.33, 0.34], generator=torch.Generator().manual_seed(42)),
+            random_split(range(100), [0.33, 0.33, 0.34], generator=torch.Generator().manual_seed(42)),
+        )
+
+    def test_incomplete_fractional_splits(self):
+        with self.assertRaises(ValueError):
+            # should raise since the sum of fractions is not 1
+            random_split([1, 2, 3, 4], [0.1])
+
+        with self.assertRaises(ValueError):
+            # should raise since fraction > 1
+            random_split([1, 2, 3, 4], [1.1])
 
     def test_splits_generator(self):
         # A random_split without a specific generator should affect the default one
