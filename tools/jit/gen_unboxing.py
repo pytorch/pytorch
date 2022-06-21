@@ -2,18 +2,23 @@
 import argparse
 import os
 import pathlib
+import sys
 from dataclasses import dataclass
+from typing import Union, Sequence, List
+
+import yaml
+from typing_extensions import Literal
+
+from torchgen.api import cpp
 from torchgen.api import unboxing
 from torchgen.api.translate import translate
 from torchgen.api.types import CppSignatureGroup
 from torchgen.api.unboxing import convert_arguments
 from torchgen.context import method_with_native_function
 from torchgen.gen import parse_native_yaml, cpp_string, get_custom_build_selector
-from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant
+from torchgen.model import NativeFunction, NativeFunctionsGroup, Variant, Argument
 from torchgen.selective_build.selector import SelectiveBuilder
 from torchgen.utils import Target, FileManager, mapMaybe, make_file_manager
-from typing import Union, Sequence
-from typing_extensions import Literal
 
 
 # Generates UnboxingFunctions.h & UnboxingFunctions.cpp.
@@ -103,12 +108,20 @@ class ComputeCodegenUnboxedKernels:
         connector = ",\n\t\t"
         args_code = []
         for arg in args:
-            if not arg.default:
+            # Using method=False faithful C++ API, so we should not see SelfArgument/TensorOptionsArgument
+            assert isinstance(arg.argument, Argument)
+            if not arg.argument.default:
                 arg_cpp = "c10::IValue(c10::nullopt)"
-            elif arg.default.startswith("{"):
-                arg_cpp = f"c10::IntArrayRef({arg.default})"
             else:
-                arg_cpp = f"c10::IValue({arg.default})"
+                # The unboxing code uses the faithful C++ API to avoid the overhead
+                # from wrapping/unwrapping TensorOptios.
+                # However, we would look to include default args for schema parsing.
+                # Default args only show up in the nonfaithful C++ API,
+                arg_default = cpp.default_expr(arg.argument.default, arg.argument.type)
+                if arg_default.startswith("{"):
+                    arg_cpp = f"c10::IntArrayRef({arg_default})"
+                else:
+                    arg_cpp = f"c10::IValue({arg_default})"
             args_code.append(
                 f"""c10::Argument("{arg.name}", nullptr, c10::nullopt, {arg_cpp})"""
             )
@@ -179,7 +192,7 @@ def gen_unboxing(
     )
 
 
-def main() -> None:
+def main(args: List[str]) -> None:
     parser = argparse.ArgumentParser(description="Generate unboxing source files")
     parser.add_argument(
         "-s",
@@ -215,8 +228,22 @@ def main() -> None:
         "each item is `namespace`::`operator name` without overload name; "
         "e.g.: aten::empty aten::conv2d ...",
     )
+    parser.add_argument(
+        "--TEST_ONLY_op_registration_allowlist_yaml_path",
+        help="Provide a path to the operator selection (for custom build) YAML "
+        "which contains a list of operators. It is to serve testing purpose and "
+        "each item is `namespace`::`operator name` without overload name; "
+        "e.g.: aten::empty aten::conv2d ...",
+    )
 
-    options = parser.parse_args()
+    options = parser.parse_args(args)
+    if options.op_registration_allowlist:
+        op_registration_allowlist = options.op_registration_allowlist
+    elif options.TEST_ONLY_op_registration_allowlist_yaml_path:
+        with open(options.TEST_ONLY_op_registration_allowlist_yaml_path, "r") as f:
+            op_registration_allowlist = yaml.safe_load(f)
+    else:
+        op_registration_allowlist = None
 
     selector = get_custom_build_selector(
         options.op_registration_allowlist,
@@ -244,4 +271,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1:])
