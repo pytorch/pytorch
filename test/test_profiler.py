@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 import unittest
+import time
 
 import torch
 import torch.nn as nn
@@ -1128,24 +1129,18 @@ class TestProfiler(TestCase):
                 ]))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
-    def test_utils_basic_evaluation(self):
-        model = torch.nn.Sequential(
-            nn.Conv2d(16, 33, 18),
-            nn.ReLU(),
-            nn.Linear(243, 243),
-            nn.ReLU(),
-        ).to('cuda')
-        inputs = torch.randn(40, 16, 18, 260).to('cuda')
+    def test_utils_compute_queue_depth(self):
+        x = torch.ones((4096, 4096), device="cuda")
         with profile() as prof:
-            model(inputs)
-            for i in range(260):
-                inputs[0, 0, 0, i] = i
-            model(inputs)
+            for _ in range(5):
+                y = torch.mm(x, x)
+            torch.cuda.synchronize()
+            for _ in range(3):
+                y[0] += 1
+                time.sleep(0.1)
         basic_evaluation = _utils.BasicEvaluation(prof.profiler)
-        for _, event_metrics in basic_evaluation.metrics.items():
-            self.assertTrue(event_metrics.fraction_idle_time() >= 0.0
-                            and event_metrics.fraction_idle_time() <= 1.0)
-        self.assertTrue(isinstance(basic_evaluation.rank_events(10), list))
+        for entry in basic_evaluation.compute_queue_depth():
+            self.assertTrue(entry.queue_depth > 0)
 
 
 if __name__ == '__main__':
