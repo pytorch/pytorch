@@ -9,4 +9,5 @@ TORCH_API torch::CppFunction autogradNotImplementedFallback();
 
 TORCH_API torch::CppFunction autogradNotImplementedInplaceOrViewFallback();
 
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch
