@@ -3486,6 +3486,32 @@ class TestNLLLoss(TestCase):
 
         helper((2, 8, 4, 5))
 
+    # Test index add
+    def test_index_add(self):
+        def helper(shape, dim, index, source_shape, alpha, idx_dtype=torch.int32):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_idx = torch.tensor(index, device='cpu', dtype=idx_dtype)
+            idx = cpu_idx.detach().clone().to('mps')
+
+            cpu_source = torch.randn(source_shape, device='cpu', dtype=torch.float, requires_grad=False)
+            source = cpu_source.detach().clone().to('mps')
+
+            idx_result = torch.index_add(x, dim=dim, index=idx, source=source)
+            idx_result_cpu = torch.index_add(cpu_x, dim=dim, index=cpu_idx, source=cpu_source)
+            self.assertEqual(idx_result, idx_result_cpu)
+
+        helper((2, 8, 4, 5), 0, [0, 1, 0], (3, 8, 4, 5), 5)
+        helper((8, 8, 4, 5), 0, [7], (1, 8, 4, 5), 6)
+        helper((2, 8, 4, 5), 1, [0, 3, 7], (2, 3, 4, 5), 5)
+        helper((2, 8, 4, 5), 2, [3, 0], (2, 8, 2, 5), 3)
+        helper((2, 8, 4, 5), 3, [2, 3, 0], (2, 8, 4, 3), 4)
+        helper((2, 3, 3), -1, [1, 2], (2, 3, 2), 6)
+        # test result dim=1
+        helper((2,), 0, [1], (1,), 6)
+        helper(2, 0, 1, 1, 6)
+
     # Test index select
     def test_index_select(self):
         def helper(shape, dim, index, idx_dtype=torch.int32):

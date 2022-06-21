@@ -27,6 +27,96 @@
 namespace at {
 namespace native {
 
+TORCH_IMPL_FUNC(index_add_mps_out)(
+  const Tensor& self,
+  int64_t dim,
+  const Tensor& index,
+  const Tensor& source,
+  const Scalar& alpha,
+  const Tensor& result) {
+  auto numel = index.numel();
+
+  using namespace mps;
+  MPSStream* stream = getCurrentMPSStream();
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  if (numel == 0) {
+    return;
+  }
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* indexTensor_ = nil;
+    MPSGraphTensor* sourceTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  @autoreleasepool {
+
+    string key = "index_add_mps_out" + getTensorsStringKey({self, index, source}) + ":" + std::to_string(dim) + ":" + std::to_string(alpha.to<double>());
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+
+    if(!cachedGraph) {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        CachedGraph *newCachedGraph = nil;
+
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          MPSGraphTensor* indexTensor = mpsGraphRankedPlaceHolder(mpsGraph, index);
+          MPSGraphTensor* sourceTensor = mpsGraphRankedPlaceHolder(mpsGraph, source);
+          MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.to<double>()
+                                                               shape:@[@1]
+                                                            dataType:getMPSScalarType(self.scalar_type())];
+          MPSGraphTensor* inputSlice = [mpsGraph gatherWithUpdatesTensor:inputTensor
+                                                           indicesTensor:indexTensor
+                                                                    axis:dim
+                                                         batchDimensions:0
+                                                                    name:nil];
+          MPSGraphTensor* alphaSourceSlice = [mpsGraph multiplicationWithPrimaryTensor:sourceTensor
+                                                                       secondaryTensor:alphaTensor
+                                                                                  name:nil];
+          MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:inputTensor
+                                                            updatesTensor:alphaSourceSlice
+                                                            indicesTensor:indexTensor
+                                                                     axis:dim
+                                                                     mode:MPSGraphScatterModeAdd
+                                                                     name:nil];
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->indexTensor_ = indexTensor;
+          newCachedGraph->sourceTensor_ = sourceTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+
+    Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder indexPlaceholder = Placeholder(cachedGraph->indexTensor_, index);
+    Placeholder sourcePlaceholder = Placeholder(cachedGraph->sourceTensor_, source);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+      indexPlaceholder.getMPSGraphTensor() : indexPlaceholder.getMPSGraphTensorData(),
+      sourcePlaceholder.getMPSGraphTensor() : sourcePlaceholder.getMPSGraphTensorData()
+    };
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+}
+
+
 Tensor index_select_mps(const Tensor & self,
                          int64_t dim,
                          const Tensor & index) {

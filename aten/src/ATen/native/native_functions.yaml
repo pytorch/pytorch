@@ -6417,6 +6417,7 @@
   dispatch:
     CPU: index_add_cpu_out
     CUDA: index_add_cuda_out
+    MPS: index_add_mps_out
 
 - func: index_add_(Tensor(a!) self, int dim, Tensor index, Tensor source, *, Scalar alpha=1) -> Tensor(a!)
   structured_delegate: index_add.out
