@@ -464,11 +464,11 @@ std::vector<Shape> compute_shape_expand(
     } else {
       target_size[idx] = _sizes[idx].data();
       if (_sizes[idx].data() == -1) {
-          // -1 can't be specified for non-existing dimensions
-          TORCH_CHECK(idx >= num_new_dimensions);
-          target_size[idx] = padded_self[idx];
+        // -1 can't be specified for non-existing dimensions
+        TORCH_CHECK(idx >= num_new_dimensions);
+        target_size[idx] = padded_self[idx];
       } else {
-          target_size[idx] = _sizes[idx].data();
+        target_size[idx] = _sizes[idx].data();
       }
     }
   }
