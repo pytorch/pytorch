@@ -2652,6 +2652,22 @@
 - name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   self: grad.reshape(self.sizes())
 
+# Nested Tensor
+- name: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  list: "grad.defined()? at::native::NestedTensor_unbind(grad) : std::vector<Tensor>(list.size())"
+
+- name: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+  t: grad.to_padded_tensor(0, t.sizes())
+  mask: non_differentiable
+
+- name: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
+  padded: _nested_from_padded_backward(grad, padded, fuse_transform_0213)
+  cpu_nested_shape_example: non_differentiable
+
+- name: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+  self: at::_nested_from_padded(grad, self._nested_tensor_size())
+  padding: non_differentiable
+
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
