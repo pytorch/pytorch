@@ -20423,18 +20423,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.hardshrink",
         torch_opinfo_name="nn.functional.hardshrink",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.softshrink",
         torch_opinfo_name="nn.functional.softshrink",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     #
     # Elementwise Binary Reference OpInfos
@@ -20567,12 +20561,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.logical_not",
         torch_opinfo_name="logical_not",
-        skips=(
-            DecorateInfo(
-                # NotImplementedError: argument of type: <class 'complex'>
-                unittest.skip("Fails aten complex and nvfuser doesn't support eq(a, 0)"), 'TestCommon', 'test_python_ref_executor'
-            ),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
