@@ -36,31 +36,30 @@ class TestBaseDataScheduler(TestCase):
                 'config': {'sparsity_level': 0.3}
             }
         ]
-        return data_list, defaults, data_with_config
+        return data_list, data_with_config, defaults
 
-    def _get_sparsifier(self):
-        data_list, defaults, data_with_config = self._get_data()
+    def _get_sparsifier(self, data_list, data_with_config, defaults):
         sparsifier = DataNormSparsifier(data_list, **defaults)
         for data_config_dict in data_with_config:
             name, data, config = data_config_dict['name'], data_config_dict['data'], data_config_dict['config']
             sparsifier.add_data(name=name, data=data, **config)
         return sparsifier
 
-    def _get_scheduler(self, sparsifier):
-        schedule_param = self._get_scheduler_param()
+    def _get_scheduler(self, sparsifier, schedule_param):
         scheduler = ImplementedDataScheduler(sparsifier, schedule_param)
         return scheduler
 
-    def _get_scheduler_param(self):
+    def _get_schedule_param(self):
         return 'sparsity_level'
 
     def test_constructor(self):
-        sparsifier = self._get_sparsifier()
-        scheduler = self._get_scheduler(sparsifier)
-        scheduler_param = self._get_scheduler_param()
+        data_list, data_with_config, defaults = self._get_data()
+        sparsifier = self._get_sparsifier(data_list, data_with_config, defaults)
+        schedule_param = self._get_schedule_param()
+        scheduler = self._get_scheduler(sparsifier, schedule_param)
 
         assert scheduler.data_sparsifier == sparsifier
         assert scheduler._step_count == 0  # 0 now as step() is not yet implemented
 
         for name, config in sparsifier.data_groups.items():
-            assert scheduler.base_param[name] == config.get(scheduler_param, None)
+            assert scheduler.base_param[name] == config.get(schedule_param, None)
