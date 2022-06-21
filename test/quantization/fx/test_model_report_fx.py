@@ -7,12 +7,14 @@ import torch.nn.functional as F
 from torch.ao.quantization import QConfig, QConfigMapping
 from torch.ao.quantization.fx._model_report.detector import DynamicStaticDetector, PerChannelDetector
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
+from torch.ao.quantization.fx._model_report.model_report import ModelReport
 from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
 from torch.nn.intrinsic.modules.fused import ConvReLU2d, LinearReLU
 from torch.testing._internal.common_quantization import (
     ConvModel,
     QuantizationTestCase,
     SingleLayerLinearModel,
+    override_quantized_engine,
     TwoLayerLinearModel,
     skipIfNoFBGEMM,
     skipIfNoQNNPACK,
@@ -88,7 +90,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
     """
 
     def test_simple_conv(self):
-        torch.backends.quantized.engine = "onednn"
+        torch.backends.quantized.engine = "fbgemm"
 
         q_config_mapping = QConfigMapping()
         q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
@@ -805,3 +807,41 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
         self.assertTrue("stationary" in data_dist_info)
         self.assertTrue("non-stationary" in data_dist_info)
         self.assertTrue(dynam_vs_stat_dict[linear_fqn]["dynamic_recommended"])
+
+
+class TestFxModelReportClass(QuantizationTestCase):
+
+    @skipIfNoFBGEMM
+    def test_constructor(self):
+        """
+        Tests the constructor of the ModelReport class.
+
+        Specifically looks at:
+        - The desired reports
+        - Ensures that the observers of interest are properly initialized
+        """
+
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+            backend = torch.backends.quantized.engine
+
+            # make an example set of detectors
+            test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
+            # initialize with an empty detector
+            model_report = ModelReport(test_detector_set)
+
+            # make sure internal valid reports matches
+            detector_name_set = set([detector.get_detector_name() for detector in test_detector_set])
+            self.assertEqual(model_report.get_desired_reports_names(), detector_name_set)
+
+            # now attempt with no valid reports, should raise error
+            with self.assertRaises(ValueError):
+                model_report = ModelReport(set([]))
+
+            # number of expected obs of interest entries
+            num_expected_entries = len(test_detector_set)
+            self.assertEqual(len(model_report.get_observers_of_interest()), num_expected_entries)
+
+            for value in model_report.get_observers_of_interest().values():
+                self.assertEqual(len(value), 0)
