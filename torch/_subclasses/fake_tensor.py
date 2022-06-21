@@ -214,9 +214,18 @@ def clone(fake_mode, func, input, memory_format=None):
         out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
-@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags)  # type: ignore[attr-defined]
+# index.Tensor data-dependent in only some conditions
+@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
+                  and func != aten.index.Tensor)
 def data_dep_op(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
+
+# Bool Indices get Expanded as Masks
+# See: IndexingUtils.h:expandTensors
+def check_no_bool_index_tensors(func, self, indices):
+    for index in indices:
+        if index is not None and index.dtype in (torch.bool, torch.uint8):
+            raise DynamicOutputShapeException(func)
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -251,6 +260,26 @@ class FakeTensor(torch.Tensor):
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
+
+    def new(self, *args, **kwargs):
+        # torch.Tensor.new does not go through the normal dispatcher pattern
+        # so in order to use the same pattern as normal invocation of
+        # returning meta device within the kernel we need to intercept
+        # the call here
+        out_device = self.fake_device
+        if "device" in kwargs:
+            kwarg_device = kwargs.pop("device")
+            out_device = kwarg_device if kwarg_device else out_device
+            kwargs["device"] = "meta"
+        self.in_kernel_invocation = True
+        try:
+            with no_dispatch():
+                meta_out = super().new(*args, **kwargs)
+        finally:
+            self.in_kernel_invocation = False
+
+        with no_dispatch():
+            return FakeTensor(self.fake_mode, meta_out, out_device)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -417,6 +446,8 @@ class FakeTensorMode(TorchDispatchMode):
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
 
+            if func == aten.index.Tensor:
+                check_no_bool_index_tensors(func, *args, **kwargs)
 
             self.in_kernel_invocation = True
             try:
@@ -441,7 +472,6 @@ class FakeTensorMode(TorchDispatchMode):
 
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
-
 
 def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
     with no_dispatch():
