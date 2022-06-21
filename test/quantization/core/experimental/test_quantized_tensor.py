@@ -5,7 +5,6 @@ import random
 import unittest
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
-from torch.ao.quantization.experimental.apot_utils import apot_to_float
 
 class TestQuantizedTensor(unittest.TestCase):
     r""" Tests int_repr on APoTQuantizer with random tensor2quantize
@@ -20,18 +19,14 @@ class TestQuantizedTensor(unittest.TestCase):
 
         quantizer = APoTQuantizer(4, 2, torch.max(tensor2quantize), False)
 
-        tensor_apot = TensorAPoT(APoTQuantizer(4, 2, torch.max(tensor2quantize), False))
+        # get apot quantized tensor result
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
 
-        # # get apot quantized tensor result
-        # qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
+        tensor_apot = TensorAPoT(quantizer)
 
-        # print(quantizer)
+        qtensor_int_rep = tensor_apot.int_repr()
 
-        # tensor_apot = TensorAPoT(quantizer)
-
-        # qtensor_int_rep = tensor_apot.int_repr()
-
-        # self.assertTrue(torch.equal(qtensor, qtensor_int_rep))
+        self.assertTrue(torch.equal(qtensor, qtensor_int_rep))
 
 if __name__ == '__main__':
     unittest.main()
