@@ -160,9 +160,7 @@ def _communicate_optim_state(
                 tensor_buffer = value.new_zeros(*buffer_size)
             dist._all_gather_base(tensor_buffer, value, group=group)
             if to_save:
-                assert hasattr(flat_param, "_orig_size"), \
-                    "Sharded flattened parameter should have `_orig_size` set"
-                unpadded_numel = flat_param._orig_size.numel()  # type: ignore[attr-defined]
+                unpadded_numel = flat_param._unsharded_size.numel()  # type: ignore[attr-defined]
                 tensor_state[state_name] = tensor_buffer[:unpadded_numel].cpu()
         # Zero-dimension tensor state and non-tensor state: take this rank's
         # value directly
@@ -467,7 +465,7 @@ def _flatten_tensor_optim_state(
         in zip(pos_dim_tensors, unflat_param_shapes)
     ]
     flat_tensor = torch.cat(tensors)
-    flat_param_shape = flat_param._orig_size  # type: ignore[attr-defined]
+    flat_param_shape = flat_param._unsharded_size  # type: ignore[attr-defined]
     assert flat_tensor.shape == flat_param_shape, \
         f"tensor optim state: {flat_tensor.shape} " \
         f"flattened parameter: {flat_param_shape}"
