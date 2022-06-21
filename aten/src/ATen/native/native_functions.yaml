@@ -4596,7 +4596,7 @@
   device_check: NoCheck
   device_guard: False
 
-- func: sum_to_checked(Tensor self, SymInt[]? size, Tensor? size, int grad_index) -> Tensor
+- func: sum_to_checked(Tensor self, SymInt[]? size, Tensor? tsize, int grad_idx) -> Tensor
   variants: method
   device_check: NoCheck
   device_guard: False

@@ -13,6 +13,7 @@
 #include <c10/util/DimVector.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/util/SmallVector.h>
+#include "c10/util/Optional.h"
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -88,6 +89,17 @@ struct InputMetadata {
     return at::zeros_symint(shape_as_dim_vector(), options_);
   }
 
+  c10::optional<c10::SymIntArrayRef> shape_as_dim_vector_opt() const {
+    if (is_nested_tensor()) {
+      return c10::nullopt;
+    }
+   return {shape_as_dim_vector()};
+  }
+
+  c10::optional<at::Tensor> shape_as_tensor_opt() const {
+    return is_nested_tensor() ? c10::optional<at::Tensor>{c10::get<at::Tensor>(shape_)} : c10::nullopt;
+  }
+
  private:
   bool is_nested_tensor() const {
     return (c10::holds_alternative<at::Tensor>(shape_));
@@ -102,11 +114,7 @@ struct InputMetadata {
 
   c10::SymIntArrayRef shape_as_dim_vector() const {
     const auto& dim_shape = c10::get<SymIntSmallVec>(shape_);
-   return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
-  }
-
-  at::Tensor shape_as_tensor() const {
-    return c10::get<at::Tensor>(shape_);
+    return c10::SymIntArrayRef(dim_shape.data(), dim_shape.size());
   }
 
   const at::TensorOptions options_;

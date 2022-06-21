@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cfloat>
 #include <type_traits>
+#include <ATen/NestedTensorImpl.h>
 
 namespace at {
 namespace native {

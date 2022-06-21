@@ -11,6 +11,7 @@
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/macros/Export.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <typeindex>
 
 namespace torch {
@@ -108,6 +109,15 @@ struct OptionalArray {
     }
     return *list;
   }
+
+  template<typename T_ = T, 
+            typename = std::enable_if_t<std::is_same<T_, c10::SymInt>::value>>
+    operator c10::optional<c10::SymIntArrayRef>() {
+      if (!list) {
+        return nullopt;
+      }
+      return {c10::SymIntArrayRef(list->data(), list->size())};
+    }
 
   operator c10::OptionalArrayRef<T>() {
     if (!list) {

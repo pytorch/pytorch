@@ -724,7 +724,7 @@ void validate_outputs(
       continue;
     }
 
-    grad = grad.sum_to_checked({metadata.shape_as_dim_vector()}, {metadata.shape_as_tensor()}, i);
+    grad = grad.sum_to_checked(metadata.shape_as_dim_vector_opt(), metadata.shape_as_tensor_opt(), i);
 
     bool input_is_complex =
         isComplexType(c10::typeMetaToScalarType(metadata.options().dtype()));

@@ -804,6 +804,16 @@ void addInputs(Node* n, const char* name, c10::SymIntArrayRef value) {
   addInputs(n, name, asIntArrayRefSlow(value));
 }
 
+void addInputs(Node* n, const char* name, c10::optional<c10::SymIntArrayRef> value) {
+  if (value) {
+    jit::tracer::addInputs(n, name, *value);
+  } else {
+    Graph* g = n->owningGraph();
+    Value* none = g->insertNode(g->createNone())->output();
+    n->addInput(none);
+  }
+}
+
 void addInputs(
     Node* n,
     const char* name,

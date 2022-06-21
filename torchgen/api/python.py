@@ -1202,6 +1202,9 @@ def arg_parser_unpack_method(t: Type, has_default: bool) -> str:
             if str(t.elem.elem) == "int":
                 # accept definite size
                 return "intlistOptional"
+            if str(t.elem.elem) == "SymInt":
+                # accept definite size
+                return "symintlistOptional"
             elif str(t.elem) == "float[]":
                 return "doublelistOptional"
             elif str(t.elem) == "Dimname[]":
