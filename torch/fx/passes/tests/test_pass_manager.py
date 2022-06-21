@@ -20,7 +20,7 @@ def replace_mul_with_sub_pass(gm):
 class AddModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
-    
+
     def forward(self, x):
         y = torch.add(x, x)
         z = torch.add(y, x)
@@ -46,10 +46,10 @@ class TestPassManager(unittest.TestCase):
         for node in traced_m.graph.nodes:
             if node.op == "call_function":
                 self.assertEqual(node.target, torch.div)
-    
+
     def test_this_before_that_pass_constraint(self):
-        """ 
-        Tests the construction of constraints 
+        """
+        Tests the construction of constraints
         """
         passes = [lambda x: 2 * x for _ in range(10)]
         pm = PassManager(passes)
@@ -59,7 +59,7 @@ class TestPassManager(unittest.TestCase):
 
         self.assertRaises(RuntimeError, pm.validate_constraints)
 
-    
+
     def test_pass_manager_checks(self):
         """
         Tests that users can add in check functions correctly
@@ -68,19 +68,19 @@ class TestPassManager(unittest.TestCase):
         traced_m = torch.fx.symbolic_trace(m)
         pm = PassManager(passes=[replace_add_with_mul_pass, replace_mul_with_sub_pass])
 
-        def check_div_target(graph_module): 
+        def check_div_target(graph_module):
             for node in graph_module.graph.nodes:
-                if node.op == "call_function" and node.target != torch.div: 
+                if node.op == "call_function" and node.target != torch.div:
                     raise ValueError("Target should be div!")
         pm.add_checks(check_div_target)
 
         self.assertRaises(ValueError, pm, traced_m)
-        
+
     def test_pass_manager_bad_checks(self):
         """
         Checks that we error if we pass in a check function with the wrong parameters
         """
-        def check_bad_args(graph_module, i): 
+        def check_bad_args(graph_module, i):
             pass
 
         pm = PassManager()

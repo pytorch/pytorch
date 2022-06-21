@@ -25,7 +25,7 @@ class PassPipelineManager:
         if pass_managers:
             self.pass_managers = pass_managers
         self.run_checks_after_each_pass = run_checks_after_each_pass
-    
+
     def add_checks(self, check: Callable) -> None:
         """
         Adds a function which takes runs various checks on a given graph module.
@@ -34,11 +34,10 @@ class PassPipelineManager:
         """
         sig = inspect.signature(check)
 
-        params = [p for p in sig.parameters.values()]
-        if len(params) != 1:
+        if len(list(sig.parameters.values())) != 1:
             raise TypeError("PassManager check function should only take in one variable, a graph_module")
 
-        setattr(self, "check", check)
+        setattr(self, "check", check)  # noqa: B010
 
     def check(self, graph_module: fx.GraphModule) -> None:
         pass
@@ -50,12 +49,12 @@ class PassPipelineManager:
         the graph module to ensure that it still maintains the same required
         invariants.
         """
-        
+
         self.check(graph_module)
 
         for pm in self.pass_managers:
             pm(graph_module)
-            
+
             if self.run_checks_after_each_pass:
                 self.check(graph_module)
 
