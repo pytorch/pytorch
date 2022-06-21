@@ -18,9 +18,9 @@ Tensor NestedTensor_linear(
   const auto last_dim = get_consistent_last_dim_of_nested_tensor(*nt_input);
   TORCH_CHECK(
       last_dim == weight.size(1),
-      "shape mismatch for NestedTensor linear. NestedTensor last_dim: ",
+      "Shape mismatch for NestedTensor linear. NestedTensor last_dim: ",
       last_dim,
-      " vs. first dim of rhs: ",
+      " vs. dim 1 of rhs: ",
       weight.size(1));
   const Tensor& input_buffer = nt_input->get_buffer();
   Tensor result_buffer =

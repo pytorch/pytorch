@@ -359,7 +359,7 @@ std::tuple<Tensor, Tensor, Tensor> NestedTensor_linear_backward(
     const Tensor& weight,
     const c10::optional<Tensor>& bias_opt) {
   if (!grad.defined()) {
-    return {Tensor(), Tensor(), Tensor()};
+    return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
   }
   auto* nt_grad = at::native::get_nested_tensor_impl_or_null(grad);
   auto* nt_self = at::native::get_nested_tensor_impl_or_null(self);
