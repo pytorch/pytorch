@@ -1,11 +1,11 @@
 import unittest
 import torch
 
-from torch.fx.passes.pass_manager import (
+from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
 )
-from torch.fx.passes.pass_pipeline_manager import PassPipelineManager
+from torch.fx.passes.infra.pass_pipeline_manager import PassPipelineManager
 
 def replace_add_with_mul_pass(gm):
     for node in gm.graph.nodes:
