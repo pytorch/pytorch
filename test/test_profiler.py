@@ -210,13 +210,14 @@ class TestExecutionGraph(TestCase):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
             rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
-            x = torch.randn(10, 10)
+            x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
-            y = torch.randn(10, 10)
+            y = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 y = y.cuda()
             z = x + y + x * y + x * y
+            z.backward(z)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
