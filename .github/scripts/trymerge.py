@@ -5,6 +5,8 @@ import json
 import os
 import re
 import time
+import urllib.parse
+from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
@@ -121,6 +123,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
+            pushedDate
             oid
           }
         }
@@ -335,7 +338,7 @@ def fetch_json(url: str,
                data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={val}" for name, val in params.items())
+        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
     return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
 
@@ -446,6 +449,12 @@ class GitHubPR:
 
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
+
+    def last_pushed_at(self) -> datetime:
+        return datetime.fromisoformat(self.last_commit()['pushedDate'][:-1])
+
+    def last_commit(self) -> Any:
+        return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -909,27 +918,57 @@ def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
 
+def check_for_sev(org: str, project: str, force: bool) -> None:
+    if force:
+        return
+    response = cast(
+        Dict[str, Any],
+        fetch_json(
+            "https://api.github.com/search/issues",
+            params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
+        ),
+    )
+    if response["total_count"] != 0:
+        for item in response["items"]:
+            if "merge blocking" in item["body"].lower():
+                raise RuntimeError(
+                    "Not merging any PRs at the moment because there is a "
+                    + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
+                    + f"{item['html_url']}"
+                )
+    return
+
+
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
           force: bool = False,
           comment_id: Optional[int] = None,
           mandatory_only: bool = False,
           on_green: bool = False,
-          timeout_minutes: int = 400) -> None:
+          timeout_minutes: int = 400,
+          stale_pr_days: int = 3) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
-    if force:
-        pr = GitHubPR(org, project, pr_num)
-        pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+    pr = GitHubPR(org, project, pr_num)
+    initial_commit_sha = pr.last_commit()['oid']
+    check_for_sev(org, project, force)
+    if force or can_skip_internal_checks(pr, comment_id):
+        # do not wait for any pending signals if PR is closed as part of co-development process
+        return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
+        check_for_sev(org, project, force)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
+        if initial_commit_sha != pr.last_commit()['oid']:
+            raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)

@@ -191,6 +191,27 @@ Tensor NestedTensor_nested_tensor_from_mask(const Tensor& t, const Tensor& mask)
     return at::_nested_from_padded(t, sizes, false);
 }
 
+bool NestedTensor_nested_tensor_from_mask_left_aligned(const Tensor& t, const Tensor& mask) {
+    TORCH_CHECK(mask.scalar_type() == at::ScalarType::Bool, "Expected mask to be of ScalarType Bool, but got ", mask.scalar_type(), " instead.");
+    TORCH_CHECK(mask.dim() == 2, "Padding mask should be 2D");
+    TORCH_CHECK(t.dim() == 3, "Input should be a 3D tensor, N * L * D");
+    auto N = t.size(0), L = t.size(1);
+    auto NN = mask.size(0), LL = mask.size(1);
+    TORCH_CHECK(N == NN && L == LL, "Mask size should match input size");
+
+    // N * L
+    Tensor sizes = mask;
+    Tensor tmp_pad = at::zeros({N, 1}, mask.options());
+    // Make sure padding is only added at the end of mask
+    Tensor nums = at::cat({sizes, tmp_pad}, 1).to(kInt).argmin(1);
+
+    // N, ([size1, size2, ... sizeN])
+    sizes = sizes.cumsum(1).select(1, L - 1);
+    nums = nums.to(sizes.options());
+
+    return sizes.equal(nums);
+}
+
 Tensor nested_tensor(
     TensorList list,
     c10::optional<ScalarType> dtype,
@@ -351,7 +372,7 @@ Tensor NestedTensor_to_padded_tensor_generic(
 
   if (sizes.numel() == 0 || sizes.dim() == 0) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nt.get_buffer().numel() == 0);
-    return nt.get_buffer();
+    return nt.get_buffer().clone();
   }
 
   // TODO: doesn't handle empty/scalar entries because we don't need
@@ -620,6 +641,24 @@ Tensor clone_nested(
   // efficient implementation of nested_size_tensor_.
   return wrap_buffer(
       get_buffer(self).clone(), get_nested_size_tensor(self).clone());
+}
+
+at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
+  return get_nested_size_tensor(self);
+}
+
+Tensor dropout_nested(const Tensor& input, double p, bool train) {
+  auto input_ptr = get_nested_tensor_impl(input);
+  const Tensor & input_buffer = input_ptr->get_buffer(),
+                 sizemat = input_ptr->get_nested_size_tensor();
+  Tensor output_buffer = at::dropout(input_buffer, p, train);
+  return wrap_buffer(output_buffer, sizemat.clone());
+}
+
+Tensor& dropout_nested_(Tensor& input, double p, bool train) {
+  Tensor input_buffer = get_buffer(input);
+  at::dropout_(input_buffer, p, train);
+  return input;
 }
 
 } // namespace native

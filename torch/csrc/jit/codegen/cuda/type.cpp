@@ -310,6 +310,8 @@ static const char* expr_type2string(ExprType t) {
       return "MmaOp";
     case ExprType::TransposeOp:
       return "TransposeOp";
+    case ExprType::ExpandOp:
+      return "ExpandOp";
     case ExprType::ShiftOp:
       return "ShiftOp";
     case ExprType::GatherOp:
@@ -717,9 +719,7 @@ static const char* iter_type2string(IterType t) {
       return "i";
     case IterType::Reduction:
       return "r";
-    case IterType::BroadcastWithStride:
-      return "sb";
-    case IterType::BroadcastWithoutStride:
+    case IterType::Broadcast:
       return "b";
     case IterType::Gather:
       return "g";
