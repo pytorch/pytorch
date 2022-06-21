@@ -837,6 +837,10 @@ inline py::object toPyObject(IValue ivalue) {
 #else
     TORCH_CHECK(false, "RRef is only supported with the distributed package");
 #endif
+  } else if (ivalue.isSymInt()) {
+    auto si = ivalue.toSymInt();
+    return si.is_symbolic() ? py::cast(si.toSymbolicIntNode())
+                            : py::cast(si.expect_int());
   } else {
     AT_ERROR(
         "Missing cases in 'toPyObject'! Can't convert ",
@@ -1215,7 +1219,8 @@ inline py::object _get_operation_for_overload_or_packet(
         total_arg_num,
         false /* throw_error */);
   }
-  if (overloaded_args.size() > 0) {
+  if (overloaded_args.size() > 0 ||
+      at::impl::PythonTorchFunctionTLS::get_mode()) {
     std::vector<py::object> overloaded_types;
     overloaded_types.reserve(overloaded_args.size());
     for (auto& oarg : overloaded_args) {

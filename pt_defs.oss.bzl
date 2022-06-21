@@ -1,16 +1,13 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
+load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
+load(":build_variables.bzl", "aten_native_source_list")
 load(
-    "//tools:build_variables.bzl",
-    "aten_native_source_list",
-)
-load(
-    "//tools:ufunc_defs.bzl",
+    ":ufunc_defs.bzl",
     "aten_ufunc_generated_cpu_kernel_sources",
     "aten_ufunc_generated_cpu_sources",
     "aten_ufunc_generated_cuda_sources",
 )
-load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
-load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 
 USED_PT_BACKENDS = [
     "CPU",
@@ -23,6 +20,7 @@ PT_BACKEND_HEADERS = [
     "CPU",
     "CUDA",
     "CompositeExplicitAutograd",
+    "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
     "Meta",
 ]
@@ -336,6 +334,7 @@ def get_aten_generated_files(enabled_backends):
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
+        "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
         "RegisterSchema.cpp",
         "Declarations.yaml",
@@ -356,10 +355,13 @@ def get_aten_generated_files(enabled_backends):
         "CompositeImplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
+        "CompositeExplicitAutogradNonFunctionalFunctions.h",
+        "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
         "core/aten_interned_strings.h",
+        "core/enum_tag.h",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
     # This is tiresome.  A better strategy would be to unconditionally
@@ -419,7 +421,6 @@ def build_aten_cpu(name, srcs, deps = []):
             ":generated_aten_headers_cpu",
             ":jit_core_headers",
             ":pthreadpool",
-            ":th_header",
             "//third_party:ruy_lib",
         ],
     )
@@ -526,7 +527,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):

@@ -3,10 +3,14 @@
 import collections
 import doctest
 import functools
+import importlib
+import inspect
 import itertools
 import math
 import os
 import re
+import subprocess
+import sys
 import unittest.mock
 from typing import Any, Callable, Iterator, List, Tuple
 
@@ -477,7 +481,7 @@ if __name__ == '__main__':
         test_bases_count = len(get_device_type_test_bases())
         # Test without setting env var should run everything.
         env = dict(os.environ)
-        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+        for k in ['CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
             if k in env.keys():
                 del env[k]
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
@@ -1760,6 +1764,54 @@ class TestTestParametrizationDeviceType(TestCase):
 
 instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
+
+
+class TestImports(TestCase):
+    def test_circular_dependencies(self) -> None:
+        """ Checks that all modules inside torch can be imported
+        Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
+        ignored_modules = ["torch.utils.tensorboard",  # deps on tensorboard
+                           "torch.distributed.elastic.rendezvous",  # depps on etcd
+                           "torch.backends._coreml",  # depends on pycoreml
+                           "torch.contrib.",  # something weird
+                           "torch.testing._internal.common_fx2trt",  # needs fx
+                           "torch.testing._internal.distributed.",  # just fails
+                           ]
+        # See https://github.com/pytorch/pytorch/issues/77801
+        if not sys.version_info >= (3, 9):
+            ignored_modules.append("torch.utils.benchmark")
+        if IS_WINDOWS:
+            # Distributed does not work on Windows
+            ignored_modules.append("torch.distributed.")
+            ignored_modules.append("torch.testing._internal.dist_utils")
+
+        torch_dir = os.path.dirname(torch.__file__)
+        for base, folders, files in os.walk(torch_dir):
+            prefix = os.path.relpath(base, os.path.dirname(torch_dir)).replace(os.path.sep, ".")
+            for f in files:
+                if not f.endswith(".py"):
+                    continue
+                mod_name = f"{prefix}.{f[:-3]}" if f != "__init__.py" else prefix
+                # Do not attempt to import executable modules
+                if f == "__main__.py":
+                    continue
+                if any(mod_name.startswith(x) for x in ignored_modules):
+                    continue
+                try:
+                    mod = importlib.import_module(mod_name)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to import {mod_name}: {e}") from e
+                self.assertTrue(inspect.ismodule(mod))
+
+    @unittest.skipIf(IS_WINDOWS, "importing torch+CUDA on CPU results in warning")
+    def test_no_warning_on_import(self) -> None:
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import torch"],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
 
 
 if __name__ == '__main__':

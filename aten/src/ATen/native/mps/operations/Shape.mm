@@ -300,6 +300,8 @@ TORCH_IMPL_FUNC(topk_out_mps)
     k >= 0 && k <= (self.dim() > 0 ? self.size(dim) : 1),
     "selected index k out of range");
 
+  TORCH_CHECK( k <= 16 , "Currently topk on mps works only for k<=16 ");
+
   if (self.dim() == 0 && self.numel() == 1)
   {
       values.copy_(self);
@@ -531,8 +533,8 @@ TORCH_IMPL_FUNC(cat_out_mps)
   for(const Tensor& t : materialized_inputs) {
     auto lap = at::get_overlap_status(out, t);
     TORCH_CHECK(
-        lap != at::MemOverlapStatus::PARTIAL &&
-            lap != at::MemOverlapStatus::FULL,
+        lap != at::MemOverlapStatus::Partial &&
+            lap != at::MemOverlapStatus::Full,
         "torch.cat(): unsupported operation: the input tensors cannot refer to any "
         "of the output memory locations. Found overlap in input "
         "tensor ",
