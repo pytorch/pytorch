@@ -5,6 +5,8 @@ from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 class TensorAPoT(torch.Tensor):
     quantizer: APoTQuantizer
     data: torch.Tensor
+    data_int_repr: torch.Tensor
+    dtype: torch.dtype
 
     def __init__(self, quantizer):
         raise NotImplementedError
