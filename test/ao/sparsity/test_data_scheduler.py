@@ -42,24 +42,20 @@ class TestBaseDataScheduler(TestCase):
                 'config': {'sparsity_level': 0.3}
             }
         ]
-        return data_list, defaults, data_with_config
+        return data_list, data_with_config, defaults
 
-    def _get_sparsifier(self, return_data=False):
-        data_list, defaults, data_with_config = self._get_data()
+    def _get_sparsifier(self, data_list, data_with_config, defaults):
         sparsifier = DataNormSparsifier(data_list, **defaults)
         for data_config_dict in data_with_config:
             name, data, config = data_config_dict['name'], data_config_dict['data'], data_config_dict['config']
             sparsifier.add_data(name=name, data=data, **config)
-        if return_data:
-            return sparsifier, data_list, defaults, data_with_config
         return sparsifier
 
-    def _get_scheduler(self, sparsifier):
-        schedule_param = self._get_scheduler_param()
+    def _get_scheduler(self, sparsifier, schedule_param):
         scheduler = ImplementedDataScheduler(sparsifier, schedule_param)
         return scheduler
 
-    def _get_scheduler_param(self):
+    def _get_schedule_param(self):
         return 'sparsity_level'
 
     def _get_name_data_config(self, some_data, defaults):
@@ -76,19 +72,22 @@ class TestBaseDataScheduler(TestCase):
     def test_constructor(self):
         """Checks if the warning is thrown if the scheduler step is called
         before the sparsifier step"""
-        sparsifier = self._get_sparsifier()
-        scheduler = self._get_scheduler(sparsifier)
-        scheduler_param = self._get_scheduler_param()
+        data_list, data_with_config, defaults = self._get_data()
+        sparsifier = self._get_sparsifier(data_list, data_with_config, defaults)
+        schedule_param = self._get_schedule_param()
+        scheduler = self._get_scheduler(sparsifier, schedule_param)
 
         assert scheduler.data_sparsifier == sparsifier
         assert scheduler._step_count == 1
 
         for name, config in sparsifier.data_groups.items():
-            assert scheduler.base_param[name] == config.get(scheduler_param, None)
+            assert scheduler.base_param[name] == config.get(schedule_param, None)
 
     def test_order_of_steps(self):
-        sparsifier = self._get_sparsifier()
-        scheduler = self._get_scheduler(sparsifier)
+        data_list, data_with_config, defaults = self._get_data()
+        sparsifier = self._get_sparsifier(data_list, data_with_config, defaults)
+        schedule_param = self._get_schedule_param()
+        scheduler = self._get_scheduler(sparsifier, schedule_param)
 
         # Sparsifier step is not called
         with self.assertWarns(UserWarning):
@@ -106,19 +105,28 @@ class TestBaseDataScheduler(TestCase):
                 assert fname != 'torch/ao/sparsity/experimental/scheduler/data_scheduler/base_data_scheduler.py'
 
     def test_step(self):
-        sparsifier, data_list, defaults, data_with_config = self._get_sparsifier(return_data=True)
-        scheduler = self._get_scheduler(sparsifier)
-        scheduler_param = self._get_scheduler_param()
+        data_list, data_with_config, defaults = self._get_data()
+        sparsifier = self._get_sparsifier(data_list, data_with_config, defaults)
+        schedule_param = self._get_schedule_param()
+        scheduler = self._get_scheduler(sparsifier, schedule_param)
 
         all_data = data_list + data_with_config
 
         for some_data in all_data:
             name, _, config = self._get_name_data_config(some_data, defaults)
-            assert sparsifier.data_groups[name][scheduler_param] == config[scheduler_param]
+            assert sparsifier.data_groups[name][schedule_param] == config[schedule_param]
 
         sparsifier.step()
         scheduler.step()
 
         for some_data in all_data:
             name, _, config = self._get_name_data_config(some_data, defaults)
-            assert sparsifier.data_groups[name][scheduler_param] == config[scheduler_param] * 0.5
+            assert sparsifier.data_groups[name][schedule_param] == config[schedule_param] * 0.5
+
+        # checking step count
+        step_cnt = 5
+        for _ in range(0, step_cnt):
+            sparsifier.step()
+            scheduler.step()
+
+        assert scheduler._step_count == step_cnt + 2  # step_cnt + step above + 1 step in constructor
