@@ -98,7 +98,7 @@ inline C10_HOST_DEVICE Half operator-(const Half& a) {
     defined(__HIP_DEVICE_COMPILE__)
   return __hneg(a);
 #elif defined(__SYCL_DEVICE_ONLY__)
-  return -static_cast<sycl::half>(a);
+  return -sycl::bit_cast<sycl::half>(a);
 #else
   return -static_cast<float>(a);
 #endif
