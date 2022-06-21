@@ -115,16 +115,10 @@ def hook_iterator(namespace, profile_name):
             Return next with logic related to iterator validity, profiler, and incrementation of samples yielded.
             """
             _check_iterator_valid(self.source_dp, self.iterator_id)
-            try:
-                # Avoid double counting since if `__next__` is defined, it will be called
-                if not self.self_and_has_next_method:
-                    self.source_dp._number_of_samples_yielded += 1
-                return next(self.iterator)
-            except Exception:
-                # If there is an exception,the element was not successfully returned, the count needs to -= 1.
-                if not self.self_and_has_next_method:
-                    self.source_dp._number_of_samples_yielded -= 1
-                raise
+            result = next(self.iterator)
+            if not self.self_and_has_next_method:
+                self.source_dp._number_of_samples_yielded += 1
+            return result
 
         def __next__(self):
             # TODO: Add try-except to in-place reduce traceback from the Exception
@@ -147,9 +141,6 @@ def hook_iterator(namespace, profile_name):
             gen = func(*args, **kwargs)
             datapipe = args[0]
             if datapipe._fast_forward_iterator:
-                print("Returning fast-forward iterator")
-                print("Iterator in wrap_generator", datapipe._fast_forward_iterator)
-                # print(list(datapipe._fast_forward_iterator))
                 while True:
                     try:
                         yield next(datapipe._fast_forward_iterator)
@@ -201,20 +192,14 @@ def hook_iterator(namespace, profile_name):
 
             @functools.wraps(next_func)
             def wrap_next(*args, **kwargs):
-                try:
-                    if torch.autograd._profiler_enabled():
-                        with profiler_record_fn_context():
-                            return next_func(*args, **kwargs)
-                    else:
-                        return next_func(*args, **kwargs)
-                except Exception:
-                    # If there is an exception,the element was not successfully returned, the count needs to -= 1.
-                    datapipe = args[0]
-                    datapipe._number_of_samples_yielded -= 1
-                    raise
-                finally:
-                    datapipe = args[0]
-                    datapipe._number_of_samples_yielded += 1
+                if torch.autograd._profiler_enabled():
+                    with profiler_record_fn_context():
+                        result = next_func(*args, **kwargs)
+                else:
+                    result = next_func(*args, **kwargs)
+                datapipe = args[0]
+                datapipe._number_of_samples_yielded += 1
+                return result
 
             namespace['__next__'] = wrap_next
 
