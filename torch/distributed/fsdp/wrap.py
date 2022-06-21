@@ -21,6 +21,17 @@ import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
 
 
+__all__ = [
+    "always_wrap_policy",
+    "lambda_auto_wrap_policy",
+    "transformer_auto_wrap_policy",
+    "size_based_auto_wrap_policy",
+    "enable_wrap",
+    "wrap",
+    "ParamExecOrderWrapPolicy",
+]
+
+
 def always_wrap_policy(*args, **kwargs) -> bool:
     """
     A simple wrapper policy that always returns ``True``,
@@ -29,6 +40,43 @@ def always_wrap_policy(*args, **kwargs) -> bool:
     distinct FSDP instances.
     """
     return True
+
+def lambda_auto_wrap_policy(
+    module: nn.Module,
+    recurse: bool,
+    unwrapped_params: int,
+    lambda_fn: Callable
+) -> bool:
+    """
+    A convenient auto wrap policy to wrap submodules based on an arbitrary user
+    function. If `lambda_fn(submodule) == True``, the submodule will be wrapped as
+    a `wrapper_cls` unit.
+
+    Return if a module should be wrapped during auto wrapping.
+
+    The first three parameters are required by :func:`_recursive_wrap`.
+
+    Args:
+       module (nn.Module):
+           The module to be considered in this decision.
+       recurse (bool):
+           Indicate if this is called to make a decision on whether we
+           should recurse down a subgraph of the module structure.
+           If False, it means this function is called to make a decision
+           on whether we should wrap the said module.
+       unwrapped_params (int):
+           The number of parameters yet to be wrapped in this module.
+
+       lambda_fn (Callable[nn.Module] -> bool):
+           If this returns ``True``, this module will be wrapped by
+           wrapper_cls individually.
+    """
+    if recurse:
+        # always recurse
+        return True
+    else:
+        # if not recursing, decide whether we should wrap for the leaf node or reminder
+        return lambda_fn(module)
 
 def transformer_auto_wrap_policy(
     module: nn.Module,
@@ -267,8 +315,8 @@ class ParamExecOrderWrapPolicy:
             wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
             within each transformer layer.
     """
-    init_policy : Callable = always_wrap_policy
-    group_size : int = 1
+    init_policy: Callable = always_wrap_policy
+    group_size: int = 1
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
@@ -316,7 +364,11 @@ def _recursive_wrap(
     for _, child in module.named_modules():
         if child in ignored_modules:
             continue
-        assert not isinstance(child, cast(type, wrapper_cls))
+        try:
+            assert not isinstance(child, cast(type, wrapper_cls))
+        except TypeError:
+            # wrapper_cls is a function as opposed to a class type, just bypass above check.
+            pass
 
     # We count all params, assuming none of them are already wrapped.
     num_params = sum(

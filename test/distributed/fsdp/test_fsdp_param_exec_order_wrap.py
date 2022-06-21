@@ -36,10 +36,10 @@ class Model(torch.nn.Module):
         return z
 
     def get_input(self, device: torch.device):
-        return torch.randn((8, 6)).to(device)
+        return (torch.randn((8, 6)).to(device), )
 
     def get_loss(self, input, output):
-        return (output - input).sum()
+        return (output - input[0]).sum()
 
     @staticmethod
     def wrap(
@@ -70,39 +70,34 @@ class TestFSDPExecOrder(FSDPTest):
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     @parametrize("iters", [1, 3])
-    def test_fsdp_flatten_params_exec_order(
-        self,
-        sharding_strategy: ShardingStrategy,
-        iters: int
-    ):
+    def test_fsdp_flatten_params_exec_order(self, sharding_strategy: ShardingStrategy, iters: int):
         """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
         model = Model()
         policy_exec_order = ParamExecOrderWrapPolicy(
-            init_policy=always_wrap_policy
+            init_policy=always_wrap_policy,
+            group_size=1,
         )
-        fsdp_model = Model.wrap(
-            model,
-            sharding_strategy,
-            self.device,
-            policy_exec_order
-        )
+        fsdp_model = Model.wrap(model, sharding_strategy, self.device, policy_exec_order)
+        self.assertTrue(fsdp_model._is_param_exec_order_prep_stage())
         for _ in range(iters):
             input = fsdp_model.module.get_input(self.device)
-            output = fsdp_model(input)
+            output = fsdp_model(*input)
             loss = fsdp_model.module.get_loss(input, output).to(self.device)
             loss.backward()
         params_list = list(fsdp_model.parameters())
-        assert set(fsdp_model.flatten_params_exec_order()) == set(params_list)
         # Since the forward execution order is NOT consistent with the model definition order,
         # the ordering in flatten_named_params_exec_order should be different from named_parameters
-        assert fsdp_model.flatten_params_exec_order() == [
-            params_list[0],
-            params_list[2],
-            params_list[3],
-            params_list[1]
-        ]
-        assert fsdp_model.use_param_exec_order_policy()
-        assert not fsdp_model.is_param_exec_order_prep_stage()
+        self.assertEqual(
+            fsdp_model._fsdp_params_exec_order,
+            [
+                params_list[0],
+                params_list[2],
+                params_list[3],
+                params_list[1]
+            ]
+        )
+        self.assertTrue(fsdp_model._use_param_exec_order_policy())
+        self.assertTrue(not fsdp_model._is_param_exec_order_prep_stage())
 
     @skip_if_lt_x_gpu(2)
     @parametrize(
@@ -138,20 +133,20 @@ class TestFSDPExecOrder(FSDPTest):
         )
         input = fsdp_model_1.module.get_input(self.device)
         # initialization
-        output_1 = fsdp_model_1(input)
+        output_1 = fsdp_model_1(*input)
         loss_1 = fsdp_model_1.module.get_loss(input, output_1).to(self.device)
         loss_1.backward()
         # end initialization
         optim_1 = SGD(fsdp_model_1.parameters(), lr=0.1)
         optim_2 = SGD(fsdp_model_2.parameters(), lr=0.1)
         for _ in range(iters):
-            output_1 = fsdp_model_1(input)
+            output_1 = fsdp_model_1(*input)
             loss_1 = fsdp_model_1.module.get_loss(input, output_1).to(self.device)
             loss_1.backward()
             optim_1.step()
             optim_1.zero_grad()
         for _ in range(iters):
-            output_2 = fsdp_model_2(input)
+            output_2 = fsdp_model_2(*input)
             loss_2 = fsdp_model_2.module.get_loss(input, output_2).to(self.device)
             loss_2.backward()
             optim_2.step()
@@ -176,7 +171,7 @@ class TestFSDPExecOrder(FSDPTest):
         assert len(list(out_module.parameters())) == 1
 
         with out_module.summon_full_params(out_module):
-            assert len(list(out_module.parameters())) == num_params_model1 + num_params_model2
+            self.assertEqual(len(list(out_module.parameters())), num_params_model1 + num_params_model2)
             self.assertEqual(raw_model_size, self.get_model_param_count(out_module))
 
 
