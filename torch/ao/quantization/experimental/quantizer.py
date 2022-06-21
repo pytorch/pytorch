@@ -41,12 +41,19 @@ class APoTQuantizer(torch.Tensor):
     The approach follows the method outlined in the APoT paper: https://arxiv.org/pdf/1909.13144.pdf.
     Args:
         tensor2quantize: fp Tensor
+        use_int_repr: bool flag to specify int of reduced precision fp representation of APoT tensor
     Returns:
         result: APoT representation of tensor2quantize (integer or reduced precision fp)
     """
-    def quantize_APoT(self, tensor2quantize: Tensor):
-        self.data = tensor2quantize.apply_(lambda x:
-                                            float_to_reduced_precision(x, self.quantization_levels, self.level_indices))
+    def quantize_APoT(self, tensor2quantize: Tensor, use_int_repr: bool):
+        self.use_int_repr = use_int_repr
+        if use_int_repr:
+            # map float_to_apot over tensor2quantize elements
+            self.data = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
+        else:
+            self.data = tensor2quantize.apply_(lambda x:
+                                               float_to_reduced_precision(x, self.quantization_levels, self.level_indices))
+
         return self
 
     def dequantize(self) -> Tensor:
