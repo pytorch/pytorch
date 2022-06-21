@@ -186,5 +186,21 @@ jobs:
           python3 -m tools.stats.print_test_stats --upload-to-s3 --compare-with-s3 test
 
       - name: Teardown ROCm
-        uses: ./.github/actions/teardown-rocm
         if: always()
+        shell: bash
+        run: |
+          # Only stop the docker container we started since there might be multiple runners on this host.
+          docker stop "${{ env.CONTAINER_NAME }}" || true
+          # Prune all of the docker containers.
+          # Might fail if a prune is already in progress by another runner.
+          docker container prune -f || true
+          # Prune everything docker if there are more than 10 images (~200GB).
+          # This is easier than using a time filter, e.g., "until=24h".
+          # Might fail if a prune is already in progress by another runner.
+          image_count=$(docker images | wc -l)
+          if [[ ${image_count} -gt 10 ]]; then
+              echo "Purging all docker caches"
+              docker system prune -af || true
+          else
+              echo "Will not purge docker, only ${image_count} images found"
+          fi
