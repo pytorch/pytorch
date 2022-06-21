@@ -1141,7 +1141,8 @@ inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
 
 /// Scaled modified Bessel function of the second kind of order 0.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k0.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k0.
 ///
 /// Example:
 ///
