@@ -119,22 +119,19 @@ std::vector<at::Tensor> NestedTensor_unbind(
       "got dimension ",
       dim,
       " instead.");
-  auto esizes = get_nested_size_tensor(self);
-  std::vector<at::Tensor> result_tensors;
-  if (esizes.dim() == 0) {
-    return result_tensors;
+  auto self_ptr = get_nested_tensor_impl(self);
+  // empty nested tensor
+  if (self_ptr->get_nested_size_tensor().dim() == 0) {
+    return std::vector<at::Tensor>();
   }
-  auto esizes_chunks = esizes.unbind(0);
-  std::vector<int64_t> splits;
-  for (const auto i : c10::irange(esizes_chunks.size())) {
-    splits.push_back(esizes_chunks[i].prod().item<int64_t>());
-  }
-  auto buffer_chunks = at::split_with_sizes(get_buffer(self), splits);
-  for (const auto i : c10::irange(buffer_chunks.size())) {
-    const auto& esize_chunk = esizes_chunks[i];
-    result_tensors.push_back(buffer_chunks[i].view(IntArrayRef(
-        esize_chunk.data_ptr<int64_t>(),
-        esize_chunk.data_ptr<int64_t>() + esize_chunk.numel())));
+  int64_t ntensors = *(self_ptr->opt_size(0));
+  std::vector<at::Tensor> result_tensors(ntensors);
+  const at::Tensor & buffer = self_ptr->get_buffer();
+  std::vector<int64_t> offsets;
+  std::vector<IntArrayRef> shapes;
+  std::tie(offsets, shapes) = self_ptr->get_offsets_and_shapes();
+  for (int64_t i = 0; i < ntensors; i++) {
+    result_tensors[i] = buffer.slice(0, offsets[i], offsets[i + 1]).view(shapes[i]);
   }
   return result_tensors;
 }
@@ -576,55 +573,27 @@ Tensor& NestedTensor_mul__Tensor(Tensor& self, const Tensor& other) {
 }
 
 Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
+  auto self_ptr = get_nested_tensor_impl(self);
+  int64_t positive_dim = at::maybe_wrap_dim(dim, self_ptr->dim());
   TORCH_CHECK(
-    dim == 0,
+    positive_dim == 0,
     "NestedTensor can only be selected along dimension 0 ",
     "got dimension ", dim, " instead."
   );
-  auto self_ptr = get_nested_tensor_impl(self);
-  // buffer contains the underlying data in a contiguous vector
+  int64_t ntensors = 0;
+  if (self_ptr->get_nested_size_tensor().dim() == 2) {
+    ntensors = *(self_ptr->opt_size(0));
+  }
+  TORCH_CHECK_INDEX(
+      index >= -ntensors && index < ntensors,
+      "index ", index,
+      " is out of bounds for dimension 0 with size ", ntensors);
+  int64_t positive_index = index < 0 ? index + ntensors : index;
   const at::Tensor & buffer = self_ptr->get_buffer();
-  int64_t numel = buffer.numel();
-  TORCH_CHECK(
-    numel > 0,
-    "cannot index an empty nested tensor."
-  );
-  // nested_tensor[i] = i-th original tensor
-  int64_t ntensors = *(self_ptr->opt_size(0));
-  int64_t positive_index = at::maybe_wrap_dim(index, ntensors);
-  // determine the memory segment of the i-th original tensor
-  Tensor sizemat = get_nested_size_tensor(self);
-  int64_t original_dim = sizemat.size(1);
-  const int64_t * sizemat_ptr = sizemat.data_ptr<int64_t>();
-  // start of the segment
-  int64_t start = 0, sizemat_offset = 0;
-  for (int64_t i = 0; i < positive_index; i++) {
-    int64_t row_product = sizemat_ptr[sizemat_offset];
-    sizemat_offset++;
-    for (int64_t j = 1; j < original_dim; j++) {
-      row_product *= sizemat_ptr[sizemat_offset];
-      sizemat_offset++;
-    }
-    start += row_product;
-  }
-  // btw determine the shape of the i-th original tensor
-  IntArrayRef shape(sizemat_ptr + sizemat_offset, sizemat_ptr + sizemat_offset + original_dim);
-  // stop of the segment
-  int64_t stop;
-  if (positive_index == ntensors - 1) {
-    stop = numel;
-  }
-  else {
-    int64_t row_product = sizemat_ptr[sizemat_offset];
-    sizemat_offset++;
-    for (int64_t j = 1; j < original_dim; j++) {
-      row_product *= sizemat_ptr[sizemat_offset];
-      sizemat_offset++;
-    }
-    stop = start + row_product;
-  }
-  // extract the memory segment then reshape to the original shape
-  return buffer.slice(0, start, stop).view(shape);
+  std::vector<int64_t> offsets;
+  std::vector<IntArrayRef> shapes;
+  std::tie(offsets, shapes) = self_ptr->get_offsets_and_shapes();
+  return buffer.slice(0, offsets[positive_index], offsets[positive_index + 1]).view(shapes[positive_index]);
 }
 
 Tensor clone_nested(

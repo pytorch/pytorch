@@ -35,6 +35,35 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   return result;
 }
 
+// assume contiguous, we can construct stride from size
+inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
+  // empty `sizes` means empty nested tensor, so return empty strides
+  if (sizes.dim() == 0) {
+    return sizes;
+  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
+  int64_t orig_dim = sizes.size(1);
+  // `sizes`.sizes() = ntensors x 0 means empty but shaped `sizes`
+  // in this case strides is also empty but shaped
+  if (orig_dim == 0) {
+    return sizes;
+  }
+  at::Tensor strides = sizes.new_empty(sizes.sizes());
+  const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+  int64_t* strides_ptr = strides.data_ptr<int64_t>();
+  for (int64_t i = 0; i < sizes.size(0); i++) {
+    strides_ptr[orig_dim - 1] = 1;
+    int64_t product = sizes_ptr[orig_dim - 1];
+    for (int64_t j = orig_dim - 2; j >= 0; j--) {
+      strides_ptr[j] = product;
+      product *= sizes_ptr[j];
+    }
+    sizes_ptr += orig_dim;
+    strides_ptr += orig_dim;
+  }
+  return strides;
+}
+
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_size_tensor)
@@ -45,6 +74,7 @@ NestedTensorImpl::NestedTensorImpl(
           buffer.device()),
       buffer_(std::move(buffer)),
       nested_size_tensor_(std::move(nested_size_tensor)),
+      nested_stride_tensor_(construct_nested_stride_tensor(nested_size_tensor_)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_))
 {
   TORCH_WARN_ONCE(
@@ -83,6 +113,35 @@ IntArrayRef NestedTensorImpl::strides_custom() const {
 
 const char* NestedTensorImpl::tensorimpl_type_name() const {
   return "NestedTensorImpl";
+}
+
+// implicit batch dimension index offsets, original tensors shapes
+std::tuple<std::vector<int64_t>, std::vector<IntArrayRef>>
+NestedTensorImpl::get_offsets_and_shapes() const {
+  // unbinding empty nested tensor should have returned before calling this function
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!opt_sizes_.empty());
+  const int64_t& ntensors = opt_sizes_[0];
+  std::vector<int64_t> offsets(ntensors + 1);
+  std::vector<IntArrayRef> shapes(ntensors);
+  int64_t orig_dim = nested_size_tensor_.size(1);
+  // nesting scalars means empty `nested_size_tensor_` and `nested_stride_tensor_`
+  // `nested_size_tensor_`.sizes() = `nested_stride_tensor_`.sizes() = ntensors x 0
+  if (orig_dim == 0) {
+    std::iota(offsets.begin(), offsets.end(), 0);
+    return std::make_tuple(offsets, shapes);
+  }
+  const int64_t* sizemat_ptr = nested_size_tensor_.data_ptr<int64_t>();
+  const int64_t* stridemat_ptr = nested_stride_tensor_.data_ptr<int64_t>();
+  offsets[0] = 0;
+  for (int64_t i = 0; i < ntensors - 1; i++) {
+    offsets[i + 1] = offsets[i] + *sizemat_ptr * *stridemat_ptr;
+    shapes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
+    sizemat_ptr += orig_dim;
+    stridemat_ptr += orig_dim;
+  }
+  offsets.back() = buffer_.numel();
+  shapes.back() = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
+  return std::make_tuple(offsets, shapes);
 }
 
 } // namespace native

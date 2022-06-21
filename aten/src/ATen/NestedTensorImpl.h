@@ -13,15 +13,32 @@ namespace native {
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
+  // Note: in current implementation,
+  // empty nested tensor = no underlying tensor
+  // nesting empty tensors is not considered empty nested tensor
+  // TODO: for now, we use `nested_size_tensor_.dim()`
+  // to determine whether a nested tensor is empty
+  // when empty, `nested_size_tensor_.dim() = 0`
+  // otherwise `nested_size_tensor_.dim() = 2`
+  // maybe there is a better indicator for emptiness?
+  // e.g. when empty, `opt_sizes_.empty() = true`
+
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
   // callers cannot fix it.
   const Tensor& get_nested_size_tensor() const {
     return nested_size_tensor_;
   }
+  // TODO: don't expose private implementation details like this
+  const Tensor& get_nested_stride_tensor() const {
+    return nested_stride_tensor_;
+  }
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
   // size at the (i-1)th dimension.
+  // TODO: when empty, we have `opt_sizes_.size() = 0` and `dim() = 1`,
+  // so calling `opt_size(0)` will pass `maybe_wrap_dim` bound check
+  // then trigger segmentation fault
   c10::optional<int64_t> opt_size(int64_t d) const {
     d = at::maybe_wrap_dim(d, dim(), false);
     if (opt_sizes_[d] == -1) {
@@ -33,6 +50,10 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   const at::Tensor& get_buffer() const {
     return buffer_;
   }
+
+  // implicit batch dimension index offsets, original tensors shapes
+  std::tuple<std::vector<int64_t>, std::vector<IntArrayRef>>
+  get_offsets_and_shapes() const;
 
  protected:
   const char* tensorimpl_type_name() const override;
@@ -53,7 +74,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   void refresh_dim();
 
   at::Tensor buffer_;
-  const at::Tensor nested_size_tensor_;
+  const at::Tensor nested_size_tensor_, nested_stride_tensor_;
   // NOTE: -1 here means the size is missing
   std::vector<int64_t> opt_sizes_;
 };
