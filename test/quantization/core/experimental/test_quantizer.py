@@ -72,9 +72,6 @@ class TestQuantizer(unittest.TestCase):
         # 0.0215 in tensor2quantize nearest 0.0208 in quantization_levels -> 3 in level_indices
         expected_qtensor = torch.tensor([3, 8, 13, 12], dtype=torch.uint8)
 
-        print(qtensor_data)
-        print(expected_qtensor)
-
         self.assertTrue(torch.equal(qtensor_data, expected_qtensor))
 
     r""" Tests dequantize_apot result on random 1-dim tensor
@@ -99,11 +96,11 @@ class TestQuantizer(unittest.TestCase):
 
         dequantized_result = quantizer.dequantize()
 
-        print(dequantized_result)
-
         quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
-        self.assertTrue(torch.equal(dequantized_result, quantized_result))
+        quantized_result = quantized_result.int()
+
+        self.assertTrue(torch.equal(quantized_result, orig_input))
 
     r""" Tests dequantize_apot result on random 1-dim tensor
         and hardcoded values for b, k.
@@ -129,7 +126,9 @@ class TestQuantizer(unittest.TestCase):
 
         quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
-        self.assertTrue(torch.equal(dequantized_result, quantized_result))
+        quantized_result = quantized_result.int()
+
+        self.assertTrue(torch.equal(quantized_result, orig_input))
 
     def test_q_apot_alpha(self):
         with self.assertRaises(NotImplementedError):

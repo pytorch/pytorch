@@ -23,7 +23,6 @@ class APoTQuantizer():
         signed,
             dtype=torch.quint8) -> None:
         self.signed = signed
-        self.use_int_repr = True
 
         # check for valid inputs of b, k
         assert(k and k != 0)
