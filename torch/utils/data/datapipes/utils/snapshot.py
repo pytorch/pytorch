@@ -1,4 +1,5 @@
 from torch.utils.data.datapipes.datapipe import IterDataPipe
+from torch.utils.data.graph_settings import apply_shuffle_seed
 
 __all__ = [
     "simple_fast_forward_graph",
@@ -6,9 +7,14 @@ __all__ = [
 ]
 
 
-def simple_fast_forward_graph(datapipe: IterDataPipe, n_iterations: int) -> None:
+# TODO: Caveats
+#   1. Caller (either the ReadingService or DataLoader) must pass in the initial RNG
+#   2. `in_batch_shuffle` and `bucketbatch` are not compatible with this because they currently
+#      lack the option to `set_seed`.
+
+def simple_fast_forward_graph(datapipe: IterDataPipe, n_iterations: int, rng=None) -> None:
     r"""
-    This function will fast-forward the given DataPipe by `n_iterations`, and in the process,
+    This function will fast-forward the given DataPipe by ``n_iterations``, and in the process,
     fast-forward its parent DataPipes as well at the cost of re-doing every computation.
     For instance, applying this function to the final DataPipe of a graph will fast-forward
     every DataPipe within the graph.
@@ -22,20 +28,15 @@ def simple_fast_forward_graph(datapipe: IterDataPipe, n_iterations: int) -> None
     Args:
         datapipe: IterDataPipe to be fast-forwarded
         n_iterations: number of iterations to fast-forward
+        rng: ``Optional[torch.Generator]``. If not ``None``, this RNG will be used for shuffling. The generator
+            should be in its `initial` state as it was first passed into ``DataLoader`` or ``ReadingService``.
     """
-
-    # TODO: Caveats
-    #   1. `Shuffler` needs to `set_seed` before running this to get the same ordering
-    #      The fix is to restore its buffer and RNG
-    #   2. `in_batch_shuffle` and `bucketbatch` are not compatible with this because they currently
-    #      lack the option to `set_seed`.
+    apply_shuffle_seed(datapipe, rng)
 
     # Fast-forward only when the DP has recently been restored. Is this necessary?
     # if self._restored:
     remainder = n_iterations
-    print(f"Creating iterator for fast-forward of {datapipe}")
     it = iter(datapipe)
-    print(f"About to fast-forward {datapipe}")
     while remainder > 0:
         try:
             next(it)
@@ -43,7 +44,6 @@ def simple_fast_forward_graph(datapipe: IterDataPipe, n_iterations: int) -> None
         except StopIteration:
             raise RuntimeError(f"Fast-forward {datapipe} by {n_iterations} iterations"
                                "exceeds the number of samples available.")
-    print(f"Fast-forward of {datapipe} has been completed")
     datapipe._fast_forward_iterator = it
     # This will prevent the DataPipe from resetting in the `iter()` call
     # If another DataPipe is consuming it, it won't have to start over again

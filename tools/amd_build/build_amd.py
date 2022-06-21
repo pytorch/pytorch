@@ -8,7 +8,12 @@ import sys
 sys.path.append(
     os.path.realpath(
         os.path.join(
-            __file__, os.path.pardir, os.path.pardir, os.path.pardir, "torch", "utils"
+            __file__,
+            os.path.pardir,
+            os.path.pardir,
+            os.path.pardir,
+            "third_party",
+            "hipify_torch",
         )
     )
 )
