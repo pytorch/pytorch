@@ -1068,7 +1068,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
       in principle, figure out copy of strides.
     */
     if ((at::has_internal_overlap(src.unsafeGetTensorImpl()) ==
-         at::MemOverlap::YES) ||
+         at::MemOverlap::Yes) ||
         (memory_format != c10::MemoryFormat::Preserve)) {
       p_node->Output(0) = at::native::clone(src, memory_format);
       return;
@@ -1227,12 +1227,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
     const auto in1_l =
         at::native::toListOfOptionalTensors(p_node->Input(1).toListRef());
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::index(in0_t, in1_l);
+      p_node->Output(0) = at::cpu::index(in0_t, in1_l);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::index_out(out_t, in0_t, in1_l);
+    at::cpu::index_out(out_t, in0_t, in1_l);
   };
 });
 
@@ -2640,12 +2640,6 @@ void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
       output_data[i] = std::log1p(abs_if_signed(input_data[i])) * sign;
     }
   });
-}
-
-at::Tensor signed_log1p(const at::Tensor& input) {
-  auto out = create_empty_from(input);
-  signed_log1p_out(out, input);
-  return out;
 }
 
 } // namespace
