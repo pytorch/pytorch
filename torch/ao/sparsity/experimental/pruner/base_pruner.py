@@ -177,7 +177,7 @@ class BasePruner(BaseSparsifier):
                 local_args['tensor_name'] = tensor_name_list
             else:
                 if isinstance(module_config, nn.Module):
-                    module_config = {'module': module_config} # type: ignore[dict-item]
+                    module_config = {'module': module_config}  # type: ignore[dict-item]
 
                 local_args = copy.deepcopy(self.defaults)
                 local_args.update(module_config)
