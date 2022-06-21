@@ -1087,6 +1087,9 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See <issue>
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1115,6 +1118,9 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See <issue>
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1129,6 +1135,9 @@ module_db: List[ModuleInfo] = [
                    # Failure on ROCM for float32 issue #70125
                    DecorateInfo(skipCUDAIfRocm, 'TestModule', 'test_memory_format', dtypes=[torch.float32]),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See <issue>
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1192,6 +1201,9 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See <issue>
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1226,6 +1238,9 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See <issue>
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -1243,6 +1258,9 @@ module_db: List[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
                    DecorateInfo(skipIfMps, 'TestModule', dtypes=[torch.float64]),
+                   # This was wrongly being skipped before and needs investigation.
+                   # See <issue>
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format"),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
