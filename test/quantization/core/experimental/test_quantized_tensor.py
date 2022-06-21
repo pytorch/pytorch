@@ -20,7 +20,7 @@ class TestQuantizedTensor(unittest.TestCase):
 
         quantizer = APoTQuantizer(4, 2, torch.max(tensor2quantize), False)
 
-        tensor_apot = TensorAPoT(quantizer)
+        tensor_apot = TensorAPoT(APoTQuantizer(4, 2, torch.max(tensor2quantize), False))
 
         # # get apot quantized tensor result
         # qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
