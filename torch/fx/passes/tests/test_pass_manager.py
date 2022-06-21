@@ -1,7 +1,7 @@
 import unittest
 import torch
 
-from torch.fx.passes.pass_manager import (
+from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
 )
