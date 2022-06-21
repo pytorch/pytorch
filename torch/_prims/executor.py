@@ -73,8 +73,8 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                     return arg
 
             # Transforms graph to call nvfuser lowerings
-            nv_args = tree_map(to_nv, args)
-            nv_kwargs = tree_map(to_nv, kwargs)
+            nv_args = tuple(map(to_nv, args))
+            nv_kwargs = {k: to_nv(v) for k, v in kwargs.items()}
 
             out = FusionInterpreter(gm).run(*nv_args, **nv_kwargs)
             flat_out, unflatten_spec = torch.utils._pytree.tree_flatten(out)
