@@ -1073,6 +1073,7 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/api/*.h',
                 'include/torch/csrc/jit/serialization/*.h',
                 'include/torch/csrc/jit/python/*.h',
+                'include/torch/csrc/jit/mobile/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/jit/tensorexpr/operators/*.h',
