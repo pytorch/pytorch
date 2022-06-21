@@ -36,7 +36,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     else:
         sz = 1
 
-    if len(sig.parameters) >= sz:
+    if len(sig.parameters) > sz:
         non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
         if len(non_default_params) > sz:
             raise ValueError(
