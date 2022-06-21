@@ -771,6 +771,9 @@ class OpInfo(object):
     # only run tracing tests
     supports_scripting: bool = True
 
+    # if the operator can be traced
+    supports_tracing: bool = True
+
     # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
 
     # whether the op supports sparse csr inputs
@@ -2408,6 +2411,29 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
             lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input
         )
 
+def sample_inputs_equal(op, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = (
+        ((), ()),
+        ((S,), ()),
+        ((), (S,)),
+        ((S, 1), (S,)),
+        ((M, S), ()),
+        ((S, S), (S, S))
+    )
+
+    for shape_lhs, shape_rhs in shapes:
+        lhs = make_arg(shape_lhs)
+        rhs = make_arg(shape_rhs)
+        broadcasts_input = shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs)
+
+        yield SampleInput(lhs, args=(rhs,), broadcasts_input=broadcasts_input)
+        if shape_lhs == shape_rhs:
+            yield SampleInput(lhs, args=(lhs.clone().detach_(),))
+
+
 
 def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -3662,6 +3688,10 @@ def sample_inputs_trace(self, device, dtype, requires_grad, **kwargs):
                                      requires_grad=requires_grad))),)
 
 
+def error_inputs_trace(op, device):
+    yield ErrorInput(SampleInput(make_tensor((3, 4, 5), dtype=torch.float32, device=device)), error_regex="expected a matrix")
+
+
 def sample_inputs_renorm(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     cases = (((S, S, S), (2, 1, 0.5)),
@@ -4330,7 +4360,6 @@ def error_inputs_embedding(op_info, device, **kwargs):
 def error_inputs_t(op_info, device, **kwargs):
     yield ErrorInput(
         SampleInput(torch.randn(2, 3, 4, 5, device=device)),
-        error_type=RuntimeError,
         error_regex="expects a tensor with <= 2",
     )
 
@@ -11533,6 +11562,14 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+    OpInfo('equal',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           ref=lambda input, other: (input == other).all(),
+           sample_inputs_func=sample_inputs_equal,
+           supports_autograd=False,
+           supports_tracing=False,
+           skips=(
+           )),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -12478,8 +12515,6 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # Could not run 'aten::linalg_eigh' with arguments from the 'AutogradMeta' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -17636,6 +17671,7 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex(),
            dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           error_inputs_func=error_inputs_trace,
            supports_inplace_autograd=False,
            supports_out=False,
            supports_forward_ad=True,
@@ -20401,8 +20437,6 @@ python_ref_db = [
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         decorators=(
-            # Need FakeTensor support for meta coverage
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
             # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
@@ -20450,6 +20484,22 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
         torch_opinfo_name="nn.functional.tanhshrink",
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.hardshrink",
+        torch_opinfo_name="nn.functional.hardshrink",
+        skips=(
+            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.softshrink",
+        torch_opinfo_name="nn.functional.softshrink",
+        skips=(
+            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        )
     ),
     #
     # Elementwise Binary Reference OpInfos
@@ -20547,6 +20597,11 @@ python_ref_db = [
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.gcd",
+        torch_opinfo_name="gcd",
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
         torch_opinfo_name="ge",
         supports_nvfuser=False,
@@ -20577,6 +20632,11 @@ python_ref_db = [
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.lcm",
+        torch_opinfo_name="lcm",
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.le",
         torch_opinfo_name="le",
         supports_nvfuser=False,
@@ -20590,6 +20650,16 @@ python_ref_db = [
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex64, torch.complex128,)
+            ),
+        )
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.logical_not",
+        torch_opinfo_name="logical_not",
+        skips=(
+            DecorateInfo(
+                # NotImplementedError: argument of type: <class 'complex'>
+                unittest.skip("Fails aten complex and nvfuser doesn't support eq(a, 0)"), 'TestCommon', 'test_python_ref_executor'
             ),
         )
     ),
@@ -20704,6 +20774,17 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.remainder",
+        torch_opinfo_name="remainder",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.bfloat16,), device_type='cpu'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -21153,6 +21234,16 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
             # RuntimeError: Tracing expected 5 arguments but got 3 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        ),
+    ),
+    PythonRefInfo(
+        "_refs.trace",
+        torch_opinfo_name="trace",
+        decorators=(
+            # TODO: torch.diag is currently not supported by either refs, meta funcs, or NVFuser
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+            DecorateInfo(unittest.skip("diag is not supported by meta"), 'TestCommon', 'test_python_ref_meta'),
+            DecorateInfo(unittest.skip("diag is not supported by nvfuser"), 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     #
