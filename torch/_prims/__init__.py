@@ -389,6 +389,7 @@ def _elementwise_meta(
 
     assert len(args) > 0
 
+    import pdb; pdb.set_trace()
     utils.check_same_dtype(*args)
 
     args_ = list(args)
