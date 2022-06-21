@@ -279,9 +279,15 @@ void index_put_with_sort_kernel(Tensor & self, const c10::List<c10::optional<Ten
 
   if (expandedValue.numel() < num_indices * nElemBefore * sliceSize) {
     auto expanded_size = at::DimVector(expandedValue.sizes());
-    auto size1 = expandedValue.sizes();
-    auto size2 = linearIndex.sizes();
+    auto size1 = expandedValue.sizes().vec();
+    auto size2 = linearIndex.sizes().vec();
     if (are_expandable(size1, size2)) {
+      expanded_size = infer_size_dimvector(size1, size2);
+    } else if (sliceSize == expandedValue.numel()) {
+      while (size1.size() < self.dim() && !are_expandable(size1, size2)) {
+        size2.push_back(1);
+        size1.insert(size1.begin(), 1, 1);
+      }
       expanded_size = infer_size_dimvector(size1, size2);
     }
     if (nElemBefore > 1) {
