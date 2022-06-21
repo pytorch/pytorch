@@ -4,7 +4,7 @@ import torch
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 import unittest
 
-class TestQuantizedTensor(unittest.TestCase):
+class TestQuantizer(unittest.TestCase):
     def test_quantize_APoT(self):
         t = torch.Tensor()
         with self.assertRaises(NotImplementedError):
