@@ -282,20 +282,20 @@ jobs:
   #     docker-image-name: pytorch-linux-focal-py3.7-gcc7
   #     build-generates-artifacts: false
 
-  deploy-linux-xenial-cuda11_3-py3_7-gcc7-build:
-    name: deploy-linux-xenial-cuda11.3-py3.7-gcc7
+  linux-xenial-cuda11_3-py3_7-gcc7-deploy-build:
+    name: linux-xenial-cuda11_3-py3_7-gcc7-deploy
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-deploy
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7
+    name: linux-xenial-cuda11_3-py3_7-gcc7-deploy
     uses: ./.github/workflows/_linux-test.yml
-    needs: deploy-linux-xenial-cuda11_3-py3_7-gcc7-build
+    needs: linux-xenial-cuda11_3-py3_7-gcc7-deploy-build
     with:
-      build-environment: deploy-linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image: ${{ needs.deploy-linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-deploy
+      docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-deploy-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
