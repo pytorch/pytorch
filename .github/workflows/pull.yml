@@ -193,6 +193,13 @@ jobs:
       docker-image-name: pytorch-linux-xenial-py3-clang5-asan
       build-generates-artifacts: false
 
+  linux-jammy-cuda-11_6-cudnn8-py3_8-clang12-build:
+    name: linux-jammy-cuda11.6-cudnn8-py3.8-clang12
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-jammy-cuda11.6-cudnn8-py3.8-clang12
+      docker-image-name: pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12
+
   linux-xenial-py3-clang5-mobile-custom-build-static:
     name: linux-xenial-py3-clang5-mobile-custom-build-static
     uses: ./.github/workflows/_linux-build.yml
