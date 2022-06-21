@@ -20293,7 +20293,15 @@ python_ref_db = [
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
-        torch_opinfo_name="nn.functional.prelu",),
+        torch_opinfo_name="nn.functional.prelu",
+        skips=(
+            # NumPy does not support bfloat16
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16,)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.bfloat16,)),
+        ),
+    ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
