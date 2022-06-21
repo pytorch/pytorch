@@ -905,11 +905,9 @@ gt = _make_elementwise_binary_reference(
 
 
 def _heaviside(input: TensorLikeType, values: TensorLikeType) -> TensorLikeType:
-    zeros_like_input = zeros_like(input)
-    ones_like_input = ones_like(input)
-    input_eq_zero = eq(input, zeros_like_input)
-    input_lt_zero = logical_or(lt(input, zeros_like_input), isnan(input))
-    zeros_and_ones = where(input_lt_zero, zeros_like_input, ones_like_input)
+    input_eq_zero = eq(input, 0)
+    input_lt_zero = logical_or(lt(input, 0), isnan(input))
+    zeros_and_ones = where(input_lt_zero, 0, 1)
     output = where(input_eq_zero, values, zeros_and_ones)
     return output
 

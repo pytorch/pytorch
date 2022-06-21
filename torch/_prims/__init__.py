@@ -405,7 +405,7 @@ def _elementwise_meta(
     # Acquires the dtype
     dtype = None
     scalar_type = None
-    for arg in args:
+    for arg in args_:
         if isinstance(arg, TensorLike):
             if not utils.is_cpu_scalar_tensor(arg):
                 dtype = arg.dtype
