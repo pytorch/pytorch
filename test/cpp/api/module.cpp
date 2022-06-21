@@ -350,7 +350,7 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
   }
 }
 
-TEST_F(ModuleTest, Conversion_MultiCUDA_NoGrad) {
+TEST_F(ModuleTest, Conversion_NoGrad_MultiCUDA) {
   Linear module(128, 64);
   for (auto& parameter : module->parameters()) {
       parameter.requires_grad_(false);
