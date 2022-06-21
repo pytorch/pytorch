@@ -644,6 +644,10 @@ class SequentialLR(_LRScheduler):
         for group in self.optimizer.param_groups:
             group["lr"] = group["initial_lr"]
 
+        # "Undo" the step performed by other schedulers
+        for scheduler in self._schedulers:
+            scheduler.last_epoch -= 1
+
         # Perform the initial step for only the first scheduler
         self._schedulers[0]._initial_step()
 
