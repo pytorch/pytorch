@@ -116,12 +116,15 @@ class BasicEvaluation:
             key=lambda x: x.start_us())
 
         kernel_mapping: Dict[_KinetoEvent, int] = {}
-        for i, cuda_launch_event in enumerate(cuda_launch_events):
-            kernel_mapping[cuda_launch_event] = index_of_first_match(
+        last_mapped_kernel = 0
+        for cuda_launch_event in cuda_launch_events:
+            index = index_of_first_match(
                 cuda_kernel_events,
                 lambda x: x.linked_correlation_id(
                 ) == cuda_launch_event.linked_correlation_id(),
-                start=i)
+                start=last_mapped_kernel)
+            kernel_mapping[cuda_launch_event] = index
+            last_mapped_kernel = index if index is not None else last_mapped_kernel
 
         current_kernel_index = -1
         spawned_kernel_index = None
