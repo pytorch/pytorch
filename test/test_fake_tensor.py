@@ -33,6 +33,12 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
 
+    def test_parameter_instantiation(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x = torch.rand([4])
+            y = torch.nn.parameter.Parameter(x)
+            self.assertTrue(isinstance(y, torch.nn.Parameter))
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
@@ -186,6 +192,14 @@ class FakeTensorTest(TestCase):
 
         self.assertIs(mod_copied.a, mod_copied.b)
         self.assertEqual(mod_copied.b.storage()._cdata, mod_copied.a.storage()._cdata)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_new(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            a = torch.rand([16, 1])
+            self.checkType(a.new(10, 10), "cpu", [10, 10])
+            self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
+            self.checkType(a.new(device='cuda'), "cuda", [0])
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
