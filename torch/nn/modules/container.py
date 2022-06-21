@@ -534,7 +534,7 @@ class ParameterList(Module):
                 device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
                 parastr = '{} containing: [{} of size {}{}]'.format(
                     "Parameter" if isinstance(p, Parameter) else "Tensor",
-                    torch.typename(p), size_str, device_str)
+                    p.dtype, size_str, device_str)
                 child_lines.append('  (' + str(k) + '): ' + parastr)
             else:
                 child_lines.append('  (' + str(k) + '): Object of type: ' + type(p).__name__)

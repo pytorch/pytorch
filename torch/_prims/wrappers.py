@@ -1,5 +1,4 @@
 import torch
-import torch._prims as prims
 from torch._prims.utils import (
     Number,
     NumberType,
@@ -176,7 +175,6 @@ def out_wrapper(fn: Callable) -> Callable:
             assert isinstance(out, TensorLike)
             out = _maybe_resize_out(out, result.shape)
             return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
-            return out
         return result
 
     sig = inspect.signature(fn)
@@ -241,3 +239,32 @@ def out_wrapper_multi(*out_names):
         return _fn
 
     return go
+
+
+# TODO: when tracing this will add torch tensors and not TensorMeta objects
+# to the trace -- we should fix this by adding a tracing context and NumberMeta classes
+# TODO: this wrapper is currently untested
+def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
+    """
+    Allows unary operators that accept tensors to work with Python numbers.
+    """
+    sig = inspect.signature(fn)
+
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        if len(args) > 0 and isinstance(args[0], Number):
+            dtype = utils.type_to_dtype(type(args[0]))
+            args_ = list(args)
+            args_[0] = torch.tensor(args[0], dtype=dtype)
+            result = fn(*args_, **kwargs)
+            assert isinstance(result, torch.Tensor)
+            return result.item()
+
+        return fn(*args, **kwargs)
+
+    _fn.__signature__ = sig  # type: ignore[attr-defined]
+    return _fn
+
+
+# avoid mypy import cycle
+import torch._prims as prims
