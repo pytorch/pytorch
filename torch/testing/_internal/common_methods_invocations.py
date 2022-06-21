@@ -1936,8 +1936,10 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
     yield SampleInput(make_arg((S, S)), kwargs=dict(weight=make_arg((S,)),))
 
 def sample_kwargs_prelu_scalar_weight(device, dtype, input):
-    weight = torch.randn(tuple(), requires_grad=input.requires_grad, device=device, dtype=dtype)
-    return ({'weight': weight}, {'weight': weight})
+    dtype = torch.float32 if dtype == torch.bfloat16 else dtype
+    weight = torch.rand(tuple(), device=device, dtype=dtype)
+    np_weight = weight.numpy()
+    return ({'weight': weight}, {'weight': np_weight})
 
 def error_inputs_prelu(op, device):
     # Weight has numel != 1, but self.ndim is zero-dim tensor
@@ -14429,7 +14431,6 @@ op_db: List[OpInfo] = [
         supports_gradgrad=True,
         supports_out=False,
         # test_reference_numerics only tests the case when the weight tensor is a scalar
-        # but for other tests, sample_inputs_func provides samples when weight is 1-D
         sample_kwargs=sample_kwargs_prelu_scalar_weight,
         error_inputs_func=error_inputs_prelu,
         sample_inputs_func=sample_inputs_nn_functional_prelu,
