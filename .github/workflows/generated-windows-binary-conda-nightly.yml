@@ -24,11 +24,7 @@ env:
   AWS_DEFAULT_REGION: us-east-1
   BUILD_ENVIRONMENT: windows-binary-conda
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  IN_CI: 1
-  IS_GHA: 1
-  PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
-  PYTORCH_RETRY_TEST_CASES: 1
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
@@ -119,7 +115,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_7-cpu
@@ -192,7 +188,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
@@ -278,7 +274,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cpu
@@ -418,7 +414,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_7-cuda11_3
@@ -492,7 +488,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_3
@@ -579,7 +575,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_3
@@ -719,7 +715,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_7-cuda11_6
@@ -793,7 +789,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_6
@@ -880,7 +876,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_7-cuda11_6
@@ -1019,7 +1015,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_8-cpu
@@ -1092,7 +1088,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cpu
@@ -1178,7 +1174,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cpu
@@ -1318,7 +1314,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_8-cuda11_3
@@ -1392,7 +1388,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_3
@@ -1479,7 +1475,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_3
@@ -1619,7 +1615,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_8-cuda11_6
@@ -1693,7 +1689,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_6
@@ -1780,7 +1776,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_8-cuda11_6
@@ -1919,7 +1915,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_9-cpu
@@ -1992,7 +1988,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
@@ -2078,7 +2074,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cpu
@@ -2218,7 +2214,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_9-cuda11_3
@@ -2292,7 +2288,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_3
@@ -2379,7 +2375,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_3
@@ -2519,7 +2515,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_9-cuda11_6
@@ -2593,7 +2589,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_6
@@ -2680,7 +2676,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_9-cuda11_6
@@ -2819,7 +2815,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_10-cpu
@@ -2892,7 +2888,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
@@ -2978,7 +2974,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cpu
@@ -3118,7 +3114,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_10-cuda11_3
@@ -3192,7 +3188,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_3
@@ -3279,7 +3275,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_3
@@ -3419,7 +3415,7 @@ jobs:
         shell: bash
         run: |
           "${PYTORCH_ROOT}/.circleci/scripts/binary_windows_build.sh"
-      - uses: seemethere/upload-artifact-s3@v4
+      - uses: seemethere/upload-artifact-s3@v5
         if: always()
         with:
           name: conda-py3_10-cuda11_6
@@ -3493,7 +3489,7 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_6
@@ -3580,7 +3576,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
-      - uses: seemethere/download-artifact-s3@v3
+      - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
           name: conda-py3_10-cuda11_6

@@ -292,7 +292,7 @@ to reuse the same function name in both cases.
 
 Available backend options can be found by searching `dispatch_keys` in
 [codegen](https://github.com/pytorch/pytorch/blob/master/torchgen/gen.py).
-There are also two special "generic" backends:
+There are also three special "generic" backends:
 
   - `CompositeExplicitAutograd` (previously known as `DefaultBackend`):
     implementations of kernels that work for all backends, but require an
@@ -304,6 +304,18 @@ There are also two special "generic" backends:
     kernel to every backend (e.g., `CPU, CUDA`). Note: kernels which call
     DispatchStub should NOT be registered as CompositeExplicitAutograd, as
     DispatchStub only works for `CPU, CUDA`)
+
+  - `CompositeExplicitAutogradNonFunctional`:
+    Similar to CompositeExplicitAutograd, but this key should be used if:
+    (1) Your kernel is written for a non-aliasing operator.
+    (2) *and* it calls internally into an aliasing operator.
+    An example of this is select_backward, which is non-aliasing, but decomposes into select.
+    We would like to distinguish between "ordinary" CompositeExplicitAutograd kernels
+    and these kernels, because some backends would not like
+    to decompose an non-aliasing op into an aliasing op.
+    LazyTensor + XLA are the two current examples of this - since they operate on a functional IR,
+    they would prefer to directly implement a non-aliasing operator with their own kernel,
+    instead of using a decomposition that results in more aliasing operators.
 
   - `CompositeImplicitAutograd` (previously known as `Math`): implementations of
     kernels that work for all backends, and also can implicitly support autograd,
