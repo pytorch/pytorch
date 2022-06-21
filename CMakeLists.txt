@@ -93,7 +93,7 @@ if(APPLE)
     # Determine if we can link against MPSGraph
     set(MPS_FOUND OFF)
     execute_process(
-      COMMAND bash -c "xcodebuild -sdk macosx -version SDKVersion"
+      COMMAND bash -c "xcrun --sdk macosx --show-sdk-version"
       RESULT_VARIABLE _exit_code
       OUTPUT_VARIABLE _macosx_sdk_version
       OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -791,7 +791,6 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-overflow")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-aliasing")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
@@ -947,7 +946,8 @@ endif()
 
 if(APPLE)
     if(USE_MPS)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_MPS -fno-objc-arc -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
+      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
     endif()
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")
