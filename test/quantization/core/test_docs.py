@@ -49,7 +49,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         r"""
         This function runs `code` using any vars in `global_inputs`
         """
-        if code is not None: # this path doesn't work for some CI runs
+        if code is not None:  # the path doesn't work for some CI runs
             expr = compile(code, "test", "exec")
             exec(expr, global_inputs)
 
