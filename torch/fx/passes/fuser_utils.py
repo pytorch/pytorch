@@ -215,23 +215,14 @@ def insert_subgm(gm, sub_gm, original_nodes):
 
 def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:
     for partition_id, nodes in enumerate(partitions):
-        partition_name = "fused_" + str(partition_id)
-
         sorted_nodes = topo_sort(nodes)
 
+        partition_name = "fused_" + str(partition_id)
         sub_gm = fuse_partition(gm, sorted_nodes, partition_name)
-
-        # print(partition_name)
-        # print(sub_gm.graph)
 
         insert_subgm(gm, sub_gm, sorted_nodes)
 
-    # print("before")
-    # print(gm)
-
+    # topological sort original gm with newly created sub_gm
     legalize_graph(gm)
-
-    # print("after")
-    # print(gm)
 
     return gm

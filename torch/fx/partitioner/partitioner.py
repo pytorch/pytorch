@@ -4,11 +4,15 @@ from torch.fx.passes.fuser_utils import fuse_by_partitions
 from torch.fx.passes.tools_common import NodeList
 
 from torch.fx.graph_module import GraphModule
-from torch.fx.node import Node
+from torch.fx.node import Node, _get_qualified_name
 from torch.fx.passes.operator_support import OperatorSupportBase
 
 from itertools import groupby
 from collections import defaultdict
+import logging
+
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
 
 class Partition:
     def __init__(self, id: int = None, nodes: Iterable[Node] = set()):
@@ -31,9 +35,12 @@ class CapabilityBasedPartitioner:
 
     def __init__(self,
                  graph_module: GraphModule,
-                 operator_support: OperatorSupportBase) -> None:
+                 operator_support: OperatorSupportBase,
+                 allows_single_node_partition: bool = False
+                 ) -> None:
         self.graph_module = graph_module
         self.operator_support = operator_support
+        self.allows_single_node_partition = allows_single_node_partition
 
         # map of node to it's upstream dependency nodes
         # if A is found in dependency_map[B], then B depends on A (or a is an upstream depedency of b)
@@ -79,14 +86,17 @@ class CapabilityBasedPartitioner:
                     return dependency
         return 0
 
-    def get_candidates(self) -> NodeList:
-        candidates = []
+    def __get_supported_nodes(self) -> NodeList:
+        logging.debug("Collecting supported nodes...")
+        supported_nodes = []
         for node in self.graph_module.graph.nodes:
             if self.operator_support.is_node_supported(self.graph_module.named_modules(), node):
-                candidates.append(node)
-        return candidates
+                supported_nodes.append(node)
+        return supported_nodes
 
-    def partition(self, candidates: NodeList) -> List[Partition]:
+    def propose_partitions(self) -> List[Partition]:
+        candidates: NodeList = self.__get_supported_nodes()
+
         # assumptions: nodes in candidate list is sorted in topological order
         assignment: Dict[Node, int] = {}   # maping from node to partition_id
         partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
@@ -94,11 +104,11 @@ class CapabilityBasedPartitioner:
         def assign(node: Node, id: Optional[int]):
             # node has been assigned before, clean up and re-assign
             if node in assignment:
-               original_id = assignment[node]
-               del assignment[node]
-               partitions_by_id[original_id].remove_node(node)
-               if partitions_by_id[original_id].size() == 0:
-                   del partitions_by_id[original_id]
+                original_id = assignment[node]
+                del assignment[node]
+                partitions_by_id[original_id].remove_node(node)
+                if partitions_by_id[original_id].size() == 0:
+                    del partitions_by_id[original_id]
 
             if id is not None:
                 assignment[node] = id
@@ -111,9 +121,9 @@ class CapabilityBasedPartitioner:
             g = groupby(iterable)
             return next(g, True) and not next(g, False)
 
+        logging.debug("Proposing partitions...")
         # visit candidates in reversed topological order
         for node in reversed(candidates):
-
             user_partitions: Set[Partition] = set()
             for user_node in node.users:
                 if user_node in assignment:
@@ -121,9 +131,6 @@ class CapabilityBasedPartitioner:
                     user_partitions.add(partitions_by_id[id])
                 else:
                     user_partitions.add(Partition(nodes=[user_node]))
-
-            # print(node)
-            # print('user_partitions', user_partitions)
 
             # Filter out all the partitions that has dependency on other users
             # TODO: find a better way to do this, rather than pair-wise comparision
@@ -137,8 +144,6 @@ class CapabilityBasedPartitioner:
                         user_partitions.remove(pj)
                     elif dependency == -1 and pi in user_partitions:
                         user_partitions.remove(pi)
-
-            # print("user_partitions after filtering", user_partitions)
 
             # We use the following rules for partition assignment:
             # 1. If none of the candidates has been assigned to a partition, create a new partition
@@ -163,39 +168,53 @@ class CapabilityBasedPartitioner:
                 id = partitions_size_by_id[0][1]
                 assign(node, id)
 
-
         # post processing to re-assign "getitem" nodes into upstream partition
-        nodes_reassignment: Dict[Node, id] = {}
+        logger.debug("Reassigning getitem nodes to its producer node's partition...")
+        nodes_reassignment: Dict[Node, int] = {}
         for node in self.graph_module.graph.nodes:
             is_tuple_output = True
             for user in node.users:
-                if user.op != "call_function" or user.target.__name__ != "getitem":
+                if user.op != "call_function" or \
+                   _get_qualified_name(user.target) != "_operator.getitem":     # type: ignore[arg-type]
                     is_tuple_output = False
                     break
+
             # node has tuple outputs, re-assign all following getitem node into node's partition
             if is_tuple_output:
-                id = assignment.get(node, None)
+                id = assignment.get(node, None)     # type: ignore[arg-type]
                 for user in node.users:
-                    if assignment.get(user, None) != id:
+                    if assignment.get(user, None) != id:    # type: ignore[arg-type]
                         nodes_reassignment[user] = id
         for node, id in nodes_reassignment.items():
             assign(node, id)
 
         # filter out single node partitions
-        print("Filtering out single node partitions...")
-        partitions_to_remove: List[int] = []
+        if not self.allows_single_node_partition:
+            logger.debug("Filtering out single node partitions...")
+            partitions_to_remove: List[int] = []
+            for id, partition in partitions_by_id.items():
+                compute_node_count = 0
+                for node in partition.nodes:
+                    if node.op == "call_function" and \
+                       _get_qualified_name(node.target) not in {"torch.ops.aten.view", "_operator.getitem"}:  # type: ignore[arg-type]
+                        compute_node_count += 1
+                if compute_node_count <= 1:
+                    partitions_to_remove.append(id)
+            for id in partitions_to_remove:
+                del partitions_by_id[id]
+
+        logging.debug("Partitions proposed:")
         for id, partition in partitions_by_id.items():
-            compute_node_count = 0
-            for node in partition.nodes:
-                if node.target.__name__ not in {"view", "getitem"}:
-                    compute_node_count += 1
-            if compute_node_count <= 1:
-                partitions_to_remove.append(id)
-        for id in partitions_to_remove:
-            del partitions_by_id[id]
+            logging.debug(f"partition #{id}", [node.name for node in partition.nodes])
 
         return list(partitions_by_id.values())
 
     def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
+        logging.debug("Fusing partitions...")
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
         return fuse_by_partitions(self.graph_module, [list(partition.nodes) for partition in partitions])
+
+    def partition_and_fuse(self) -> GraphModule:
+        partitions = self.propose_partitions()
+        fused_gm = self.fuse_partitions(partitions)
+        return fused_gm
