@@ -3394,7 +3394,7 @@ at::Tensor& diagonal_copy_out(const at::Tensor & self, int64_t offset, int64_t d
 
 
 at::Tensor& expand_copy_SymInt_out(const at::Tensor & self, c10::SymIntArrayRef size, bool implicit, at::Tensor & out) {
-  auto tmp = self.expand(size, implicit);
+  auto tmp = self.expand_symint(size, implicit);
   out.copy_(tmp);
   return out;
 }
