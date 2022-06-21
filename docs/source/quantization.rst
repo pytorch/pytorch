@@ -71,29 +71,29 @@ Diagram::
 
 API example::
 
-    import torch
+  import torch
 
-    # define a floating point model
-    class M(torch.nn.Module):
-        def __init__(self):
-            super(M, self).__init__()
-            self.fc = torch.nn.Linear(4, 4)
+  # define a floating point model
+  class M(torch.nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.fc = torch.nn.Linear(4, 4)
 
-        def forward(self, x):
-            x = self.fc(x)
-            return x
+      def forward(self, x):
+          x = self.fc(x)
+          return x
 
-    # create a model instance
-    model_fp32 = M()
-    # create a quantized model instance
-    model_int8 = torch.quantization.quantize_dynamic(
-        model_fp32,  # the original model
-        {torch.nn.Linear},  # a set of layers to dynamically quantize
-        dtype=torch.qint8)  # the target dtype for quantized weights
+  # create a model instance
+  model_fp32 = M()
+  # create a quantized model instance
+  model_int8 = torch.quantization.quantize_dynamic(
+      model_fp32,  # the original model
+      {torch.nn.Linear},  # a set of layers to dynamically quantize
+      dtype=torch.qint8)  # the target dtype for quantized weights
 
-    # run the model
-    input_fp32 = torch.randn(4, 4, 4, 4)
-    res = model_int8(input_fp32)
+  # run the model
+  input_fp32 = torch.randn(4, 4, 4, 4)
+  res = model_int8(input_fp32)
 
 To learn more about dynamic quantization please see our `dynamic quantization tutorial
 <https://pytorch.org/tutorials/recipes/recipes/dynamic_quantization.html>`_.
@@ -131,7 +131,7 @@ API Example::
   # define a floating point model where some layers could be statically quantized
   class M(torch.nn.Module):
       def __init__(self):
-          super(M, self).__init__()
+          super().__init__()
           # QuantStub converts tensors from floating point to quantized
           self.quant = torch.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
@@ -229,7 +229,7 @@ API Example::
   # define a floating point model where some layers could benefit from QAT
   class M(torch.nn.Module):
       def __init__(self):
-          super(M, self).__init__()
+          super().__init__()
           # QuantStub converts tensors from floating point to quantized
           self.quant = torch.quantization.QuantStub()
           self.conv = torch.nn.Conv2d(1, 1, 1)
@@ -249,8 +249,8 @@ API Example::
   # create a model instance
   model_fp32 = M()
 
-  # model must be set to train mode for QAT logic to work
-  model_fp32.train()
+  # model must be set to eval for fusion to work
+  model_fp32.eval()
 
   # attach a global qconfig, which contains information about what kind
   # of observers to attach. Use 'fbgemm' for server inference and
@@ -265,8 +265,9 @@ API Example::
       [['conv', 'bn', 'relu']])
 
   # Prepare the model for QAT. This inserts observers and fake_quants in
+  # the model needs to be set to train for QAT logic to work
   # the model that will observe weight and activation tensors during calibration.
-  model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused)
+  model_fp32_prepared = torch.quantization.prepare_qat(model_fp32_fused.train())
 
   # run the training loop (not shown)
   training_loop(model_fp32_prepared)
@@ -326,11 +327,12 @@ There are multiple quantization types in post training quantization (weight only
 
 API Example::
 
-  from torch.quantization import QConfigMapping
+  import torch
+  from torch.ao.quantization import QConfigMapping
   import torch.quantization.quantize_fx as quantize_fx
   import copy
 
-  model_fp = UserModel(...)
+  model_fp = UserModel()
 
   #
   # post training dynamic/weight_only quantization
@@ -340,9 +342,11 @@ API Example::
   model_to_quantize = copy.deepcopy(model_fp)
   model_to_quantize.eval()
   qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_dynamic_qconfig)
+  # a tuple of one or more example inputs are needed to trace the model
+  example_inputs = (input_fp32)
   # prepare
-  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping)
-  # no calibration needed when we only have dynamici/weight_only quantization
+  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
+  # no calibration needed when we only have dynamic/weight_only quantization
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
 
@@ -354,7 +358,7 @@ API Example::
   qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qconfig('qnnpack'))
   model_to_quantize.eval()
   # prepare
-  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping)
+  model_prepared = quantize_fx.prepare_fx(model_to_quantize, qconfig_mapping, example_inputs)
   # calibrate (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
@@ -367,7 +371,7 @@ API Example::
   qconfig_mapping = QConfigMapping().set_global(torch.quantization.get_default_qat_qconfig('qnnpack'))
   model_to_quantize.train()
   # prepare
-  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_mapping)
+  model_prepared = quantize_fx.prepare_qat_fx(model_to_quantize, qconfig_mapping, example_inputs)
   # training loop (not shown)
   # quantize
   model_quantized = quantize_fx.convert_fx(model_prepared)
