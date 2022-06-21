@@ -13,7 +13,6 @@ __all__ = [
 def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> Optional[str]:
     """
     Returns the fqn for a module or None if module not a descendent of model.
-    Similar to model.get_submodule(path) but works for tensors.
     """
     if module is model:
         return ""
@@ -27,7 +26,7 @@ def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> Opti
 def fqn_to_module(model: Optional[nn.Module], path: str) -> Optional[nn.Module]:
     """
     Given an fqn, returns the corresponding module or tensor or None if the fqn given by `path`
-    doesn't correspond to anything.
+    doesn't correspond to anything. Similar to model.get_submodule(path) but works for tensors.
     """
     if path != "":
         for name in path.split("."):
@@ -37,7 +36,7 @@ def fqn_to_module(model: Optional[nn.Module], path: str) -> Optional[nn.Module]:
 
 def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> Dict[str, Any]:
     """
-    Uses tensor_fqn to obtain a dict containing
+    Uses tensor_fqn to obtain a dict containing module_fqn, module and tensor_name
     """
     # string manip to split tensor_fqn into module_fqn and tensor_name
     # if tensor_fqn is 'weight' then module_fqn and tensor_name are '' and 'weight'
