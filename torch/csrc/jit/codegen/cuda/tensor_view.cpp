@@ -35,18 +35,7 @@ TensorView::TensorView(
     MemoryType mtype)
     : Val(passkey, ValType::TensorView, dtype),
       domain_(domain),
-      memory_type_(mtype) {
-  // Don't do this after transforms
-  if (domain_->domain() == domain_->getRootDomain()) {
-    // Mark the size-1 axes as broadcast to support implicit broadcast semantic
-    for (auto* id : domain_->domain()) {
-      if (!id->isBroadcast() && !id->isReduction() && !id->isGather() &&
-          id->extent()->isOneInt()) {
-        id->convertToBroadcast();
-      }
-    }
-  }
-}
+      memory_type_(mtype) {}
 
 TensorView::TensorView(
     IrBuilderPasskey passkey,
@@ -66,14 +55,16 @@ TensorView::TensorView(
     if (tensor_type->sizes()[i].has_value() &&
         tensor_type->sizes()[i].value() == 1) {
       // If size is known to be 1, assuem it needs to be broadcasted.
-      sizes.push_back(IrBuilder::create<IterDomain>(
-          passkey.ir_container_->zeroVal(),
-          passkey.ir_container_->oneVal(),
-          ParallelType::Serial,
-          IterType::BroadcastWithStride));
+      sizes.push_back(
+          IterDomainBuilder(
+              passkey.ir_container_->zeroVal(), passkey.ir_container_->oneVal())
+              .iter_type(IterType::Broadcast)
+              .build());
     } else {
-      sizes.push_back(IrBuilder::create<IterDomain>(
-          passkey.ir_container_->zeroVal(), IrBuilder::create<Int>()));
+      sizes.push_back(
+          IterDomainBuilder(
+              passkey.ir_container_->zeroVal(), IrBuilder::create<Int>())
+              .build());
     }
   }
   // [ Note -- stride_properties in tensor type ]
@@ -173,13 +164,10 @@ void TensorView::convertRfactorToRootDomain() {
             getMaybeRFactorDomain().size());
         for (const auto& id : getMaybeRFactorDomain()) {
           if (replacement_extents[idx] != nullptr) {
-            new_root_domain[idx] = IrBuilder::create<IterDomain>(
-                container(),
-                id->start(),
-                replacement_extents[idx],
-                id->stopOffset(),
-                id->getParallelType(),
-                id->getIterType());
+            new_root_domain[idx] = IterDomainBuilder(id)
+                                       .extent(replacement_extents[idx])
+                                       .resetSchedulingParams()
+                                       .build();
             ++idx;
           } else {
             TORCH_INTERNAL_ASSERT(!id->isRFactorProduct());
@@ -796,7 +784,7 @@ std::vector<TensorView*> TensorView::rFactor(
   return rf_tvs;
 }
 
-TensorView* TensorView::cacheBefore() {
+TensorView* TensorView::cacheBefore(c10::optional<LoadStoreOpType> cache_op) {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -865,7 +853,13 @@ TensorView* TensorView::cacheBefore() {
   ir_utils::replaceValInExpr(definition(), this, producer);
 
   // Expr* producer_uses =
-  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, consumer, producer);
+  if (cache_op.has_value()) {
+    IrBuilder::create<LoadStoreOp>(
+        container(), cache_op.value(), consumer, producer);
+  } else {
+    IrBuilder::create<UnaryOp>(
+        container(), UnaryOpType::Set, consumer, producer);
+  }
 
   // definition_ is no longer valid
   // setDefinition(nullptr);
@@ -924,7 +918,7 @@ TensorView* TensorView::cacheFork() {
   return new_output;
 }
 
-TensorView* TensorView::cacheAfter() {
+TensorView* TensorView::cacheAfter(c10::optional<LoadStoreOpType> cache_op) {
   TORCH_INTERNAL_ASSERT(
       !container()->isA<kir::Kernel>(),
       "Function invalid for kernel container.");
@@ -990,7 +984,13 @@ TensorView* TensorView::cacheAfter() {
   }
 
   // Expr* consumer_definition =
-  IrBuilder::create<UnaryOp>(container(), UnaryOpType::Set, consumer, producer);
+  if (cache_op.has_value()) {
+    IrBuilder::create<LoadStoreOp>(
+        container(), cache_op.value(), consumer, producer);
+  } else {
+    IrBuilder::create<UnaryOp>(
+        container(), UnaryOpType::Set, consumer, producer);
+  }
 
   return consumer;
 }
@@ -1043,7 +1043,7 @@ bool TensorView::isEmptyTensor() const {
 
 void TensorView::applyMmaSwizzle(MmaOptions options) {
   switch (options.operand) {
-    case MmaOptions::Operand::NotOperand:
+    case MmaOptions::Operand::Accumulator:
       mma_util::WarpMmaSwizzler::scheduleMmaWarpOutput(this, options);
       break;
     case MmaOptions::Operand::A:
@@ -1093,8 +1093,10 @@ TensorView* TensorViewBuilder::build() const {
   std::vector<IterDomain*> domain(ndims_, nullptr);
   for (const auto i : c10::irange(ndims_)) {
     if (shape_.empty() || shape_[i] == -1) {
-      domain[i] = IrBuilder::create<IterDomain>(
-          FusionGuard::getCurFusion()->zeroVal(), IrBuilder::create<Int>());
+      domain[i] =
+          IterDomainBuilder(
+              FusionGuard::getCurFusion()->zeroVal(), IrBuilder::create<Int>())
+              .build();
     } else {
       TORCH_CHECK(
           shape_[i] >= 0,
@@ -1102,15 +1104,16 @@ TensorView* TensorViewBuilder::build() const {
           "For a tensor representing a single scalar use ndims = 0 with no sizes set.");
       if (shape_[i] == 1) {
         // If size is known to be 1, assume it needs to be broadcasted.
-        domain[i] = IrBuilder::create<IterDomain>(
-            FusionGuard::getCurFusion()->zeroVal(),
-            FusionGuard::getCurFusion()->oneVal(),
-            ParallelType::Serial,
-            IterType::BroadcastWithStride);
+        domain[i] = IterDomainBuilder(
+                        FusionGuard::getCurFusion()->zeroVal(),
+                        FusionGuard::getCurFusion()->oneVal())
+                        .iter_type(IterType::Broadcast)
+                        .build();
       } else {
-        domain[i] = IrBuilder::create<IterDomain>(
-            FusionGuard::getCurFusion()->zeroVal(),
-            IrBuilder::create<Int>(shape_[i]));
+        domain[i] = IterDomainBuilder(
+                        FusionGuard::getCurFusion()->zeroVal(),
+                        IrBuilder::create<Int>(shape_[i]))
+                        .build();
       }
     }
   }
@@ -1118,13 +1121,6 @@ TensorView* TensorViewBuilder::build() const {
   // Create the final TensorView
   return IrBuilder::create<TensorView>(
       IrBuilder::create<TensorDomain>(domain, contiguity_), dtype_);
-}
-
-void TensorView::configureMma(MmaOptions options) {
-  TORCH_CHECK(definition(), "configureMma: invalid for input tensor ", this);
-  auto mma = dynamic_cast<MmaOp*>(definition());
-  TORCH_CHECK(mma, "configureMma: invalid for non-mma output: ", this);
-  mma->configureOptions(options);
 }
 
 } // namespace cuda
