@@ -1072,24 +1072,42 @@ Tensor narrow(const Tensor& self, int64_t dim, const Tensor& start, int64_t leng
   return at::narrow(self, dim, st, length);
 }
 
-Tensor permute(const Tensor& self, IntArrayRef dims) {
-  auto nDims = self.dim();
-  TORCH_CHECK(dims.size() == (size_t)nDims,
-           "number of dims don't match in permute");
-  auto oldSizes = self.sizes();
-  auto oldStrides = self.strides();
-  DimVector newSizes(nDims);
-  DimVector newStrides(nDims);
-  std::vector<bool> seen(nDims);
-  for (const auto i : c10::irange(nDims)) {
-    auto dim = maybe_wrap_dim(dims[i], nDims);
-    TORCH_CHECK(!seen[dim],
-             "repeated dim in permute");
-    seen[dim] = true;
-    newSizes[i] = oldSizes[dim];
-    newStrides[i] = oldStrides[dim];
+std::tuple<DimVector, DimVector, DimVector>
+_permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
+  const auto ndim = self.dim();
+  TORCH_CHECK(ndim == static_cast<int64_t>(dims.size()),
+      "permute(sparse_coo): number of dimensions in the tensor input ",
+      "does not match the length of the desired ordering of dimensions ",
+      "i.e. input.dim() = ", ndim, " is not equal to len(dims) = ", dims.size());
+
+  const auto is_strided_layout = self.options().layout() == at::kStrided;
+  const auto old_sizes = self.sizes();
+  const auto old_strides = is_strided_layout ? self.strides() : IntArrayRef{};
+
+  auto new_sizes = DimVector(ndim);
+  auto new_strides = DimVector(is_strided_layout ? ndim : 0);
+  auto wrapped_dims = DimVector(ndim);
+  std::vector<bool> seen_dims(ndim);
+
+  for (const auto i : c10::irange(ndim)) {
+    const auto d = maybe_wrap_dim(dims[i], ndim);
+    TORCH_CHECK(!seen_dims[d],
+        "permute(): duplicate dims are not allowed.");
+    seen_dims[d] = true;
+    wrapped_dims[i] = d;
+    new_sizes[i] = old_sizes[d];
+    if (is_strided_layout) {
+      new_strides[i] = old_strides[d];
+    }
   }
-  return self.as_strided(newSizes, newStrides);
+
+  return std::make_tuple(new_sizes, new_strides, wrapped_dims);
+}
+
+Tensor permute(const Tensor& self, IntArrayRef dims) {
+  DimVector new_sizes, new_strides, _;
+  std::tie(new_sizes, new_strides, _) = _permute_size_stride_estimation(self, dims);
+  return self.as_strided(new_sizes, new_strides);
 }
 
 Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
