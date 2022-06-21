@@ -14854,9 +14854,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness'),
                DecorateInfo(unittest.skip('Skipped!'), 'TestNNCOpInfo', 'test_nnc_correctness',
                             device_type='cpu', dtypes=(torch.bfloat16,)),
-               # see https://github.com/pytorch/pytorch/issues/76283
-               DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
-                            device_type="cpu"),
                # Trying to use forward AD with miopen_batch_norm that does not support it
                # because it has not been implemented yet.
                DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
@@ -14874,8 +14871,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            decorators=[onlyCUDA, disablecuDNN],
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad',
-                            device_type='cpu'),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-02)}),
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            ),
