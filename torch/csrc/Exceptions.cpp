@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include <fmt/format.h>
 #include <torch/csrc/THP.h>
 
 #include <c10/util/StringUtil.h>
@@ -55,7 +56,7 @@ could not be completed because the input matrix is singular.",
 
 namespace torch {
 
-std::string processErrorMsg(std::string str) {
+void processErrorMsgInplace(std::string& str) {
   // Translate Aten types to their respective pytorch ones
   constexpr std::array<std::pair<c10::string_view, c10::string_view>, 64>
       changes{{
@@ -127,12 +128,15 @@ std::string processErrorMsg(std::string str) {
 
   // Avoid doing any work if no types need translated
   if (str.find("Type") == str.npos) {
-    return str;
+    return;
   }
   for (const auto& it : changes) {
     c10::ReplaceAll(str, it.first, it.second);
   }
+}
 
+std::string processErrorMsg(std::string str) {
+  processErrorMsgInplace(str);
   return str;
 }
 
@@ -222,9 +226,10 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       // error has been set yet
       PyErr_Fetch(&type, &value, &traceback);
     }
-    for (const auto& warning : warning_buffer) {
+    for (auto& warning : warning_buffer) {
       auto source_location = warning.source_location_;
-      const auto& msg = processErrorMsg(warning.msg_);
+      auto& msg = warning.msg_;
+      processErrorMsgInplace(msg);
       if (source_location.file == nullptr) {
         result = PyErr_WarnEx(PyExc_RuntimeWarning, msg.c_str(), 1);
       } else if (warning.verbatim_) {
@@ -242,10 +247,15 @@ PyWarningHandler::~PyWarningHandler() noexcept(false) {
       } else {
         // Lets Python set the source location and puts the C++ warning
         // location into the message.
-        std::ostringstream os;
-        os << msg << " (Triggered internally at  " << source_location.file;
-        os << ":" << source_location.line << ".)";
-        result = PyErr_WarnEx(PyExc_UserWarning, os.str().c_str(), 1);
+        fmt::memory_buffer buf;
+        fmt::format_to(
+            buf,
+            FMT_STRING("{} (Triggered internally at {}:{}.)"),
+            msg,
+            source_location.file,
+            source_location.line);
+        buf.push_back('\0');
+        result = PyErr_WarnEx(PyExc_UserWarning, buf.data(), 1);
       }
       if (result < 0) {
         if (in_exception_) {
