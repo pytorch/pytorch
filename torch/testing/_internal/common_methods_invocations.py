@@ -20423,18 +20423,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.hardshrink",
         torch_opinfo_name="nn.functional.hardshrink",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.softshrink",
         torch_opinfo_name="nn.functional.softshrink",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     #
     # Elementwise Binary Reference OpInfos
