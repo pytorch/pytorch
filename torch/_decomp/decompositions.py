@@ -737,7 +737,7 @@ def embedding_dense_backward(
     numel = indices.numel()
     grad = grad_output.view(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
-    indices_rank1 = indices.view(numel)
+    indices_rank1 = indices.reshape(numel)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = indices.new_ones((numel,))
@@ -1005,11 +1005,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-@register_decomposition(aten.logical_not)
-def logical_not(self: Tensor) -> Tensor:
-    return ~self.to(dtype=torch.bool)
-
-
 @register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
@@ -1164,11 +1159,6 @@ def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
     maxes_squeezed = torch.masked_fill(maxes_squeezed, maxes_squeezed.abs() == float('inf'), 0)
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
-
-
-@register_decomposition(aten.trace.default)
-def trace(self: Tensor) -> Tensor:
-    return torch.sum(torch.diag(self))
 
 
 # nb: Should use acc_t, not op_math

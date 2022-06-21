@@ -321,6 +321,9 @@ int64_t FunctionalTensorWrapper::numel_custom() const {
 bool FunctionalTensorWrapper::is_contiguous_custom(at::MemoryFormat memory_format) const {
   return value_.unsafeGetTensorImpl()->is_contiguous();
 }
+c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes() const {
+  return value_.unsafeGetTensorImpl()->sym_sizes();
+}
 c10::SymIntArrayRef FunctionalTensorWrapper::sym_sizes_custom() const {
   return value_.unsafeGetTensorImpl()->sym_sizes();
 }
@@ -663,7 +666,11 @@ void functionalize_op_helper(const c10::OperatorHandle& op, torch::jit::Stack* s
     // the output in a functional tensor based on TLS.
     // In this code, we're re-entrantly entering functionalization in the same call-stack,
     // so we need to manually fix up TLS as if it hadn't already been called.
-    ReenableFunctionalize guard;
+    auto curr_tls = c10::impl::tls_local_dispatch_key_set();
+    auto tls_reenable_functionalize = c10::impl::PODLocalDispatchKeySet();
+    tls_reenable_functionalize.set_included(curr_tls.included_);
+    tls_reenable_functionalize.set_excluded(curr_tls.excluded_.remove(c10::DispatchKey::Functionalize));
+    c10::impl::ForceDispatchKeyGuard guard_(tls_reenable_functionalize);
     // So, we should probably provide a way to directly call a kernel registered to
     // the `CompositeExplicitAutograd` key.
     // We can't do that today, so this should be a reasonably good proxy

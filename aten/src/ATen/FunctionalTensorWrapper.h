@@ -140,6 +140,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   int64_t dim_custom() const override;
   int64_t numel_custom() const override;
   bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  c10::SymIntArrayRef sym_sizes() const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
 
  private:
@@ -271,45 +272,6 @@ class TORCH_API FunctionalizationReapplyViewsGuard {
 };
 
 } // namespace impl
-
-// Helper RAII guard
-// This guard expects the passed in dispatch key to already be in the exclude
-// set, and will *remove that key from the exclude set while the guard is
-// active. Useful for re-entrant functionalization within a single dispatch
-// chain.
-class TORCH_API _RemoveExcludeDispatchKeyGuard {
- public:
-  _RemoveExcludeDispatchKeyGuard(DispatchKey k) {
-    // This guard expects the key to already be excluded, and will temporary
-    // remove it from the exclude set.
-    key_ = k;
-    // MLIR and XLA are using this API, so waiting to add this assert back
-    // until after they're using the functionalization pass.
-    // TORCH_INTERNAL_ASSERT(c10::impl::tls_is_dispatch_key_excluded(key_));
-    c10::impl::tls_set_dispatch_key_excluded(key_, false);
-  }
-
-  _RemoveExcludeDispatchKeyGuard(const _RemoveExcludeDispatchKeyGuard&) =
-      delete;
-  _RemoveExcludeDispatchKeyGuard operator=(
-      const _RemoveExcludeDispatchKeyGuard&) = delete;
-  _RemoveExcludeDispatchKeyGuard(_RemoveExcludeDispatchKeyGuard&&) = delete;
-  _RemoveExcludeDispatchKeyGuard operator=(_RemoveExcludeDispatchKeyGuard&&) =
-      delete;
-
-  ~_RemoveExcludeDispatchKeyGuard() {
-    c10::impl::tls_set_dispatch_key_excluded(key_, true);
-  }
-
- private:
-  c10::DispatchKey key_;
-};
-
-struct ReenableFunctionalize {
-  ReenableFunctionalize()
-      : remove_exclude_guard_(c10::DispatchKey::Functionalize) {}
-  _RemoveExcludeDispatchKeyGuard remove_exclude_guard_;
-};
 
 // Helper function to call an out-of-place composite aten kernel that may use
 // mutations / views internally, and functionalize them.

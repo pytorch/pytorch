@@ -48,11 +48,11 @@ from .graph_module import (
 )
 
 from .pattern_utils import (
-    MatchResult,
     sorted_patterns_dict,
 )
 
 from .match_utils import (
+    _MatchResultWithQConfig,
     find_matches,
 )
 
@@ -732,7 +732,7 @@ def maybe_insert_output_observer_for_node(
     model: torch.nn.Module,
     modules: Dict[str, torch.nn.Module],
     graph: Graph,
-    matches: Dict[str, MatchResult],
+    matches: Dict[str, _MatchResultWithQConfig],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
     matched_pattern: Any,
     qhandler: Optional[QuantizeHandler],
@@ -885,7 +885,7 @@ def maybe_propagate_dtype_for_node(
     node: Node,
     target_dtype: Union[torch.dtype, type],
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    matches: Dict[str, MatchResult],
+    matches: Dict[str, _MatchResultWithQConfig],
 ) -> None:
     """
     Assigns `target_dtype` to `node`. If `node` is a general tensor shape op
@@ -907,7 +907,7 @@ def maybe_propagate_dtype_for_node(
 def propagate_dtypes_for_known_nodes(
     graph: Graph,
     node_name_to_target_dtype: Dict[str, Dict[str, Optional[Union[torch.dtype, type]]]],
-    matches: Dict[str, MatchResult],
+    matches: Dict[str, _MatchResultWithQConfig],
 ) -> None:
     """
     Currently we assume that inputs to the graph are either `torch.float` or
@@ -1062,7 +1062,7 @@ def swap_custom_module_to_observed(
 def insert_observers_for_model(
     model: GraphModule,
     modules: Dict[str, torch.nn.Module],
-    matches: Dict[str, MatchResult],
+    matches: Dict[str, _MatchResultWithQConfig],
     qconfig_map: Dict[str, QConfigAny],
     graph: Graph,
     prepare_custom_config: PrepareCustomConfig,
@@ -1506,9 +1506,15 @@ def prepare(
     standalone_module_classes = list(prepare_custom_config.standalone_module_classes.keys())
 
     custom_module_classes = get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
-    matches = find_matches(
-        model.graph, modules, patterns, root_node_getter_mapping, qconfig_map,
+    matches_without_qconfig = find_matches(
+        model.graph, modules, patterns, root_node_getter_mapping,
         standalone_module_names, standalone_module_classes, custom_module_classes)
+
+    # map qconfig instances to matches
+    matches = {}
+    for node_name, match_without_qconfig in matches_without_qconfig.items():
+        match_with_qconfig = (*match_without_qconfig, qconfig_map[node_name])
+        matches[node_name] = match_with_qconfig
 
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
