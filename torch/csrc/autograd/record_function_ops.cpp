@@ -26,7 +26,8 @@ void record_function_enter(
   if (rec.isActive()) {
     if (rec.needsInputs() && args.has_value()) {
       rec.before(
-          std::string(name), c10::ArrayRef<const c10::IValue>{c10::IValue{args.value()}});
+          std::string(name),
+          c10::ArrayRef<const c10::IValue>{c10::IValue{args.value()}});
     } else {
       rec.before(std::string(name));
     }
@@ -56,7 +57,9 @@ c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
     const c10::optional<std::string>& args_) {
   auto rec =
       c10::make_intrusive<PythonRecordFunction>(at::RecordScope::USER_SCOPE);
-  auto args = args_.has_value() ? c10::optional<c10::string_view>(c10::string_view(args_.value())) : c10::optional<c10::string_view>(c10::nullopt);
+  auto args = args_.has_value()
+      ? c10::optional<c10::string_view>(c10::string_view(args_.value()))
+      : c10::optional<c10::string_view>(c10::nullopt);
   record_function_enter(name, args, rec->record);
   return rec;
 }
