@@ -93,6 +93,7 @@ __all__ = [
     "prod",
     "cumsum",
     "t",
+    "numpy_T",
     "expand",
     "expand_as",
     "embedding",
