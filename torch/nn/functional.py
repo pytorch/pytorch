@@ -1611,8 +1611,8 @@ learnable parameter.
 
 .. note::
     `weight` is expected to be a scalar or 1-D tensor. If `weight` is 1-D,
-    it must have the same size as the size of `input`'s channel dim, usually the
-    2nd dim of input (or when input has dims < 2 the numbers of channels = 1).
+    its size must match the number of input channels, determined by
+    `input.size(1)` when `input.dim() >= 2`, otherwise 1.
     In the 1-D case, note that when `input` has dim > 2, `weight` can be expanded
     to the shape of `input` in a way that is not possible using normal
     :ref:`broadcasting semantics<broadcasting-semantics>`.
