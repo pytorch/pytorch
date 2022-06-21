@@ -64,6 +64,10 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                     # to filter those out
                     and torch._C._dispatch_has_kernel(name)
                     and not torch._C._dispatch_has_kernel_for_dispatch_key(name, 'Meta')
+                    # Don't register a meta kernel to any operator that has
+                    # a CompositeImplicitAutograd kernel in core.
+                    # Otherwise we won't be able to run autograd for that operator with the meta backend.
+                    and 'CompositeImplicitAutograd' not in torch._C._dispatch_dump(name)
                 ):
                     meta_lib.impl(op_overload, f)
 
