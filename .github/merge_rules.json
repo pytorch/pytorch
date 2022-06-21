@@ -21,21 +21,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-xenial-py3.7-clang7-onnx / test (default, 1, 2, linux.2xlarge)",
-         "linux-xenial-py3.7-clang7-onnx / test (default, 2, 2, linux.2xlarge)"
+         "pull"
       ]
    },
    {
@@ -50,20 +36,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-focal-py3.7-gcc7 / build"
+         "pull"
       ]
    },
    {
@@ -73,20 +46,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-focal-py3.7-gcc7 / build"
+         "pull"
       ]
    },
    {
@@ -120,20 +80,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-focal-py3.7-gcc7 / build"
+         "pull"
       ]
    },
    {
@@ -143,20 +90,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-focal-py3.7-gcc7 / build"
+         "pull"
       ]
    },
    {
@@ -177,20 +111,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-focal-py3.7-gcc7 / build"
+         "pull"
       ]
    },
    {
@@ -211,20 +132,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-focal-py3.7-gcc7 / build"
+         "pull"
       ]
    },
    {
@@ -250,20 +158,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-focal-py3.7-gcc7 / build"
+         "pull"
       ]
    },
    {
@@ -276,7 +171,8 @@
       "approved_by": ["kulinseth", "razarmehr"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
-         "Lint"
+         "Lint",
+         "pull"
       ]
    },
    {
@@ -303,19 +199,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build"
+         "pull"
       ]
    },
    {
@@ -325,20 +209,7 @@
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
-         "linux-docs / build-docs (cpp)",
-         "linux-docs / build-docs (python)",
-         "win-vs2019-cpu-py3 / build",
-         "win-vs2019-cuda11.3-py3 / build",
-         "linux-bionic-py3.7-clang9 / build",
-         "linux-xenial-py3.7-clang7-onnx / build",
-         "linux-vulkan-bionic-py3.7-clang9 / build",
-         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-bionic-cuda11.3-py3.7-clang9 / build",
-         "linux-xenial-py3-clang5-mobile-build / build",
-         "linux-xenial-py3-clang5-mobile-custom-build-static / build",
-         "pytorch-xla-linux-bionic-py3.7-clang8 / build",
-         "deploy-linux-xenial-cuda11.3-py3.7-gcc7 / build",
-         "linux-focal-py3.7-gcc7 / build"
+         "pull"
       ]
    }
 ]
