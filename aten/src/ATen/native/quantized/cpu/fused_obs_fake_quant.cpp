@@ -7,7 +7,7 @@
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
 #endif
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 
 namespace {
 void calculate_moving_average(
@@ -143,6 +143,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cpu(
     const int64_t ch_axis,
     bool per_row_fake_quant,
     bool symmetric_quant) {
+  TORCH_CHECK(ch_axis < self.dim(), "Error in fused_moving_avg_obs_fake_quant_cpu: ch_axis must be < self.dim()");
   // Calculate min/max
   auto observe = observer_on.item().toInt();
   // Calculate the size of the dimension we need to quantize over,

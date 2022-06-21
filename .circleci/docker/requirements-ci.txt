@@ -80,10 +80,10 @@ librosa>=0.6.2
 #Pinned versions:
 #test that import:
 
-mypy==0.812
+mypy==0.960
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 0.812
+#Pinned versions: 0.960
 #test that import: test_typing.py, test_type_hints.py
 
 #networkx
@@ -128,9 +128,9 @@ numba==0.54.1 ; python_version == "3.9"
 #Pinned versions:
 #test that import:
 
-#protobuf
+protobuf==3.20.1
 #Description:  Google’s data interchange format
-#Pinned versions:
+#Pinned versions: 3.20.1
 #test that import: test_tensorboard.py
 
 psutil
