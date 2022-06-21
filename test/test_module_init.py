@@ -370,6 +370,7 @@ def generate_tests(test_cls, constructor_arg_db):
         # See https://github.com/pytorch/pytorch/issues/55396
         torch.nn.quantized.Embedding,
         torch.nn.quantized.EmbeddingBag,
+        torch.nn.quantized.modules.rnn.LSTM,
     }
     # no need to support kwargs for these modules even though
     # they have parameters / buffers because they are passed in

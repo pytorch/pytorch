@@ -2711,7 +2711,7 @@ class TestQuantizedOps(TestCase):
                 torch.nn.LSTM: torch.nn.quantizable.LSTM
             },
             'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.LSTM: torch.nn.quantizable.LSTM
+                torch.nn.quantizable.LSTM: torch.nn.quantized.LSTM
             }
         }
 
@@ -2752,6 +2752,7 @@ class TestQuantizedOps(TestCase):
                     lstm, prepare_custom_config_dict=custom_module_config)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
+                assert type(lstm_prepared[0]) == torch.nn.quantizable.LSTM
 
                 # Calibrate
                 y = lstm_prepared(x)
@@ -2760,6 +2761,7 @@ class TestQuantizedOps(TestCase):
                 # Quantize
                 lstm_quantized = torch.ao.quantization.convert(
                     lstm_prepared, convert_custom_config_dict=custom_module_config)
+                assert type(lstm_quantized[0]) == torch.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
