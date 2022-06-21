@@ -2,9 +2,11 @@
 
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace torch {
@@ -153,36 +155,26 @@ class TORCH_CUDA_CU_API TransformReplay {
       const TensorDomain* self);
 };
 
+namespace {
+struct NextHopInfo;
+}
+
+// TransformPropagator starts from a reference tensor, and propagate
+// the transformations in this tensor to the entire graph. The propagation
+// is done with the Dijkstra algorithm which will transform every tensor
+// in this graph based on the information flow from the path that perserves
+// the most amount of information about the reference tensor. Every tensor in
+// the graph is replayed only once.
+//
+// During the propagation, we explicitly keep track of the information about
+// which reference tensor's root ID's information is preserved, and to which
+// level. This information is stored as a vector of `RootIDInfo`, where each
+// item in the vector correspond to one ID in the reference tensor's root
+// domain.
 class TORCH_CUDA_CU_API TransformPropagator {
- private:
-  bool replayPasC(TensorView* producer_tv, TensorView* consumer_tv = nullptr);
-  bool replayCasP(TensorView* consumer_tv, TensorView* producer_tv = nullptr);
-
-  TransformPropagator(TensorView* from);
-
- private:
-  std::unordered_map<TensorView*, unsigned int> replayed_pos;
-
-  // This example comes from a BN kernel, the domain:
-  //
-  // [ iS{ceilDiv(ceilDiv(ceilDiv(i4, 128), 4), 1)}, iS{1}, iS{4}, iS{128},
-  // iS{i0}, iS{i2}, iS{i3} ]
-  //
-  // and
-  //
-  // [ iS{ceilDiv(ceilDiv(ceilDiv(i5*i6*i7*i8, 128), 4), 1)}, iS252{1},
-  // iS250{4}, iS248{128} ]
-  //
-  // Have the same number of replayed dimensions, however the second one
-  // involves more root domains. The second one is also likely the prefered
-  // replay. Therefore keep track of how many root domains were part of the
-  // replay and prefer transformations with more root domains. We could probably
-  // fix this instances of this occuring by changing the traversal pattern so
-  // that once propagating towards roots through broadcast axes, it can't come
-  // back through another broadcast, losing the transformation on those axes.
-  // However, this should work for existing cases.
-  std::unordered_map<TensorView*, unsigned int> n_replayed_root_dims;
   TensorView* starting_tv = nullptr;
+  TransformPropagator(TensorView* from);
+  static unsigned int replay(const NextHopInfo&);
 
  public:
   static void from(TensorView* tv);
