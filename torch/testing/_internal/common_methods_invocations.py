@@ -20561,12 +20561,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.logical_not",
         torch_opinfo_name="logical_not",
-        skips=(
-            DecorateInfo(
-                # NotImplementedError: argument of type: <class 'complex'>
-                unittest.skip("Fails aten complex and nvfuser doesn't support eq(a, 0)"), 'TestCommon', 'test_python_ref_executor'
-            ),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
