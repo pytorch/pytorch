@@ -23,7 +23,7 @@ def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable
     """
     Defines a partial order ('depends on' function) where `this` must occur
     before `that`.
-    
+
     For example, the following pass list and constraint list would be invalid.
     ```
     passes = [pass_b, pass_a]
@@ -32,7 +32,7 @@ def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable
         this_before_that_pass_constraint(pass_a, pass_b)
     ]
     ```
-    
+
     Args:
         this (Callable): pass which should occur first
         that (Callable): pass which should occur later
@@ -88,8 +88,8 @@ class PassManager:
             self.constraints = constraints
         if steps:
             self.steps = steps
-        
-        self.run_checks_after_each_pass=run_checks_after_each_pass,
+
+        self.run_checks_after_each_pass = run_checks_after_each_pass,
 
     def add_pass(self, _pass: Callable):
         """
@@ -124,11 +124,10 @@ class PassManager:
         """
         sig = inspect.signature(check)
 
-        params = [p for p in sig.parameters.values()]
-        if len(params) != 1:
+        if len(list(sig.parameters.values())) != 1:
             raise TypeError("PassManager check function should only take in one variable, a graph_module")
 
-        setattr(self, "check", check)
+        setattr(self, "check", check)  # noqa: B010
 
     def check(self, graph_module: GraphModule) -> None:
         pass
@@ -143,13 +142,13 @@ class PassManager:
         The list of passes will be run until the graph stops changing, or until
         `steps` number of times.
         """
-        # Check constraints 
+        # Check constraints
         self.validate_constraints()
 
         # Lint and check graph invariants
         graph_module.graph.lint()
         self.check(graph_module)
-        
+
         # Run the set of passes `steps` number of times or until the graph stops
         # changing
         for _ in range(self.steps):
