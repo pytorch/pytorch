@@ -1,9 +1,12 @@
 load("//third_party:glog.buck.bzl", "define_glog")
 load("//third_party:xnnpack.buck.bzl", "define_xnnpack")
+load("//third_party:kineto.buck.bzl", "define_kineto")
 
 define_glog()
 
 define_xnnpack()
+
+define_kineto()
 
 cxx_library(
     name = "fmt",
@@ -218,4 +221,97 @@ cxx_library(
     visibility = [
         "PUBLIC",
     ],
+)
+
+cxx_library(
+    name = "flatbuffers-api",
+    public_include_directories = ["flatbuffers/include"],
+    raw_headers = [
+        "flatbuffers/include/flatbuffers/base.h",
+        "flatbuffers/include/flatbuffers/flatbuffers.h",
+        "flatbuffers/include/flatbuffers/stl_emulation.h",
+    ],
+    preferred_linkage = "static",
+    visibility = ["PUBLIC"],
+)
+
+cxx_library(
+    name = "flatc_library",
+    srcs = [
+        "flatbuffers/src/code_generators.cpp",
+        "flatbuffers/src/flatc.cpp",
+        "flatbuffers/src/idl_gen_fbs.cpp",
+        "flatbuffers/src/idl_gen_text.cpp",
+        "flatbuffers/src/idl_parser.cpp",
+        "flatbuffers/src/reflection.cpp",
+        "flatbuffers/src/util.cpp",
+    ],
+    public_include_directories = [
+        "flatbuffers/grpc",
+        "flatbuffers/include",
+    ],
+    raw_headers = [
+        "flatbuffers/include/flatbuffers/flatc.h",
+        "flatbuffers/include/flatbuffers/base.h",
+        "flatbuffers/include/flatbuffers/flatbuffers.h",
+        "flatbuffers/include/flatbuffers/stl_emulation.h",
+        "flatbuffers/include/flatbuffers/code_generators.h",
+        "flatbuffers/include/flatbuffers/flexbuffers.h",
+        "flatbuffers/include/flatbuffers/hash.h",
+        "flatbuffers/include/flatbuffers/idl.h",
+        "flatbuffers/include/flatbuffers/minireflect.h",
+        "flatbuffers/include/flatbuffers/reflection.h",
+        "flatbuffers/include/flatbuffers/reflection_generated.h",
+        "flatbuffers/include/flatbuffers/util.h",
+    ],
+    preferred_linkage = "static",
+    visibility = ["PUBLIC"],
+)
+
+cxx_binary(
+    name = "flatc",
+    srcs = [
+        "flatbuffers/grpc/src/compiler/cpp_generator.cc",
+        "flatbuffers/grpc/src/compiler/go_generator.cc",
+        "flatbuffers/grpc/src/compiler/java_generator.cc",
+        "flatbuffers/grpc/src/compiler/python_generator.cc",
+        "flatbuffers/grpc/src/compiler/swift_generator.cc",
+        "flatbuffers/grpc/src/compiler/ts_generator.cc",
+        "flatbuffers/src/bfbs_gen_lua.cpp",
+        "flatbuffers/src/flatc_main.cpp",
+        "flatbuffers/src/idl_gen_cpp.cpp",
+        "flatbuffers/src/idl_gen_csharp.cpp",
+        "flatbuffers/src/idl_gen_dart.cpp",
+        "flatbuffers/src/idl_gen_go.cpp",
+        "flatbuffers/src/idl_gen_grpc.cpp",
+        "flatbuffers/src/idl_gen_java.cpp",
+        "flatbuffers/src/idl_gen_ts.cpp", # idl_gen_js_ts.cpp in fbsource
+        "flatbuffers/src/idl_gen_json_schema.cpp",
+        "flatbuffers/src/idl_gen_kotlin.cpp",
+        "flatbuffers/src/idl_gen_lobster.cpp",
+        "flatbuffers/src/idl_gen_lua.cpp",
+        "flatbuffers/src/idl_gen_php.cpp",
+        "flatbuffers/src/idl_gen_python.cpp",
+        "flatbuffers/src/idl_gen_rust.cpp",
+        "flatbuffers/src/idl_gen_swift.cpp",
+        "flatbuffers/src/idl_gen_text.cpp",
+        "flatbuffers/src/util.cpp",
+    ],
+    include_directories = [
+        "flatbuffers/grpc",
+        "flatbuffers/include",
+    ],
+    raw_headers = [
+        "flatbuffers/grpc/src/compiler/config.h",
+        "flatbuffers/grpc/src/compiler/cpp_generator.h",
+        "flatbuffers/grpc/src/compiler/go_generator.h",
+        "flatbuffers/grpc/src/compiler/java_generator.h",
+        "flatbuffers/grpc/src/compiler/python_generator.h",
+        # "flatbuffers/grpc/src/compiler/python_private_generator.h",
+        "flatbuffers/grpc/src/compiler/schema_interface.h",
+        "flatbuffers/grpc/src/compiler/swift_generator.h",
+        "flatbuffers/grpc/src/compiler/ts_generator.h",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [":flatc_library"],
 )
