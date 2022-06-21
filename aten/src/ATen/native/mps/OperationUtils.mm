@@ -26,7 +26,7 @@ MPSGeneratorImpl::MPSGeneratorImpl(DeviceIndex device_index)
 }
 
 const Generator& getDefaultMPSGenerator() {
-  auto gen = make_generator<MPSGeneratorImpl>(0);
+  static auto gen = make_generator<MPSGeneratorImpl>(0);
   gen.seed();
   return gen;
 }
@@ -39,19 +39,14 @@ c10::intrusive_ptr<c10::TensorImpl> MPSGeneratorImpl::get_state() const {
   static const size_t total_size = seed_size + offset_size;
 
   auto state_tensor = at::detail::empty_cpu({(int64_t)total_size}, ScalarType::Byte, c10::nullopt, c10::nullopt, c10::nullopt, c10::nullopt);
-  auto rng_state = state_tensor.data_ptr<uint8_t>();
 
   return state_tensor.getIntrusivePtr();
 }
 
 void MPSGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(int64_t);
-  static const size_t total_size = seed_size + offset_size;
 
   detail::check_rng_state(new_state);
-
-  auto new_state_size = new_state.numel();
 
   uint64_t input_seed;
   auto new_rng_state = new_state.data<uint8_t>();
@@ -277,7 +272,6 @@ MPSCachedGraph* _getCachedGraph(const at::Tensor& src) {
 id<MTLBuffer> _gatherViewTensor(const at::Tensor& src, id<MTLBuffer> sourceBuffer, MPSCachedGraph* mpsCachedGraph, Tensor& output) {
   TORCH_CHECK(mpsCachedGraph != nil);
 
-  id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
 
   struct CachedGraph : public MPSCachedGraph
