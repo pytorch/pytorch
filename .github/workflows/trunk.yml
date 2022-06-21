@@ -67,7 +67,6 @@ jobs:
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
-          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
         ]}
 
   libtorch-linux-xenial-cuda10_2-py3_7-gcc7-build:
