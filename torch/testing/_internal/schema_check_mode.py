@@ -4,6 +4,11 @@ from torch.fx.operator_schemas import normalize_function
 from torch.testing._internal.jit_utils import clone_inputs
 from torch.utils._python_dispatch import TorchDispatchMode
 from itertools import combinations
+from collections import namedtuple
+
+# Named Tuples used within SchemaCheckMode
+Mutation = namedtuple('Mutation', ['op_name', 'arg_name'])
+Aliasing = namedtuple('Aliasing', ['op_name', 'arg_name', 'output_number'])
 
 # This TorchDispatchMode Subclass is used to verify op schemas
 # This TorchDispatchMode Scubclass currently:
@@ -13,6 +18,9 @@ from itertools import combinations
 
 class SchemaCheckMode(TorchDispatchMode):
     def __init__(self):
+        # Information recorded for testing purposes. For example:
+        #  - incorrect schemas
+        #  - overly conservative schemas
         self.ops = []
         self.mutated = []
         self.aliasing = []
@@ -64,7 +72,6 @@ class SchemaCheckMode(TorchDispatchMode):
                     return e
             else:
                 return e
-
         self.ops.append(func._schema.name)
         arguments = normalize_function(
             func,
@@ -76,6 +83,8 @@ class SchemaCheckMode(TorchDispatchMode):
         cloned_arguments = dict(zip(arguments.keys(), clone_inputs(arguments.values())))
         out = func(*args, **kwargs)
 
+        # Construct an aliasing map between op arguments for verifying aliasing pairs
+        # between op arguments and op outputs
         arg_alias_pairs_map = {arg.name : [arg] for arg in func._schema.arguments}
         out_alias_pairs_map = [set() for arg in func._schema.returns]
 
@@ -105,14 +114,14 @@ class SchemaCheckMode(TorchDispatchMode):
                     if not is_mutable(arg_alias_pairs):
                         raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
                     else:
-                        self.mutated.append((func._schema.name, name))
+                        self.mutated.append(Mutation(func._schema.name, name))
                 for v in u_values:
                     for j in range(len(u_out)):
                         if has_aliased(v, u_out[j]):
                             if not is_aliasing(func._schema.returns[j].alias_info, arg_alias_pairs):
                                 raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
                             else:
-                                self.aliasing.append((func._schema.name, name, f"output_{j}"))
+                                self.aliasing.append(Aliasing(func._schema.name, name, f"output_{j}"))
                                 out_alias_pairs_map[j].add(name)
 
         # Aliasing between outputs
