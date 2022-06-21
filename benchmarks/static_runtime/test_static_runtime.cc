@@ -2482,6 +2482,137 @@ TEST(StaticRuntime, LinalgNorm_StringOrd) {
   testStaticRuntime(linalg_norm_ord_str, args0, args1);
 }
 
+TEST(StaticRuntime, Index_Put) {
+  const auto index_put_str = R"JIT(
+    def forward(self, a: Tensor, indices: Tuple[Optional[Tensor]], values: Tensor, accumulate: bool):
+        return torch.index_put(a, indices, values, accumulate).clone()
+  )JIT";
+
+  auto a = at::randn({2});
+  auto indicies_a = std::make_tuple(torch::tensor({0}, at::kLong));
+  auto values_a = at::randn({1});
+
+  std::vector<IValue> args0{a, indicies_a, values_a, false};
+  testStaticRuntime(index_put_str, args0);
+}
+
+TEST(StaticRuntime, Item) {
+  const auto item_str = R"JIT(
+    def forward(self, a: Tensor):
+        return torch.item(a)
+  )JIT";
+
+  auto a = at::randn({1});
+
+  std::vector<IValue> args0{a};
+  testStaticRuntime(item_str, args0);
+}
+
+TEST(StaticRuntime, Tensor_Split) {
+  const auto tensor_split_str1 = R"JIT(
+    def forward(self, a: Tensor, sections: int, dim: int):
+        return torch.tensor_split(a, sections, dim)
+  )JIT";
+  std::vector<IValue> args1{at::randn({8}), 3, 0};
+
+  const auto tensor_split_str2 = R"JIT(
+    def forward(self, a: Tensor, sections: Tensor, dim: int):
+        return torch.tensor_split(a, sections, dim)
+  )JIT";
+  std::vector<IValue> args2{at::randn({8}), torch::tensor(3), 0};
+
+  const auto tensor_split_str3 = R"JIT(
+    def forward(self, a: Tensor, indicies: List[int], dim: int):
+        return torch.tensor_split(a, indicies, dim)
+  )JIT";
+  std::vector<IValue> args3{at::randn({8}), c10::List<int64_t>({1, 6}), 0};
+
+  testStaticRuntime(tensor_split_str1, args1);
+  testStaticRuntime(tensor_split_str2, args2);
+  testStaticRuntime(tensor_split_str3, args3);
+}
+
+TEST(StaticRuntime, JIT_Aten_Cpu) {
+  const std::string script = R"IR(
+    graph(%a: Tensor):
+        %1 : int = prim::Constant[value=0]()
+        %aa: Tensor = aten::add(%a, %a, %1)
+        %ret: Tensor = aten::cpu(%aa)
+        return (%ret)
+  )IR";
+
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  vmap.reserve(0);
+  parseIR(script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+
+  auto a = at::randn({2, 4});
+  std::vector<IValue> args0{a};
+
+  testStaticRuntime(script, args0);
+}
+
+TEST(StaticRuntime, JIT_Aten_Numel) {
+  const std::string script = R"IR(
+    graph(%a: Tensor):
+        %1 : int = prim::Constant[value=0]()
+        %aa: Tensor = aten::add(%a, %a, %1)
+        %ret: int = aten::numel(%aa)
+        return (%ret)
+  )IR";
+
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  vmap.reserve(0);
+  parseIR(script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+
+  auto a = at::randn({2, 4});
+  std::vector<IValue> args0{a};
+
+  testStaticRuntime(script, args0);
+}
+
+TEST(StaticRuntime, JIT_Aten_List) {
+  const std::string script = R"IR(
+    graph(%a: str):
+        %1 : int = prim::Constant[value=0]()
+        %ret: str[] = aten::list(%a)
+        return (%ret)
+  )IR";
+
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  vmap.reserve(0);
+  parseIR(script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+
+  string a = "abcd";
+  std::vector<IValue> args0{a};
+
+  testStaticRuntime(script, args0);
+}
+
+TEST(StaticRuntime, JIT_Aten_Range_Length) {
+  const std::string script = R"IR(
+    graph(%lo: int, %hi: int, %step: int):
+        %1 : int = prim::Constant[value=0]()
+        %ret: int = aten::__range_length(%lo, %hi, %step)
+        return (%ret)
+  )IR";
+
+  auto graph = std::make_shared<Graph>();
+  std::unordered_map<std::string, Value*> vmap;
+  vmap.reserve(0);
+  parseIR(script, graph.get(), vmap);
+  torch::jit::StaticModule smodule(graph);
+
+  std::vector<IValue> args0{0, 10, 2};
+
+  testStaticRuntime(script, args0);
+}
+
 TEST(StaticRuntime, Cat) {
   const std::string cat_script = R"IR(
     graph(%a: Tensor, %b: Tensor, %dim: int):
