@@ -88,54 +88,6 @@ struct InputMetadata {
     return at::zeros_symint(shape_as_dim_vector(), options_);
   }
 
-  bool is_same_shape(const at::Tensor& grad) const {
-    TORCH_CHECK(
-        grad.is_nested() == is_nested_tensor(),
-        "Both grad and InputMetadata need to be either nested or non nested tensors.")
-    if (grad.is_nested()) {
-      return at::native::get_nested_size_tensor(grad).is_same_size(
-          shape_as_tensor());
-    }
-    return grad.sizes().equals(c10::asIntArrayRefSlow(shape_as_dim_vector()));
-  }
-  bool is_expandable_to_shape(const at::Tensor& grad) const {
-    // Currently NestedTensors are not expandable. If this support is added then
-    // updates to reduce_grad will be needed
-    TORCH_CHECK(
-        grad.is_nested() == is_nested_tensor(),
-        "Both grad and InputMetadata need to be either nested or non nested tensors.")
-    return grad.is_nested()
-        ? false
-        : at::is_expandable_to(c10::asIntArrayRefSlow(shape_as_dim_vector()), grad.sizes());
-  }
-
-  at::Tensor reduce_grad(at::Tensor& grad) const {
-    // Currently reduce_grad is only called if is_expandable_to_shape returns
-    // true For nested tensors this always returns False, so this check
-    // shouldn't fail
-    TORCH_INTERNAL_ASSERT(!grad.is_nested() && !is_nested_tensor())
-    return at::sum_to(std::move(grad), c10::asIntArrayRefSlow(shape_as_dim_vector()));
-  }
-
-  std::stringstream incompatible_shape_error_message(
-      const size_t index,
-      const at::Tensor& grad) const {
-    std::stringstream ss;
-    ss << "invalid gradient at index " << index << " - got ";
-    if (grad.is_nested()) {
-      ss << at::native::get_nested_size_tensor(grad);
-    } else {
-      ss << grad.sizes();
-    }
-    ss << " but expected shape compatible with ";
-    if (is_nested_tensor()) {
-      ss << shape_as_tensor();
-    } else {
-      ss << c10::asIntArrayRefSlow(shape_as_dim_vector());
-    }
-    return ss;
-  }
-
  private:
   bool is_nested_tensor() const {
     return (c10::holds_alternative<at::Tensor>(shape_));
