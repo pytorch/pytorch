@@ -9,7 +9,7 @@ from typing import Dict, Iterable, List, Tuple, Union, Optional, Callable
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 __all__ = [
-    "ensure_map_fn_works",
+    "validate_input_col",
     "StreamWrapper",
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
@@ -18,7 +18,7 @@ __all__ = [
 ]
 
 
-def ensure_map_fn_works(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
+def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
     """
     Checks that function used in a map style datapipe works with the input column
 

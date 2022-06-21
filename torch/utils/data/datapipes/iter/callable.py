@@ -5,7 +5,7 @@ from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import (
     _check_lambda_fn,
-    ensure_map_fn_works)
+    validate_input_col)
 
 __all__ = [
     "CollatorIterDataPipe",
@@ -77,7 +77,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
                 raise ValueError("`output_col` must be a single-element list or tuple")
             output_col = output_col[0]
         self.output_col = output_col
-        ensure_map_fn_works(fn, input_col)
+        validate_input_col(fn, input_col)
 
     def _apply_fn(self, data):
         if self.input_col is None and self.output_col is None:

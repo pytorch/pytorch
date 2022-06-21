@@ -6,7 +6,7 @@ from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.utils.common import (
     _check_lambda_fn,
     _deprecation_warning,
-    ensure_map_fn_works)
+    validate_input_col)
 
 __all__ = ["FilterIterDataPipe", ]
 
@@ -66,7 +66,7 @@ class FilterIterDataPipe(IterDataPipe[T_co]):
         self.drop_empty_batches = drop_empty_batches
 
         self.input_col = input_col
-        ensure_map_fn_works(filter_fn, self.input_col)
+        validate_input_col(filter_fn, self.input_col)
 
     def _apply_filter_fn(self, data) -> bool:
         if self.input_col is None:
