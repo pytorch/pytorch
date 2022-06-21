@@ -7,7 +7,6 @@ from torch.autograd.profiler import profile
 from torch.autograd import _KinetoEvent
 
 
-
 @dataclass
 class EventMetrics:
     duration_time_ns: int = 0
@@ -126,7 +125,8 @@ class BasicEvaluation:
         spawned_kernel_index = None
         for cuda_launch_event in cuda_launch_events:
             # Find latest cuda kernel event
-            while (cuda_kernel_events[current_kernel_index + 1].start_us() +
+            while (current_kernel_index + 1 < len(cuda_kernel_events) and
+                   cuda_kernel_events[current_kernel_index + 1].start_us() +
                    cuda_kernel_events[current_kernel_index + 1].duration_us() <
                    cuda_launch_event.start_us() +
                    cuda_launch_event.duration_us()):
