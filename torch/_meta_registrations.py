@@ -200,25 +200,93 @@ def meta_conv(
     stride: List[int],
     padding: List[int],
     dilation: List[int],
-    *args,
+    is_transposed: bool,
+    output_padding: List[int],
+    groups: int,
 ):
-    def calc_conv_return_shape(dim, kernel_size, stride, padding, dilation):
-        h_out = math.floor(
-            (dim[0] + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1)
-            / stride[0]
-            + 1
-        )
-        w_out = math.floor(
-            (dim[1] + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1)
-            / stride[1]
-            + 1
-        )
-        return h_out, w_out
+    def _formula(ln: int, p: int, d: int, k: int, s: int) -> int:
+        """
+        Formula to apply to calculate the length of some dimension of the output
 
-    shape_out = calc_conv_return_shape(
-        input_tensor.shape[-2:], weight.shape[-2:], stride, padding, dilation
-    )
-    return input_tensor.new_empty((input_tensor.shape[0], weight.shape[0], *shape_out))
+        See: https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
+
+        Args:
+            ln: length of the dimension
+            p: padding in that dim
+            d: dilation in that dim
+            k: kernel size in that dim
+            s: stride in that dim
+        Returns:
+            The output length
+        """
+        return math.floor((ln + 2 * p - d * (k - 1) - 1) / s + 1)
+
+    def _formula_transposed(ln: int, p: int, d: int, k: int, s: int, op: int) -> int:
+        """
+        Formula to apply to calculate the length of some dimension of the output
+        if transposed convolution is used.
+        See: https://pytorch.org/docs/stable/generated/torch.nn.ConvTranspose2d.html
+
+        Args:
+            ln: length of the dimension
+            p: padding in that dim
+            d: dilation in that dim
+            k: kernel size in that dim
+            s: stride in that dim
+            op: output padding in that dim
+
+        Returns:
+            The output length
+        """
+        return (ln - 1) * s - 2 * p + d * (k - 1) + op + 1
+
+    def calc_conv_nd_return_shape(
+        dims,
+        kernel_size: torch.Size,
+        stride: List[int],
+        padding: List[int],
+        dilation: List[int],
+        output_padding: Optional[List[int]] = None,
+    ):
+        ret_shape = []
+        for i in range(len(dims)):
+            # If output_padding is present, we are dealing with a transposed convolution
+            if output_padding:
+                ret_shape.append(
+                    _formula_transposed(
+                        dims[i],
+                        padding[i],
+                        dilation[i],
+                        kernel_size[i],
+                        stride[i],
+                        output_padding[i],
+                    )
+                )
+            else:
+                ret_shape.append(
+                    _formula(
+                        dims[i], padding[i], dilation[i], kernel_size[i], stride[i]
+                    )
+                )
+        return ret_shape
+
+    if is_transposed:
+        out_channels = groups * weight.shape[1]
+        shape_out = calc_conv_nd_return_shape(
+            input_tensor.shape[2:],
+            weight.shape[2:],
+            stride,
+            padding,
+            dilation,
+            output_padding,
+        )
+
+    else:
+        out_channels = weight.shape[0]
+        shape_out = calc_conv_nd_return_shape(
+            input_tensor.shape[2:], weight.shape[2:], stride, padding, dilation
+        )
+    return input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
 
 
 @torch.library.impl(meta_lib, "_adaptive_avg_pool2d")
