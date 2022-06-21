@@ -614,65 +614,6 @@ class TestNN(NNTestCase):
         mod.register_full_backward_hook(lambda mod, gI, gO: None)
         mod(inp, inp.detach(), inp)
 
-    def test_meta_conv1d_correct_shape(self):
-        signal = torch.randn(2, 8)
-        batch_signal = torch.randn(4, 2, 8)
-
-        def _meta_out(t, layer):
-            return layer.to('meta')(t.to('meta'))
-
-        def _run_checks(t, batch_t, layer):
-            out_shape = layer(t).shape
-            out_batch_shape = layer(batch_t).shape
-            out_shape_meta = _meta_out(t, layer).shape
-            out_shape_meta_batch = _meta_out(batch_t, layer).shape
-            self.assertEqual(out_shape, out_shape_meta)
-            self.assertEqual(out_batch_shape, out_shape_meta_batch)
-
-        layer = torch.nn.Conv1d(2, 3, 1)
-        _run_checks(signal, batch_signal, layer)
-
-        layer = torch.nn.Conv1d(2, 3, 1, stride=1)
-        _run_checks(signal, batch_signal, layer)
-
-        layer = torch.nn.Conv1d(2, 3, 1, stride=1, padding=2)
-        _run_checks(signal, batch_signal, layer)
-
-        layer = torch.nn.Conv1d(2, 3, 1, stride=1, padding=1, dilation=2)
-        _run_checks(signal, batch_signal, layer)
-
-    def test_meta_conv2d_correct_shape(self):
-        img = torch.randn(3, 7, 9)
-        batch_img = torch.randn(4, 3, 7, 9)
-
-        def _meta_out(t, layer):
-            return layer.to('meta')(t.to('meta'))
-
-        def _run_checks(t, batch_t, layer):
-            out_shape = layer(t).shape
-            out_batch_shape = layer(batch_t).shape
-            out_shape_meta = _meta_out(t, layer).shape
-            out_shape_meta_batch = _meta_out(batch_t, layer).shape
-            self.assertEqual(out_shape, out_shape_meta)
-            self.assertEqual(out_batch_shape, out_shape_meta_batch)
-
-        layer = torch.nn.Conv2d(3, 4, 2)
-        _run_checks(img, batch_img, layer)
-
-        layer = torch.nn.Conv2d(3, 4, kernel_size=(2, 3))
-        _run_checks(img, batch_img, layer)
-
-        layer = torch.nn.Conv2d(3, 4, kernel_size=(2, 3), stride=(3, 2))
-        _run_checks(img, batch_img, layer)
-
-        layer = torch.nn.Conv2d(3, 4, kernel_size=(2, 3), stride=(3, 2), padding=(1, 2))
-        _run_checks(img, batch_img, layer)
-
-        layer = torch.nn.Conv2d(3, 4, kernel_size=(2, 3), stride=(3, 2),
-                                padding=(1, 2), dilation=(2, 1))
-        _run_checks(img, batch_img, layer)
-
-
     def test_hook_no_requires_grad(self):
         mod = nn.Linear(2, 3)
 
