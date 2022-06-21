@@ -21,7 +21,6 @@ from torchgen.api.types import (
     BaseCType,
     Expr,
     NamedCType,
-    ScalarTypeToCppMapping,
     VectorizedCType,
 )
 from torchgen.context import with_native_function
@@ -309,13 +308,9 @@ AT_DISPATCH_CASE(at::ScalarType::{dtype},
 {stub_sig.dispatch_decl()};
 
 {stub_sig.kernel_defn()} {{
-  at::ScalarType st = iter.common_dtype();
-  RECORD_KERNEL_FUNCTION_DTYPE("{sig.name}", st);
-  switch (st) {{
+  AT_DISPATCH_SWITCH(iter.common_dtype(), "{sig.name}",
     {dtype_cases_str}
-    default:
-      TORCH_CHECK(false, "{sig.name}", " not implemented for '", toString(st), "'");
-  }}
+  );
 }}
 REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name});
 
@@ -535,9 +530,9 @@ AT_DISPATCH_CASE(at::ScalarType::{dtype},
 namespace {{
 
 {stub_sig.kernel_defn()} {{
-  AT_DISPATCH_SWITCH_BEGIN(iter.common_dtype(), "{stub_sig.name}")
+  AT_DISPATCH_SWITCH(iter.common_dtype(), "{stub_sig.name}",
     {dtype_cases_str}
-  AT_DISPATCH_SWITCH_END();
+  );
 }}
 
 }} // anonymous namespace

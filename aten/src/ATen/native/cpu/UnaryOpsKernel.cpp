@@ -300,7 +300,7 @@ void sign_kernel(TensorIteratorBase& iter){
 
 static void signbit_kernel(TensorIteratorBase& iter){
   // NOTE: signbit does not always support integral arguments.
-  AT_DISPATCH_SWITCH_BEGIN(iter.input_dtype(), "signbit_cpu")
+  AT_DISPATCH_SWITCH(iter.input_dtype(), "signbit_cpu",
       AT_DISPATCH_CASE_INTEGRAL_TYPES([&] {
         cpu_kernel(iter, [](scalar_t a) -> bool { return c10::is_negative(a); });
       })
@@ -308,7 +308,7 @@ static void signbit_kernel(TensorIteratorBase& iter){
         using opmath_t = at::opmath_type<scalar_t>;
         cpu_kernel(iter, [](scalar_t a) -> bool { return std::signbit(opmath_t{a}); });
       })
-  AT_DISPATCH_SWITCH_END();
+    );
 }
 
 static void sgn_kernel(TensorIteratorBase& iter) {

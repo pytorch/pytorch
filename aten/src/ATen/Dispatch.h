@@ -48,33 +48,37 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 #endif
 
 #if defined __cpp_if_constexpr
+#define AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type)   \
+  do {                                                \
+    if constexpr (!at::should_include_kernel_dtype(   \
+                      at_dispatch_name, enum_type)) { \
+      AT_ERROR(                                       \
+          "dtype '",                                  \
+          toString(enum_type),                        \
+          "' not selected for kernel tag ",           \
+          at_dispatch_name);                          \
+    }                                                 \
+  } while (0)
+#else // defined __cpp_if_constexpr
+#define AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type)        \
+  at::guts::if_constexpr<!at::should_include_kernel_dtype( \
+      at_dispatch_name, enum_type)>([&] {                  \
+    AT_ERROR(                                              \
+        "dtype '",                                         \
+        toString(enum_type),                               \
+        "' not selected for kernel tag ",                  \
+        at_dispatch_name);                                 \
+  })
+#endif
+
 #define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...) \
   case enum_type: {                                           \
-    if constexpr (!at::should_include_kernel_dtype(           \
-                      at_dispatch_name, enum_type)) {         \
-      AT_ERROR(                                               \
-          "dtype '",                                          \
-          toString(enum_type),                                \
-          "' not selected for kernel tag ",                   \
-          at_dispatch_name);                                  \
-    }                                                         \
+    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);              \
     using HINT = c10::impl::ScalarTypeToCPPTypeT<enum_type>;  \
     return __VA_ARGS__();                                     \
   }
-#else
-#define AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, HINT, ...)                 \
-  case enum_type: {                                                           \
-    at::guts::if_constexpr<(                                                  \
-        !at::should_include_kernel_dtype(at_dispatch_name, enum_type))>([&] { \
-          AT_ERROR("dtype '", toString(enum_type),                            \
-                   "' not selected for kernel tag ", at_dispatch_name);       \
-    });                                                                       \
-    using HINT = c10::impl::ScalarTypeToCPPTypeT<enum_type>;                  \
-    return __VA_ARGS__();                                                     \
-  }
-#endif
 
-#define AT_DISPATCH_CASE(enum_type, ...)                            \
+#define AT_DISPATCH_CASE(enum_type, ...) \
   AT_PRIVATE_CASE_TYPE_USING_HINT(enum_type, scalar_t, __VA_ARGS__)
 
 // Workaround for C10_UNUSED because CUDA 10.1 and below fails to handle unused
@@ -87,19 +91,22 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 #endif // defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10010
 
 #define AT_DISPATCH_CASE_QINT(enum_type, ...)                                \
-  AT_DISPATCH_CASE(enum_type, [&] {                                          \
-    using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                 \
-        typename scalar_t::underlying;                                       \
+  case enum_type: {                                                          \
+    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                             \
+    using scalar_t = c10::impl::ScalarTypeToCPPTypeT<enum_type>;             \
+    using underlying_t = typename scalar_t::underlying;                      \
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type; \
     const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =        \
         toUnderlying(enum_type);                                             \
     (void)SCALAR_TYPE; /* Suppress unused-var compiler warning */            \
     return __VA_ARGS__();                                                    \
-  });
+  }
 
 #define AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                  \
     enum_type, bitwidth, qmin, qmax, ...)                                    \
-  AT_DISPATCH_CASE(enum_type, [&] {                                          \
+  case enum_type: {                                                          \
+    AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                             \
+    using scalar_t = c10::impl::ScalarTypeToCPPTypeT<enum_type>;             \
     using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                 \
         typename scalar_t::underlying;                                       \
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type; \
@@ -112,7 +119,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
     (void)quant_min; /* Suppress unused variable warning */                  \
     (void)quant_max; /* Suppress unused variable warning */                  \
     return __VA_ARGS__();                                                    \
-  });
+  }
 
 namespace detail {
 
@@ -207,274 +214,260 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 // but we're just being safe (and it doesn't hurt.)  Note we must
 // use it to shut up warnings about unused store.
 
-#define AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                \
-  [&] {                                                                     \
-    const auto& at_dispatch_type = TYPE;                                    \
-    constexpr const char * at_dispatch_name = NAME;                         \
-    /* don't use TYPE again in case it is an expensive or side-effect op */ \
-    at::ScalarType _st = ::detail::scalar_type(at_dispatch_type);           \
-    RECORD_KERNEL_FUNCTION_DTYPE(at_dispatch_name, _st);                    \
-    switch (_st) {
-
-#define AT_DISPATCH_SWITCH_END()                                            \
-    default:                                                                \
-      AT_ERROR(at_dispatch_name, " not implemented for '",                  \
-               toString(_st), "'");                                         \
-    }                                                                       \
+#define AT_DISPATCH_SWITCH(TYPE, NAME, ...)                                  \
+  [&] {                                                                      \
+    const auto& the_type = TYPE;                                             \
+    constexpr const char* at_dispatch_name = NAME;                           \
+    /* don't use TYPE again in case it is an expensive or side-effect op */  \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
+    RECORD_KERNEL_FUNCTION_DTYPE(at_dispatch_name, _st);                     \
+    switch (_st) {                                                           \
+      __VA_ARGS__                                                            \
+      default:                                                               \
+        AT_ERROR(                                                            \
+            at_dispatch_name, " not implemented for '", toString(_st), "'"); \
+    }                                                                        \
   }()
 
-#define AT_DISPATCH_CASE_FLOATING_TYPES(...)                            \
-  AT_DISPATCH_CASE(at::ScalarType::Double, __VA_ARGS__)                 \
+#define AT_DISPATCH_CASE_FLOATING_TYPES(...)            \
+  AT_DISPATCH_CASE(at::ScalarType::Double, __VA_ARGS__) \
   AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__)
 
 #define AT_DISPATCH_FLOATING_TYPES(TYPE, NAME, ...) \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)              \
-  AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)      \
-  AT_DISPATCH_SWITCH_END()
+  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_FLOATING_TYPES_AND_HALF(...)               \
-  AT_DISPATCH_CASE(at::ScalarType::Double, __VA_ARGS__)             \
-  AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__)              \
-  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__)               \
+#define AT_DISPATCH_CASE_FLOATING_TYPES_AND_HALF(...)   \
+  AT_DISPATCH_CASE(at::ScalarType::Double, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Float, __VA_ARGS__)  \
+  AT_DISPATCH_CASE(at::ScalarType::Half, __VA_ARGS__)
 
-#define AT_DISPATCH_FLOATING_TYPES_AND_HALF(TYPE, NAME, ...)        \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                              \
-  AT_DISPATCH_CASE_FLOATING_TYPES_AND_HALF(__VA_ARGS__)             \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_FLOATING_TYPES_AND_HALF(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                        \
+      TYPE, NAME, AT_DISPATCH_CASE_FLOATING_TYPES_AND_HALF(__VA_ARGS__))
 
 #define AT_DISPATCH_CASE_FLOATING_TYPES_AND(SCALARTYPE, ...) \
-  AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)                          \
-  AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)                             \
-
-#define AT_DISPATCH_FLOATING_TYPES_AND(SCALARTYPE, TYPE, NAME, ...) \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                              \
-  AT_DISPATCH_CASE_FLOATING_TYPES_AND(SCALARTYPE, __VA_ARGS__)      \
-  AT_DISPATCH_SWITCH_END()
-
-#define AT_DISPATCH_CASE_FLOATING_TYPES_AND2(                           \
-    SCALARTYPE1, SCALARTYPE2, ...)                                      \
-  AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)                          \
-  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                            \
-  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)                            \
-
-#define AT_DISPATCH_FLOATING_TYPES_AND2(                                      \
-    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)                                \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                        \
-  AT_DISPATCH_CASE_FLOATING_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, __VA_ARGS__) \
-  AT_DISPATCH_SWITCH_END()
-
-#define AT_DISPATCH_CASE_COMPLEX_TYPES(...)                     \
-  AT_DISPATCH_CASE(at::ScalarType::ComplexDouble, __VA_ARGS__)  \
-  AT_DISPATCH_CASE(at::ScalarType::ComplexFloat, __VA_ARGS__)   \
-
-#define AT_DISPATCH_COMPLEX_TYPES(TYPE, NAME, ...)  \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)              \
-  AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)       \
-  AT_DISPATCH_SWITCH_END()
-
-#define AT_DISPATCH_CASE_COMPLEX_TYPES_AND(SCALARTYPE, ...)     \
-  AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)                   \
+  AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)               \
   AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
 
-#define AT_DISPATCH_COMPLEX_TYPES_AND(                           \
-    SCALARTYPE, TYPE, NAME, ...)                                 \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                           \
-  AT_DISPATCH_CASE_COMPLEX_TYPES_AND(SCALARTYPE, __VA_ARGS__)    \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_FLOATING_TYPES_AND(SCALARTYPE, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                               \
+      TYPE,                                                         \
+      NAME,                                                         \
+      AT_DISPATCH_CASE_FLOATING_TYPES_AND(SCALARTYPE, __VA_ARGS__))
+
+#define AT_DISPATCH_CASE_FLOATING_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, ...) \
+  AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)                              \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                                \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)
+
+#define AT_DISPATCH_FLOATING_TYPES_AND2(       \
+    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                          \
+      TYPE,                                    \
+      NAME,                                    \
+      AT_DISPATCH_CASE_FLOATING_TYPES_AND2(    \
+          SCALARTYPE1, SCALARTYPE2, __VA_ARGS__))
+
+#define AT_DISPATCH_CASE_COMPLEX_TYPES(...)                    \
+  AT_DISPATCH_CASE(at::ScalarType::ComplexDouble, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::ComplexFloat, __VA_ARGS__)
+
+#define AT_DISPATCH_COMPLEX_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__))
+
+#define AT_DISPATCH_CASE_COMPLEX_TYPES_AND(SCALARTYPE, ...) \
+  AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
+
+#define AT_DISPATCH_COMPLEX_TYPES_AND(SCALARTYPE, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                              \
+      TYPE, NAME, AT_DISPATCH_CASE_COMPLEX_TYPES_AND(SCALARTYPE, __VA_ARGS__))
 
 #define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(...) \
   AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)           \
-  AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)            \
+  AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)
 
-#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(TYPE, NAME, ...)         \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__)              \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                           \
+      TYPE, NAME, AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__))
 
 #define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND1(SCALARTYPE, ...) \
   AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__)                \
   AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
 
-#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(                    \
-    SCALARTYPE, TYPE, NAME, ...)                                        \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND1(                     \
-      SCALARTYPE, __VA_ARGS__)                                          \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(    \
+    SCALARTYPE, TYPE, NAME, ...)                        \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE,                                             \
+      NAME,                                             \
+      AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND1( \
+          SCALARTYPE, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND2(               \
-    SCALARTYPE1, SCALARTYPE2, ...)                                      \
-  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__)              \
-  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                            \
+#define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND2(  \
+    SCALARTYPE1, SCALARTYPE2, ...)                         \
+  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__) \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)               \
   AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)
 
-#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(                    \
-    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)                          \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND2(                     \
-      SCALARTYPE1, SCALARTYPE2, __VA_ARGS__)                            \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(    \
+    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)          \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE,                                             \
+      NAME,                                             \
+      AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND2( \
+          SCALARTYPE1, SCALARTYPE2, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND3(   \
-    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, ...)             \
-  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__)  \
-  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                \
-  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)                \
+#define AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND3(  \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, ...)            \
+  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES(__VA_ARGS__) \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)               \
   AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)
 
-#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(                    \
-    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)             \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND3(                     \
-      SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__)               \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(        \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                       \
+      TYPE,                                                 \
+      NAME,                                                 \
+      AT_DISPATCH_CASE_FLOATING_AND_COMPLEX_TYPES_AND3(     \
+          SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_INTEGRAL_TYPES(...)                \
-  AT_DISPATCH_CASE(at::ScalarType::Byte, __VA_ARGS__)       \
-  AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__)       \
-  AT_DISPATCH_CASE(at::ScalarType::Int, __VA_ARGS__)        \
-  AT_DISPATCH_CASE(at::ScalarType::Long, __VA_ARGS__)       \
+#define AT_DISPATCH_CASE_INTEGRAL_TYPES(...)          \
+  AT_DISPATCH_CASE(at::ScalarType::Byte, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Char, __VA_ARGS__) \
+  AT_DISPATCH_CASE(at::ScalarType::Int, __VA_ARGS__)  \
+  AT_DISPATCH_CASE(at::ScalarType::Long, __VA_ARGS__) \
   AT_DISPATCH_CASE(at::ScalarType::Short, __VA_ARGS__)
 
-#define AT_DISPATCH_INTEGRAL_TYPES(TYPE, NAME, ...)         \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                      \
-  AT_DISPATCH_CASE_INTEGRAL_TYPES(__VA_ARGS__)              \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_INTEGRAL_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_INTEGRAL_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_INTEGRAL_TYPES_AND(SCALARTYPE, ...)    \
-  AT_DISPATCH_CASE_INTEGRAL_TYPES(__VA_ARGS__)                  \
+#define AT_DISPATCH_CASE_INTEGRAL_TYPES_AND(SCALARTYPE, ...) \
+  AT_DISPATCH_CASE_INTEGRAL_TYPES(__VA_ARGS__)               \
   AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
 
-#define AT_DISPATCH_INTEGRAL_TYPES_AND(SCALARTYPE, TYPE, NAME, ...)     \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_INTEGRAL_TYPES_AND(SCALARTYPE, __VA_ARGS__)          \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_INTEGRAL_TYPES_AND(SCALARTYPE, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                               \
+      TYPE,                                                         \
+      NAME,                                                         \
+      AT_DISPATCH_CASE_INTEGRAL_TYPES_AND(SCALARTYPE, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_ALL_TYPES(...)         \
-  AT_DISPATCH_CASE_INTEGRAL_TYPES(__VA_ARGS__)  \
+#define AT_DISPATCH_CASE_ALL_TYPES(...)        \
+  AT_DISPATCH_CASE_INTEGRAL_TYPES(__VA_ARGS__) \
   AT_DISPATCH_CASE_FLOATING_TYPES(__VA_ARGS__)
 
-#define AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...)                          \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__)                               \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_QINT_TYPES(...)           \
-  AT_DISPATCH_CASE_QINT(at::kQInt8, __VA_ARGS__)   \
-  AT_DISPATCH_CASE_QINT(at::kQUInt8, __VA_ARGS__)  \
+#define AT_DISPATCH_CASE_QINT_TYPES(...)          \
+  AT_DISPATCH_CASE_QINT(at::kQInt8, __VA_ARGS__)  \
+  AT_DISPATCH_CASE_QINT(at::kQUInt8, __VA_ARGS__) \
   AT_DISPATCH_CASE_QINT(at::kQInt32, __VA_ARGS__)
 
-#define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...)                         \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_QINT_TYPES(__VA_ARGS__)                              \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_QINT_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_QINT_BYTE_TYPES(...)       \
-  AT_DISPATCH_CASE_QINT(at::kQInt8, __VA_ARGS__)    \
+#define AT_DISPATCH_CASE_QINT_BYTE_TYPES(...)    \
+  AT_DISPATCH_CASE_QINT(at::kQInt8, __VA_ARGS__) \
   AT_DISPATCH_CASE_QINT(at::kQUInt8, __VA_ARGS__)
 
 #define AT_DISPATCH_QINT_BYTE_TYPES(TYPE, NAME, ...) \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)               \
-  AT_DISPATCH_CASE_QINT_BYTE_TYPES(__VA_ARGS__)      \
-  AT_DISPATCH_SWITCH_END()
+  AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_QINT_BYTE_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_QINT_AND_SUB_BYTE_TYPES(...)                     \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                   \
-      at::kQInt8, CHAR_BIT, SCHAR_MIN, SCHAR_MAX, __VA_ARGS__)            \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                   \
-      at::kQUInt8, CHAR_BIT, 0, UCHAR_MAX, __VA_ARGS__)                   \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                   \
-      at::kQInt32, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__) \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                     \
-      at::kQUInt4x2, 4, 0, 15, __VA_ARGS__)                               \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                     \
-      at::kQUInt2x4, 2, 0, 3, __VA_ARGS__)                                \
+#define AT_DISPATCH_CASE_QINT_AND_SUB_BYTE_TYPES(...)                      \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                      \
+      at::kQInt8, CHAR_BIT, SCHAR_MIN, SCHAR_MAX, __VA_ARGS__)             \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                      \
+      at::kQUInt8, CHAR_BIT, 0, UCHAR_MAX, __VA_ARGS__)                    \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                      \
+      at::kQInt32, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__)  \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(at::kQUInt4x2, 4, 0, 15, __VA_ARGS__) \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(at::kQUInt2x4, 2, 0, 3, __VA_ARGS__)
 
-#define AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(TYPE, NAME, ...)            \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_QINT_AND_SUB_BYTE_TYPES(__VA_ARGS__)                 \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                        \
+      TYPE, NAME, AT_DISPATCH_CASE_QINT_AND_SUB_BYTE_TYPES(__VA_ARGS__))
 
 #define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(...) \
   AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__)           \
   AT_DISPATCH_CASE_COMPLEX_TYPES(__VA_ARGS__)
 
-#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX(TYPE, NAME, ...)              \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__)                   \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX(TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                      \
+      TYPE, NAME, AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_ALL_TYPES_AND(SCALARTYPE, ...)          \
-  AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__)                        \
-  AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)                      \
+#define AT_DISPATCH_CASE_ALL_TYPES_AND(SCALARTYPE, ...) \
+  AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__)               \
+  AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
 
-
-#define AT_DISPATCH_ALL_TYPES_AND(SCALARTYPE, TYPE, NAME, ...)          \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_ALL_TYPES_AND(SCALARTYPE, __VA_ARGS__)               \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_ALL_TYPES_AND(SCALARTYPE, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                          \
+      TYPE, NAME, AT_DISPATCH_CASE_ALL_TYPES_AND(SCALARTYPE, __VA_ARGS__))
 
 #define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND(SCALARTYPE, ...) \
   AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__)               \
   AT_DISPATCH_CASE(SCALARTYPE, __VA_ARGS__)
 
 #define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(SCALARTYPE, TYPE, NAME, ...) \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND(SCALARTYPE, __VA_ARGS__)   \
-  AT_DISPATCH_SWITCH_END()
+  AT_DISPATCH_SWITCH(                                                      \
+      TYPE,                                                                \
+      NAME,                                                                \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND(SCALARTYPE, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_ALL_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, ...)  \
-  AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__)                               \
-  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                            \
+#define AT_DISPATCH_CASE_ALL_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, ...) \
+  AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__)                              \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                           \
   AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)
 
-#define AT_DISPATCH_ALL_TYPES_AND2(                                     \
-    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)                          \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_ALL_TYPES_AND2(                                      \
-      SCALARTYPE1, SCALARTYPE2, __VA_ARGS__)                            \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_ALL_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                                         \
+      TYPE,                                                                   \
+      NAME,                                                                   \
+      AT_DISPATCH_CASE_ALL_TYPES_AND2(SCALARTYPE1, SCALARTYPE2, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND2(                    \
-    SCALARTYPE1, SCALARTYPE2, ...)                                      \
-  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__)                   \
-  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)                            \
+#define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND2(  \
+    SCALARTYPE1, SCALARTYPE2, ...)                    \
+  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__) \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)          \
   AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)
 
-#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(                         \
-    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)                          \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND2(                          \
-      SCALARTYPE1, SCALARTYPE2, __VA_ARGS__)                            \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(    \
+    SCALARTYPE1, SCALARTYPE2, TYPE, NAME, ...)     \
+  AT_DISPATCH_SWITCH(                              \
+      TYPE,                                        \
+      NAME,                                        \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND2( \
+          SCALARTYPE1, SCALARTYPE2, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_ALL_TYPES_AND3(                \
-    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, ...)         \
-  AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__)               \
-  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)            \
-  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)            \
+#define AT_DISPATCH_CASE_ALL_TYPES_AND3(        \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, ...) \
+  AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__)       \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)    \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)    \
   AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)
 
-#define AT_DISPATCH_ALL_TYPES_AND3(                          \
-    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...)  \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                       \
-  AT_DISPATCH_CASE_ALL_TYPES_AND3(                           \
-      SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__)    \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_ALL_TYPES_AND3(                         \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                       \
+      TYPE,                                                 \
+      NAME,                                                 \
+      AT_DISPATCH_CASE_ALL_TYPES_AND3(                      \
+          SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__))
 
-#define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND3(    \
-    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, ...)         \
-  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__)   \
-  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)            \
-  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)            \
+#define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND3(  \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, ...)       \
+  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX(__VA_ARGS__) \
+  AT_DISPATCH_CASE(SCALARTYPE1, __VA_ARGS__)          \
+  AT_DISPATCH_CASE(SCALARTYPE2, __VA_ARGS__)          \
   AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)
 
 #define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(             \
     SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, TYPE, NAME, ...) \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                      \
-  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND3(              \
-      SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__)   \
-  AT_DISPATCH_SWITCH_END()
+  AT_DISPATCH_SWITCH(                                       \
+      TYPE,                                                 \
+      NAME,                                                 \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND3(          \
+          SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, __VA_ARGS__))
 
 #define AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(         \
     SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, ...) \
@@ -484,27 +477,30 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
   AT_DISPATCH_CASE(SCALARTYPE3, __VA_ARGS__)                 \
   AT_DISPATCH_CASE(SCALARTYPE4, __VA_ARGS__)
 
-#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(             \
-    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4,     \
-    TYPE, NAME, ...)                                        \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                      \
-  AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(              \
-      SCALARTYPE1, SCALARTYPE2, SCALARTYPE3,                \
-      SCALARTYPE4, __VA_ARGS__)                             \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                          \
+    SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, TYPE, NAME, ...) \
+  AT_DISPATCH_SWITCH(                                                    \
+      TYPE,                                                              \
+      NAME,                                                              \
+      AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(                       \
+          SCALARTYPE1, SCALARTYPE2, SCALARTYPE3, SCALARTYPE4, __VA_ARGS__))
 
-#define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)                              \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                        \
-  AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Int, index_t, __VA_ARGS__)  \
-  AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__) \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_INDEX_TYPES(TYPE, NAME, ...)     \
+  AT_DISPATCH_SWITCH(                                \
+      TYPE,                                          \
+      NAME,                                          \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(               \
+          at::ScalarType::Int, index_t, __VA_ARGS__) \
+          AT_PRIVATE_CASE_TYPE_USING_HINT(           \
+              at::ScalarType::Long, index_t, __VA_ARGS__))
 
 // ----------------------------------------------------------------------------
 // DEPRECATED MACROS, DON'T USE THESE
 // ----------------------------------------------------------------------------
 
-#define AT_DISPATCH_ALL_TYPES_AND_HALF(TYPE, NAME, ...)                 \
-  detail::deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF();                  \
-  AT_DISPATCH_SWITCH_BEGIN(TYPE, NAME)                                  \
-  AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, __VA_ARGS__)          \
-  AT_DISPATCH_SWITCH_END()
+#define AT_DISPATCH_ALL_TYPES_AND_HALF(TYPE, NAME, ...) \
+  detail::deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF();  \
+  AT_DISPATCH_SWITCH(                                   \
+      TYPE,                                             \
+      NAME,                                             \
+      AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, __VA_ARGS__))

@@ -179,10 +179,9 @@ namespace {
 constexpr int NLL_LOSS_THREADS = 32;
 
 #define AT_DISPATCH_NLL_LOSS_INDEX_TYPES(TYPE, NAME, ...)                     \
-  AT_DISPATCH_SWITCH_BEGIN()                                                  \
+  AT_DISPATCH_SWITCH(TYPE, NAME,                                              \
   AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Byte, index_t, __VA_ARGS__) \
-  AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__) \
-  AT_DISPATCH_SWITCH_END()
+  AT_PRIVATE_CASE_TYPE_USING_HINT(at::ScalarType::Long, index_t, __VA_ARGS__))
 
 template <typename scalar_t, typename index_t>
 __global__ void nll_loss_forward_no_reduce_cuda_kernel(
