@@ -5,7 +5,6 @@ import json
 import os
 import re
 import time
-import urllib.parse
 from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
@@ -312,7 +311,6 @@ RE_REVERT_CMD = re.compile(r"@pytorch(merge|)bot\s+revert\s+this")
 RE_REVERT_CMD_CLI = re.compile(r"@pytorch(merge|)bot\s+revert\s+(-m.*-c.*|-c.*-m.*)")
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
 
-
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
                data: Optional[Dict[str, Any]] = None,
@@ -332,15 +330,21 @@ def _fetch_url(url: str, *,
             print(f"Rate limit exceeded: {err.headers['X-RateLimit-Used']}/{err.headers['X-RateLimit-Limit']}")
         raise
 
-
 def fetch_json(url: str,
                params: Optional[Dict[str, Any]] = None,
                data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
+        url += '?' + '&'.join(f"{name}={val}" for name, val in params.items())
     return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
+def fetch_json_dict(url: str,
+                    params: Optional[Dict[str, Any]] = None,
+                    data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    if params is not None and len(params) > 0:
+        url += '?' + '&'.join(f"{name}={val}" for name, val in params.items())
+    return cast(Dict[str, Any], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
 def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
     if dry_run:
@@ -395,6 +399,7 @@ def parse_args() -> Any:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--on-green", action="store_true")
     parser.add_argument("--on-mandatory", action="store_true")
+    parser.add_argument("--land-checks", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
@@ -733,9 +738,26 @@ class GitHubPR:
         msg += f"Approved by: {approved_by_urls}\n"
         return msg
 
-    def merge_into(self, repo: GitRepo, *, force: bool = False, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
+    def merge_into(self, repo: GitRepo, *,
+                   force: bool = False,
+                   dry_run: bool = False,
+                   already_merged: bool = False,
+                   comment_id: Optional[int] = None) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
+        if not already_merged:
+            self.merge_changes(repo, force, comment_id)
+
+        if repo.current_branch() != self.default_branch():
+            repo.checkout(self.default_branch())
+
+        repo.push(self.default_branch(), dry_run)
+        gh_post_pr_comment(self.org, self.project, self.pr_num,
+                           f"@{self.get_pr_creator_login()} your PR has been successfully merged.", dry_run)
+        if not dry_run:
+            gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
+
+    def merge_changes(self, repo: GitRepo, force: bool = False, comment_id: Optional[int] = None) -> None:
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
@@ -747,9 +769,19 @@ class GitHubPR:
         else:
             self.merge_ghstack_into(repo, force, comment_id=comment_id)
 
-        repo.push(self.default_branch(), dry_run)
-        if not dry_run:
-            gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
+    def create_land_time_check_branch(self, repo: GitRepo) -> str:
+        branch_name = f'landchecks/{self.pr_num}'
+        try:
+            repo._run_git('branch', "-D", branch_name)
+        except Exception:
+            pass
+        repo._run_git('checkout', "-b", branch_name)
+        repo._run_git('push', '-u', 'origin', branch_name, '--force')
+        commit = repo.get_commit('HEAD').commit_hash
+        gh_post_pr_comment(self.org, self.project, self.pr_num,
+                           'Successfully started land time checks.' +
+                           f' See progress here: https://github.com/{self.org}/{self.project}/commit/{commit}')
+        return commit
 
 
 class MandatoryChecksMissingError(Exception):
@@ -938,27 +970,29 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
+def validate_land_time_checks(repo: GitRepo, commit: str) -> bool:
+    [owner, name] = repo.gh_owner_and_name()
+    checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
+    if checks['total_count'] == 0:
+        raise MandatoryChecksMissingError("Refusing to merge as land time check(s) are not yet run")
+    check_runs = checks['check_runs']
+    pending_jobs = []
+    failed_jobs = []
+    for check_run in check_runs:
+        name = check_run['name']
+        conclusion = check_run['conclusion']
+        if conclusion == 'failure':
+            failed_jobs.append(name)
+        elif conclusion is None:
+            pending_jobs.append(name)
 
-def check_for_sev(org: str, project: str, force: bool) -> None:
-    if force:
-        return
-    response = cast(
-        Dict[str, Any],
-        fetch_json(
-            "https://api.github.com/search/issues",
-            params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
-        ),
-    )
-    if response["total_count"] != 0:
-        for item in response["items"]:
-            if "merge blocking" in item["body"].lower():
-                raise RuntimeError(
-                    "Not merging any PRs at the moment because there is a "
-                    + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
-                    + f"{item['html_url']}"
-                )
-    return
-
+    if len(failed_jobs) > 0:
+        raise RuntimeError(f"Failed to merge: some checks failed: {', '.join(failed_jobs)}")
+    if len(pending_jobs) > 0:
+        raise MandatoryChecksMissingError(f"Refusing to merge as land time check(s) {', '.join(pending_jobs)} are not yet run")
+    if len(pending_jobs) == 0 and len(failed_jobs) == 0:
+        return True
+    return False
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
@@ -966,24 +1000,27 @@ def merge(pr_num: int, repo: GitRepo,
           comment_id: Optional[int] = None,
           mandatory_only: bool = False,
           on_green: bool = False,
+          land_checks: bool = False,
           timeout_minutes: int = 400,
           stale_pr_days: int = 3) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
-    check_for_sev(org, project, force)
     if force or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
         return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
     if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
+    if land_checks:
+        pr.merge_changes(repo, force=force, comment_id=comment_id)
+        commit = pr.create_land_time_check_branch(repo)
+
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
-        check_for_sev(org, project, force)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
@@ -994,17 +1031,20 @@ def merge(pr_num: int, repo: GitRepo,
             find_matching_merge_rule(pr, repo)
             pending = pr_get_pending_checks(pr)
             failing = pr_get_failed_checks(pr)
+
             if (not mandatory_only and on_green) and len(failing) > 0:
                 raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
                                    ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
             if (not mandatory_only and on_green) and len(pending) > 0:
                 raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
+            if land_checks and validate_land_time_checks(repo, commit):
+                return pr.merge_into(repo, dry_run=dry_run, force=force, already_merged=True, comment_id=comment_id)
             return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
-            time.sleep(5 * 60)
+            time.sleep(60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
@@ -1052,10 +1092,10 @@ def main() -> None:
               force=args.force,
               comment_id=args.comment_id,
               on_green=args.on_green,
-              mandatory_only=args.on_mandatory)
+              mandatory_only=args.on_mandatory,
+              land_checks=args.land_checks)
     except Exception as e:
         handle_exception(e)
-
 
 
 if __name__ == "__main__":
