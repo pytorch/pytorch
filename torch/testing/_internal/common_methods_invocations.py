@@ -20302,8 +20302,6 @@ python_ref_db = [
         skips=(
             # NotImplementedError: Could not run 'aten::where.ScalarOther' with arguments from the 'AutogradMeta'...
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
-            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
