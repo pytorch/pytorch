@@ -1,12 +1,11 @@
 from collections import deque
-from typing import Dict, List
 from dataclasses import dataclass
+from typing import Dict, List
+
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
-import re
-import numpy as np
+from torch.autograd import _KinetoEvent
 
-DEBUG = False
 
 
 @dataclass
@@ -15,6 +14,7 @@ class EventMetrics:
     self_time_ns: int = 0
     idle_time_ns: int = 0
 
+    @property
     def fraction_idle_time(self):
         if self.duration_time_ns == 0:
             return 0.0
@@ -44,7 +44,11 @@ class EventKey:
 
     def intervals_overlap(self, intervals: List[Interval]):
         overlap_time = 0
-        for interval in intervals:
+        intervals = sorted(intervals, key=lambda x: x.start)
+        for i, interval in enumerate(intervals):
+            if i + 1 < len(intervals):
+                assert interval.end <= intervals[
+                    i + 1].start, "Intervals must be disjoint"
             overlap_start = max(self.event.start_time_ns, interval.start)
             overlap_end = min(self.event.end_time_ns, interval.end)
 
@@ -59,7 +63,6 @@ class BasicEvaluation:
         self.profile = prof
         self.metrics: Dict[EventKey, EventMetrics] = {}
         self.compute_self_time()
-        self.qd_list = self.compute_idle_time_and_qd()
 
     def compute_self_time(self):
         '''
@@ -84,14 +87,14 @@ class BasicEvaluation:
             self.metrics[EventKey(
                 curr_event)].duration_time_ns = curr_event.duration_time_ns
 
-    def compute_idle_time_and_qd(self):
+    def compute_queue_depth(self):
         '''
         Computes event's idle time. Idle time is defined as the time when the CUDA kernel queue depth is 0.
         It also return a Time series of the queue depth data.
         qd = cuda kernel queue depth
         '''
         assert (self.profile.kineto_results is not None)
-        event_list = self.profile.kineto_results.events()
+        cuda_event_list = self.profile.kineto_results.events()
 
         def is_cuda_launch_kernel(e):
             # TODO: find a better way to identify cudaLaunchKernel
@@ -103,146 +106,55 @@ class BasicEvaluation:
             ).lower()
 
         # Record All the idle intervals
-        curr_qd = 0
-        idle_interval = []
-        qd_list = []
-        idle_start = 0
-        cuda_kernel_events = [
-            event for event in event_list
-            if is_cuda_launch_kernel(event) or is_cuda_kernel(event)
-        ]
-        cuda_kernel_events.sort(key=lambda e: e.start_us())
+        idle_interval: List[Interval] = []
+        queue_depth_list: List[Interval] = []
 
-        for curr_event, next_event in zip(cuda_kernel_events,
-                                          cuda_kernel_events[1:]):
-            if (is_cuda_launch_kernel(curr_event)):
-                if (curr_qd == 0):
-                    if idle_start is not None:
-                        idle_interval.append(
-                            Interval(idle_start * 1000,
-                                     curr_event.start_us() * 1000))
-                curr_qd += 1
-            if (is_cuda_kernel(curr_event)):
-                curr_qd -= 1
-                if (curr_qd == 0):
-                    idle_start = curr_event.start_us()
+        cuda_launch_events = sorted(
+            (e for e in cuda_event_list if is_cuda_launch_kernel(e)),
+            key=lambda x: x.start_us())
+        cuda_kernel_events = sorted(
+            (e for e in cuda_event_list if is_cuda_kernel(e)),
+            key=lambda x: x.start_us())
 
-            qd_list.append(
-                Interval(curr_event.start_us() * 1000,
-                         (next_event.start_us() + next_event.duration_us()) *
-                         1000, curr_qd))
+        kernel_mapping: Dict[_KinetoEvent, int] = {}
+        for cuda_launch_event in cuda_launch_events:
+            kernel_mapping[cuda_launch_event] = index_of_first_match(
+                cuda_kernel_events, lambda x: x.linked_correlation_id() ==
+                cuda_launch_event.linked_correlation_id())
+
+        current_kernel_index = -1
+        spawned_kernel_index = None
+        for cuda_launch_event in cuda_launch_events:
+            # Find latest cuda kernel event
+            while (cuda_kernel_events[current_kernel_index + 1].start_us() +
+                   cuda_kernel_events[current_kernel_index + 1].duration_us() <
+                   cuda_launch_event.start_us() +
+                   cuda_launch_event.duration_us()):
+                current_kernel_index += 1
+
+            # Find current spawned cuda kernel event
+            spawned_kernel_index = kernel_mapping[cuda_launch_event]
+            if spawned_kernel_index is None:
+                current_queue_depth = 0
+            else:
+                current_queue_depth = spawned_kernel_index - current_kernel_index
+
+            queue_depth_list.append(
+                Interval(
+                    cuda_launch_event.start_us(),
+                    cuda_launch_event.start_us() +
+                    cuda_launch_event.duration_us(), current_queue_depth))
 
         event_list = [e.event for e in self.metrics.keys()]
         for event in event_list:
             self.metrics[EventKey(event)].idle_time_ns = EventKey(
                 event).intervals_overlap(idle_interval)
-        return qd_list
 
-    def rank_events(self, length):
-        '''
-        Filter and Rank the events based on some heuristics:
-        1) Events that are in the falling phase of the queue depth.
-        2) Events that have a high idle_time, self_time difference.
-
-        Parameters:
-            length: The number of events to return.
-        '''
-
-        # Find the interval when qd is falling to 0
-        qd_list = list(reversed(self.qd_list))
-        qd_values = [e.queue_depth for e in qd_list]
-
-        decrease_interval = []
-        for i in range(len(qd_values) - 1):
-            if qd_values[i] == 0:
-                # Find next zero and if the max value between them exceeds
-                # the threshold, then we have a falling interval
-                for j in range(i + 1, len(qd_values)):
-                    if qd_values[j] == 0:
-                        peak_idx = argmax(qd_values, start=i + 1, end=j)
-                        if peak_idx is None:
-                            continue
-                        # check for threshold
-                        if qd_values[peak_idx] - qd_values[i] > 8:
-                            decrease_interval.append(
-                                Interval(qd_list[peak_idx].start,
-                                         qd_list[i].start))
-                            i = peak_idx
-
-        # Filter out events that are not in the decrease interval
-        event_list = [
-            event for event in self.metrics.keys()
-            if event.intervals_overlap(decrease_interval)
-        ]
-
-        self_time = np.array(
-            [self.metrics[event].self_time_ns for event in event_list])
-        idle_time = np.array(
-            [self.metrics[event].idle_time_ns for event in event_list])
-
-        normalized_gain = (idle_time - np.mean(idle_time)) / np.std(idle_time)
-        normalized_self = (self_time - np.mean(self_time)) / np.std(self_time)
-        heuristic_score_list = np.abs(0.4 * normalized_gain - normalized_self)
-
-        # Sort events by heuristic
-        event_list = [
-            event for _, event in sorted(zip(heuristic_score_list, event_list),
-                                         key=lambda x: x[0],
-                                         reverse=True)
-        ]
-        event_list = event_list[:length]
-
-        def plot_analysis_graph(filepath):
-            import matplotlib.pyplot as plt
-            plt.plot([x.start for x in self.qd_list],
-                     qd_values[::-1])
-            for interval in decrease_interval:
-                plt.axvspan(interval.start,
-                            interval.end,
-                            color='orange',
-                            alpha=0.5)
-            for i, event in enumerate(event_list):
-                y_loc = max(qd_values) - i * 20
-                plt.plot([event.event.start_time_ns, event.event.end_time_ns],
-                         [y_loc, y_loc],
-                         label=event.event.name())
-            plt.legend(bbox_to_anchor=(1, 0.5), loc='center left')
-            plt.xlabel("Time (ns)")
-            plt.ylabel("Queue Depth")
-            plt.savefig(filepath, bbox_inches='tight')
-
-        if DEBUG:
-            plot_analysis_graph("qd.png")
-
-        return event_list
-
-    def get_optimizable_events(self, length: int = 1):
-        event_list = self.rank_events(length)
-        if len(event_list) == 0:
-            print("No events to optimize")
-            return []
-        print("Optimizable events:")
-        for event in event_list:
-            print(f"""{'-'*80}
-Event:                {event}
-Source code location: {source_code_location(event.event)}
-Percentage idle time: {self.metrics[event].fraction_idle_time() * 100:.2f}%
-{'-'*80}""")
-        return event_list
+        return queue_depth_list
 
 
-def argmax(seq, key=lambda x: x, start=0, end=None):
-    seq = seq[start:end]
-    if len(seq) == 0:
-        return None
-    return seq.index(max(seq, key=key)) + start
-
-
-def source_code_location(event):
-    while (event is not None):
-        match = re.search(r"\.py\(.*\)", event.name())
-        if (match is None):
-            event = event.parent
-            continue
-        return event.name()
-    return "No source code location found"
+def index_of_first_match(seq, predicate, start=0, end=None):
+    for i, x in enumerate(seq[start:end]):
+        if predicate(x):
+            return i + start
+    return None
