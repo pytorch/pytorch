@@ -6,7 +6,11 @@ import torch.nn as nn
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn.functional as F
 from torch.ao.quantization import QConfig, QConfigMapping
-from torch.ao.quantization.fx._model_report.detector import DynamicStaticDetector, PerChannelDetector
+from torch.ao.quantization.fx._model_report.detector import (
+    DynamicStaticDetector,
+    InputWeightEqualizationDetector,
+    PerChannelDetector,
+)
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.fx._model_report.model_report import ModelReport
 from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
@@ -1078,5 +1082,70 @@ class TestFxModelReportClass(QuantizationTestCase):
 
 class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
-    def test_simple_pass(self):
-        pass
+    @skipIfNoFBGEMM
+    def test_input_weight_equalization_determine_points(self):
+        class LinearConv(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+                self.conv2d = torch.nn.Conv2d(3, 3, 1)
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.relu(x)
+                x = self.conv2d(x)
+                x = self.relu(x)
+                return x
+
+        class TwoBlockComplexNet(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.block1 = LinearConv()
+                self.block2 = LinearConv()
+
+            def forward(self, x):
+                x = self.block1(x)
+                y = self.block2(x)
+                z = x + y
+                z = F.relu(z)
+                return z
+
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+            # set the backend for this test
+            torch.backends.quantized.engine = "fbgemm"
+
+            detector_set = set([InputWeightEqualizationDetector(0.5)])
+            model_report = ModelReport(detector_set)
+
+            # create model instance and prepare it
+            model = TwoBlockComplexNet()
+            example_input = torch.randn(1, 3, 3, 3)
+            current_backend = torch.backends.quantized.engine
+            q_config_mapping = QConfigMapping()
+            q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
+
+            model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
+
+            # prepare the model for callibration
+            prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
+
+            # supported modules to check
+            mods_to_check = set([nn.Linear, nn.Conv2d])
+
+            # get the set of all nodes in the graph their fqns
+            node_fqns = set([node.target for node in prepared_for_callibrate_model.graph.nodes])
+
+            # there should be 4 node fqns that have the observer inserted
+            correct_number_of_obs_inserted = 4
+            number_of_obs_found = 0
+            obs_name_to_find = InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME
+
+            for node in prepared_for_callibrate_model.graph.nodes:
+                # if the obs name is inside the target, we found an observer
+                if obs_name_to_find in str(node.target):
+                    number_of_obs_found += 1
+
+            self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
