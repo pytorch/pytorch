@@ -11954,6 +11954,8 @@
 
 - func: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: function
+  dispatch:
+    CompositeExplicitAutograd: nested_tensor
 
 - func: _fw_primal_copy(Tensor self, int level) -> Tensor
   variants: function
