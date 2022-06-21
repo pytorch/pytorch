@@ -645,20 +645,17 @@ static PyObject* record_function_enter_fast(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_record_function_enter_fast(std::string name, std::string? args=None)"});
+      {"_record_function_enter_fast(c10::string_view name, c10::string_view? args=None)"});
 
   ParsedArgs<3> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
 
-  // auto res =
-  // torch::autograd::profiler::record_function_enter_legacy(_r.tensor(0),
-  // _r.string(1), _r.string(2));
   static auto op =
       c10::Dispatcher::singleton()
           .findSchemaOrThrow("profiler::_record_function_enter", "")
           .typed<decltype(torch::autograd::profiler::
                               record_function_enter_legacy)>();
-  auto res = op.call(_r.string(0), _r.stringOptional(1));
+  auto res = op.call(_r.stringView(0), _r.stringViewOptional(1));
   return THPVariable_Wrap(std::move(res));
   END_HANDLE_TH_ERRORS
 }
@@ -673,7 +670,6 @@ static PyObject* record_function_exit_fast(
   ParsedArgs<1> parsed_args;
   auto _r = parser.parse(args, kwargs, parsed_args);
 
-  // torch::autograd::profiler::record_function_exit_legacy(_r.tensor(0));
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("profiler::_record_function_exit", "")
                        .typed<decltype(torch::autograd::profiler::

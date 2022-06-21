@@ -20,23 +20,23 @@ namespace profiler {
 // Creates a new profiling scope using RecordFunction and invokes its starting
 // callbacks.
 void record_function_enter(
-    const std::string& name,
-    const c10::optional<std::string>& args,
+    c10::string_view name,
+    c10::optional<c10::string_view> args,
     at::RecordFunction& rec) {
   if (rec.isActive()) {
     if (rec.needsInputs() && args.has_value()) {
       rec.before(
-          name, c10::ArrayRef<const c10::IValue>{c10::IValue{args.value()}});
+          std::string(name), c10::ArrayRef<const c10::IValue>{c10::IValue{args.value()}});
     } else {
-      rec.before(name);
+      rec.before(std::string(name));
     }
   }
 }
 
 // Legacy signature using cpp_custom_type_hack
 at::Tensor record_function_enter_legacy(
-    const std::string& name,
-    const c10::optional<std::string>& args) {
+    c10::string_view name,
+    c10::optional<c10::string_view> args) {
   auto step_callbacks =
       at::getStepCallbacksUnlessEmpty(at::RecordScope::FUNCTION);
   if (C10_UNLIKELY(step_callbacks.has_value())) {
@@ -53,9 +53,10 @@ at::Tensor record_function_enter_legacy(
 // New signature using custom_class
 c10::intrusive_ptr<PythonRecordFunction> record_function_enter_new(
     const std::string& name,
-    const c10::optional<std::string>& args) {
+    const c10::optional<std::string>& args_) {
   auto rec =
       c10::make_intrusive<PythonRecordFunction>(at::RecordScope::USER_SCOPE);
+  auto args = args_.has_value() ? c10::optional<c10::string_view>(c10::string_view(args_.value())) : c10::optional<c10::string_view>(c10::nullopt);
   record_function_enter(name, args, rec->record);
   return rec;
 }
