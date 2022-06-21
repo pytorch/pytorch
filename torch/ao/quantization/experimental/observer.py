@@ -5,18 +5,20 @@ the values observed during calibration (PTQ) or training (QAT).
 
 import torch
 import itertools
+import matplotlib.pyplot as plt
 from torch.ao.quantization.observer import ObserverBase
+from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
 
 # TODO: Consider adding NonUniformQuantizationObserverBase class
 # when more than one non-uniform method is implemented
 
 class APoTObserver(ObserverBase):
+    max_val: float
     b: int
     k: int
     n: int
     alpha: float
     gamma: float
-    max_val: float
     level_indices: torch.Tensor
 
     def __init__(
@@ -113,3 +115,16 @@ class APoTObserver(ObserverBase):
         r"""Records the running maximum of ``x``."""
         max_val = self.max_val
         return x_orig
+
+    def quant_levels_visualization(self, obs_result, filename):
+        xs = [float(x) / 1000.0 for x in range(1000)]
+        ys = [apot_to_float(float_to_apot(x, obs_result[1], obs_result[2]),
+                            obs_result[1], obs_result[2]).item() for x in xs]
+
+        f = plt.figure(figsize=(15, 10))
+
+        plt.plot(xs, ys)
+        plt.title("APoT Quantization Plot")
+        plt.xlabel("Full Precision")
+        plt.ylabel("Quantized")
+        plt.show()
