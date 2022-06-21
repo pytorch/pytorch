@@ -10,7 +10,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import TEST_CUDNN
 from torch.testing._internal.common_dtype import floating_types
 from torch.testing._internal.common_device_type import (
-    _TestParametrizer, _update_param_kwargs, skipIf, toleranceOverride, tol,
+    _TestParametrizer, _update_param_kwargs, toleranceOverride, tol,
     skipCUDAIfCudnnVersionLessThan, skipCUDAIfRocm, precisionOverride, skipMeta)
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import nllloss_reference, get_reduction
@@ -48,7 +48,10 @@ for namespace in MODULE_NAMESPACES:
     for module_name in namespace.__all__:  # type: ignore[attr-defined]
         module_cls = getattr(namespace, module_name)
         namespace_name = namespace.__name__.replace('torch.', '').replace('.modules', '')
-        MODULE_CLASS_NAMES[module_cls] = f'{namespace_name}.{module_name}'
+
+        # Deal with any aliases by preferring earlier names.
+        if module_cls not in MODULE_CLASS_NAMES:
+            MODULE_CLASS_NAMES[module_cls] = f'{namespace_name}.{module_name}'
 
 
 # Specifies the modes (i.e. train, eval) to test over.
@@ -104,37 +107,27 @@ class modules(_TestParametrizer):
                 _update_param_kwargs(param_kwargs, 'training', training)
 
                 try:
-                    active_decorators = [set_single_threaded_if_parallel_tbb]
-                    if module_info.should_skip(generic_cls.__name__, test.__name__, device_cls.device_type, dtype):
-                        active_decorators.append(skipIf(True, "Skipped!"))
-
-                    if module_info.decorators is not None:
-                        for decorator in module_info.decorators:
-                            # Can't use isinstance as it would cause a circular import
-                            if decorator.__class__.__name__ == 'DecorateInfo':
-                                if decorator.is_active(generic_cls.__name__, test.__name__,
-                                                       device_cls.device_type, dtype):
-                                    active_decorators += decorator.decorators
-                            else:
-                                active_decorators.append(decorator)
-
+                    # Copy the test per-ModuleInfo.
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
                         return test(*args, **kwargs)
 
-                    for decorator in active_decorators:
-                        test_wrapper = decorator(test_wrapper)
+                    decorator_fn = partial(module_info.get_decorators, generic_cls.__name__,
+                                           test.__name__, device_cls.device_type, dtype)
 
-                    yield (test_wrapper, test_name, param_kwargs)
+                    yield (test_wrapper, test_name, param_kwargs, decorator_fn)
                 except Exception as ex:
                     # Provides an error message for debugging before rethrowing the exception
                     print("Failed to instantiate {0} for module {1}!".format(test_name, module_info.name))
                     raise ex
 
 
-def get_module_fully_qualified_name(module_cls):
-    """ Returns the common name of the module class formatted for use in test names. """
-    return MODULE_CLASS_NAMES[module_cls]
+def get_module_common_name(module_cls):
+    if module_cls in MODULE_CLASS_NAMES:
+        # Example: "nn.Linear"
+        return MODULE_CLASS_NAMES[module_cls]
+    else:
+        return module_cls.__name__
 
 
 class FunctionInput(object):
@@ -187,20 +180,26 @@ class ModuleInfo(object):
                  ):
         self.module_cls = module_cls
         self.module_inputs_func = module_inputs_func
-        self.skips = skips
-        self.decorators = decorators
+        self.decorators = (*(decorators if decorators else []), *(skips if skips else []))
         self.dtypes = dtypes
         self.supports_gradgrad = supports_gradgrad
         self.gradcheck_nondet_tol = gradcheck_nondet_tol
         self.module_memformat_affects_out = module_memformat_affects_out
         self.train_and_eval_differ = train_and_eval_differ
 
-    def should_skip(self, cls_name, test_name, device_type, dtype):
-        return any(si.is_active(cls_name, test_name, device_type, dtype) for si in self.skips)
+    def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
+        result = [set_single_threaded_if_parallel_tbb]
+        for decorator in self.decorators:
+            if isinstance(decorator, DecorateInfo):
+                if decorator.is_active(test_class, test_name, device, dtype, param_kwargs):
+                    result.extend(decorator.decorators)
+            else:
+                result.append(decorator)
+        return result
 
     @property
     def name(self):
-        return get_module_fully_qualified_name(self.module_cls)
+        return get_module_common_name(self.module_cls)
 
     @property
     def formatted_name(self):

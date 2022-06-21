@@ -24,10 +24,10 @@ from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCUDA, onlyNativeDeviceTypes,
      deviceCountAtLeast, ops, expectedFailureMeta)
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, DecorateInfo
 import torch.testing._internal.opinfo_helper as opinfo_helper
-from torch.testing._internal.common_dtype import all_types_and_complex_and
-from torch.testing._internal.common_modules import modules, module_db
+from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
+from torch.testing._internal.common_modules import modules, module_db, ModuleInfo
 
 # For testing TestCase methods and torch.testing functions
 class TestTesting(TestCase):
@@ -1404,6 +1404,12 @@ def _get_test_names_for_test_class(test_cls):
     return sorted(test_names)
 
 
+def _get_test_funcs_for_test_class(test_cls):
+    """ Convenience function to get all (test function, parametrized_name) pairs for a given test class. """
+    test_funcs = [(getattr(test_cls, key), key) for key in test_cls.__dict__ if key.startswith('test_')]
+    return test_funcs
+
+
 class TestTestParametrization(TestCase):
     def test_default_names(self):
 
@@ -1494,6 +1500,48 @@ class TestTestParametrization(TestCase):
         test_names = _get_test_names_for_test_class(TestParametrized)
         self.assertEqual(expected_test_names, test_names)
 
+    def test_apply_param_specific_decorators(self):
+        # Test that decorators can be applied on a per-param basis.
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        class TestParametrized(TestCase):
+            @parametrize("x", [subtest(1, name='one'),
+                               subtest(2, name='two', decorators=[test_dec]),
+                               subtest(3, name='three')])
+            def test_param(self, x):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
+        for test_func, name in _get_test_funcs_for_test_class(TestParametrized):
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), name == 'test_param_two')
+
+    def test_compose_param_specific_decorators(self):
+        # Test that multiple per-param decorators compose correctly.
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        class TestParametrized(TestCase):
+            @parametrize("x", [subtest(1),
+                               subtest(2, decorators=[test_dec]),
+                               subtest(3)])
+            @parametrize("y", [subtest(False, decorators=[test_dec]),
+                               subtest(True)])
+            def test_param(self, x, y):
+                pass
+
+        instantiate_parametrized_tests(TestParametrized)
+
+        for test_func, name in _get_test_funcs_for_test_class(TestParametrized):
+            # Decorator should be applied whenever either x == 2 or y == False.
+            should_apply = ('x_2' in name) or ('y_False' in name)
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
+
     def test_modules_decorator_misuse_error(self):
         # Test that @modules errors out when used with instantiate_parametrized_tests().
 
@@ -1506,7 +1554,7 @@ class TestTestParametrization(TestCase):
             instantiate_parametrized_tests(TestParametrized)
 
     def test_ops_decorator_misuse_error(self):
-        # Test that @modules errors out when used with instantiate_parametrized_tests().
+        # Test that @ops errors out when used with instantiate_parametrized_tests().
 
         class TestParametrized(TestCase):
             @ops(op_db)
@@ -1685,6 +1733,81 @@ class TestTestParametrizationDeviceType(TestCase):
         test_names = _get_test_names_for_test_class(device_cls)
         self.assertEqual(sorted(expected_test_names), sorted(test_names))
 
+    def test_modules_composition_names(self, device):
+        device = self.device_type
+
+        class TestParametrized(TestCase):
+            @modules(module_db)
+            @parametrize("flag", [False, True], lambda f: 'flag_enabled' if f else 'flag_disabled')
+            def test_module_parametrized(self, device, dtype, module_info, training, flag):
+                pass
+
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+        expected_test_names = []
+        for module_info in module_db:
+            for dtype in floating_types():
+                for flag_part in ('flag_disabled', 'flag_enabled'):
+                    expected_train_modes = (
+                        ['train_mode', 'eval_mode'] if module_info.train_and_eval_differ else [''])
+                    for training_part in expected_train_modes:
+                        expected_name = '{}.test_module_parametrized_{}{}_{}_{}_{}'.format(
+                            device_cls.__name__, module_info.formatted_name,
+                            '_' + training_part if len(training_part) > 0 else '',
+                            flag_part, device, dtype_name(dtype))
+                        expected_test_names.append(expected_name)
+
+        test_names = _get_test_names_for_test_class(device_cls)
+        self.assertEqual(sorted(expected_test_names), sorted(test_names))
+
+    def test_modules_decorator_applies_module_and_param_specific_decorators(self, device):
+        # Test that decorators can be applied on a per-module / per-param basis.
+
+        # Create a test module, ModuleInfo entry, and decorator to apply.
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.nn.Parameter(torch.randn(3))
+
+            def forward(self, y):
+                return self.x + y
+
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        test_module_info = ModuleInfo(
+            TestModule,
+            module_inputs_func=lambda _: [],
+            decorators=[
+                DecorateInfo(test_dec, 'TestParametrized', 'test_module_param',
+                             device_type='cpu', dtypes=[torch.float64],
+                             active_if=lambda p: p['x'] == 2)
+            ])
+
+        class TestParametrized(TestCase):
+            @modules(module_db + [test_module_info])
+            @parametrize("x", [2, 3])
+            def test_module_param(self, device, dtype, module_info, training, x):
+                pass
+
+            @modules(module_db + [test_module_info])
+            @parametrize("y", [
+                subtest(4),
+                subtest(5, decorators=[test_dec])])
+            def test_other(self, device, dtype, module_info, training, y):
+                pass
+
+        device = self.device_type
+        instantiate_device_type_tests(TestParametrized, locals(), only_for=device)
+        device_cls = locals()['TestParametrized{}'.format(device.upper())]
+
+        for test_func, name in _get_test_funcs_for_test_class(device_cls):
+            should_apply = (name == 'test_module_param_TestModule_x_2_cpu_float64' or
+                            ('test_other' in name and 'y_5' in name))
+            self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
+
     def test_dtypes_composition_valid(self, device):
         # Test checks that @parametrize and @dtypes compose as expected when @parametrize
         # doesn't set dtype.
@@ -1744,7 +1867,7 @@ class TestTestParametrizationDeviceType(TestCase):
         class TestParametrized(TestCase):
             @ops(op_db)
             @modules(module_db)
-            def test_param(self, device, dtype, op, module_info):
+            def test_param(self, device, dtype, op, module_info, training):
                 pass
 
         with self.assertRaisesRegex(RuntimeError, "handled multiple times"):
