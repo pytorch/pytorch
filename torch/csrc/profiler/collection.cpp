@@ -210,15 +210,16 @@ std::string toString(const ExtraFields<EventType::PyCall>& e) {
       e.callsite_.funcname_.str());
 }
 
-#define CAST_ACTIVITY(x)                                         \
-  static_cast<torch::profiler::impl::kineto::ActivityTypeAlias>( \
-      static_cast<int>(x))
-
 namespace {
+auto cast_activity(const libkineto::ActivityType activity) {
+  return static_cast<torch::profiler::impl::kineto::ActivityTypeAlias>(
+      static_cast<int>(activity));
+}
+
 auto scopeToType(at::RecordScope scope) {
   return scope == at::RecordScope::USER_SCOPE
-      ? CAST_ACTIVITY(libkineto::ActivityType::USER_ANNOTATION)
-      : CAST_ACTIVITY(libkineto::ActivityType::CPU_OP);
+      ? cast_activity(libkineto::ActivityType::USER_ANNOTATION)
+      : cast_activity(libkineto::ActivityType::CPU_OP);
 }
 } // namespace
 
@@ -233,9 +234,9 @@ DEFINE_VISITOR(
     kinetoType,
     scopeToType(e.scope_),
     scopeToType(e.scope_),
-    CAST_ACTIVITY(libkineto::ActivityType::CPU_INSTANT_EVENT),
-    CAST_ACTIVITY(libkineto::ActivityType::PYTHON_FUNCTION),
-    CAST_ACTIVITY(libkineto::ActivityType::PYTHON_FUNCTION));
+    cast_activity(libkineto::ActivityType::CPU_INSTANT_EVENT),
+    cast_activity(libkineto::ActivityType::PYTHON_FUNCTION),
+    cast_activity(libkineto::ActivityType::PYTHON_FUNCTION));
 DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0);
 DEFINE_VISITOR(
     endTimeNS,
@@ -258,7 +259,6 @@ DEFINE_VISITOR(
     e.device_type_,
     c10::DeviceType::CPU,
     c10::DeviceType::CPU);
-#undef CAST_ACTIVITY
 #undef DEFINE_VISITOR
 #undef OUT_T
 
