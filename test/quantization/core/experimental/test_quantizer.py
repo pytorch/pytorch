@@ -9,7 +9,7 @@ quantize_APoT = APoTQuantizer.quantize_APoT
 dequantize = APoTQuantizer.dequantize
 
 class TestQuantizer(unittest.TestCase):
-    r""" Tests quantize_APoT result (int representation) on random 1-dim tensor
+    r""" Tests quantize_APoT result on random 1-dim tensor
         and hardcoded values for b, k by comparing to uniform quantization
         (non-uniform quantization reduces to uniform for k = 1)
         quantized tensor (https://pytorch.org/docs/stable/generated/torch.quantize_per_tensor.html)
@@ -21,13 +21,13 @@ class TestQuantizer(unittest.TestCase):
         # generate random size of tensor2dequantize between 1 -> 20
         size = random.randint(1, 20)
 
-        # generate tensor with random fp values
-        tensor2quantize = torch.rand(size, dtype=torch.float)
+        # generate tensor with random fp values between 0 -> 1000
+        tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
-        quantizer = APoTQuantizer(4, 1, False)
+        quantizer = APoTQuantizer(4, 1, torch.max(tensor2quantize), False)
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
@@ -37,7 +37,7 @@ class TestQuantizer(unittest.TestCase):
 
         self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
 
-    r""" Tests quantize_APoT result (int representation) on random 2-dim tensor
+    r""" Tests quantize_APoT result on random 2-dim tensor
         and hardcoded values for b, k by comparing to uniform quantization
         (non-uniform quantization reduces to uniform for k = 1)
         quantized tensor (https://pytorch.org/docs/stable/generated/torch.quantize_per_tensor.html)
@@ -50,12 +50,12 @@ class TestQuantizer(unittest.TestCase):
         size = random.randint(1, 20)
 
         # generate tensor with random fp values
-        tensor2quantize = torch.rand((size, size), dtype=torch.float)
+        tensor2quantize = 1000 * torch.rand((size, size), dtype=torch.float)
 
-        quantizer = APoTQuantizer(4, 1, False)
+        quantizer = APoTQuantizer(4, 1, torch.max(tensor2quantize), False)
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
@@ -66,76 +66,47 @@ class TestQuantizer(unittest.TestCase):
         self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
 
     r""" Tests quantize_APoT for k != 1.
-        Tests quantize_APoT result (reduced precision fp representation) on
-        random 1-dim tensor and hardcoded values for b=4, k=2 by comparing results to
-        hand-calculated error bound (+/- 0.25 between reduced precision fp representation
-        and original input tensor values because max difference between quantization levels
-        for b=4, k=2 is 0.25).
+        Tests quantize_APoT result on random 1-dim tensor and hardcoded values for
+        b=4, k=2 by comparing results to hand-calculated results from APoT paper
+        https://arxiv.org/pdf/1909.13144.pdf
         * tensor2quantize: Tensor
         * b: 4
         * k: 2
     """
     def test_quantize_APoT_k2(self):
-        # generate random size of tensor2dequantize between 1 -> 20
-        size = random.randint(1, 20)
+        r"""
+        given b = 4, k = 2, alpha = 1.0, we know:
+        (from APoT paper example: https://arxiv.org/pdf/1909.13144.pdf)
 
-        # generate tensor with random fp values
-        tensor2quantize = torch.rand((size), dtype=torch.float)
+        quantization_levels = tensor([0.0000, 0.0208, 0.0417, 0.0625, 0.0833, 0.1250, 0.1667,
+        0.1875, 0.2500, 0.3333, 0.3750, 0.5000, 0.6667, 0.6875, 0.7500, 1.0000])
 
-        quantizer = APoTQuantizer(4, 2, False)
+        level_indices = tensor([ 0, 3, 12, 15,  2, 14,  8, 11, 10, 1, 13,  9,  4,  7,  6,  5]))
+        """
+
+        # generate tensor with random fp values between 0 -> 1000
+        tensor2quantize = torch.tensor([0.0215, 0.1692, 0.385, 0.0391])
+
+        quantizer = APoTQuantizer(4, 2, 1.0, False)
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=False)
-        qtensor_data = torch.tensor(qtensor).type(torch.float)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
+        qtensor_data = torch.tensor(qtensor).type(torch.uint8)
 
-        expectedResult = True
+        # expected qtensor values calculated based on
+        # corresponding level_indices to nearest quantization level
+        # for each fp value in tensor2quantize
+        # e.g.
+        # 0.0215 in tensor2quantize nearest 0.0208 in quantization_levels -> 3 in level_indices
+        expected_qtensor = torch.tensor([3, 8, 13, 12], dtype=torch.uint8)
 
-        for result, orig in zip(qtensor_data, tensor2quantize):
-            if abs(result - orig) > 0.25:
-                expectedResult = False
+        print(qtensor_data)
+        print(expected_qtensor)
 
-        self.assertTrue(expectedResult)
-
-    r""" Tests quantize_APoT result (reduced precision fp representation) on random 1-dim tensor
-        and hardcoded values for b, k by comparing to int representation
-        * tensor2quantize: Tensor
-        * b: 4
-        * k: 2
-    """
-    def test_quantize_APoT_reduced_precision(self):
-        # generate random size of tensor2dequantize between 1 -> 20
-        size = random.randint(1, 20)
-
-        # generate tensor with random fp values
-        tensor2quantize = torch.rand(size, dtype=torch.float)
-
-        quantizer = APoTQuantizer(4, 2, False)
-
-        # get apot reduced precision fp quantized tensor result
-        qtensor_red_prec = torch.clone(quantizer.quantize_APoT(tensor2quantize=tensor2quantize,
-                                                               use_int_repr=False))
-        reduced_precision_lst = list(qtensor_red_prec)
-
-        # get apot int representation quantized tensor result
-        qtensor_int_rep = torch.clone(quantizer.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True))
-        int_rep_lst = list(qtensor_int_rep)
-
-        # get quantization levels and level indices
-        quant_levels_lst = list(quantizer.quantization_levels)
-        level_indices_lst = list(quantizer.level_indices)
-
-        # compare with quantized int representation to verify result
-        expectedResult = True
-        for ele, i in zip(reduced_precision_lst, int_rep_lst):
-            reduced_prec_idx = quant_levels_lst.index(ele)
-            int_rep_idx = level_indices_lst.index(i)
-            if int_rep_idx != reduced_prec_idx:
-                expectedResult = False
-
-        self.assertTrue(expectedResult)
+        self.assertTrue(torch.equal(qtensor_data, expected_qtensor))
 
     r""" Tests dequantize_apot result on random 1-dim tensor
-        (int repr) and hardcoded values for b, k.
+        and hardcoded values for b, k.
         Dequant -> quant an input tensor and verify that
         result is equivalent to input
         * tensor2quantize: Tensor
@@ -143,14 +114,14 @@ class TestQuantizer(unittest.TestCase):
         * k: 2
     """
     def test_dequantize_quantize_rand_1d(self):
-        # generate random size of tensor2dequantize
-        size = random.randint(1, 16)
+        # generate random size of tensor2dequantize between 1->20
+        size = random.randint(1, 20)
 
         # initialize quantize APoT tensor to dequantize:
         # generate tensor with random values between 0 -> 2**4 = 16
         # because there are 2**b = 2**4 quantization levels total
         tensor2dequantize = 16 * torch.rand(size)
-        quantizer = APoTQuantizer(4, 2, False)
+        quantizer = APoTQuantizer(4, 2, 1.0, False)
         quantizer.data = tensor2dequantize.int()
         orig_input = torch.clone(quantizer.data)
 
@@ -158,7 +129,7 @@ class TestQuantizer(unittest.TestCase):
 
         print(dequantized_result)
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result, use_int_repr=True)
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
         self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
@@ -172,19 +143,19 @@ class TestQuantizer(unittest.TestCase):
     """
     def test_dequantize_quantize_rand_2d(self):
         # generate random size of tensor2dequantize
-        size = random.randint(1, 64)
+        size = random.randint(1, 20)
 
         # initialize quantize APoT tensor to dequantize:
         # generate tensor with random values between 0 -> 2**6 = 64
         # because there are 2**b = 2**6 quantization levels total
         tensor2dequantize = 64 * torch.rand(size, size)
-        quantizer = APoTQuantizer(6, 2, False)
+        quantizer = APoTQuantizer(6, 2, 1.0, False)
         quantizer.data = tensor2dequantize.int()
         orig_input = torch.clone(quantizer.data)
 
         dequantized_result = quantizer.dequantize()
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result, use_int_repr=True)
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
         self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
@@ -198,44 +169,19 @@ class TestQuantizer(unittest.TestCase):
     """
     def test_dequantize_quantize_rand_3d(self):
         # generate random size of tensor2dequantize
-        size = random.randint(1, 64)
+        size = random.randint(1, 20)
 
         # initialize quantize APoT tensor to dequantize:
         # generate tensor with random values between 0 -> 2**6 = 64
         # because there are 2**b = 2**6 quantization levels total
         tensor2dequantize = 64 * torch.rand(size, size, size)
-        quantizer = APoTQuantizer(6, 2, False)
+        quantizer = APoTQuantizer(6, 2, 1.0, False)
         quantizer.data = tensor2dequantize.int()
         orig_input = torch.clone(quantizer.data)
 
         dequantized_result = quantizer.dequantize()
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result, use_int_repr=True)
-
-        self.assertTrue(torch.equal(dequantized_result, quantized_result))
-
-    r""" Tests dequantize_apot result on random 1-dim tensor
-        (reduced precision fp repr) and hardcoded values for b, k.
-        Dequant -> quant an input tensor and verify that
-        result is equivalent to input
-        * tensor2quantize: Tensor
-        * b: 4
-        * k: 2
-    """
-    def test_dequantize_quantize_fp_rand_1d(self):
-        # generate random size of tensor2dequantize between 1 -> 16
-        # because there are 2**b = 2**4 quantization levels total
-        size = random.randint(1, 16)
-
-        # initialize quantize APoT tensor to dequantize:
-        # generate tensor with random fp values between 0 -> 1
-        tensor2quantize = torch.rand(size)
-        quantizer = APoTQuantizer(4, 2, False)
-        orig_input = torch.clone(quantizer.data)
-
-        dequantized_result = quantizer.dequantize()
-
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result, use_int_repr=False)
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
         self.assertTrue(torch.equal(dequantized_result, quantized_result))
 
