@@ -1,4 +1,3 @@
-import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.apot_utils import float_to_apot, float_to_reduced_precision
@@ -6,7 +5,7 @@ from torch.ao.quantization.experimental.apot_utils import float_to_apot, float_t
 # class to store APoT quantizer
 # implements quantize and dequantize
 # and stores all quantization parameters
-class APoTQuantizer(torch.Tensor):
+class APoTQuantizer():
     b: int
     k: int
     n: int
