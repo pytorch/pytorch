@@ -119,6 +119,8 @@ To install with optional dependencies, e.g. for AOTAutograd:
 pip install -e .[aot]
 ```
 
+To run functorch tests, please install our test dependencies (`expecttest`, `pyyaml`).
+
 
 </p>
 </details>
