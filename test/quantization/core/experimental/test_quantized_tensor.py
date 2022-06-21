@@ -2,9 +2,6 @@
 
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 import unittest
-import random
-quantize_APoT = TensorAPoT.quantize_APoT
-dequantize = TensorAPoT.dequantize
 
 class TestQuantizedTensor(unittest.TestCase):
     def test_int_repr(self):
