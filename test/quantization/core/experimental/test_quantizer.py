@@ -109,7 +109,6 @@ class TestQuantizer(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             APoTQuantizer.dequantize(self)
 
-
     def test_q_apot_alpha(self):
         with self.assertRaises(NotImplementedError):
             APoTQuantizer.q_apot_alpha(self)
