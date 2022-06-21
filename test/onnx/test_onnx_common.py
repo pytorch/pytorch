@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import random
 import unittest
 from typing import Any, Mapping, Type
 
@@ -49,17 +50,22 @@ def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any])
     return f"{cls.__name__}_{suffix}"
 
 
+def set_rng_seed(seed):
+    torch.manual_seed(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+
+
 class _TestONNXRuntime(unittest.TestCase):
     opset_version = _constants.onnx_default_opset
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
 
     def setUp(self):
-        torch.manual_seed(0)
+        set_rng_seed(0)
         onnxruntime.set_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
-        np.random.seed(seed=0)
         os.environ["ALLOW_RELEASED_ONNX_OPSET_ONLY"] = "0"
         self.is_script_test_enabled = True
 
