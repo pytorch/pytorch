@@ -20299,10 +20299,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.threshold",
         torch_opinfo_name="nn.functional.threshold",
-        skips=(
-            # NotImplementedError: Could not run 'aten::where.ScalarOther' with arguments from the 'AutogradMeta'...
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
