@@ -74,8 +74,7 @@ class TestFSDPExecOrder(FSDPTest):
         """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
         model = Model()
         policy_exec_order = ParamExecOrderWrapPolicy(
-            init_policy=always_wrap_policy,
-            group_size=1,
+            init_policy=always_wrap_policy
         )
         fsdp_model = Model.wrap(model, sharding_strategy, self.device, policy_exec_order)
         self.assertTrue(fsdp_model._is_param_exec_order_prep_stage())

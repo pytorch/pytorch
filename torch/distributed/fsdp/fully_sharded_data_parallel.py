@@ -2925,11 +2925,6 @@ class FullyShardedDataParallel(nn.Module):
                 # shard when rebuilding the full params in the pre_beckward_hook.
                 self._free_mp_shard(cast(List[FlatParameter], [param]))
 
-            if (self._use_param_exec_order_policy() and self._param_exec_order_prep_stage):
-                # In self._fsdp_params_exec_order, the parameters are ordered based on
-                # the execution order in the backward pass in the first iteration.
-                self._fsdp_params_exec_order.append(param)
-
             # Switch to local shard after backward. Note that
             # when CPU offload is enabled, _use_param_local_shard implicitly
             # offloads the local shard to CPU by making p.data point to
@@ -3191,7 +3186,7 @@ class FullyShardedDataParallel(nn.Module):
                     # reset this flag for cases like "one forward pass + multiple backward passes"
                     self._post_backward_callback_queued = False
 
-        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
+        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage and self._is_root:
             self._param_exec_order_policy_second_iter_init()
 
     def _param_exec_order_policy_second_iter_init(self) -> None:
