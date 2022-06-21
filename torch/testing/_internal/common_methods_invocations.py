@@ -1913,7 +1913,11 @@ def sample_inputs_nn_activation_relu(op_info, device, dtype, requires_grad, **kw
     for shape in cases:
         yield SampleInput(make_arg(shape))
 
-def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_prelu(op_info, device, dtype, requires_grad, **kwargs):
+    op_kwargs = op_info.sample_kwargs(device, dtype, None)[0]
+    yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad,
+                                               op_kwargs=op_kwargs)
+
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
     cases = (
@@ -1932,13 +1936,18 @@ def sample_inputs_nn_functional_prelu(op_info, device, dtype, requires_grad, **k
             channel_size = shape[1]
             yield SampleInput(make_arg(shape), args=(make_arg((channel_size,)),))
     weight_tensor = torch.tensor(1., device=device, dtype=dtype, requires_grad=requires_grad)
+
     yield SampleInput(make_arg((S, S)), kwargs=dict(weight=weight_tensor,))
     yield SampleInput(make_arg((S, S)), kwargs=dict(weight=make_arg((S,)),))
 
+def reference_inputs_prelu(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_prelu(op, device, dtype, requires_grad, **kwargs)
+    yield from reference_inputs_elementwise_unary(op, device, dtype, requires_grad, **kwargs)
+
 def sample_kwargs_prelu_scalar_weight(device, dtype, input):
-    dtype = torch.float32 if dtype == torch.bfloat16 else dtype
     weight = torch.rand(tuple(), device=device, dtype=dtype)
-    np_weight = weight.numpy()
+    # NumPy does not support bfloat16, so we default to float32 (only for NumPy) in that case
+    np_weight = weight.to(torch.float32).numpy() if dtype == torch.bfloat16 else weight.numpy()
     return ({'weight': weight}, {'weight': np_weight})
 
 def error_inputs_prelu(op, device):
@@ -14433,7 +14442,8 @@ op_db: List[OpInfo] = [
         # test_reference_numerics only tests the case when the weight tensor is a scalar
         sample_kwargs=sample_kwargs_prelu_scalar_weight,
         error_inputs_func=error_inputs_prelu,
-        sample_inputs_func=sample_inputs_nn_functional_prelu,
+        sample_inputs_func=sample_inputs_prelu,
+        reference_inputs_func=reference_inputs_prelu,
         decorators=[
             # FIXME: second derivative is implemented but seems to be incorrect
             # https://github.com/pytorch/pytorch/issues/68760
@@ -20294,13 +20304,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
         torch_opinfo_name="nn.functional.prelu",
-        skips=(
-            # NumPy does not support bfloat16
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                         dtypes=(torch.bfloat16,)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                         dtypes=(torch.bfloat16,)),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",

@@ -380,6 +380,10 @@ def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
         raise RuntimeError("approximate argument must be either none or tanh.")
 
 
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a", "weight"),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
 def prelu(a: TensorLikeType, weight: TensorLikeType) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.prelu
