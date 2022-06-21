@@ -51,13 +51,13 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 #include <ATen/InferSize.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
-#include <aten/src/ATen/ExpandUtils.h>
-#include <aten/src/ATen/native/ReduceOpsUtils.h>
 #include <c10/core/ScalarType.h>
 #include <torch/csrc/api/include/torch/enum.h>
 #include <torch/csrc/lazy/core/ops/utils.h>
@@ -856,15 +856,6 @@ std::vector<Shape> compute_shape_glu_jvp(
     const at::Tensor& dx,
     int64_t dim) {
   return {Shape(glu.scalar_type(), glu.sizes().vec())};
-}
-
-std::vector<Shape> compute_shape_l1_loss_backward(
-    const at::Tensor& grad_output,
-    const at::Tensor& self,
-    const at::Tensor& target,
-    int64_t reduction) {
-  TORCH_INTERNAL_ASSERT(grad_output.scalar_type() == self.dtype());
-  return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_clamp_min(
