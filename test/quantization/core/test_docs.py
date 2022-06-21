@@ -49,21 +49,21 @@ class TestQuantizationDocs(QuantizationTestCase):
         # is there a better way to check for no error than just running it?
 
     def test_quantization_doc_ptdq(self):
-        filename = "docs/source/quantization.rst"
+        filename = "./docs/source/quantization.rst"
         first_line = 74
         last_line = 96
         code = self._get_code(filename, first_line, last_line)
         self._test_code(code)
 
     def test_quantization_doc_ptsq(self):
-        filename = "docs/source/quantization.rst"
+        filename = "./docs/source/quantization.rst"
         first_line = 129
         last_line = 187
         code = self._get_code(filename, first_line, last_line)
         self._test_code(code)
 
     def test_quantization_doc_qat(self):
-        filename = "docs/source/quantization.rst"
+        filename = "./docs/source/quantization.rst"
         first_line = 227
         last_line = 283
 
@@ -77,7 +77,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         self._test_code(code, global_inputs)
 
     def test_quantization_doc_fx(self):
-        filename = "docs/source/quantization.rst"
+        filename = "./docs/source/quantization.rst"
         first_line = 330
         last_line = 383
 
