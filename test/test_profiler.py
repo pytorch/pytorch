@@ -1132,15 +1132,18 @@ class TestProfiler(TestCase):
     def test_utils_compute_queue_depth(self):
         x = torch.ones((4096, 4096), device="cuda")
         with profile() as prof:
+            # First half we want it to be compute bound
             for _ in range(5):
                 y = torch.mm(x, x)
+            # Second half we want it to be overhead bound
+            # So we are synchronize and sleeping
             torch.cuda.synchronize()
             for _ in range(3):
                 y[0] += 1
                 time.sleep(0.1)
         basic_evaluation = _utils.BasicEvaluation(prof.profiler)
         for entry in basic_evaluation.compute_queue_depth():
-            self.assertTrue(entry.queue_depth > 0)
+            self.assertTrue(entry.queue_depth >= 0)
 
 
 if __name__ == '__main__':
