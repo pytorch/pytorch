@@ -188,7 +188,7 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
                     "call_method",
                     "dequantize",
                     users[0].args,
-                    users[0].kwargs
+                    {}
                 )
             for dequant in dequant_users:
                 dequant.replace_all_uses_with(unique_dq)
