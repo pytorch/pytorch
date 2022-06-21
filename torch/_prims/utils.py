@@ -1092,6 +1092,10 @@ def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
 
 
 def make_batched_column_major_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    """
+    Returns the strides of a batch of contiguous column-major matrices
+    This is often used when calling external libraries like BLAS/LAPACK/cuSolver...
+    """
     contiguous_strides = make_contiguous_strides_for(shape)
     if len(shape) < 2:
         return contiguous_strides
