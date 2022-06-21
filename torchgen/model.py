@@ -1,12 +1,12 @@
+import dataclasses
+import itertools
 import re
 
-from torchgen.utils import assert_never
-
 from dataclasses import dataclass
-import dataclasses
-from typing import List, Dict, Optional, Iterator, Tuple, Set, Sequence, Callable, Union
-from enum import Enum, auto
-import itertools
+from enum import auto, Enum
+from typing import Callable, Dict, Iterator, List, Optional, Sequence, Set, Tuple, Union
+
+from torchgen.utils import assert_never
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 #
@@ -44,6 +44,9 @@ class Location:
 
 # Valid values of the 'variants' field in native_functions.yaml
 Variant = Enum("Variant", ("function", "method"))
+
+# Default kernel namespace
+DEFAULT_KERNEL_NAMESPACE = "at::native"
 
 # NOTE: Keep the list in sync with `DispatchKey` in c10/core/DispatchKey.h
 class DispatchKey(Enum):
@@ -120,7 +123,8 @@ class DispatchKey(Enum):
     Autograd = auto()
     CompositeImplicitAutograd = auto()
     CompositeExplicitAutograd = auto()
-    EndOfAliasKeys = CompositeExplicitAutograd
+    CompositeExplicitAutogradNonFunctional = auto()
+    EndOfAliasKeys = CompositeExplicitAutogradNonFunctional
 
     CPUTensorId = CPU
     CUDATensorId = CUDA
@@ -159,6 +163,7 @@ dispatch_keys = [
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
     DispatchKey.CompositeExplicitAutograd,
+    DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
     # Meta is a magic key: it is automatically generated for structured
@@ -172,6 +177,7 @@ dispatch_keys = [
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
     return dk in {
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.CompositeImplicitAutograd,
     }
 
@@ -315,6 +321,12 @@ ViewSchemaKind = Enum(
 # of this at FunctionSchema.
 @dataclass(frozen=True)
 class NativeFunction:
+    # The namespace for this operator. For example, if we have "at::add"
+    # then the namespace would be "at". This enables ops to be registered
+    # through the same DSL with a custom namespace. If not specified, the
+    # default namespace would be "at".
+    namespace: str
+
     # The function schema of the operator in question.  This schema
     # has been parsed; see FunctionSchema for more about its structure.
     # (This type is quoted as we are forward referencing a type
@@ -413,6 +425,7 @@ class NativeFunction:
     # Whether or not the NativeFunction contains a backend-agnostic kernel
     has_composite_implicit_autograd_kernel: bool
     has_composite_explicit_autograd_kernel: bool
+    has_composite_explicit_autograd_non_functional_kernel: bool
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
@@ -440,7 +453,13 @@ class NativeFunction:
 
         funcs = e.pop("func")
         assert isinstance(funcs, str), f"not a str: {funcs}"
-        func = FunctionSchema.parse(funcs)
+        # only support one level of namespace. E.g., aten::add
+        namespaced_funcs = funcs.split("::", 1)
+        if len(namespaced_funcs) == 1:
+            namespace = "aten"
+        else:
+            namespace = namespaced_funcs[0]
+        func = FunctionSchema.parse(namespaced_funcs[-1])
 
         cpp_no_default_args_list = e.pop("cpp_no_default_args", [])
         assert isinstance(cpp_no_default_args_list, list)
@@ -489,7 +508,11 @@ class NativeFunction:
         structured_delegate_s = e.pop("structured_delegate", None)
         assert structured_delegate_s is None or isinstance(
             structured_delegate_s, str
-        ), f"not a str: {structured_delegate}"
+        ), f"not a str: {structured_delegate_s}"
+        assert structured_delegate_s is None or "::" not in structured_delegate_s, (
+            "namespace is not supported in structured delegate,"
+            " using the same namespace as the native function"
+        )
         structured_delegate: Optional[OperatorName] = None
         if structured_delegate_s is not None:
             structured_delegate = OperatorName.parse(structured_delegate_s)
@@ -498,6 +521,10 @@ class NativeFunction:
         assert structured_inherits is None or isinstance(
             structured_inherits, str
         ), f"not a str: {structured_inherits}"
+        assert structured_inherits is None or "::" not in structured_inherits, (
+            "namespace is not supported in structured inherits,"
+            " using the same namespace as the native function"
+        )
 
         python_module = e.pop("python_module", None)
         assert python_module is None or isinstance(
@@ -552,13 +579,19 @@ class NativeFunction:
                         f"Dispatch key {dispatch_key} of kernel {v} "
                         "is not a supported dispatch key."
                     )
+                    # We only allow one level of namespace for kernels and operator.
+                    # We will append "native" to a custom kernel namespace.
+                    tokens = v.split("::", 1)
                     # Why is 'structured' included? External backends (e.g.
                     # XLA) opt into which ops are structured independently
                     # of which in-tree ops are structured
                     dispatch[dispatch_key] = BackendMetadata(
-                        v,
+                        kernel=tokens[-1],
                         structured=structured
                         and is_structured_dispatch_key(dispatch_key),
+                        cpp_namespace=(tokens[0] + "::native")
+                        if len(tokens) > 1
+                        else DEFAULT_KERNEL_NAMESPACE,
                     )
                     if (
                         dispatch_key is DispatchKey.CompositeImplicitAutograd
@@ -581,14 +614,20 @@ class NativeFunction:
             )
         elif not structured and structured_delegate is None:
             dispatch[DispatchKey.CompositeImplicitAutograd] = BackendMetadata(
-                cpp.name(func), structured=False
+                cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
             )
 
-        assert not (
-            DispatchKey.CompositeExplicitAutograd in dispatch
-            and DispatchKey.CompositeImplicitAutograd in dispatch
-        ), (
-            "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each "
+        composites_in_dispatch = [
+            d
+            for d in dispatch
+            if d == DispatchKey.CompositeExplicitAutograd
+            or d == DispatchKey.CompositeExplicitAutogradNonFunctional
+            or d == DispatchKey.CompositeImplicitAutograd
+        ]
+
+        assert len(composites_in_dispatch) <= 1, (
+            "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
+            "or CompositeImplicitAutograd on a single kernel; each "
             "strictly subsumes the other.  If you wanted to provide an explicit autograd "
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
         )
@@ -627,7 +666,9 @@ class NativeFunction:
                     dispatch_key not in dispatch
                 ), f"ufunc should not have explicit dispatch entry for {dispatch_key}"
                 dispatch[dispatch_key] = BackendMetadata(
-                    kernel=ufunc.schema_kernel_name(func, dispatch_key), structured=True
+                    kernel=ufunc.schema_kernel_name(func, dispatch_key),
+                    structured=True,
+                    cpp_namespace=DEFAULT_KERNEL_NAMESPACE,
                 )
 
         if structured_delegate:
@@ -641,6 +682,9 @@ class NativeFunction:
         )
         has_composite_explicit_autograd_kernel = (
             DispatchKey.CompositeExplicitAutograd in dispatch.keys()
+        )
+        has_composite_explicit_autograd_non_functional_kernel = (
+            DispatchKey.CompositeExplicitAutogradNonFunctional in dispatch.keys()
         )
 
         # We aren't going to store dispatch metadata inline in NativeFunctions;
@@ -684,7 +728,9 @@ class NativeFunction:
                 is_abstract=is_abstract,
                 has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
+                has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
+                namespace=namespace,
             ),
             backend_metadata,
         )
@@ -757,6 +803,7 @@ class NativeFunction:
         return (
             self.has_composite_implicit_autograd_kernel
             or self.has_composite_explicit_autograd_kernel
+            or self.has_composite_explicit_autograd_non_functional_kernel
         )
 
     @property
@@ -787,7 +834,7 @@ class NativeFunction:
         return self.func.name.name.base
 
 
-SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable"))
+SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
@@ -816,18 +863,15 @@ class NativeFunctionsGroup:
                     f"that don't have matching signatures: {test_sig} != {f.func.signature()}"
                 )
         assert self.functional.func.kind() == SchemaKind.functional
-        assert not self.functional.is_view_op, (
-            "View operator shouldn't be grouped into NativeFunctionsGroup objects."
-            f"This is likely because you tried to add an out= variant for '{f.func.name}', which is an existing view operator."
-            "out= variants of view operators are not valid. Please reach out to to the core team if you have questions."
-        )
         assert self.out.func.kind() == SchemaKind.out
-
+        assert self.functional.namespace == self.out.namespace
         if self.inplace is not None:
             assert self.inplace.func.kind() == SchemaKind.inplace
+            assert self.inplace.namespace == self.functional.namespace
 
         if self.mutable is not None:
             assert self.mutable.func.kind() == SchemaKind.mutable
+            assert self.mutable.namespace == self.functional.namespace
 
         if self.structured:
             # For now, structured composite kernels are not supported (need some
@@ -893,7 +937,7 @@ class NativeFunctionsGroup:
         # these don't count as structured for our purposes here
         if out is None:
             return None
-
+        # assuming all variants have the same namespace
         return NativeFunctionsGroup(
             functional=functional,
             inplace=inplace,
@@ -917,6 +961,9 @@ class BackendMetadata:
     # in native_functions.yaml.
     # However, external backends like XLA can indendently toggle which ops are structured.
     structured: bool
+
+    # The namespace for kernels, default value: DEFAULT_KERNEL_NAMESPACE
+    cpp_namespace: str
 
 
 @dataclass(frozen=True)
@@ -1077,18 +1124,14 @@ class FunctionSchema:
             self.arguments.out,
         )
 
+    decl_re = re.compile(r"(?P<name>[^\(]+)\((?P<args>.*)\) -> (?P<returns>.*)")
+
     @staticmethod
     def parse(func: str) -> "FunctionSchema":
         # We should probably get a proper parser here
-        assert (
-            " -> " in func
-        ), "function schema missing return type (spaces are mandatory)"
-        last_index = func.rfind(" -> ")
-        func_decl = func[:last_index]
-        return_decl = func[last_index + len(" -> ") :]
-        ops, args = func_decl.split("(", 1)
-        assert args[-1] == ")", "Expecting closing )"
-        args = args[:-1]
+        decls = FunctionSchema.decl_re.findall(func)
+        assert len(decls) == 1, f"Invalid function schema: {func}"
+        ops, args, return_decl = decls[0]
         name = OperatorName.parse(ops)
         arguments = Arguments.parse(args)
         returns = parse_returns(return_decl)
@@ -1158,7 +1201,15 @@ class FunctionSchema:
                 ), "out= ops that accept tensor lists as out arguments "
                 "are expected to have no return type (since you can't do method chaining on them)"
             else:
-                assert len(self.arguments.out) == len(
+                # mutable keyward arguments whose name has _scratch_ prefix are
+                # scratch tensors for memory planning and should not be returned
+                assert len(
+                    [
+                        arg
+                        for arg in self.arguments.out
+                        if not arg.name.startswith("_scratch_")
+                    ]
+                ) == len(
                     self.returns
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
@@ -1197,6 +1248,10 @@ class FunctionSchema:
     def is_functional_fn(self) -> bool:
         return "functional" in self.name.overload_name
 
+    def is_symint_fn(self) -> bool:
+        # TODO: make this more robust
+        return "SymInt" in self.name.overload_name
+
     def is_out_fn(self) -> bool:
         # Note [is_out_fn]
         #
@@ -1234,6 +1289,9 @@ class FunctionSchema:
         the result into an explicitly provided out argument.
         """
         is_out = bool(self.arguments.out)
+        is_scratch = bool(
+            [arg for arg in self.arguments.out if arg.name.startswith("_scratch_")]
+        )
         is_inplace = self.name.name.inplace
         is_mutable = any(
             a.annotation is not None and a.annotation.is_write
@@ -1249,7 +1307,15 @@ class FunctionSchema:
         # we can probably manually write code for them instead of forcing the codegen to handle them.
         if is_inplace:
             return SchemaKind.inplace
+        elif is_scratch:
+            assert (
+                is_out
+            ), "invariant: all scratch operators are expected to be out= operators too"
+            return SchemaKind.scratch
         elif is_out:
+            assert (
+                not is_scratch
+            ), "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable
@@ -1509,6 +1575,7 @@ BaseTy = Enum(
         "Tensor",
         "int",
         "Dimname",
+        "DimVector",
         "float",
         "str",
         "bool",
@@ -2341,6 +2408,15 @@ class Precompute:
         r = Precompute(replace=replace, add=add_args)
         assert r.to_list() == src, "r.to_list() != src"
         return r
+
+    def __post_init__(self) -> None:
+        # the template parameters are upper so if these are the
+        # same then it is ambiguous
+        for a in self.add:
+            assert a.name.upper() != a.name
+        for args in self.replace.values():
+            for a in args:
+                assert a.name.upper() != a.name
 
     def to_list(self) -> List[str]:
         replace_list = []
