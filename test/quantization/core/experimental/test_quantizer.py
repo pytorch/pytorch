@@ -3,14 +3,13 @@
 import torch
 from torch import quantize_per_tensor
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
-from torch.ao.quantization.experimental.apot_utils import float_to_apot
 import unittest
 import random
 quantize_APoT = APoTQuantizer.quantize_APoT
 dequantize = APoTQuantizer.dequantize
 
 class TestQuantizer(unittest.TestCase):
-    r""" Tests quantize_APoT result on random 1-dim tensor
+    r""" Tests quantize_APoT result (int representation) on random 1-dim tensor
         and hardcoded values for b, k by comparing to uniform quantization
         (non-uniform quantization reduces to uniform for k = 1)
         quantized tensor (https://pytorch.org/docs/stable/generated/torch.quantize_per_tensor.html)
@@ -27,21 +26,18 @@ class TestQuantizer(unittest.TestCase):
 
         qtensor = APoTQuantizer(4, 1, False)
 
-        # get quantized tensor result
-        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize)
-
-        # convert quantized tensor to int repr
-        qtensor_int_repr = qtensor.apply_(lambda x: float_to_apot(x, qtensor.quantization_levels, qtensor.level_indices))
+        # get apot quantized tensor result
+        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
 
-        qtensor_data = torch.tensor(qtensor_int_repr.data).type(torch.uint8)
+        qtensor_data = torch.tensor(qtensor.data).type(torch.uint8)
         uniform_quantized_tensor = uniform_quantized.data
 
         self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
 
-    r""" Tests quantize_APoT result on random 2-dim tensor
+    r""" Tests quantize_APoT result (int representation) on random 2-dim tensor
         and hardcoded values for b, k by comparing to uniform quantization
         (non-uniform quantization reduces to uniform for k = 1)
         quantized tensor (https://pytorch.org/docs/stable/generated/torch.quantize_per_tensor.html)
@@ -58,23 +54,20 @@ class TestQuantizer(unittest.TestCase):
 
         qtensor = APoTQuantizer(4, 1, False)
 
-        # get quantized tensor result
-        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize)
-
-        # convert quantized tensor to int repr
-        qtensor_int_repr = qtensor.apply_(lambda x: float_to_apot(x, qtensor.quantization_levels, qtensor.level_indices))
+        # get apot quantized tensor result
+        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
 
-        qtensor_data = torch.tensor(qtensor_int_repr.data).type(torch.uint8)
+        qtensor_data = torch.tensor(qtensor.data).type(torch.uint8)
         uniform_quantized_tensor = uniform_quantized.data
 
         self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
 
     r""" Tests quantize_APoT for k != 1.
-        Tests quantize_APoT result on random 1-dim tensor and
-        hardcoded values for b=4, k=2 by comparing results to
+        Tests quantize_APoT result (reduced precision fp representation) on
+        random 1-dim tensor and hardcoded values for b=4, k=2 by comparing results to
         hand-calculated error bound (+/- 0.25 between reduced precision fp representation
         and original input tensor values because max difference between quantization levels
         for b=4, k=2 is 0.25).
@@ -92,7 +85,7 @@ class TestQuantizer(unittest.TestCase):
         qtensor = APoTQuantizer(4, 2, False)
 
         # get apot quantized tensor result
-        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize)
+        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=False)
         qtensor_data = torch.tensor(qtensor.data).type(torch.float)
 
         expectedResult = True
