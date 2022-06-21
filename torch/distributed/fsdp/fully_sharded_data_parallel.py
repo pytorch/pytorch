@@ -3186,7 +3186,7 @@ class FullyShardedDataParallel(nn.Module):
                     # reset this flag for cases like "one forward pass + multiple backward passes"
                     self._post_backward_callback_queued = False
 
-        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage and self._is_root:
+        if self._use_param_exec_order_policy() and self._param_exec_order_prep_stage:
             self._param_exec_order_policy_second_iter_init()
 
     def _param_exec_order_policy_second_iter_init(self) -> None:
