@@ -338,6 +338,21 @@ Tensor norm_jvp(
   return norm_jvp(self_p, self_t, p_, norm, {}, true);
 }
 
+Tensor _nested_from_padded_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    bool do_transform_0213) {
+  if (do_transform_0213) {
+    auto new_sizes = {
+        input.size(0), input.size(2), (input.size(1) * input.size(3))};
+    auto out = grad.to_padded_tensor(0, new_sizes);
+    auto expand_last_dim_size = {
+        input.size(0), input.size(2), input.size(1), input.size(3)};
+    return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
+  }
+  return grad.to_padded_tensor(0, input.sizes());
+}
+
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -2138,38 +2153,6 @@ Tensor binary_cross_entropy_double_backward_grad_output(
     return ggO / input.numel();
   }
   return ggO;
-}
-
-Tensor l1_loss_double_backward(
-    const Tensor& grad,
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& other,
-    int64_t reduction) {
-  if (!self.is_complex()) {
-    return at::zeros_like(grad);
-  } else {
-    auto diff = self - other;
-    auto output = grad_output * sgn_backward(diff.sgn(), grad, diff);
-    if (reduction == at::Reduction::Mean) {
-      output /= self.numel();
-    }
-    return output;
-  }
-}
-
-Tensor l1_loss_double_backward_grad_output(
-    const Tensor& grad,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& target,
-    int64_t reduction) {
-  auto output =
-      at::l1_loss_backward(grad.conj(), input, target, at::Reduction::None);
-  if (reduction == at::Reduction::Mean) {
-    output /= input.numel();
-  }
-  return handle_r_to_c(grad_output, output);
 }
 
 Tensor smooth_l1_loss_double_backward(
@@ -4059,13 +4042,13 @@ Tensor linalg_det_backward(
     // decomposition so that autograd computes the correct gradients wrt to A
     // (cf. solve_backward)
 
-    // TODO When the user wants higher derivatives, the trick above just does not cut it
-    // The proper way of doing this is doing `auto mask = det == 0.;` and then
-    // if any determinant is zero, use an SVD decomposition to compute the
-    // derivative in those inputs (not all inputs). The derivative may be then
-    // computed explicitly by noting that the gradient of the derivative of the
-    // determinant is given in terms of the adjugate of a matrix.
-    // Then, the adjugate of a singular matrix may be computed as per
+    // TODO When the user wants higher derivatives, the trick above just does
+    // not cut it The proper way of doing this is doing `auto mask = det == 0.;`
+    // and then if any determinant is zero, use an SVD decomposition to compute
+    // the derivative in those inputs (not all inputs). The derivative may be
+    // then computed explicitly by noting that the gradient of the derivative of
+    // the determinant is given in terms of the adjugate of a matrix. Then, the
+    // adjugate of a singular matrix may be computed as per
     // https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
     // The code may be implemented as follows:
     //
@@ -4077,10 +4060,9 @@ Tensor linalg_det_backward(
     //
     // The issue with this code is that the derivative given by autograd of
     // prod_safe_zeros_backward is not the second derivative of the product.
-    // It is not clear to me how to implement the second derivative of the product
-    // efficently.
-    // Note that this is also currently a problem when we compute higher
-    // derivatives of `x.prod()` and `x` has more than one zero.
+    // It is not clear to me how to implement the second derivative of the
+    // product efficently. Note that this is also currently a problem when we
+    // compute higher derivatives of `x.prod()` and `x` has more than one zero.
     return at::linalg_solve(A.mH(), d);
   }
 }

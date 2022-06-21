@@ -372,7 +372,7 @@ Tensor NestedTensor_to_padded_tensor_generic(
 
   if (sizes.numel() == 0 || sizes.dim() == 0) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(nt.get_buffer().numel() == 0);
-    return nt.get_buffer();
+    return nt.get_buffer().clone();
   }
 
   // TODO: doesn't handle empty/scalar entries because we don't need
