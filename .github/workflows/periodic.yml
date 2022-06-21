@@ -106,6 +106,25 @@ jobs:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
 
+  linux-bionic-cuda10_2-py3_9-gcc7-build:
+    name: linux-bionic-cuda10.2-py3.9-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-cuda10.2-py3.9-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
+
+  linux-bionic-cuda10_2-py3_9-gcc7-test:
+    name: linux-bionic-cuda10.2-py3.9-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda10_2-py3_9-gcc7-build
+    with:
+      build-environment: linux-bionic-cuda10.2-py3.9-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
+        ]}
+
   linux-xenial-cuda11_3-py3_7-gcc7-debug-build:
     name: linux-xenial-cuda11.3-py3.7-gcc7-debug
     uses: ./.github/workflows/_linux-build.yml
