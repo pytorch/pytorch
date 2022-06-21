@@ -88,6 +88,7 @@ __all__ = [
     "square",
     "tan",
     "tanh",
+    "trace",
     #
     # Elementwise Binary References
     #
@@ -107,7 +108,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
-    # 'gcd',
+    "gcd",
     "ge",
     "gt",
     # 'heaviside',
@@ -115,10 +116,11 @@ __all__ = [
     "igamma",
     "igammac",
     "isclose",
-    # 'lcm',
+    "lcm",
     # 'ldexp',
     "le",
     "logical_and",
+    "logical_not",
     "logical_or",
     "logical_xor",
     "lt",
@@ -131,7 +133,7 @@ __all__ = [
     "nextafter",
     # 'polar',  # abs, cos, sin
     "pow",
-    # 'remainder',
+    "remainder",
     # 'rsub', # unblocked
     # # special.xlog1py
     # # special.zeta
@@ -192,11 +194,13 @@ __all__ = [
     "hsplit",
     "hstack",
     "narrow",
+    "native_layer_norm",
     "permute",
     "ravel",
     "reshape",
     "roll",
     "rot90",
+    "rsqrt",
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
@@ -285,11 +289,13 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             if preserve_cpu_scalar_tensors and utils.is_cpu_scalar_tensor(x):
                 return x
 
-            if tuple(x.shape) != common_shape:
+            if not utils.same_shape(x.shape, common_shape):
                 common_rank = len(common_shape) + 1
                 start = common_rank - (len(x.shape) + 1)
                 dims = tuple(range(start, len(x.shape) + start))
                 return prims.broadcast_in_dim(x, common_shape, dims)
+
+            return x
         else:
             raise RuntimeError(
                 "Unexpected type when broadcasting: " + str(type(x)) + "!"
@@ -659,6 +665,11 @@ def round(a):
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def rsqrt(a):
+    return prims.rsqrt(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def sigmoid(a: TensorLikeType) -> TensorLikeType:
     return true_divide(1, add(1, exp(neg(a))))
 
@@ -898,6 +909,15 @@ fmod = _make_elementwise_binary_reference(
 )
 
 # TODO: add docstring
+gcd = _make_elementwise_binary_reference(
+    prims.gcd,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.gcd,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+
+# TODO: add docstring
 ge = _make_elementwise_binary_reference(
     prims.ge,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
@@ -987,6 +1007,21 @@ def isclose(
     return result
 
 
+def _lcm(a: TensorLikeType, b: TensorLikeType):
+    g = gcd(a, b)
+    return where(eq(g, 0), 0, abs(mul(true_divide(a, g), b)))
+
+
+# TODO: add docstring
+lcm = _make_elementwise_binary_reference(
+    _lcm,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.lcm,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
+
+
 # TODO: add docstring
 le = _make_elementwise_binary_reference(
     prims.le,
@@ -997,10 +1032,10 @@ le = _make_elementwise_binary_reference(
 
 def _logical_and(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_and(a, b)
+        b = b != 0
+    return a & b
 
 
 logical_and = _make_elementwise_binary_reference(
@@ -1010,12 +1045,21 @@ logical_and = _make_elementwise_binary_reference(
 )
 
 
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL, aten_op=torch.ops.aten.logical_not
+)
+def logical_not(a: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        return a == 0
+    return ~a
+
+
 def _logical_or(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_or(a, b)
+        b = b != 0
+    return a | b
 
 
 logical_or = _make_elementwise_binary_reference(
@@ -1027,10 +1071,10 @@ logical_or = _make_elementwise_binary_reference(
 
 def _logical_xor(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_xor(a, b)
+        b = b != 0
+    return a ^ b
 
 
 # TODO: skip unnecessary conversion of long to float
@@ -1085,6 +1129,13 @@ nextafter = _make_elementwise_binary_reference(
 pow = _make_elementwise_binary_reference(
     prims.pow,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+)
+
+# TODO: add docstring
+remainder = _make_elementwise_binary_reference(
+    prims.remainder,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.remainder,
 )
 
 # TODO: add docstring
@@ -1458,7 +1509,7 @@ def _set_correction(
 @out_wrapper
 def var(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
@@ -1516,7 +1567,7 @@ def std(
 
 def mean(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
     dtype=None,
@@ -1571,7 +1622,7 @@ def std_mean(
 
 def var_mean(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[List[int]]] = None,
+    dim: Optional[DimsType] = None,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
@@ -1827,6 +1878,92 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
     return prims.slice_in_dim(a, start, start + length, axis=dim)
+
+
+def _normalize(
+    a: Tensor, norm_dims: DimsType, eps: float
+) -> Tuple[Tensor, Tensor, Tensor]:
+    """Computes mean and 1/std of a tensor along norm_dims.
+
+    Used as a helper function for normalization layers.
+
+    Args:
+        a (Tensor): input tensor
+        norm_dims (DimsType): dimensions to normalize over
+        eps (float): epsilon for numerical stability
+
+    Returns:
+        out (Tensor): normalized tensor.
+        mean (Tensor): mean of the tensor along norm_dims.
+        rstd (Tensor): 1/std of the tensor along norm_dims.
+    """
+    computation_dtype = utils.get_computation_dtype(a.dtype)
+    a_acc = _maybe_convert_to_dtype(a, computation_dtype)
+    assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
+    biased_var, mean = var_mean(a_acc, dim=norm_dims, unbiased=False, keepdim=True)
+    rstd = torch.rsqrt(biased_var + eps)
+    out = (a - mean) * rstd
+    return out, mean, rstd
+
+
+@register_decomposition(torch.ops.aten.native_layer_norm)
+def native_layer_norm(
+    input: Tensor,
+    normalized_shape: ShapeType,
+    weight: Optional[Tensor],
+    bias: Optional[Tensor],
+    eps: float,
+) -> Tuple[Tensor, Tensor, Tensor]:
+    normalized_ndim = len(normalized_shape)
+    utils.check(
+        normalized_ndim >= 1,
+        lambda: "Expected normalized_shape to be at least 1-dimensional, i.e., "
+        + "containing at least one element, but got normalized_shape = "
+        + str(normalized_shape),
+    )
+    # torch.Size([1, 2, 3]) == [1, 2, 3] evaluates to False
+    # while torch.Size([1, 2, 3]) == (1, 2, 3) is True
+    # therefore we use tuple(normalized_shape)
+    utils.check(
+        weight is None or weight.shape == tuple(normalized_shape),
+        lambda: "Expected weight to be of same shape as normalized_shape, but got "
+        + "weight of shape "
+        + str(weight.shape)  # type: ignore[union-attr]
+        + " and normalized_shape = "
+        + str(normalized_shape),
+    )
+    utils.check(
+        bias is None or bias.shape == tuple(normalized_shape),
+        lambda: "Expected bias to be of same shape as normalized_shape, but got "
+        + "bias of shape "
+        + str(bias.shape)  # type: ignore[union-attr]
+        + " and normalized_shape = "
+        + str(normalized_shape),
+    )
+    utils.check(
+        input.ndim >= normalized_ndim
+        and input.shape[(input.ndim - normalized_ndim) :] == tuple(normalized_shape),
+        lambda: "Given normalized_shape="
+        + str(normalized_shape)
+        + ", expected input with shape "
+        + str(normalized_shape)
+        + ", but got input of size "
+        + str(input.shape),
+    )
+    axis = input.ndim - normalized_ndim
+    reduction_dims = list(range(axis, input.ndim))
+    out, mean, rstd = _normalize(input, reduction_dims, eps)
+    if weight is None and bias is not None:
+        out = out + bias
+    elif weight is not None and bias is None:
+        out = out * weight
+    elif weight is not None and bias is not None:
+        out = out * weight + bias
+    out = prims.convert_element_type(out, input.dtype)
+    if input.device.type == "cpu":
+        mean = prims.convert_element_type(mean, input.dtype)
+        rstd = prims.convert_element_type(rstd, input.dtype)
+    return (out, mean, rstd)
 
 
 # TODO: Adding this as a meta function causes functorch tests to fail when compiled with debug mode.
@@ -2522,6 +2659,13 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
-# populate the decomp table
+@register_decomposition(torch.ops.aten.trace)
+def trace(self: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
+    )
+    return torch.sum(torch.diag(self, 0))
+
+
 import torch._refs.nn.functional
 import torch._refs.special
