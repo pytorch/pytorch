@@ -4,24 +4,49 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/native/nested/NestedTensorMath.h>
+#include <c10/util/string_view.h>
 
 namespace at {
 namespace native {
+namespace {
 
-Tensor NestedTensor_linear(
+void check_nested_tensor_matrix_constraints(
+    const Tensor& nested_tensor,
+    const Tensor& dense_matrix,
+    c10::string_view caller) {
+  auto* nt_input = get_nested_tensor_impl(nested_tensor);
+  TORCH_INTERNAL_ASSERT(nt_input != nullptr);
+  TORCH_CHECK(
+      !dense_matrix.is_nested(),
+      caller,
+      " does not support nested weight when input is a nested tensor.")
+  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
+  TORCH_CHECK(
+      nested_tensor.dim() == 3 && dense_matrix.dim() == 2,
+      caller,
+      " requires nested_tensor.dim == 3 and dense_matrix.dim == 2. "
+      "Nested tensor dim: ",
+      nested_tensor.dim(),
+      ". Dense tensor dim: ",
+      dense_matrix.dim());
+  const auto last_dim = get_consistent_last_dim_of_nested_tensor(*nt_input);
+  TORCH_CHECK(
+      last_dim == dense_matrix.size(1),
+      "Shape mismatch for NestedTensor ",
+      caller,
+      ". NestedTensor last_dim: ",
+      last_dim,
+      " vs. dim 1 of rhs: ",
+      dense_matrix.size(1));
+}
+} // namespace
+
+Tensor nested_linear(
     const Tensor& input,
     const Tensor& weight,
     const c10::optional<Tensor>& bias_opt) {
-  auto* nt_input = get_nested_tensor_impl_or_null(input);
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_input));
-  TORCH_CHECK(input.dim() == 3 && weight.dim() == 2);
-  const auto last_dim = get_consistent_last_dim_of_nested_tensor(*nt_input);
-  TORCH_CHECK(
-      last_dim == weight.size(1),
-      "Shape mismatch for NestedTensor linear. NestedTensor last_dim: ",
-      last_dim,
-      " vs. dim 1 of rhs: ",
-      weight.size(1));
+  check_nested_tensor_matrix_constraints(input, weight, c10::string_view{"Linear"});
+  auto* nt_input = get_nested_tensor_impl(input);
   const Tensor& input_buffer = nt_input->get_buffer();
   Tensor result_buffer =
       at::linear(input_buffer.reshape({-1, weight.size(1)}), weight, bias_opt);
@@ -30,22 +55,46 @@ Tensor NestedTensor_linear(
   Tensor new_sizes = nt_input->get_nested_size_tensor().clone();
   // Now the last entry in every row of new_sizes should be weight_size_1.
   new_sizes.index_put_({at::indexing::Slice(), -1}, weight_size_1);
-  return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(result_buffer), std::move(new_sizes));
+  return wrap_buffer(result_buffer, new_sizes);
+}
+
+std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
+    const Tensor& input,
+    const Tensor& grad_output,
+    const Tensor& weight,
+    std::array<bool, 3> output_mask) {
+  Tensor grad_input, grad_weight, grad_bias;
+  auto* nt_grad_output = get_nested_tensor_impl(grad_output);
+  auto* nt_input = get_nested_tensor_impl(input);
+  TORCH_INTERNAL_ASSERT(nt_grad_output != nullptr);
+  TORCH_INTERNAL_ASSERT(nt_input != nullptr);
+  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_grad_output));
+  auto grad_ouput_buffer = nt_grad_output->get_buffer();
+  auto input_buffer = nt_input->get_buffer();
+
+  if (output_mask[0]) {
+    auto grad_input_buffer =
+        at::mm(grad_ouput_buffer.reshape({-1, weight.size(0)}), weight)
+            .view({-1});
+    auto grad_input_nt_size = nt_input->get_nested_size_tensor().clone();
+    grad_input = wrap_buffer(grad_input_buffer, grad_input_nt_size);
+  }
+  if (output_mask[1]) {
+    grad_weight = at::mm(
+        grad_ouput_buffer.reshape({-1, weight.size(0)}).t_(),
+        input_buffer.reshape({-1, weight.size(1)}));
+  }
+
+  if (output_mask[2]) {
+    grad_bias = input_buffer.reshape({-1, weight.size(0)});
+    grad_bias = grad_bias.sum(0);
+  }
+  return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }
 
 Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
+  check_nested_tensor_matrix_constraints(self, other, c10::string_view{"Matmul"});
   auto* nt_self = get_nested_tensor_impl_or_null(self);
-  TORCH_CHECK(nt_self != nullptr);
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_self));
-  TORCH_CHECK(self.dim() == 3 && other.dim() == 2);
-  const auto last_dim = get_consistent_last_dim_of_nested_tensor(*nt_self);
-  TORCH_CHECK(
-      last_dim == other.sizes()[0],
-      "shape mismatch for NestedTensor matmul. NestedTensor last_dim: ",
-      last_dim,
-      " vs. first dim of rhs: ",
-      other.sizes()[0]);
   const Tensor& self_buffer = nt_self->get_buffer();
   Tensor result_buffer =
       at::mm(self_buffer.reshape({-1, other.sizes()[0]}), other);
@@ -54,8 +103,7 @@ Tensor NestedTensor_matmul(const Tensor& self, const Tensor& other) {
   Tensor new_sizes = nt_self->get_nested_size_tensor().clone();
   // Now the last entry in every row of new_sizes should be other_size_1.
   new_sizes.index_put_({at::indexing::Slice(), -1}, other_size_1);
-  return at::detail::make_tensor<NestedTensorImpl>(
-      std::move(result_buffer), std::move(new_sizes));
+  return wrap_buffer(result_buffer, new_sizes);
 }
 
 Tensor NestedTensor_times_Tensor_plus_Tensor_addmm(

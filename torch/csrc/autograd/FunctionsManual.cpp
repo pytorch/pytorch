@@ -353,47 +353,6 @@ Tensor _nested_from_padded_backward(
   return grad.to_padded_tensor(0, input.sizes());
 }
 
-std::tuple<Tensor, Tensor, Tensor> NestedTensor_linear_backward(
-    const Tensor& grad,
-    const Tensor& self,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt) {
-  if (!grad.defined()) {
-    return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
-  }
-  auto* nt_grad = at::native::get_nested_tensor_impl_or_null(grad);
-  auto* nt_self = at::native::get_nested_tensor_impl_or_null(self);
-  TORCH_CHECK(nested_tensor_impl_is_contiguous(nt_grad));
-  auto grad_buffer = nt_grad->get_buffer();
-  auto self_buffer = nt_self->get_buffer();
-
-  auto d_weight = at::mm(
-      grad_buffer.reshape({-1, weight.size(0)}).t_(),
-      self_buffer.reshape({-1, weight.size(1)}));
-
-  // d_self is a nested tensor so have to do calculation then re-flatten
-  auto d_self_buffer =
-      at::mm(grad_buffer.reshape({-1, weight.size(0)}), weight);
-  d_self_buffer = d_self_buffer.view({-1});
-
-  auto d_self_nt_size = nt_self->get_nested_size_tensor().clone();
-  auto d_self = at::detail::make_tensor<at::native::NestedTensorImpl>(
-      std::move(d_self_buffer), std::move(d_self_nt_size));
-
-  c10::MaybeOwned<Tensor> bias_maybe_owned =
-      at::borrow_from_optional_tensor(bias_opt);
-  const Tensor& bias = *bias_maybe_owned;
-  Tensor d_bias = at::Tensor();
-  // You would never(hopefully) add a full bias though since shape would change
-  // per batch
-  if (bias.defined()) {
-    d_bias = grad_buffer.reshape({-1, weight.size(0)});
-    d_bias = bias.dim() == 1 ? d_bias.sum(0) : d_bias;
-  }
-
-  return std::tie(d_self, d_weight, d_bias);
-}
-
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
