@@ -24,15 +24,15 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values
         tensor2quantize = torch.rand(size, dtype=torch.float)
 
-        qtensor = APoTQuantizer(4, 1, False)
+        quantizer = APoTQuantizer(4, 1, False)
 
         # get apot quantized tensor result
-        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
 
-        qtensor_data = torch.tensor(qtensor.data).type(torch.uint8)
+        qtensor_data = torch.tensor(qtensor).type(torch.uint8)
         uniform_quantized_tensor = uniform_quantized.data
 
         self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
@@ -52,15 +52,15 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values
         tensor2quantize = torch.rand((size, size), dtype=torch.float)
 
-        qtensor = APoTQuantizer(4, 1, False)
+        quantizer = APoTQuantizer(4, 1, False)
 
         # get apot quantized tensor result
-        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
 
-        qtensor_data = torch.tensor(qtensor.data).type(torch.uint8)
+        qtensor_data = torch.tensor(qtensor).type(torch.uint8)
         uniform_quantized_tensor = uniform_quantized.data
 
         self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
@@ -82,11 +82,11 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values
         tensor2quantize = torch.rand((size), dtype=torch.float)
 
-        qtensor = APoTQuantizer(4, 2, False)
+        quantizer = APoTQuantizer(4, 2, False)
 
         # get apot quantized tensor result
-        qtensor = qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=False)
-        qtensor_data = torch.tensor(qtensor.data).type(torch.float)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=False)
+        qtensor_data = torch.tensor(qtensor).type(torch.float)
 
         expectedResult = True
 
@@ -109,20 +109,20 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values
         tensor2quantize = torch.rand(size, dtype=torch.float)
 
-        qtensor = APoTQuantizer(4, 2, False)
+        quantizer = APoTQuantizer(4, 2, False)
 
         # get apot reduced precision fp quantized tensor result
-        qtensor_red_prec = torch.clone(qtensor.quantize_APoT(tensor2quantize=tensor2quantize,
-                                                             use_int_repr=False))
+        qtensor_red_prec = torch.clone(quantizer.quantize_APoT(tensor2quantize=tensor2quantize,
+                                                               use_int_repr=False))
         reduced_precision_lst = list(qtensor_red_prec)
 
         # get apot int representation quantized tensor result
-        qtensor_int_rep = torch.clone(qtensor.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True))
+        qtensor_int_rep = torch.clone(quantizer.quantize_APoT(tensor2quantize=tensor2quantize, use_int_repr=True))
         int_rep_lst = list(qtensor_int_rep)
 
         # get quantization levels and level indices
-        quant_levels_lst = list(qtensor.quantization_levels)
-        level_indices_lst = list(qtensor.level_indices)
+        quant_levels_lst = list(quantizer.quantization_levels)
+        level_indices_lst = list(quantizer.level_indices)
 
         # compare with quantized int representation to verify result
         expectedResult = True
