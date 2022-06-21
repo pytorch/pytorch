@@ -88,6 +88,7 @@ __all__ = [
     "square",
     "tan",
     "tanh",
+    "trace",
     #
     # Elementwise Binary References
     #
@@ -119,6 +120,7 @@ __all__ = [
     # 'ldexp',
     "le",
     "logical_and",
+    "logical_not",
     "logical_or",
     "logical_xor",
     "lt",
@@ -287,11 +289,13 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             if preserve_cpu_scalar_tensors and utils.is_cpu_scalar_tensor(x):
                 return x
 
-            if tuple(x.shape) != common_shape:
+            if not utils.same_shape(x.shape, common_shape):
                 common_rank = len(common_shape) + 1
                 start = common_rank - (len(x.shape) + 1)
                 dims = tuple(range(start, len(x.shape) + start))
                 return prims.broadcast_in_dim(x, common_shape, dims)
+
+            return x
         else:
             raise RuntimeError(
                 "Unexpected type when broadcasting: " + str(type(x)) + "!"
@@ -996,10 +1000,10 @@ le = _make_elementwise_binary_reference(
 
 def _logical_and(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_and(a, b)
+        b = b != 0
+    return a & b
 
 
 logical_and = _make_elementwise_binary_reference(
@@ -1009,12 +1013,21 @@ logical_and = _make_elementwise_binary_reference(
 )
 
 
+@_make_elementwise_unary_reference(
+    ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL, aten_op=torch.ops.aten.logical_not
+)
+def logical_not(a: TensorLikeType):
+    if not utils.is_boolean_dtype(a.dtype):
+        return a == 0
+    return ~a
+
+
 def _logical_or(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_or(a, b)
+        b = b != 0
+    return a | b
 
 
 logical_or = _make_elementwise_binary_reference(
@@ -1026,10 +1039,10 @@ logical_or = _make_elementwise_binary_reference(
 
 def _logical_xor(a: TensorLikeType, b: TensorLikeType):
     if not utils.is_boolean_dtype(a.dtype):
-        a = ne(a, 0)
+        a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
-        b = ne(b, 0)
-    return bitwise_xor(a, b)
+        b = b != 0
+    return a ^ b
 
 
 # TODO: skip unnecessary conversion of long to float
@@ -2614,6 +2627,13 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
     return item(all(eq(a, b)))  # type: ignore[return-value]
 
 
-# populate the decomp table
+@register_decomposition(torch.ops.aten.trace)
+def trace(self: TensorLikeType) -> TensorLikeType:
+    utils.check(
+        self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
+    )
+    return torch.sum(torch.diag(self, 0))
+
+
 import torch._refs.nn.functional
 import torch._refs.special

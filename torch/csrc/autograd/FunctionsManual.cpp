@@ -338,6 +338,21 @@ Tensor norm_jvp(
   return norm_jvp(self_p, self_t, p_, norm, {}, true);
 }
 
+Tensor _nested_from_padded_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    bool do_transform_0213) {
+  if (do_transform_0213) {
+    auto new_sizes = {
+        input.size(0), input.size(2), (input.size(1) * input.size(3))};
+    auto out = grad.to_padded_tensor(0, new_sizes);
+    auto expand_last_dim_size = {
+        input.size(0), input.size(2), input.size(1), input.size(3)};
+    return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
+  }
+  return grad.to_padded_tensor(0, input.sizes());
+}
+
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
