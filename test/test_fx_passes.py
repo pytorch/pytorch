@@ -435,25 +435,18 @@ class TestFXGraphPasses(JitTestCase):
             print("Forming partitions...")
             partitions = partitioner.partition(candidates)
 
-            print("Filtering out single node partitions...")
-            filtered_partitions = []
-            for partition in partitions:
-                count = 0
-                for node in partition.nodes:
-                    if node.target.__name__ not in {"view", "getitem"}:
-                        count += 1
-                if count > 1:
-                    filtered_partitions.append(partition)
-
-            partitions = filtered_partitions
-            # partitions = [partition for partition in partitions if len([for node in partition.nodes if node.target != "_operator.getitem"]) > 1]
-
             print("Partitions formed:")
             for partition in partitions:
                 print([node.name for node in partition.nodes])
 
             print("Fusing partitions...")
             fused_graph = partitioner.fuse_partitions(partitions)
+
+            # compile the nvFuser submodel with torchscript jit
+            # for node in fused_graph.graph.nodes:
+            #     if "fused_" in node.name:
+            #         module = getattr(fused_graph, node.name)
+            #         setattr(fused_graph, node.name, torch.jit.script(module) )
 
             if draw:
                 print("Drawing fused graph...")

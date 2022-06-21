@@ -1,4 +1,4 @@
-from typing import Dict, List, Set, Iterable
+from typing import Dict, List, Set, Iterable, Optional
 
 from torch.fx.passes.fuser_utils import fuse_by_partitions
 from torch.fx.passes.tools_common import NodeList
@@ -91,19 +91,21 @@ class CapabilityBasedPartitioner:
         assignment: Dict[Node, int] = {}   # maping from node to partition_id
         partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
 
-        def assign(node, id):
+        def assign(node: Node, id: Optional[int]):
             # node has been assigned before, clean up and re-assign
             if node in assignment:
                original_id = assignment[node]
+               del assignment[node]
                partitions_by_id[original_id].remove_node(node)
                if partitions_by_id[original_id].size() == 0:
                    del partitions_by_id[original_id]
 
-            assignment[node] = id
-            if id not in partitions_by_id:
-                partitions_by_id[id] = Partition(id=id, nodes=[node])
-            else:
-                partitions_by_id[id].add_node(node)
+            if id is not None:
+                assignment[node] = id
+                if id not in partitions_by_id:
+                    partitions_by_id[id] = Partition(id=id, nodes=[node])
+                else:
+                    partitions_by_id[id].add_node(node)
 
         def all_equal(iterable):
             g = groupby(iterable)
@@ -164,20 +166,33 @@ class CapabilityBasedPartitioner:
 
         # post processing to re-assign "getitem" nodes into upstream partition
         nodes_reassignment: Dict[Node, id] = {}
-        for id, partition in partitions_by_id.items():
-            for node in partition.nodes:
-                is_tuple_output = True
+        for node in self.graph_module.graph.nodes:
+            is_tuple_output = True
+            for user in node.users:
+                if user.op != "call_function" or user.target.__name__ != "getitem":
+                    is_tuple_output = False
+                    break
+            # node has tuple outputs, re-assign all following getitem node into node's partition
+            if is_tuple_output:
+                id = assignment.get(node, None)
                 for user in node.users:
-                    if user.op != "call_function" or user.target.__name__ != "getitem":
-                        is_tuple_output = False
-                        break
-                # node has tuple outputs, re-assign all following getitem node into node's partition
-                if is_tuple_output:
-                    for user in node.users:
-                        if assignment[user] != id:
-                            nodes_reassignment[user] = id
+                    if assignment.get(user, None) != id:
+                        nodes_reassignment[user] = id
         for node, id in nodes_reassignment.items():
             assign(node, id)
+
+        # filter out single node partitions
+        print("Filtering out single node partitions...")
+        partitions_to_remove: List[int] = []
+        for id, partition in partitions_by_id.items():
+            compute_node_count = 0
+            for node in partition.nodes:
+                if node.target.__name__ not in {"view", "getitem"}:
+                    compute_node_count += 1
+            if compute_node_count <= 1:
+                partitions_to_remove.append(id)
+        for id in partitions_to_remove:
+            del partitions_by_id[id]
 
         return list(partitions_by_id.values())
 
