@@ -20,8 +20,8 @@ RUN bash ./install_user.sh && rm install_user.sh
 
 # Install katex
 ARG KATEX
-ADD ./common/install_katex.sh install_katex.sh
-RUN bash ./install_katex.sh && rm install_katex.sh
+ADD ./common/install_docs_reqs.sh install_docs_reqs.sh
+RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
