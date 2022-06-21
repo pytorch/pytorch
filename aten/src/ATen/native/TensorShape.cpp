@@ -1156,7 +1156,7 @@ Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
   const auto new_values = (new_dense_dims == old_dense_dims)
     ? old_values
     : [&]() -> Tensor {
-      auto values_perm = DimVector(dense_ndim + 1);
+      auto values_perm = std::vector<int64_t>(dense_ndim + 1);
       for (const auto i : c10::irange(dense_ndim)) {
         values_perm[i + 1] = new_dense_dims[i] - sparse_ndim + 1;
       }
