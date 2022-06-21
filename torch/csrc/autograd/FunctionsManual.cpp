@@ -348,6 +348,21 @@ Tensor norm_jvp(
   return norm_jvp(self_p, self_t, p_, norm, {}, true);
 }
 
+Tensor _nested_from_padded_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    bool do_transform_0213) {
+  if (do_transform_0213) {
+    auto new_sizes = {
+        input.size(0), input.size(2), (input.size(1) * input.size(3))};
+    auto out = grad.to_padded_tensor(0, new_sizes);
+    auto expand_last_dim_size = {
+        input.size(0), input.size(2), input.size(1), input.size(3)};
+    return out.view(expand_last_dim_size).permute({0, 2, 1, 3});
+  }
+  return grad.to_padded_tensor(0, input.sizes());
+}
+
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
@@ -2126,38 +2141,6 @@ Tensor binary_cross_entropy_double_backward_grad_output(
     return ggO / input.numel();
   }
   return ggO;
-}
-
-Tensor l1_loss_double_backward(
-    const Tensor& grad,
-    const Tensor& grad_output,
-    const Tensor& self,
-    const Tensor& other,
-    int64_t reduction) {
-  if (!self.is_complex()) {
-    return at::zeros_like(grad);
-  } else {
-    auto diff = self - other;
-    auto output = grad_output * sgn_backward(diff.sgn(), grad, diff);
-    if (reduction == at::Reduction::Mean) {
-      output /= self.numel();
-    }
-    return output;
-  }
-}
-
-Tensor l1_loss_double_backward_grad_output(
-    const Tensor& grad,
-    const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& target,
-    int64_t reduction) {
-  auto output =
-      at::l1_loss_backward(grad.conj(), input, target, at::Reduction::None);
-  if (reduction == at::Reduction::Mean) {
-    output /= input.numel();
-  }
-  return handle_r_to_c(grad_output, output);
 }
 
 Tensor smooth_l1_loss_double_backward(
