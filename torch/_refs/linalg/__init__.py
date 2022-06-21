@@ -53,7 +53,7 @@ def check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_name
         )
 
 
-@out_wrapper
+@out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
     ord: float = 2.0,
