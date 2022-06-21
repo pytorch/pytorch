@@ -88,6 +88,10 @@ Tensor norm_jvp(
     const Tensor& self,
     const optional<Scalar>& p_,
     Tensor norm);
+Tensor _nested_from_padded_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    const bool do_transform_0213);
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,
