@@ -7890,6 +7890,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ("cusparseSpMM_bufferSize", ("hipsparseSpMM_bufferSize", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseCreateDnMat", ("hipsparseCreateDnMat", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseDnMatSetStridedBatch", ("hipsparseDnMatSetStridedBatch", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseCsrSetStridedBatch", ("hipsparseCsrSetStridedBatch", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseCreateDnVec", ("hipsparseCreateDnVec", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseCreateCsr", ("hipsparseCreateCsr", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseDestroyDnMat", ("hipsparseDestroyDnMat", CONV_MATH_FUNC, API_SPARSE)),
@@ -7897,6 +7898,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ("cusparseDestroySpMat", ("hipsparseDestroySpMat", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseCreateCoo", ("hipsparseCreateCoo", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseCreateCsr", ("hipsparseCreateCsr", CONV_MATH_FUNC, API_SPARSE)),
+        ("cusparseDnMatSetStridedBatch", ("hipsparseDnMatSetStridedBatch", CONV_MATH_FUNC, API_SPARSE)),
         ("cusparseSpMVAlg_t", ("hipsparseSpMVAlg_t", CONV_TYPE, API_SPARSE)),
         ("cusparseSpMMAlg_t", ("hipsparseSpMMAlg_t", CONV_TYPE, API_SPARSE)),
         ("cusparseIndexType_t", ("hipsparseIndexType_t", CONV_TYPE, API_SPARSE)),
@@ -7915,6 +7917,7 @@ CUDA_SPARSE_MAP = collections.OrderedDict(
         ("CUSPARSE_COOMM_ALG2", ("HIPSPARSE_COOMM_ALG2", CONV_NUMERIC_LITERAL, API_SPARSE)),
         ("CUSPARSE_COOMM_ALG3", ("HIPSPARSE_COOMM_ALG3", CONV_NUMERIC_LITERAL, API_SPARSE)),
         ("CUSPARSE_COOMV_ALG", ("HIPSPARSE_COOMV_ALG", CONV_NUMERIC_LITERAL, API_SPARSE)),
+        ("CUSPARSE_CSRMM_ALG1", ("HIPSPARSE_CSRMM_ALG1", CONV_NUMERIC_LITERAL, API_SPARSE)),
         (
             "CUSPARSE_STATUS_SUCCESS",
             ("HIPSPARSE_STATUS_SUCCESS", CONV_NUMERIC_LITERAL, API_SPARSE),

@@ -562,7 +562,7 @@ void spmm(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-#if !AT_USE_CUSPARSE_GENERIC_API() || defined(USE_ROCM)
+#if !AT_USE_CUSPARSE_GENERIC_API() || (defined(USE_ROCM) && ROCM_VERSION < 50200)
   addmm_out_legacy(mat1, mat2, beta, alpha, result);
 #else
   c10::MaybeOwned<Tensor> result_ = prepare_dense_matrix_for_cusparse(result);

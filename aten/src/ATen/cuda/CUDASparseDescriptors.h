@@ -99,13 +99,13 @@ class TORCH_CUDA_CPP_API CuSparseBsrsm2Info
 
 cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
-#ifndef USE_ROCM // Missing support for cusparseDnMatSetStridedBatch
+#if defined(CUDA_VERSION) || (defined(USE_ROCM) && ROCM_VERSION >= 50200)
 class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
     : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
  public:
   explicit CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
 };
-#endif // !USE_ROCM
+#endif
 
 class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
     : public CuSparseDescriptor<cusparseDnVecDescr, &cusparseDestroyDnVec> {

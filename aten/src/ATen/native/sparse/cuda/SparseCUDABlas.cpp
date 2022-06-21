@@ -13,7 +13,7 @@
 // Using these APIs in any other systems will result in compile-time or run-time failures.
 // Their support will be extended in the next releases.
 
-#if defined(CUDART_VERSION) && (CUSPARSE_VERSION >= 11000 || (!defined(_MSC_VER) && CUSPARSE_VERSION >= 10301))
+#if (defined(CUDART_VERSION) && (CUSPARSE_VERSION >= 11000 || (!defined(_MSC_VER) && CUSPARSE_VERSION >= 10301))) || (defined(USE_ROCM) && ROCM_VERSION >= 50200)
 #define IS_SPMM_AVAILABLE() 1
 #else
 #define IS_SPMM_AVAILABLE() 0
