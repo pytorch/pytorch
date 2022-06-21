@@ -7,7 +7,9 @@ class TensorAPoT(torch.Tensor):
     data: torch.Tensor
 
     def __init__(self, quantizer):
-        raise NotImplementedError
+        self.quantizer = quantizer
+        self.data = quantizer.data
+        self.dtype = torch.quint8
 
     def int_repr(self):
         raise NotImplementedError
