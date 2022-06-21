@@ -771,6 +771,9 @@ class OpInfo(object):
     # only run tracing tests
     supports_scripting: bool = True
 
+    # if the operator can be traced
+    supports_tracing: bool = True
+
     # the following metadata relates to sparse csr support and is used in test_sparse_csr.py
 
     # whether the op supports sparse csr inputs
@@ -2407,6 +2410,29 @@ def sample_inputs_elementwise_binary(op, device, dtype, requires_grad, **kwargs)
         yield SampleInput(
             lhs, args=(rhs,), kwargs=sample_kwargs, broadcasts_input=broadcasts_input
         )
+
+def sample_inputs_equal(op, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes = (
+        ((), ()),
+        ((S,), ()),
+        ((), (S,)),
+        ((S, 1), (S,)),
+        ((M, S), ()),
+        ((S, S), (S, S))
+    )
+
+    for shape_lhs, shape_rhs in shapes:
+        lhs = make_arg(shape_lhs)
+        rhs = make_arg(shape_rhs)
+        broadcasts_input = shape_lhs != torch.broadcast_shapes(shape_lhs, shape_rhs)
+
+        yield SampleInput(lhs, args=(rhs,), broadcasts_input=broadcasts_input)
+        if shape_lhs == shape_rhs:
+            yield SampleInput(lhs, args=(lhs.clone().detach_(),))
+
 
 
 def sample_inputs_jiterator(op, device, dtype, requires_grad, **kwargs):
@@ -8449,9 +8475,19 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
     for args, reduce, initial in product(test_cases, reductions, [1, 2]):
         inp_shape, dim, lengths, unsafe = args
         lengths_t = torch.tensor(lengths, dtype=torch.long, device=device)
+        sample_input_kwargs = {'axis': dim, 'unsafe': unsafe, 'initial': initial}
+        if mode == 'lengths':
+            sample_input_kwargs['lengths'] = lengths_t
+        elif mode == 'offsets':
+            zeros_shape = list(lengths_t.shape)
+            zeros_shape[dim] = 1
+            offsets_t = torch.cat((lengths_t.new_zeros(zeros_shape), lengths_t), dim).cumsum_(dim)
+            sample_input_kwargs['offsets'] = offsets_t
+        else:
+            raise RuntimeError(f"mode most be one of 'offsets' or 'lengths' got '{mode}'.")
         yield SampleInput(_tensor(inp_shape),
                           args=(reduce,),
-                          kwargs={'lengths': lengths_t, 'axis': dim, 'unsafe': unsafe, 'initial': initial})
+                          kwargs=sample_input_kwargs)
 
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
@@ -11523,6 +11559,14 @@ op_db: List[OpInfo] = [
                     supports_fwgrad_bwgrad=True,
                     supports_two_python_scalars=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=True)),
+    OpInfo('equal',
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           ref=lambda input, other: (input == other).all(),
+           sample_inputs_func=sample_inputs_equal,
+           supports_autograd=False,
+           supports_tracing=False,
+           skips=(
+           )),
     UnaryUfuncInfo('exp',
                    ref=np_unary_ufunc_integer_promotion_wrapper(np.exp),
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16),
@@ -12468,8 +12512,6 @@ op_db: List[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
-               # Could not run 'aten::linalg_eigh' with arguments from the 'AutogradMeta' backend.
-               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('linalg.eigvalsh',
            aten_name='linalg_eigvalsh',
@@ -19586,6 +19628,25 @@ op_db: List[OpInfo] = [
             ),
         ),
     ),
+    OpInfo(
+        'segment_reduce',
+        variant_test_name='offsets',
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=False,
+        # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
+        supports_gradgrad=False,
+        sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
+        skips=(
+            # FIXME: CUDA driver API confirmed a leak in
+            # __main__.TestJitCUDA.test_variant_consistency_jit_segment_reduce_cuda_float32
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cuda",
+            ),
+        ),
+    ),
     UnaryUfuncInfo(
         'special.bessel_j0',
         decorators=(
@@ -20422,6 +20483,25 @@ python_ref_db = [
         "_refs.nn.functional.tanhshrink",
         torch_opinfo_name="nn.functional.tanhshrink",
     ),
+    PythonRefInfo(
+        "_refs.nn.functional.hardshrink",
+        torch_opinfo_name="nn.functional.hardshrink",
+        skips=(
+            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.softshrink",
+        torch_opinfo_name="nn.functional.softshrink",
+        skips=(
+            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # RuntimeError: no _refs support for torch.logical_not
+            # Should pass once `refs.logical_not` is implemented
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        )
+    ),
     #
     # Elementwise Binary Reference OpInfos
     #
@@ -20518,6 +20598,11 @@ python_ref_db = [
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.gcd",
+        torch_opinfo_name="gcd",
+        supports_nvfuser=False,
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
         torch_opinfo_name="ge",
         supports_nvfuser=False,
@@ -20546,6 +20631,11 @@ python_ref_db = [
             # RuntimeError: Tracing expected 5 arguments but got 2 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.lcm",
+        torch_opinfo_name="lcm",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.le",
@@ -20675,6 +20765,17 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
                 dtypes=(torch.complex32,), device_type="cuda", active_if=not TEST_WITH_ROCM
             ),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.remainder",
+        torch_opinfo_name="remainder",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.bfloat16,), device_type='cpu'),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.bfloat16,), device_type='cpu'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
