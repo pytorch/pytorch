@@ -13625,8 +13625,6 @@ op_db: List[OpInfo] = [
                 'test_variant_consistency_jit',
                 dtypes=(torch.float32,)
             ),
-            DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_fwgrad_bwgrad',
-                         dtypes=(torch.float64,)),
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_fn_gradgrad", dtypes=(torch.float64,)),
         ),
     ),
@@ -17848,8 +17846,10 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.l1_loss",
         ref=loss_reference_reduction_wrapper(lambda input, target: np.abs(input - target)),
+        aten_backward_name='l1_loss_backward',
         sample_inputs_func=sample_inputs_l1_loss,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -20387,6 +20387,25 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
         torch_opinfo_name="nn.functional.tanhshrink",
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.hardshrink",
+        torch_opinfo_name="nn.functional.hardshrink",
+        skips=(
+            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+        )
+    ),
+    PythonRefInfo(
+        "_refs.nn.functional.softshrink",
+        torch_opinfo_name="nn.functional.softshrink",
+        skips=(
+            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # RuntimeError: no _refs support for torch.logical_not
+            # Should pass once `refs.logical_not` is implemented
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
+        )
     ),
     #
     # Elementwise Binary Reference OpInfos
