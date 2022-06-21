@@ -9,13 +9,13 @@ import logging
 import torch
 from torch.fx._symbolic_trace import symbolic_trace
 
-from torch.fx.partitioner.partitioner import CapabilityBasedPartitioner
+from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport
-from torch.fx.partitioner.nvfuser_operator_support import NvFuserOperatorSupport
+from torch.fx.passes.backends.nvfuser.operator_support import NvFuserOperatorSupport
 import torch._prims as prims
 from torch.fx.passes.graph_drawer import FxGraphDrawer
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
-from torch.fx.passes.fuser_utils import fuse_by_partitions
+from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 
 from torch.testing._internal.common_utils import run_tests, parametrize, instantiate_parametrized_tests
 from torch.testing._internal.jit_utils import JitTestCase
@@ -419,33 +419,34 @@ class TestFXGraphPasses(JitTestCase):
 
             module = importlib.import_module(module_path)
 
-            m = module.FxModule()
-            traced = symbolic_trace(m)
-
-            if draw:
-                logging.debug("Drawing original graph...")
-                drawer = FxGraphDrawer(traced, "test")
-                dot_graph = drawer.get_dot_graph()
-                dot_graph.write_png("before.png")
-
-            supported_ops = NvFuserOperatorSupport()
-            partitioner = CapabilityBasedPartitioner(traced, supported_ops)
-
-            fused_graph_module = partitioner.partition_and_fuse()
-
-            # compile the nvFuser submodel with torchscript jit
-            # for node in fused_graph.graph.nodes:
-            #     if "fused_" in node.name:
-            #         module = getattr(fused_graph, node.name)
-            #         setattr(fused_graph, node.name, torch.jit.script(module) )
-
-            if draw:
-                logging.debug("Drawing fused graph...")
-                drawer = FxGraphDrawer(fused_graph_module, "test")
-                dot_graph = drawer.get_dot_graph()
-                dot_graph.write_png("after.png")
-
             try:
+                m = module.FxModule()
+                traced = symbolic_trace(m)
+
+                if draw:
+                    logging.debug("Drawing original graph...")
+                    drawer = FxGraphDrawer(traced, "test")
+                    dot_graph = drawer.get_dot_graph()
+                    dot_graph.write_png("before.png")
+
+                supported_ops = NvFuserOperatorSupport()
+                partitioner = CapabilityBasedPartitioner(traced, supported_ops)
+
+                fused_graph_module = partitioner.partition_and_fuse()
+
+                # compile the nvFuser submodel with torchscript jit
+                # for node in fused_graph.graph.nodes:
+                #     if "fused_" in node.name:
+                #         module = getattr(fused_graph, node.name)
+                #         setattr(fused_graph, node.name, torch.jit.script(module) )
+
+                if draw:
+                    logging.debug("Drawing fused graph...")
+                    drawer = FxGraphDrawer(fused_graph_module, "test")
+                    dot_graph = drawer.get_dot_graph()
+                    dot_graph.write_png("after.png")
+
+
                 logging.debug("Generating testing data...")
                 with (open(input_data_path, 'rb')) as f:
                     inputs_meta = pickle.load(f)

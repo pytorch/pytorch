@@ -1,6 +1,6 @@
 from typing import Dict, List, Set, Iterable, Optional
 
-from torch.fx.passes.fuser_utils import fuse_by_partitions
+from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 from torch.fx.passes.tools_common import NodeList
 
 from torch.fx.graph_module import GraphModule
