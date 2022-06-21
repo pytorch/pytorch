@@ -168,10 +168,10 @@ class CheckpointWrapperTest(TestCase):
             loss.backward()
             # ensure checkpointed part of model has gradients
             for j in range(3):
-                weight_lin = model.seq[j].lin.mod.weight
-                bias_lin = model.seq[j].lin.mod.bias
-                weight_nested_lin = model.seq[j].nested_linear[0].mod.weight
-                bias_nested_lin = model.seq[j].nested_linear[0].mod.bias
+                weight_lin = model.seq[j].lin._checkpoint_wrapped_module.weight
+                bias_lin = model.seq[j].lin._checkpoint_wrapped_module.bias
+                weight_nested_lin = model.seq[j].nested_linear[0]._checkpoint_wrapped_module.weight
+                bias_nested_lin = model.seq[j].nested_linear[0]._checkpoint_wrapped_module.bias
                 for param in [weight_lin, bias_lin, weight_nested_lin, bias_nested_lin]:
                     self.assertTrue(param.requires_grad)
                     self.assertFalse(param.grad is None)
