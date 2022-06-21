@@ -95,7 +95,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
     """
 
     def test_simple_conv(self):
-        torch.backends.quantized.engine = "onednn"
+        torch.backends.quantized.engine = "fbgemm"
 
         q_config_mapping = QConfigMapping()
         q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
