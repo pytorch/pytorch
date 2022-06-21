@@ -127,8 +127,9 @@ class FakeTensorTest(TestCase):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=False)):
             filters = torch.randn(8, 4, 3, 3).cuda()
             inputs = torch.randn(1, 4, 5, 5).cuda()
-            with self.assertRaises(NotImplementedError):
-                torch.nn.functional.conv2d(inputs, filters, padding=1)
+            out = torch.nn.functional.conv2d(inputs, filters, padding=1)
+            self.assertEqual(out.device.type, "cuda")
+            self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=True)):
             # intentionally bad inputs
