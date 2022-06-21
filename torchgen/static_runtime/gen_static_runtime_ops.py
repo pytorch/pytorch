@@ -1,12 +1,13 @@
 from torchgen import gen
 from torchgen.context import native_function_manager
-from torchgen.model import DispatchKey, NativeFunctionsGroup
+from torchgen.model import DispatchKey, NativeFunctionsGroup, NativeFunctionsViewGroup
 from torchgen.static_runtime import generator
 
 import argparse
 import itertools
 import os
-from typing import Sequence
+from typing import Sequence, Union
+from libfb.py.log import set_simple_logging
 
 # Given a list of `grouped_native_functions` sorted by their op names, return a list of
 # lists each of which groups ops that share the base name. For example, `mean` and
@@ -14,15 +15,15 @@ from typing import Sequence
 
 
 def group_functions_by_op_name(
-    grouped_native_functions: Sequence[NativeFunctionsGroup],
-) -> Sequence[Sequence[NativeFunctionsGroup]]:
+    grouped_native_functions: Sequence[
+        Union[NativeFunctionsGroup, NativeFunctionsViewGroup]
+    ]
+) -> Sequence[Sequence[Union[NativeFunctionsGroup, NativeFunctionsViewGroup]]]:
     if not grouped_native_functions:
         return []
     groups = []
-    current_op_name = None
-    current_group = None
 
-    def is_supported(g: NativeFunctionsGroup) -> bool:
+    def is_supported(g: Union[NativeFunctionsGroup, NativeFunctionsViewGroup]) -> bool:
         with native_function_manager(g):
             return generator.is_supported(g)
 
@@ -31,7 +32,10 @@ def group_functions_by_op_name(
         list(group)
         for k, group in (
             itertools.groupby(
-                eligible_ops, key=lambda g: g.functional.func.name.name.base
+                eligible_ops,
+                key=lambda g: g.functional.func.name.name.base
+                if isinstance(g, NativeFunctionsGroup)
+                else g.view.root_name,
             )
         )
     ]
@@ -147,34 +151,73 @@ def main() -> None:
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
     )
-    grouped_native_functions = gen.get_grouped_native_functions(native_functions)
-    structured_native_functions = [
-        g for g in grouped_native_functions if isinstance(g, NativeFunctionsGroup)
-    ]
-    supported_function_groups = group_functions_by_op_name(structured_native_functions)
 
-    gen_out_variant_dispatcher = generator.GenOutVariantDispatcher()
-    result = [
-        gen_out_variant_dispatcher(groups, backend_indices[DispatchKey.CPU])
-        for groups in supported_function_groups
+    op_generator = generator.GenOpDispatcher()
+    test_case_generator = generator.GenOpTestCase()
+
+    native_functions_groups = [
+        g
+        for g in gen.get_grouped_native_functions(native_functions)
+        if isinstance(g, NativeFunctionsGroup)
     ]
 
-    gen_out_variant_dispatcher_test_case = generator.GenOutVariantDispatcherTestCase()
-    test_result = [
-        gen_out_variant_dispatcher_test_case(groups)
-        for groups in supported_function_groups
+    supported_functions_groups = group_functions_by_op_name(native_functions_groups)
+
+    out_variant_op_result = [
+        op_generator.out_variant(groups, backend_indices[DispatchKey.CPU])
+        for groups in supported_functions_groups
+    ]
+    out_variant_test_result = [
+        test_case_generator.out_variant(groups) for groups in supported_functions_groups
     ]
 
-    write_cpp(result, options.generated_ops_cpp_path)
+    native_functions_view_groups = [
+        g
+        for g in gen.get_grouped_by_view_native_functions(native_functions)
+        if isinstance(g, NativeFunctionsViewGroup)
+    ]
+
+    supported_functions_view_groups = group_functions_by_op_name(
+        native_functions_view_groups
+    )
+
+    view_op_result = [
+        op_generator.view(groups, backend_indices[DispatchKey.CPU])
+        for groups in supported_functions_view_groups
+    ]
+    view_test_result = [
+        test_case_generator.view(groups) for groups in supported_functions_view_groups
+    ]
+
+    op_result = out_variant_op_result + ["\n\n"] + view_op_result
+    test_result = out_variant_test_result + ["\n\n"] + view_test_result
+
+    write_cpp(op_result, options.generated_ops_cpp_path)
     write_test_cpp(test_result, options.generated_ops_test_cpp_path)
 
-    print("total grouped native ops: %d" % len(grouped_native_functions))
-    print("structured grouped native ops: %d" % len(structured_native_functions))
-    supported_grouped_functions = sum(
-        [len(groups) for groups in supported_function_groups]
+    print(
+        "\ntotal grouped native ops: %d"
+        % len(gen.get_grouped_native_functions(native_functions))
     )
-    print("generated grouped native ops: %d" % supported_grouped_functions)
+
+    print("grouped native ops with out variant: %d" % len(native_functions_groups))
+    supported_functions_num = sum(
+        [len(groups) for groups in supported_functions_groups]
+    )
+    print("generated functions groups with out variant: %d" % supported_functions_num)
+
+    print("\nview grouped native ops: %d" % len(native_functions_view_groups))
+    supported_view_functions_num = sum(
+        [len(groups) for groups in supported_functions_view_groups]
+    )
+    print("generated functions view groups: %d" % supported_view_functions_num)
+
+    print(
+        "\noverall generated : %d"
+        % (supported_functions_num + supported_view_functions_num)
+    )
 
 
 if __name__ == "__main__":
+    set_simple_logging(escape_newlines=False)
     main()

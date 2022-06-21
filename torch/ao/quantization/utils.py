@@ -4,14 +4,18 @@ Utils shared by different modes of quantization (eager/graph)
 import warnings
 import functools
 import torch
-from torch.ao.quantization.quant_type import QuantType, quant_type_to_str
-from typing import Tuple, Any, Union, Callable
+from torch.ao.quantization.quant_type import QuantType
+from typing import Tuple, Any, Union, Callable, Dict, Optional
 from torch.nn.utils.parametrize import is_parametrized
+from collections import OrderedDict
+from inspect import signature
+from inspect import getfullargspec
 
 # Type for fusion patterns, it can be more complicated than the following actually,
 # see pattern.md for docs
 # TODO: not sure if typing supports recursive data types
 Pattern = Union[Callable, Tuple[Callable, Callable], Tuple[Callable, Tuple[Callable, Callable]], Any]
+Pattern.__module__ = "torch.ao.quantization.utils"
 
 # TODO: maybe rename this to MatchInputNode
 class MatchAllNode:
@@ -95,6 +99,7 @@ method_list = {
     'view',
 }
 
+# TODO: not used now, remove
 def check_node(node, modules):
     # TODO: reuse is_fixed_qparam_node after we move this function to _lower_to_native_backend.py
     is_call_function = node.op == "call_function" and node.target in func_list
@@ -163,8 +168,7 @@ def get_swapped_custom_module_class(custom_module, custom_module_class_mapping, 
         corresponding observed/quantized custom module class for input custom module instance
     """
     quant_type = get_quant_type(qconfig)
-    quant_type_str = quant_type_to_str(quant_type)
-    class_mapping = custom_module_class_mapping.get(quant_type_str, {})
+    class_mapping = custom_module_class_mapping.get(quant_type, {})
     assert type(custom_module) in class_mapping, "did not find corresponding observed " \
         "module class for {} in mapping: {}".format(type(custom_module), class_mapping)
     return class_mapping[type(custom_module)]
@@ -370,3 +374,175 @@ def has_no_children_ignoring_parametrizations(module):
         return len(module._modules) == 1 and 'parametrizations' in module._modules
     else:
         return False
+
+def _get_path_of_module(root: torch.nn.Module, submodule: torch.nn.Module) -> Optional[str]:
+    """ Get the path (fully qualified name) of a submodule
+
+    Example::
+
+    >> class M(torch.nn.Module):
+           def __init__(self):
+               self.linear = torch.nn.Linear(5, 5)
+           def forward(self, x):
+               return self.linear(x)
+
+    >> m = M()
+    >> l = m.linear
+    >> _get_path_of_module(m, l)
+    "linear"
+    """
+    for n, p in root.named_modules():
+        if submodule is p:
+            return n
+    return None
+
+def _get_signature_locals(f: Callable, loc: Dict[str, Any]) -> Dict[str, Any]:
+    """ Get local keyword arguments
+
+    Example::
+
+    >> def f(self, a, b=9):
+           pass
+    >> loc = {"a": 6, "c": 7}
+    >> _get_signature_locals(f, loc)
+    {"a": 6}
+    """
+    return {k: v for k, v in loc.items() if k in signature(f).parameters}
+
+def _get_default_kwargs(f: Callable) -> "OrderedDict[str, Any]":
+    """ Get all default keyword arguments from function signature
+
+    Example::
+
+    >> def f(self, a, b=9):
+           pass
+    >> _get_default_kwargs(f)
+    {"b": 9}
+    """
+    kwargs = {}
+    for name, param in signature(f).parameters.items():
+        if param.default is not param.empty:
+            kwargs[name] = param.default
+        elif param.kind is param.VAR_POSITIONAL:
+            kwargs[name] = ()
+        elif param.kind is param.VAR_KEYWORD:
+            kwargs[name] = {}
+    return OrderedDict(kwargs)
+
+def _normalize_kwargs(func: Callable, loc: Dict[str, Any]) -> "OrderedDict[str, Any]":
+    """ Given a function and local function arguments, normalize the keyword
+    arguments by filling in default arguments from function signature
+
+    Example::
+
+    >> def f(self, key1=3, key2=3):
+           pass
+    >> loc = {"key2": 6}
+    >> _normalize_kwargs(f, loc)
+    {"key1": 3, "key2": 6}
+    """
+    default_kwargs = _get_default_kwargs(func)
+    local_kwargs = _get_signature_locals(func, loc)
+    normalized_kwargs = default_kwargs.copy()
+    for attr, val in local_kwargs.items():
+        if attr in normalized_kwargs:
+            # override the default keyword arguments
+            normalized_kwargs[attr] = val
+    return normalized_kwargs
+
+def _get_num_pos_args(f: Callable) -> int:
+    """ Get number of positional args for a function
+
+    Example::
+
+    >> def f(self, key1=3, key2=3):
+           pass
+    >> _get_num_pos_args(f)
+    3
+    """
+    return len(getfullargspec(f).args)
+
+def get_fqn_to_example_inputs(
+    model: torch.nn.Module,
+    example_inputs: Tuple[Any, ...]
+) -> Dict[str, Tuple[Any, ...]]:
+    """ Given a model and its example inputs, return a dictionary from
+    fully qualified name of submodules to example_inputs for that submodule,
+    e.g. {"linear1": (tensor1,), "linear2": (tensor2,), "sub": (tensor3,),
+          "sub.linear1": (tensor4,), ...}
+
+    Used to make quantizing submodules easier now that FX Graph Mode Quantization requries
+    example inputs.
+
+    Also works for keyword arguments with default values, we would flatten keyword
+    arguments as positional arguments and fill in the missing keyword args with default
+    values, e.g. if we have a forward function:
+    def forward(self, x, key1=3, key2=3):
+        ...
+
+    and we call it with self.submodule(x, key2=6)
+    we'll get example_inputs: (x, 3, 6)
+
+    user can also override `key1` with positional arguments as well:
+    for self.submodule(x, 5, key2=6)
+    we'll get: (x, 5, 6)
+
+    variable positional arguments and variable positional keyword arguments in forward
+    function are not supported currently, so please make sure no submodules is using
+    them.
+    """
+    root = model
+    fqn_to_example_inputs = {}
+
+    def _patched_module_call(self, *args, **kwargs):
+        submodule_example_inputs = list(args).copy()
+        normalized_kwargs = _normalize_kwargs(self.forward, kwargs)
+        # minus 1 to skipping counting `self`
+        num_args = _get_num_pos_args(self.forward) - 1
+        num_to_pop = num_args - len(submodule_example_inputs)
+        while num_to_pop and normalized_kwargs:
+            normalized_kwargs.popitem(last=False)
+            num_to_pop -= 1
+        submodule_example_inputs.extend(normalized_kwargs.values())
+        submodule_example_inputs_tuple = tuple(submodule_example_inputs)
+        fqn = _get_path_of_module(root, self)
+        if fqn is not None:
+            fqn_to_example_inputs[fqn] = submodule_example_inputs_tuple
+        return orig_module_call(self, *args, **kwargs)
+
+    orig_module_call = torch.nn.Module.__call__
+    torch.nn.Module.__call__ = _patched_module_call
+    try:
+        model(*example_inputs)
+    finally:
+        # restore the module call even if there is an exception
+        torch.nn.Module.__call__ = orig_module_call
+    return fqn_to_example_inputs
+
+
+__all__ = [
+    "Pattern",
+    "MatchAllNode",
+    "check_node",
+    "get_combined_dict",
+    "is_per_tensor",
+    "is_per_channel",
+    "getattr_from_fqn",
+    "get_qparam_dict",
+    "get_swapped_custom_module_class",
+    "activation_dtype",
+    "weight_dtype",
+    "activation_is_statically_quantized",
+    "activation_is_dynamically_quantized",
+    "activation_is_int8_quantized",
+    "activation_is_int32_quantized",
+    "weight_is_quantized",
+    "weight_is_statically_quantized",
+    "op_is_int8_dynamically_quantized",
+    "get_qconfig_dtypes",
+    "get_quant_type",
+    "check_min_max_valid",
+    "calculate_qmin_qmax",
+    "has_no_children_ignoring_parametrizations",
+    "get_fqn_to_example_inputs",
+]
