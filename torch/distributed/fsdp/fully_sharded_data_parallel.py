@@ -4108,30 +4108,26 @@ def _get_param_to_unflat_param_names(
             in the module walk order; if ``False``, then includes all of the
             unflattened parameter names.
     """
-    def _clean_param_name(prefix, param_info):
-        """This replicates the parameter name cleaning logic in model state
-        dict but avoids gathering any parameters."""
-        name = clean_tensor_name(
-            prefix + param_info.module_name + "." + param_info.param_name
-        )
-        return name
-
     def module_fn(module, prefix, param_to_unflat_param_names):
         # For FSDP modules, only add the entry when considering the contained
         # `FlattenParamsWrapper` to avoid duplication
         if not isinstance(module, FullyShardedDataParallel):
             for param_name, param in module.named_parameters(recurse=False):
-                prefixed_param_names = [
-                    _clean_param_name(prefix, param_info)
-                    for param_info in param._param_infos
-                ] if isinstance(param, FlatParameter) else [prefix + param_name]
+                module_prefixed_param_names = (
+                    param._param_names if isinstance(param, FlatParameter)
+                    else [param_name]
+                )  # prefixed from `module`
+                fully_prefixed_param_names = [
+                    clean_tensor_name(prefix + name)
+                    for name in module_prefixed_param_names
+                ]  # fully prefixed from the top level including `prefix`
                 # If this parameter has already been visited, then it is a
                 # shared parameter; then, only take the first parameter name
                 is_shared_param = param in param_to_unflat_param_names
                 if not is_shared_param:
-                    param_to_unflat_param_names[param] = prefixed_param_names
+                    param_to_unflat_param_names[param] = fully_prefixed_param_names
                 elif not dedup_shared_params:
-                    param_to_unflat_param_names[param].extend(prefixed_param_names)
+                    param_to_unflat_param_names[param].extend(fully_prefixed_param_names)
 
     def return_fn(param_to_unflat_param_names):
         return param_to_unflat_param_names
