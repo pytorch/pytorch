@@ -400,6 +400,12 @@ __host__ __device__
 #define C10_MOBILE 1
 #endif // ANDROID / IOS
 
+#if defined(C10_MOBILE) && C10_MOBILE
+#define C10_ALWAYS_INLINE_UNLESS_MOBILE inline
+#else
+#define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
+#endif
+
 // Portable determination of whether type T is trivially copyable.
 // Warning: __has_trivial_copy for GCC may not always detect the non-POD
 // correctly. For example, T = std::unique_ptr may evaluate to true and be
