@@ -185,12 +185,12 @@ class TestFlattenParams(TestCase):
 
         def _test(kwargs, expected):
             """
-            Tests the subroutine ``_get_shard_metadta()`` that computes shard
+            Tests the subroutine ``_get_shard_metadata()`` that computes shard
             metadata based on start and end indices in the unsharded flattened
             parameter.
 
             We manually set the relevant attributes on the flattened parameter
-            to be able to check the effect of ``_get_shard_metadta()`` via
+            to be able to check the effect of ``_get_shard_metadata()`` via
             ``shard_metadata()`` since normally the attributes are set in
             ``init_shard_info()`` with the start and end indices fixed based on
             rank and world size.

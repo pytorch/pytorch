@@ -11,9 +11,6 @@ from torch.distributed.fsdp import CPUOffload
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import MixedPrecision
 from torch.distributed.fsdp.flat_param import FlatParamHandle
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    FullyShardedDataParallel,
-)
 from torch.distributed.fsdp.wrap import enable_wrap, wrap
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -347,7 +344,7 @@ class TestSummonFullParams(FSDPTest):
         )
 
         params_to_compare = list(model_no_fsdp.parameters())
-        with FullyShardedDataParallel.summon_full_params(model_fsdp):
+        with FSDP.summon_full_params(model_fsdp):
             fsdp_params = [p.clone() for p in model_fsdp.parameters()]
 
         self.assertEqual(params_to_compare, fsdp_params)
