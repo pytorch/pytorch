@@ -503,7 +503,8 @@ meta_function_device_expected_failures['cuda'] = {
     torch.geqrf: {f32, c32, c64, c128, f64},  # aten::geqrf
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
-    torch.linalg.householder_product: {f32, c32, c64, c128, f64},  # aten::linalg_householder_product, aten::linalg_householder_product.out
+    # aten::linalg_householder_product, aten::linalg_householder_product.out
+    torch.linalg.householder_product: {f32, c32, c64, c128, f64},
     torch.linalg.solve_triangular: {f32, c32, c64, c128, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
     torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.matrix_exp: {f16},  # aten::linalg_matrix_exp
