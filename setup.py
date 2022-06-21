@@ -843,7 +843,7 @@ def configure_extension_build():
     ################################################################################
 
     extensions = []
-    packages = find_packages(exclude=('tools', 'tools.*'))
+    packages = find_packages(exclude=('tools', 'tools.*')) + ['torch.utils.hipify']
     C = Extension("torch._C",
                   libraries=main_libraries,
                   sources=main_sources,
@@ -962,6 +962,7 @@ if __name__ == '__main__':
         ext_modules=extensions,
         cmdclass=cmdclass,
         packages=packages,
+        package_dir={'torch.utils.hipify': 'third_party/hipify_torch/hipify'},
         entry_points=entry_points,
         install_requires=install_requires,
         package_data={
