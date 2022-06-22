@@ -5,7 +5,7 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <functorch/csrc/BatchedFallback.h>
-#include <functorch/csrc/VmapTransforms.h>
+#include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/Constants.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/DynamicLayer.h>

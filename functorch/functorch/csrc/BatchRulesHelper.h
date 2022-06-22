@@ -12,7 +12,7 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/BatchingMetaprogramming.h>
-#include <functorch/csrc/VmapTransforms.h>
+#include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <ATen/core/dispatch/Dispatcher.h>
