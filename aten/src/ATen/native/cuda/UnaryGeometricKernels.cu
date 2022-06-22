@@ -38,7 +38,7 @@ void acos_kernel_cuda(TensorIteratorBase& iter) {
   });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       common_dtype, "acos_cuda",
       [&]() {
@@ -339,7 +339,7 @@ void acosh_kernel_cuda(TensorIteratorBase& iter) {
   });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       common_dtype, "acosh_cuda",
       [&]() {
@@ -377,7 +377,7 @@ void asinh_kernel_cuda(TensorIteratorBase& iter) {
   });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       common_dtype, "asinh_cuda",
       [&]() {
@@ -415,7 +415,7 @@ void atanh_kernel_cuda(TensorIteratorBase& iter) {
   });
 #endif
   } else {
-  AT_DISPATCH_FLOATING_AND2(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
       ScalarType::Half, ScalarType::BFloat16,
       common_dtype, "atanh_cuda",
       [&]() {
