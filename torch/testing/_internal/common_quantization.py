@@ -34,10 +34,11 @@ from torch.jit.mobile import _load_for_lite_interpreter
 
 try:
     # graph mode quantization based on fx
-    from torch.quantization.quantize_fx import (
+    from torch.ao.quantization.quantize_fx import (
         prepare_fx,
         prepare_qat_fx,
         convert_fx,
+        convert_to_reference,
     )
     from torch.ao.ns.fx.ns_types import NSSingleResultValuesType, NSSubgraph
     from torch.fx.graph import Node
@@ -883,7 +884,7 @@ class QuantizationTestCase(TestCase):
 
             prepared_copy = copy.deepcopy(prepared)
             qgraph = convert_fx(copy.deepcopy(prepared))
-            qgraph_reference = convert_fx(copy.deepcopy(prepared), is_reference=True)
+            qgraph_reference = convert_to_reference(copy.deepcopy(prepared))
             result = qgraph(*inputs)
             result_reference = qgraph_reference(*inputs)
             qgraph_copy = copy.deepcopy(qgraph)

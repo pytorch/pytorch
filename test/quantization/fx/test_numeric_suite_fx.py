@@ -13,6 +13,7 @@ import torch.nn.quantized as nnq
 toq = torch.ops.quantized
 from torch.ao.quantization.quantize_fx import (
     convert_fx,
+    convert_to_reference,
     prepare_fx,
     prepare_qat_fx,
 )
@@ -1986,7 +1987,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         example_inputs = (torch.randn(1, 4),)
         qconfig_dict = {"": torch.ao.quantization.float16_static_qconfig}
         mp = prepare_fx(copy.deepcopy(m), qconfig_dict, example_inputs=example_inputs)
-        mq = convert_fx(mp, is_reference=True)
+        mq = convert_to_reference(mp)
         mq_shadows_m = add_shadow_loggers('a', mq, 'b', m, OutputLogger)
 
     def test_mul_add_cat_stack_skips_shadowing(self):
