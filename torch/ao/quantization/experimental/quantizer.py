@@ -31,8 +31,8 @@ class APoTQuantizer():
         self.n = b // k
 
         # make observer, get quantizion levels and level indices
-        obs = APoTObserver(max_val=max_val, b=b, k=k)
-        obs_result = obs.calculate_qparams(signed=signed)
+        obs = APoTObserver(b=b, k=k)
+        obs_result = obs.calculate_qparams(max_val=max_val, signed=signed)
         self.quantization_levels = obs_result[1]
         self.level_indices = obs_result[2]
 

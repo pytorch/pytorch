@@ -23,16 +23,19 @@ class APoTObserver(ObserverBase):
 
     def __init__(
         self,
-        max_val,
         b,
         k,
             dtype=torch.quint8) -> None:
         super().__init__(dtype)
-        self.max_val = max_val
+        self.max_val = 1.0
         self.b = b
         self.k = k
 
-    def calculate_qparams(self, signed):
+    # max_val is an optional arg to override max_val from
+    # observer's internal state
+    def calculate_qparams(self, signed, max_val=None):
+        if max_val:
+            self.max_val = max_val
         return self._calculate_qparams(signed)
 
     r""" Calculates nonuniform quantization parameters according to APoT paper:
@@ -113,7 +116,13 @@ class APoTObserver(ObserverBase):
 
     def forward(self, x_orig):
         r"""Records the running maximum of ``x``."""
-        max_val = self.max_val
+        if x_orig.numel() == 0:
+            return x_orig
+        x = x_orig.detach()  # avoid keeping autograd tape
+        x = x.to(self.max_val.dtype)
+        max_val_cur = torch.max(x)
+        max_val = torch.max(max_val_cur, self.max_val)
+        self.max_val.copy_(max_val)
         return x_orig
 
     def quant_levels_visualization(self, obs_result, filename):

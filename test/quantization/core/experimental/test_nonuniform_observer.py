@@ -9,7 +9,7 @@ class TestNonUniformObserver(unittest.TestCase):
         Test that error is thrown when k == 0
     """
     def test_calculate_qparams_invalid(self):
-        obs = APoTObserver(max_val=0.0, b=0, k=0)
+        obs = APoTObserver(b=0, k=0)
 
         with self.assertRaises(AssertionError):
             obs_result = obs.calculate_qparams(signed=False)
@@ -24,8 +24,8 @@ class TestNonUniformObserver(unittest.TestCase):
         * note: b = k * n
     """
     def test_calculate_qparams_2terms(self):
-        obs = APoTObserver(max_val=1.0, b=4, k=2)
-        obs_result = obs.calculate_qparams(signed=False)
+        obs = APoTObserver(b=4, k=2)
+        obs_result = obs.calculate_qparams(max_val=1.0, signed=False)
 
         # calculate expected gamma value
         gamma_test = 0
@@ -58,9 +58,9 @@ class TestNonUniformObserver(unittest.TestCase):
         * n = 3 (number of additive terms)
     """
     def test_calculate_qparams_3terms(self):
-        obs = APoTObserver(max_val=1.0, b=6, k=2)
+        obs = APoTObserver(b=6, k=2)
 
-        obs_result = obs.calculate_qparams(signed=False)
+        obs_result = obs.calculate_qparams(max_val=1.0, signed=False)
 
         # calculate expected gamma value
         gamma_test = 0
@@ -95,8 +95,8 @@ class TestNonUniformObserver(unittest.TestCase):
         * signed = True
     """
     def test_calculate_qparams_signed(self):
-        obs = APoTObserver(max_val=1.0, b=4, k=2)
-        obs_result = obs.calculate_qparams(signed=True)
+        obs = APoTObserver(b=4, k=2)
+        obs_result = obs.calculate_qparams(max_val=1.0, signed=True)
 
         # calculate expected gamma value
         gamma_test = 0
