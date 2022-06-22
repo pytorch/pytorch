@@ -1175,13 +1175,13 @@ def clamp(
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
     if min is not None:
-        condition = prims.ge(self, min)
-        return prims.where(condition, self, min)
+        condition = prims.ge(a, min)
+        return prims.where(condition, a, min)
     if max is not None:
-        condition = prims.le(self, max)
-        return prims.where(condition, self, max)
+        condition = prims.le(a, max)
+        return prims.where(condition, a, max)
 
-    return self
+    return a
 
 
 @out_wrapper
