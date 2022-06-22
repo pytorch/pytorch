@@ -12,6 +12,9 @@
 namespace at {
 namespace functorch {
 
+// This files contains the legacy (now-deprecated) batching rule API.
+// Please try to use the new-style batching rule API (see writing_batch_rules.md)
+
 // This file contains abstractions used for transforming *logical* vmap arguments
 // into *physical* arguments. (Keep reading for definitions of these terms).
 

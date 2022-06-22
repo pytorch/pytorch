@@ -6,7 +6,7 @@
 
 #include <torch/library.h>
 #include <ATen/ATen.h>
-#include <functorch/csrc/VmapTransforms.h>
+#include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedTensorImpl.h>
 #include <functorch/csrc/PlumbingHelper.h>
 #include <functorch/csrc/Constants.h>

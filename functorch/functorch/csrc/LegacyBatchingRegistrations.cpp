@@ -12,7 +12,7 @@
 #include <functorch/csrc/DynamicLayer.h>
 #include <functorch/csrc/TensorWrapper.h>
 #include <functorch/csrc/BatchingMetaprogramming.h>
-#include <functorch/csrc/VmapTransforms.h>
+#include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/BatchedFallback.h>
 #include <functorch/csrc/Constants.h>
 #include <functorch/csrc/BatchRulesHelper.h>
@@ -22,6 +22,10 @@ namespace functorch {
 
 
 // NOTE: [What is a batching rule?]
+//
+// This files contains batching rules written with the legacy (now-deprecated)
+// batching rule API.
+// Please try to use the new-style batching rule API (see writing_batch_rules.md)
 //
 // A *batching rule* implements the logic of how to call an operator on inputs
 // that have zero or more additional batch dimensions. When one does a vmap, the
