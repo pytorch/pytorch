@@ -167,7 +167,8 @@ def create_aot_autograd_function(
                 with preserve_rng_state():
                     # Set input tensors that require grad to leaves
                     flat_tensor_args = pytree.tree_map(
-                        lambda x: x.detach().requires_grad_(x.requires_grad), flat_tensor_args
+                        lambda x: x.detach().requires_grad_(x.requires_grad)
+                        if isinstance(x, Tensor) else x, flat_tensor_args
                     )
                     with torch.set_grad_enabled(grad_state):
                         out = flat_fn(*flat_tensor_args)
