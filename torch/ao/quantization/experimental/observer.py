@@ -119,10 +119,9 @@ class APoTObserver(ObserverBase):
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
-        x = x.to(self.max_val.dtype)
         max_val_cur = torch.max(x)
-        max_val = torch.max(max_val_cur, self.max_val)
-        self.max_val.copy_(max_val)
+        max_val = torch.max(max_val_cur, torch.tensor(self.max_val))
+        self.max_val = float(max_val)
         return x_orig
 
     def quant_levels_visualization(self, obs_result, filename):
