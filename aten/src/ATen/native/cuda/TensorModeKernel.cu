@@ -150,7 +150,6 @@ void calculate_mode(
   int64_t index;
   std::tie(mode, index) = ModeImpl<scalar_t>{}(iter_begin, iter_end);
 
-
   // Place mode, index in output
   scalar_t* values_data = values.data_ptr<scalar_t>();
   int64_t* indices_data = indices.data_ptr<int64_t>();
