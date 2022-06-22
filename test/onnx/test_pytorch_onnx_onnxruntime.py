@@ -1246,7 +1246,7 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
 
         x1 = torch.randn(4, 7)
         self.run_test(NumpyTranspose(), x1)
-        x2 = torch.randn(4)
+        x2 = torch.tensor(-42.0)
         self.run_test(NumpyTranspose(), x2)
 
     # Conversion of Transpose depends on input shape to be known.
