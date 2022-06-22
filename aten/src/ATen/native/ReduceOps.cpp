@@ -1261,7 +1261,7 @@ Tensor nanmean(
       self.scalar_type());
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
-  return at::nansum(self, dim, keepdim, opt_dtype).div_(factor);
+  return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
 }
 
 static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
