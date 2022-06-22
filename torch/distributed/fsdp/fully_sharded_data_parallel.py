@@ -1442,7 +1442,7 @@ class FullyShardedDataParallel(nn.Module):
             orig_storage = p.storage()
 
             # Replace p with the relevant shard.
-            local_shard, numel_padded = self._get_shard(p)
+            local_shard, numel_padded = FlatParamHandle._get_shard(p, self.rank, self.world_size)
             p.set_(local_shard)  # type: ignore[call-overload]
             handle.init_shard_metadata(local_shard.numel(), numel_padded, self.rank)
             self.numel_padded_per_param.append(numel_padded)
@@ -1454,60 +1454,6 @@ class FullyShardedDataParallel(nn.Module):
         assert len(self.numel_padded_per_param) == len(
             self.params
         ), "numel_padded_per_param is not populated correctly."
-
-    @staticmethod
-    def _get_chunk(
-        tensor: torch.Tensor,
-        rank: int,
-        world_size: int,
-    ) -> Tuple[torch.Tensor, int]:
-        """Returns the unpadded chunk as a view and the number of padding
-        elements of a full tensor for the given rank and world size."""
-        # Shard using `torch.chunk()` to match all-gather/reduce-scatter.
-        chunks = torch.flatten(tensor).chunk(world_size)
-        if len(chunks) < (rank + 1):
-            # If there are not enough chunks to shard across ranks, create an
-            # empty chunk that will just be padded with zeros to be the
-            # appropriate size.
-            chunk = chunks[0].new_empty(0)
-        else:
-            chunk = chunks[rank]
-        # Determine number of padding elements.
-        num_to_pad = chunks[0].numel() - chunk.numel()
-        assert num_to_pad >= 0, \
-            "Chunk's size should at most the first chunk's size"
-        return chunk, num_to_pad
-
-    @staticmethod
-    def _get_shard_functional(
-        tensor: torch.Tensor,
-        rank: int,
-        world_size: int,
-    ) -> Tuple[torch.Tensor, int]:
-        """Functional version of :meth:`_get_shard`."""
-        chunk, num_to_pad = FullyShardedDataParallel._get_chunk(
-            tensor, rank, world_size,
-        )
-        # We always need to clone here regardless of the padding and even
-        # though `chunk` is a view of `tensor` because `tensor` may be
-        # deallocated after this method returns
-        shard = chunk.clone()
-        if num_to_pad > 0:
-            shard = F.pad(shard, [0, num_to_pad])
-        return shard, num_to_pad
-
-    def _get_shard(
-        self,
-        tensor: torch.Tensor,
-        rank: Optional[int] = None,
-    ) -> Tuple[torch.Tensor, int]:
-        """Returns the local shard and the number of padding elements of a full
-        tensor for the calling rank if ``rank=None`` or for the rank ``rank``
-        if not ``None``."""
-        rank = self.rank if rank is None else rank
-        return FullyShardedDataParallel._get_shard_functional(
-            tensor, rank, self.world_size,
-        )
 
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to wrapped module."""
@@ -2238,7 +2184,9 @@ class FullyShardedDataParallel(nn.Module):
         loaded_flat_param = FlatParamHandle.flatten_params(nonsharded_tensors, requires_grad=False)
 
         # Get the chunk from the loaded flat_param for the local rank.
-        loaded_flat_param, num_to_pad = self._get_shard(loaded_flat_param)
+        loaded_flat_param, num_to_pad = FlatParamHandle._get_shard(
+            loaded_flat_param, self.rank, self.world_size,
+        )
         assert flat_param.numel() == loaded_flat_param.numel(), (
             f"The loaded local chunk has different numel({flat_param.numel()}) "
             f"from the local chunk {flat_param.numel()}."

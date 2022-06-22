@@ -15,6 +15,7 @@ from typing import (
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
 
 __all__ = [
@@ -431,6 +432,65 @@ class FlatParamHandle:
             assert len(shard_param_offsets) == \
                 shard_param_indices[-1] - shard_param_indices[0] + 1
         return tuple(shard_param_offsets), shard_param_indices
+
+    @staticmethod
+    def _get_shard_unpadded(
+        tensor: Tensor,
+        rank: int,
+        world_size: int,
+    ) -> Tuple[Tensor, int]:
+        """
+        Returns the shard of ``tensor`` without any padding for the given
+        ``rank`` and ``world_size`` and the numel to pad for that shard.
+
+        If ``tensor`` is already flattened or may be viewed in the flattened
+        shape (which is true in the expected usage), then this method does not
+        allocate any new tensor memory.
+        """
+        chunks = torch.flatten(tensor).chunk(world_size)
+        if len(chunks) < (rank + 1):
+            # This rank gets an empty chunk fully padded with zeros since there
+            # not enough chunks across ranks
+            chunk = chunks[0].new_empty(0)
+        else:
+            chunk = chunks[rank]
+        numel_to_pad = chunks[0].numel() - chunk.numel()
+        assert numel_to_pad >= 0, "Chunk's size should be at most the first chunk's size"
+        return chunk, numel_to_pad
+
+    @staticmethod
+    def _get_shard(
+        tensor: Tensor,
+        rank: int,
+        world_size: int,
+    ) -> Tuple[Tensor, int]:
+        """
+        Returns the shard of ``tensor`` with padding for the given ``rank`` and
+        ``world_size`` and the numel padded for that shard.
+
+        This method allocates new memory (via :meth:`clone`) since the
+        unsharded ``tensor`` may be deallocated after this method returns.
+        """
+        chunk, numel_to_pad = FlatParamHandle._get_shard_unpadded(tensor, rank, world_size)
+        shard = chunk.clone()
+        if numel_to_pad > 0:
+            shard = F.pad(shard, [0, numel_to_pad])
+        return shard, numel_to_pad
+
+    @staticmethod
+    def _get_sharded_size(tensor: Tensor, rank: int, world_size: int) -> torch.Size:
+        """
+        Returns the shape of ``tensor`` after sharding including padding. This
+        requires ``tensor`` to have 1D shape and ensures that the returned
+        shape is 1D.
+        """
+        assert len(tensor.shape) == 1, f"{tensor.shape}"
+        sharded_tensor_unpadded, numel_to_pad = (
+            FlatParamHandle._get_shard_unpadded(tensor, rank, world_size)
+        )
+        sharded_size_unpadded = sharded_tensor_unpadded.size()
+        assert len(sharded_size_unpadded) == 1, f"{sharded_size_unpadded}"
+        return torch.Size([sharded_size_unpadded[0] + numel_to_pad])
 
     def _get_flat_param_offsets(self) -> List[Tuple[int, int]]:
         """Returns [start, end] offsets of each original parameter's flattened

@@ -375,7 +375,9 @@ def _flatten_optim_state(
             if shard_state:
                 # Shard the flattened tensor immediately to minimize max memory
                 # usage
-                sharded_flat_tensor, _ = fsdp_module._get_shard(flat_tensor)
+                sharded_flat_tensor, _ = FlatParamHandle._get_shard(
+                    flat_tensor, fsdp_module.rank, fsdp_module.world_size,
+                )
                 flat_state[state_name] = sharded_flat_tensor
             else:
                 flat_state[state_name] = flat_tensor
@@ -591,11 +593,9 @@ def _process_pos_dim_tensor_state(
                 no_tensor_osd["state"][key][state_name] = value
                 continue
             if key.is_flat_param:  # FSDP parameter
-                chunk, num_to_pad = FSDP.FullyShardedDataParallel._get_chunk(
-                    value, rank=0, world_size=world_size,
-                )
-                assert len(chunk.shape) == 1, f"Chunk should be 1D but got {chunk.shape}"
-                info = _PosDimTensorInfo(torch.Size([chunk.shape[0] + num_to_pad]), chunk.dtype)
+                sharded_size = FlatParamHandle._get_sharded_size(value, rank=0, world_size=world_size)
+                assert len(sharded_size) == 1, f"{sharded_size}"
+                info = _PosDimTensorInfo(sharded_size, value.dtype)
             else:  # non-FSDP parameter
                 info = _PosDimTensorInfo(value.shape, value.dtype)
             no_tensor_osd["state"][key][state_name] = info
@@ -712,7 +712,7 @@ def _broadcast_sharded_pos_dim_tensor_state(
         assert unsharded_tensor is not None, \
             "Expects rank 0 to pass in the unsharded tensor"
         get_shard = functools.partial(
-            FSDP.FullyShardedDataParallel._get_shard_functional,
+            FlatParamHandle._get_shard,
             unsharded_tensor,
         )
     for target_rank in range(1, world_size):
