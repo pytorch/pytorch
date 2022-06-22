@@ -1128,7 +1128,7 @@ Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
   }
   std::sort(dims_sparse_dense_id_perm.begin(), dims_sparse_dense_id_perm.begin() + sparse_ndim);
   std::sort(dims_sparse_dense_id_perm.begin() + sparse_ndim, dims_sparse_dense_id_perm.end());
-  TORCH_CHECK(IntArrayRef(dims_sparse_dense_id_perm) == dims_id_perm,
+  TORCH_CHECK(dims_sparse_dense_id_perm == dims_id_perm,
       "permute(sparse_coo): transpositions between sparse and dense dimensions are not allowed.",
       "Only transpositions within sparse and dense dimensions are supported.");
 
