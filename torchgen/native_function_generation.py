@@ -251,6 +251,7 @@ def generate_function(
             is_abstract=f.is_abstract,
             has_composite_implicit_autograd_kernel=False,
             has_composite_explicit_autograd_kernel=True,
+            has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=set(["generated"]),
