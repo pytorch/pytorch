@@ -87,8 +87,7 @@ bool Function::initialize_operators(bool should_check_operators) {
         unsupported_op_names.empty(),
         "Following ops cannot be found: [",
         c10::Join(", ", unsupported_op_names),
-        "]. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/"
-    );
+        "]. Please check if the operator library is included in the build. If built with selected ops, check if these ops are in the list. If you are a Meta employee, please see fburl.com/missing_ops for a fix. Or post it in https://discuss.pytorch.org/c/mobile/");
   }
   code_.initialized = all_ops_supported;
   return all_ops_supported;
