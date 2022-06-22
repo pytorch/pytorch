@@ -1172,11 +1172,15 @@ def clamp(
     a, min, max = _maybe_broadcast(a, min, max)
 
     if min is not None and max is not None:
-        return minimum(maximum(a, min), max)
+        condition_min = prims.ge(self, min)
+        condition_max = prims.le(self, max)
+        return prims.where(condition_max, prims.where(condition_min, self, min), max)
     if min is not None:
-        return maximum(a, min)
+        condition = prims.ge(self, min)
+        return prims.where(condition, self, min)
     if max is not None:
-        return minimum(a, max)
+        condition = prims.le(self, max)
+        return prims.where(condition, self, max)
 
     msg = "clamp called but both min and max are none!"
     raise ValueError(msg)
@@ -1192,8 +1196,9 @@ def clamp_min(
     min: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
     self, min = _maybe_broadcast(self, min)
+    condition = prims.ge(self, min)
 
-    return maximum(self, min)
+    return prims.where(condition, self, min)
 
 
 @out_wrapper
@@ -1206,8 +1211,9 @@ def clamp_max(
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
     self, max = _maybe_broadcast(self, max)
+    condition = prims.le(self, max)
 
-    return minimum(self, max)
+    return prims.where(condition, self, max)
 
 
 #
