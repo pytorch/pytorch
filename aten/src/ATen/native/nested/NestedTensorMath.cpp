@@ -106,6 +106,63 @@ inline const at::Tensor& get_buffer(const at::Tensor& tensor) {
   return get_nested_tensor_impl(tensor)->get_buffer();
 }
 
+// The starting positions of the underlying tensors in contiguous buffer memory
+// i.e. the buffer memory offsets to get the underlying tensors
+inline std::vector<int64_t> NestedTensor_get_offsets(const NestedTensorImpl* self_ptr) {
+  int64_t ntensors = self_ptr->size(0);
+  if (ntensors == 0) {
+    return std::vector<int64_t>(1, 0);
+  }
+  std::vector<int64_t> offsets(ntensors + 1);
+  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
+  int64_t orig_dim = sizemat.size(1);
+  // nesting scalars has easy offsets
+  if (orig_dim == 0) {
+    std::iota(offsets.begin(), offsets.end(), 0);
+    return offsets;
+  }
+  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
+  const Tensor& stridemat = self_ptr->get_nested_stride_tensor();
+  const int64_t* stridemat_ptr = stridemat.data_ptr<int64_t>();
+  offsets[0] = 0;
+  for (int64_t i = 0; i < ntensors; i++) {
+    offsets[i + 1] = offsets[i] + *sizemat_ptr * *stridemat_ptr;
+    sizemat_ptr += orig_dim;
+    stridemat_ptr += orig_dim;
+  }
+  return offsets;
+}
+
+inline std::vector<int64_t> NestedTensor_get_offsets(const at::Tensor& self) {
+  const NestedTensorImpl* self_ptr = get_nested_tensor_impl(self);
+  return NestedTensor_get_offsets(self_ptr);
+}
+
+// The shapes of the underlying tensors
+inline std::vector<IntArrayRef> NestedTensor_get_shapes(const NestedTensorImpl* self_ptr) {
+  int64_t ntensors = self_ptr->size(0);
+  std::vector<IntArrayRef> shapes(ntensors);
+  if (ntensors == 0) {
+    return shapes;
+  }
+  const Tensor& sizemat = self_ptr->get_nested_size_tensor();
+  int64_t orig_dim = sizemat.size(1);
+  // nesting scalars has empty shapes
+  if (orig_dim == 0) {
+    return shapes;
+  }
+  const int64_t* sizemat_ptr = sizemat.data_ptr<int64_t>();
+  for (int64_t i = 0; i < ntensors; i++) {
+    shapes[i] = IntArrayRef(sizemat_ptr, sizemat_ptr + orig_dim);
+    sizemat_ptr += orig_dim;
+  }
+  return shapes;
+}
+
+inline std::vector<IntArrayRef> NestedTensor_get_shapes(const at::Tensor& self) {
+  const NestedTensorImpl* self_ptr = get_nested_tensor_impl(self);
+  return NestedTensor_get_shapes(self_ptr);
+}
 
 // CPU only!
 // TODO: The algorithm here can be optimized, right now it involves a lot of
@@ -120,16 +177,14 @@ std::vector<at::Tensor> NestedTensor_unbind(
       dim,
       " instead.");
   auto self_ptr = get_nested_tensor_impl(self);
-  // empty nested tensor
-  if (self_ptr->get_nested_size_tensor().dim() == 0) {
-    return std::vector<at::Tensor>();
-  }
-  int64_t ntensors = *(self_ptr->opt_size(0));
+  int64_t ntensors = self_ptr->size(0);
   std::vector<at::Tensor> result_tensors(ntensors);
+  if (ntensors == 0) {
+    return result_tensors;
+  }
   const at::Tensor & buffer = self_ptr->get_buffer();
-  std::vector<int64_t> offsets;
-  std::vector<IntArrayRef> shapes;
-  std::tie(offsets, shapes) = self_ptr->get_offsets_and_shapes();
+  std::vector<int64_t> offsets = NestedTensor_get_offsets(self_ptr);
+  std::vector<IntArrayRef> shapes = NestedTensor_get_shapes(self_ptr);
   for (int64_t i = 0; i < ntensors; i++) {
     result_tensors[i] = buffer.slice(0, offsets[i], offsets[i + 1]).view(shapes[i]);
   }
@@ -580,19 +635,15 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
     "NestedTensor can only be selected along dimension 0 ",
     "got dimension ", dim, " instead."
   );
-  int64_t ntensors = 0;
-  if (self_ptr->get_nested_size_tensor().dim() == 2) {
-    ntensors = *(self_ptr->opt_size(0));
-  }
+  int64_t ntensors = self_ptr->size(0);
   TORCH_CHECK_INDEX(
       index >= -ntensors && index < ntensors,
       "index ", index,
       " is out of bounds for dimension 0 with size ", ntensors);
   int64_t positive_index = index < 0 ? index + ntensors : index;
   const at::Tensor & buffer = self_ptr->get_buffer();
-  std::vector<int64_t> offsets;
-  std::vector<IntArrayRef> shapes;
-  std::tie(offsets, shapes) = self_ptr->get_offsets_and_shapes();
+  std::vector<int64_t> offsets = NestedTensor_get_offsets(self_ptr);
+  std::vector<IntArrayRef> shapes = NestedTensor_get_shapes(self_ptr);
   return buffer.slice(0, offsets[positive_index], offsets[positive_index + 1]).view(shapes[positive_index]);
 }
 
