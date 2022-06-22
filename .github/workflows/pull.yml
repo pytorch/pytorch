@@ -161,20 +161,20 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-xenial-cuda11_3-py3_7-gcc7-build:
-    name: linux-xenial-cuda11.3-py3.7-gcc7
+  linux-bionic-cuda11_6-py3_7-gcc7-build:
+    name: linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
-  linux-xenial-cuda11_3-py3_7-gcc7-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7
+  linux-bionic-cuda11_6-py3_7-gcc7-test:
+    name: linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-cuda11_3-py3_7-gcc7-build
+    needs: linux-bionic-cuda11_6-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
@@ -248,14 +248,14 @@ jobs:
         ]}
 
   # please ensure that this and its corresponding job in trunk.yml are in sync
-  win-vs2019-cuda11_3-py3-build:
+  win-vs2019-cuda11_6-py3-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
-    name: win-vs2019-cuda11.3-py3
+    name: win-vs2019-cuda11.6-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cuda11.3-py3
-      cuda-version: "11.3"
+      build-environment: win-vs2019-cuda11.6-py3
+      cuda-version: "11.6"
 
   linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
