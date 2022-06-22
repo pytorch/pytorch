@@ -19,15 +19,13 @@ class TestQuantizationDocs(QuantizationTestCase):
     they can be imported either in the test file or passed as a global input
     """
 
-    def _get_code(self, path_from_pytorch, unique_identifier, offset=2, strict=True):
+    def _get_code(self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False):
         r"""
-        This function reads in the code from the docs, note that first and last
-        line refer to the line number (first line of doc is 1), the offset due to
-        python file reading is handled within this function. Most code snippets
-        have a 2 space indentation, for other indentation levels, change offset,
-        strict=True is to check that the line before the first line and the line after
-        the last line are `newlines`, this is to ensure that the addition of a new line
-        in the docs does not shift the code chunk out of the selection window.
+        This function reads in the code from the docs given a unique identifier.
+        Most code snippets have a 2 space indentation, for other indentation levels,
+        change the offset `arg`. the `short_snippet` arg can be set to allow for testing
+        of smaller snippets, the check that this arg controls is used to make sure that
+        we are not accidentally only importing a blank line or something.
         """
         def get_correct_path(path_from_pytorch):
             r"""
@@ -56,13 +54,6 @@ class TestQuantizationDocs(QuantizationTestCase):
         if path_to_file:
             file = open(path_to_file)
             content = file.readlines()
-            # if strict:
-            #     assert content[first_line - 2] == "\n" and content[last_line] == "\n", (
-            #         "The line before and after the code chunk should be a newline."
-            #         "If new material was added to {}, please update this test with"
-            #         "the new code chunk line numbers, previously the lines were "
-            #         "{} to {}".format(path_to_file, first_line, last_line)
-            #     )
 
             # it will register as having a newline at the end in python
             if "\n" not in unique_identifier:
@@ -86,7 +77,7 @@ class TestQuantizationDocs(QuantizationTestCase):
             code = "".join([x[offset:] for x in content[line_num_start+1:last_line_num]])
 
             # want to make sure we are actually getting some code,
-            assert last_line_num-line_num_start>3, \
+            assert last_line_num-line_num_start>3 or short_snippet, \
                 "The code in {} identified by {} seems suspiciously short:" \
                 "\n\n###code-start####\n{}###code-end####".format(path_to_file, unique_identifier,code)
             return code
