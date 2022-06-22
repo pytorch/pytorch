@@ -189,15 +189,49 @@ struct _cuda_scatter_large_index_internal_kernel {
     // We send the relevant index and source metadata
     // to the device
     int ndim = index_shape.size();
+    const int64_t *index_shape_data = index_shape.data();
+    const int64_t *index_strides_data = index_strides.data();
+    const int64_t *src_shape_data = src_shape.data();
+    const int64_t *src_strides_data = src_strides.data();
+    int64_t index_shape_host[ndim], index_strides_host[ndim], src_shape_host[ndim], src_strides_host[ndim];
     int64_t *index_shape_device, *index_strides_device, *src_shape_device, *src_strides_device;
+
+    // We need to reorder these in case the index tensor is noncontiguous
+    bool index_is_noncontiguous = false;
+    index_shape_host[0] = index_shape_data[0];
+    index_strides_host[0] = index_strides_data[0];
+    src_shape_host[0] = src_shape_data[0];
+    src_strides_host[0] = src_strides_data[0];
+    for (int i = 1; i < ndim; i++) {
+      if (index_strides_data[i - 1] < index_strides_data[i]) {
+        index_is_noncontiguous = true;
+      }
+      index_shape_host[i] = index_shape_data[i];
+      index_strides_host[i] = index_strides_data[i];
+      src_shape_host[i] = src_shape_data[i];
+      src_strides_host[i] = src_strides_data[i];
+    }
+    if (index_is_noncontiguous) {
+      for (int i = 0; i < ndim - 1; i++) {
+        for (int j = i + 1; j < ndim; j++) {
+          if (index_strides_host[i] < index_strides_host[j]) {
+            std::swap(index_shape_host[i], index_shape_host[j]);
+            std::swap(index_strides_host[i], index_strides_host[j]);
+            std::swap(src_shape_host[i], src_shape_host[j]);
+            std::swap(src_strides_host[i], src_strides_host[j]);
+          }
+        }
+      }
+    }
+
     cudaMalloc((void**)&index_shape_device, ndim * sizeof(int64_t));
     cudaMalloc((void**)&index_strides_device, ndim * sizeof(int64_t));
     cudaMalloc((void**)&src_shape_device, ndim * sizeof(int64_t));
     cudaMalloc((void**)&src_strides_device, ndim * sizeof(int64_t));
-    cudaMemcpy(index_shape_device, index_shape.data(), ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(index_strides_device, index_strides.data(), ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(src_shape_device, src_shape.data(), ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
-    cudaMemcpy(src_strides_device, src_strides.data(), ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(index_shape_device, &index_shape_host[0], ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(index_strides_device, &index_strides_host[0], ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(src_shape_device, &src_shape_host[0], ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(src_strides_device, &src_strides_host[0], ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
 
     auto offset_calc = make_offset_calculator<3>(iter);
     auto loop = [=]C10_DEVICE(int i) {
