@@ -22,7 +22,10 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values between 0 -> 1000
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
-        quantizer = APoTQuantizer(4, 1, torch.max(tensor2quantize), False)
+        min_val = torch.min(tensor2quantize)
+        max_val = torch.max(tensor2quantize)
+
+        quantizer = APoTQuantizer(4, 1, min_val, max_val, False)
 
         # get apot quantized tensor result
         qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
@@ -55,9 +58,12 @@ class TestQuantizer(unittest.TestCase):
         """
 
         # generate tensor with random fp values between 0 -> 1000
-        tensor2quantize = torch.tensor([0.0215, 0.1692, 0.385, 0.0391])
+        tensor2quantize = torch.tensor([0, 0.0215, 0.1692, 0.385, 1, 0.0391])
 
-        quantizer = APoTQuantizer(4, 2, 1.0, False)
+        min_val = torch.min(tensor2quantize)
+        max_val = torch.max(tensor2quantize)
+
+        quantizer = APoTQuantizer(4, 2, min_val, max_val, False)
 
         # get apot quantized tensor result
         qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
@@ -68,7 +74,7 @@ class TestQuantizer(unittest.TestCase):
         # for each fp value in tensor2quantize
         # e.g.
         # 0.0215 in tensor2quantize nearest 0.0208 in quantization_levels -> 3 in level_indices
-        expected_qtensor = torch.tensor([3, 8, 13, 12], dtype=torch.uint8)
+        expected_qtensor = torch.tensor([0, 3, 8, 13, 5, 12], dtype=torch.uint8)
 
         self.assertTrue(torch.equal(qtensor_data, expected_qtensor))
 
@@ -88,7 +94,7 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random values between 0 -> 2**4 = 16
         # because there are 2**b = 2**4 quantization levels total
         float2apot = 16 * torch.rand(size)
-        quantizer = APoTQuantizer(4, 2, 1.0, False)
+        quantizer = APoTQuantizer(4, 2, torch.tensor([0]), torch.tensor([1]), False)
         float2apot = float2apot.int()
         orig_input = torch.clone(float2apot)
 
@@ -116,7 +122,7 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random values between 0 -> 2**6 = 64
         # because there are 2**b = 2**6 quantization levels total
         float2apot = 64 * torch.rand(size)
-        quantizer = APoTQuantizer(6, 2, 1.0, False)
+        quantizer = APoTQuantizer(6, 2, torch.tensor([0]), torch.tensor([1]), False)
         float2apot = float2apot.int()
         orig_input = torch.clone(float2apot)
 
