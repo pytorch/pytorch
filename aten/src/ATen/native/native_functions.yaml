@@ -2553,15 +2553,6 @@
 - func: instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor
   variants: function
 
-- func: inverse(Tensor self) -> Tensor
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: inverse
-
-- func: inverse.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  dispatch:
-    CompositeExplicitAutograd: inverse_out
-
 - func: isclose(Tensor self, Tensor other, float rtol=1e-05, float atol=1e-08, bool equal_nan=False) -> Tensor
   variants: function, method
 
@@ -11639,32 +11630,26 @@
   dispatch:
     CPU, CUDA: linalg_householder_product_out
 
-- func: _linalg_inv_out_helper_(Tensor(a!) self, Tensor(b!) infos_lu, Tensor(c!) infos_getri) -> Tensor(a!)
-  variants: function
+- func: linalg_inv_ex(Tensor A, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
+  python_module: linalg
+  structured_delegate: linalg_inv_ex.inverse
+
+- func: linalg_inv_ex.inverse(Tensor A, *, bool check_errors=False, Tensor(a!) inverse, Tensor(b!) info) -> (Tensor(a!) inverse, Tensor(b!) info)
+  python_module: linalg
+  structured: True
   dispatch:
-    CPU: _linalg_inv_out_helper_cpu
-    CUDA: _linalg_inv_out_helper_cuda
-  autogen: _linalg_inv_out_helper.functional, _linalg_inv_out_helper.out
+    CPU, CUDA: linalg_inv_ex_out
 
-- func: linalg_inv_ex(Tensor self, *, bool check_errors=False) -> (Tensor inverse, Tensor info)
+- func: linalg_inv(Tensor A) -> Tensor
   python_module: linalg
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_inv_ex
 
-- func: linalg_inv_ex.inverse(Tensor self, *, bool check_errors=False, Tensor(a!) inverse, Tensor(b!) info) -> (Tensor(a!) inverse, Tensor(b!) info)
+- func: linalg_inv.out(Tensor A, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: linalg_inv_ex_out
 
-- func: linalg_inv(Tensor self) -> Tensor
-  python_module: linalg
-  variants: function
+- func: inverse(Tensor self) -> Tensor
+  variants: function, method
 
-- func: linalg_inv.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
-  python_module: linalg
-  variants: function
+- func: inverse.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
 
 - func: inner(Tensor self, Tensor other) -> Tensor
   variants: function, method

@@ -177,7 +177,6 @@ def meta_var_mean_correction(self, dim, *, correction, keepdim=False):
     return result1, result2
 
 
-@torch.library.impl(meta_lib, "inverse")
 def meta_inverse(self):
     # Bug: https://github.com/pytorch/pytorch/issues/77498
     if self.numel() == 0:
