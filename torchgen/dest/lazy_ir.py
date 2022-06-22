@@ -175,7 +175,7 @@ class GenLazyIR(ABC):
             shape_args.extend(a.name for a in scalar_args)
             shape_ctor_arg = f"compute_shape_{schema.name}({', '.join(shape_args)}),"
         elif schema.properties.ShapeCache:
-            shape_args = [f"operand({i})" for i in range(len(value_args))]
+            shape_args = [f"nullable_operand({i})" for i in range(len(value_args))]
             shape_args.extend(a.name for a in scalar_args)
             shape_ctor_arg = f"[&](){{ return compute_shape_{schema.name}({', '.join(shape_args)})[0]; }},"
         else:
@@ -317,14 +317,14 @@ class GenTSLazyIR(GenLazyIR):
         for arg in schema.positional_values:
             if isinstance(arg.lazy_type, OptionalCType):
                 value_comparison.append(
-                    f"operand(i++) == {arg.name}.value_or(kNullValue)"
+                    f"nullable_operand(i++) == {arg.name}.value_or(kNullValue)"
                 )
             else:
-                value_comparison.append(f"operand(i++) == {arg.name}")
+                value_comparison.append(f"nullable_operand(i++) == {arg.name}")
         for arg in schema.positional_scalars:
             value_comparison.append(f"this->{arg.name} == {arg.name}")
         for arg in schema.keyword_values:
-            value_comparison.append(f"operand(i++) == {arg.name}")
+            value_comparison.append(f"nullable_operand(i++) == {arg.name}")
         for arg in schema.keyword_scalars:
             value_comparison.append(f"this->{arg.name} == {arg.name}")
         value_comparison_str = " &&\n        ".join(value_comparison)
