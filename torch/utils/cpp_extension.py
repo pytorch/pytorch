@@ -16,13 +16,8 @@ import torch
 import torch._appdirs
 from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
-try:
-    from .hipify import hipify_python  # type: ignore[import]
-    from .hipify.hipify_python import GeneratedFileCleaner  # type: ignore[import]
-except ModuleNotFoundError:
-    hipify_python = None  # type: ignore[assignment]
-    GeneratedFileCleaner = None  # type: ignore[assignment]
-
+from .hipify import hipify_python
+from .hipify.hipify_python import GeneratedFileCleaner
 from typing import List, Optional, Union, Tuple
 from torch.torch_version import TorchVersion
 
