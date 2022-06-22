@@ -1,4 +1,7 @@
+# Owner(s): ["oncall: fx"]
+
 import torch
+import torch.fx as fx
 
 from torch.testing._internal.common_utils import TestCase
 from torch.fx.passes.infra.pass_manager import (
@@ -65,7 +68,7 @@ class TestPassManager(TestCase):
         Tests that users can add in check functions correctly
         """
         m = AddModule()
-        traced_m = torch.fx.symbolic_trace(m)
+        traced_m = fx.symbolic_trace(m)
         pm = PassManager(passes=[replace_add_with_mul_pass, replace_mul_with_sub_pass])
 
         def check_div_target(graph_module):
@@ -85,6 +88,7 @@ class TestPassManager(TestCase):
 
         pm = PassManager()
         self.assertRaises(TypeError, pm.add_checks, check_bad_args)
+
 
 class TestPassPipelineManager(TestCase):
     def test_pass_pipeline_manager(self):

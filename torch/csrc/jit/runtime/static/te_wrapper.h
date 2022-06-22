@@ -33,6 +33,7 @@ class TEWrapper {
 #endif
 };
 
+std::shared_ptr<TEWrapper> createDiv();
 std::shared_ptr<TEWrapper> createLogit();
 std::shared_ptr<TEWrapper> createRelu();
 std::shared_ptr<TEWrapper> createTanh();
