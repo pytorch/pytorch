@@ -1227,6 +1227,31 @@ class TestProfiler(TestCase):
             self.assertTrue(event_metrics.fraction_idle_time >= 0.0
                             and event_metrics.fraction_idle_time <= 1.0)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_utils_get_optimizable_events(self):
+
+        def garbage_code():
+            for i in range(100):
+                x[0, i] = i
+
+        x = torch.ones((8192, 8192)).to("cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     record_shapes=True,
+                     profile_memory=True,
+                     with_stack=True,
+                     with_flops=True,
+                     with_modules=True) as prof:
+            for _ in range(100):
+                x = x @ x
+            garbage_code()
+            for _ in range(100):
+                x = x @ x
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        optimizable_events = basic_evaluation.get_optimizable_events(
+            5, print_enable=False)
+        self.assertTrue(len(optimizable_events) == 5)
+        self.assertTrue("garbage_code" in optimizable_events[0].event.name())
+
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
