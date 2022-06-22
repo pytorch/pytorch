@@ -13,7 +13,6 @@ class APoTQuantizer():
     signed: bool
     quantization_levels: torch.Tensor
     level_indices: torch.Tensor
-    data: torch.Tensor
 
     def __init__(
         self,
@@ -50,8 +49,6 @@ class APoTQuantizer():
         # map float_to_apot over tensor2quantize elements
         result = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
 
-        self.data = result
-
         return result
 
     r""" Dequantizes integer Tensor to floating point representation
@@ -62,14 +59,14 @@ class APoTQuantizer():
     Returns:
         result: floating point representation of input Tensor
     """
-    def dequantize(self):  # type: ignore[override]
-        tensor2dequantize = self.data.float()
+    def dequantize(self, float2apot: Tensor):  # type: ignore[override]
+        float2apot = float2apot.float()
 
         quantization_levels = self.quantization_levels
         level_indices = self.level_indices
 
         # map apot_to_float over tensor2quantize elements
-        result = tensor2dequantize.apply_(lambda x: float(apot_to_float(x, quantization_levels, level_indices)))
+        result = float2apot.apply_(lambda x: float(apot_to_float(x, quantization_levels, level_indices)))
 
         return result
 
