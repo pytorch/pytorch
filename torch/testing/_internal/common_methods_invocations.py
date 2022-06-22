@@ -12055,7 +12055,6 @@ op_db: List[OpInfo] = [
                skipCPUIfNoFFT,
                DecorateInfo(unittest.skip("Skipped! stft does not match the native function"),
                             'TestJit', 'test_variant_consistency_jit'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
            ],
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_stft,
@@ -13501,6 +13500,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
                DecorateInfo(unittest.skip('Fails on clang'), 'TestCommon',
                             'test_non_standard_bool_values', device_type='cpu'),
+               # AssertionError: Shapes torch.Size([]) and torch.Size([1]) are not equal!
+               DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),
            )),
     OpInfo('as_strided',
            op=lambda x, size, stride, storage_offset=0:
@@ -18289,10 +18290,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
            skips=(
-               # Pre-existing condition; Needs to be fixed
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_forward_ad'),
                # Expected RuntimeError when calling with input.device=cpu and out.device=cuda
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # Arguments for call are not valid.
@@ -20161,10 +20158,7 @@ python_ref_db = [
         "_refs.fill",
         torch_opinfo_name="fill",
         supports_out=True,
-        skips=(
-            # TypeError: _traced() got an unexpected keyword argument 'value'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.floor",
@@ -20220,26 +20214,17 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        skips=(
-            # SyntaxError: cannot assign to False
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.log_softmax",
         torch_opinfo_name="log_softmax",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
         torch_opinfo_name="nan_to_num",
-        skips=(
-            # RuntimeError: Tracing expected 4 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.neg",
@@ -20269,13 +20254,6 @@ python_ref_db = [
         handles_complex_extremal_values=False,
         handles_large_floats=False,
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
-            ),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
@@ -20298,10 +20276,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.softmax",
         torch_opinfo_name="softmax",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sqrt",
@@ -20344,10 +20319,7 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.logit",
         torch_opinfo_name="logit",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     #
     # Elementwise Unary nn.functional OpInfos
@@ -20355,10 +20327,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
@@ -20385,40 +20353,28 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: dropout is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # TypeError: _traced() got an unexpected keyword argument 'p'
+            # dropout is not comparable
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.elu",
         torch_opinfo_name="nn.functional.elu",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.hardtanh",
         torch_opinfo_name="nn.functional.hardtanh",
-        skips=(
-            # RuntimeError: Tracing expected 4 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(  # TODO: Port this to an UnaryOpInfo
         "_refs.nn.functional.gelu",
         torch_opinfo_name="nn.functional.gelu",
-        skips=(
-            # RuntimeError: TypeError: _traced() got an unexpected keyword argument 'approximate'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.layer_norm",
         torch_opinfo_name="nn.functional.layer_norm",
+        supports_nvfuser=False,
         skips=(
-            # TypeError: make_traced.<locals>._traced() got an unexpected keyword argument 'eps'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             # Reference result was farther (3.5762786809723224e-07) from the precise computation
             # than the torch result was (2.5068410824946596e-07)!
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
@@ -20428,58 +20384,34 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
         torch_opinfo_name="nn.functional.leaky_relu",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
-        decorators=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.mish",
         torch_opinfo_name="nn.functional.mish",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.selu",
         torch_opinfo_name="nn.functional.selu",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.softplus",
         torch_opinfo_name="nn.functional.softplus",
-        skips=(
-            # TypeError: _traced() got an unexpected keyword argument 'beta'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.margin_ranking_loss",
         torch_opinfo_name="nn.functional.margin_ranking_loss",
-        skips=(
-            # TypeError: _traced() got an unexpected keyword argument 'margin'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.hinge_embedding_loss",
         torch_opinfo_name="nn.functional.hinge_embedding_loss",
-        skips=(
-            # TypeError: _traced() got an unexpected keyword argument 'reduction'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.tanhshrink",
@@ -20488,18 +20420,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.hardshrink",
         torch_opinfo_name="nn.functional.hardshrink",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.softshrink",
         torch_opinfo_name="nn.functional.softshrink",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     #
     # Elementwise Binary Reference OpInfos
@@ -20510,10 +20436,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
@@ -20543,13 +20465,6 @@ python_ref_db = [
         "_refs.eq",
         torch_opinfo_name="eq",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.float_power",
@@ -20558,11 +20473,6 @@ python_ref_db = [
         skips=(
             # Test doesn't account for float -> double type promotion
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20624,11 +20534,10 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.isclose",
         torch_opinfo_name="isclose",
+        supports_nvfuser=False,
         skips=(
             # Intentional xfail -- isclose does not type promote
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
-            # RuntimeError: Tracing expected 5 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20645,47 +20554,20 @@ python_ref_db = [
         "_refs.logical_and",
         torch_opinfo_name="logical_and",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
-        )
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.logical_not",
         torch_opinfo_name="logical_not",
-        skips=(
-            DecorateInfo(
-                # NotImplementedError: argument of type: <class 'complex'>
-                unittest.skip("Fails aten complex and nvfuser doesn't support eq(a, 0)"), 'TestCommon', 'test_python_ref_executor'
-            ),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
         torch_opinfo_name="logical_or",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_xor",
         torch_opinfo_name="logical_xor",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
-        )
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
@@ -20716,11 +20598,13 @@ python_ref_db = [
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
+            # Reference result was farther (0.0) from the precise computation
+            # than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128)
+                dtypes=(torch.complex32,),
             ),
+
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
             DecorateInfo(
@@ -20739,13 +20623,6 @@ python_ref_db = [
         "_refs.ne",
         torch_opinfo_name="ne",
         supports_nvfuser=False,
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex64, torch.complex128,)
-            ),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.nextafter",
@@ -20757,10 +20634,11 @@ python_ref_db = [
         torch_opinfo_name="pow",
         supports_nvfuser=False,
         skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
+            # Reference result was farther (inf) from the precise
+            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32,),
             ),
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -20794,8 +20672,6 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             # Reference result was farther (nan) from the precise computation than
             # the torch result was (nan)!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
@@ -20814,10 +20690,11 @@ python_ref_db = [
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
+            # Reference result was farther (0.7433461727239705) from the precise
+            # computation than the torch result was (nan)!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                dtypes=(torch.complex32, torch.complex64, torch.complex128,)
+                dtypes=(torch.complex32,),
             ),
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
@@ -20848,10 +20725,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     #
     # Data Conversion & Data Movement Opinfos
@@ -20859,10 +20733,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.clone",
         torch_opinfo_name="clone",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     #
     # View & Shape OpInfos
@@ -20871,40 +20742,26 @@ python_ref_db = [
         "_refs.atleast_1d",
         torch_opinfo_name="atleast_1d",
         validate_view_consistency=False,
-        skips=(
-            # ValueError: only one element tensors can be converted to Python scalars
-            # There's a problem that the input tensor gets decomposed into a list of tensors
-            # It only happens with make_fx tracer of the reference op
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False
     ),
     PythonRefInfo(
         "_refs.atleast_2d",
         torch_opinfo_name="atleast_2d",
         validate_view_consistency=False,
-        skips=(
-            # ValueError: only one element tensors can be converted to Python scalars
-            # There's a problem that the input tensor gets decomposed into a list of tensors
-            # It only happens with make_fx tracer of the reference op
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False
     ),
     PythonRefInfo(
         "_refs.atleast_3d",
         torch_opinfo_name="atleast_3d",
         validate_view_consistency=False,
-        skips=(
-            # ValueError: only one element tensors can be converted to Python scalars
-            # There's a problem that the input tensor gets decomposed into a list of tensors
-            # It only happens with make_fx tracer of the reference op
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False
     ),
     PythonRefInfo(
         "_refs.as_strided",
         torch_opinfo_name="as_strided",
         # FIXME: doesn't support chalf
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_nvfuser=False,
         skips=(
             # TODO: fix and/or update to xfails
             DecorateInfo(unittest.skip("Errors when storage_offset is included"),
@@ -20913,25 +20770,17 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
             DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
-            # TypeError: _traced() got an unexpected keyword argument 'storage_offset'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",
         torch_opinfo_name="broadcast_shapes",
-        skips=(
-            # RuntimeError: Tracing expected 0 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_tensors",
         torch_opinfo_name="broadcast_tensors",
-        skips=(
-            # RuntimeError: Tracing expected 0 arguments but got 4 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.broadcast_to",
@@ -20941,18 +20790,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.cat",
         torch_opinfo_name="cat",
-        skips=(
-            # TypeError: _traced() got an unexpected keyword argument 'dim'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.chunk",
         torch_opinfo_name="chunk",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.column_stack",
@@ -20976,18 +20819,12 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.flatten",
         torch_opinfo_name="flatten",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.flip",
         torch_opinfo_name="flip",
-        skips=(
-            # TypeError: _traced() got an unexpected keyword argument 'dims'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.fliplr",
@@ -21026,11 +20863,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.ravel",
         torch_opinfo_name="ravel",
-        skips=(
-            # TypeError: 'NoneType' object is not callable
-            DecorateInfo(unittest.skip("Passes on aten executor but fails on nvFuser executor"),
-                         'TestCommon', 'test_python_ref_executor', dtypes=(torch.float, torch.int32)),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.reshape",
@@ -21041,37 +20874,24 @@ python_ref_db = [
         "_refs.roll",
         torch_opinfo_name="roll",
         validate_view_consistency=False,
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.rot90",
         torch_opinfo_name="rot90",
         validate_view_consistency=False,
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.stack",
         torch_opinfo_name="stack",
-        skips=(
-            # TODO: Invalid generated code from tracing
-            # SyntaxError: cannot assign to literal
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
         validate_view_consistency=False,
     ),
     PythonRefInfo(
         "_refs.squeeze",
         torch_opinfo_name="squeeze",
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.tensor_split",
@@ -21081,7 +20901,7 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta'),
             # RuntimeError: no _refs support for torch.Tensor.tolist
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
+            # RuntimeError: .tolist() is not supported for tensor subclasses.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         )
     ),
@@ -21130,99 +20950,66 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        # RuntimeError: Tried to reduce a 0-dim tensor
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
-        skips=(
-            # RuntimeError: Tracing expected 4 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
-        skips=(
-            # RuntimeError: Tracing expected 4 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
-        skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
+        supports_nvfuser=False
     ),
     ReductionPythonRefInfo(
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
         supports_nvfuser=False,
-        skips=(
-            # RuntimeError: Tracing expected 5 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        )
     ),
     ReductionPythonRefInfo(
         "_refs.std",
         torch_opinfo_name="std",
         supports_out=True,
-        skips=(
-            # RuntimeError: Tracing expected 5 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     # std_mean and var_mean are not ReductionInfos
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
         validate_view_consistency=False,
-        skips=(
-            # RuntimeError: Tracing expected 5 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True,
-        skips=(
-            # RuntimeError: Tracing expected 5 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.prod",
         torch_opinfo_name="prod",
         supports_out=True,
-        skips=(
-            # RuntimeError: Tracing expected 5 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.var",
         torch_opinfo_name="var",
         supports_out=True,
-        skips=(
-            # RuntimeError: Tracing expected 5 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
-        skips=(
-            # RuntimeError: Tracing expected 5 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
+        supports_nvfuser=False,
     ),
     #
     # Linear Algebra Operators
@@ -21230,10 +21017,9 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.addr",
         torch_opinfo_name="addr",
+        supports_nvfuser=False,
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
-            # RuntimeError: Tracing expected 5 arguments but got 3 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
@@ -21274,13 +21060,14 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # TypeError: _traced() got an unexpected keyword argument 'device'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # FIXME: shouldn't check empty results
+            DecorateInfo(unittest.skip("Can't check result for empty"), 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
     PythonRefInfo(
         "_refs.empty_like",
         torch_opinfo_name="empty_like",
+        supports_nvfuser=False,
         skips=(
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestCommon',
@@ -21303,7 +21090,7 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                          'TestMathBits',
                          'test_neg_view'),
-            # RuntimeError: Tracing expected 4 arguments but got 1 concrete arguments
+            # Fixme: should not compare results of empty_like
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
         ),
     ),
@@ -21313,14 +21100,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.masked_fill",
         torch_opinfo_name="masked_fill",
-        skips=(
-            # NotImplementedError: argument of type: <class 'complex'>
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.chalf, torch.cfloat, torch.cdouble)),
-            # TypeError: where(): incompatible function arguments.
-            DecorateInfo(unittest.skip("Passes for aten executor but not nvfuser"), 'TestCommon', 'test_python_ref_executor',
-                         dtypes=(torch.float32, torch.int32)),
-        )
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.where",
