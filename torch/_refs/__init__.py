@@ -739,6 +739,12 @@ def tan(a):
 def tanh(a):
     return prims.tanh(a)
 
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def trunc(a):
+    return prims.trunc(a)
+
+
 def bfloat16(a: Tensor, *, memory_format: torch.memory_format = torch.preserve_format):
     if a.dtype == torch.bfloat16:
         return a
@@ -746,10 +752,6 @@ def bfloat16(a: Tensor, *, memory_format: torch.memory_format = torch.preserve_f
     if memory_format != torch.preserve_format:
         out = prims.clone(out, memory_format=memory_format)
     return out
-
-@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
-def trunc(a):
-    return prims.trunc(a)
 
 
 def _make_elementwise_binary_reference(
