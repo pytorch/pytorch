@@ -28,7 +28,7 @@ struct ViewCachedGraph : public MPSCachedGraph
   std::vector<MPSGraphTensor*> strideTensors;
 };
 
-std::string getStridedKey(const ScalarType& dtype, const IntArrayRef& base_shape,
+static std::string getStridedKey(const ScalarType& dtype, const IntArrayRef& base_shape,
                           const IntArrayRef& new_shape, bool is_scatter)
 {
   return (is_scatter ? "scatter:" : "gather:") + getMPSTypeString(dtype) + "[" +
@@ -36,7 +36,7 @@ std::string getStridedKey(const ScalarType& dtype, const IntArrayRef& base_shape
 }
 
 // initializes the MTLBuffers for tesnsor data and runs the MPSGraph for the view op
-Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output, bool needsScatter)
+static Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor& output, bool needsScatter)
 {
   const id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const id<MTLBuffer> outputBuffer = getMTLBufferStorage(output);
@@ -76,7 +76,7 @@ Tensor& runViewGraph(ViewCachedGraph* cachedGraph, const at::Tensor& src, Tensor
   return output;
 }
 
-MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayRef& size,
+static MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayRef& size,
                                    const IntArrayRef& stride, int64_t offset,
                                    const IntArrayRef& base_shape, bool needsScatter)
 {
@@ -167,7 +167,7 @@ MPSGraphTensor* chainViewOperation(ViewCachedGraph* cachedGraph, const IntArrayR
 //            |    /          \   |
 //            |   /            \  |
 //            NonView T         NonView T
-ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, IntArrayRef stride, int64_t storage_offset, bool needsScatter)
+static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, IntArrayRef stride, int64_t storage_offset, bool needsScatter)
 {
   IntArrayRef base_shape = get_buffer_shape(self.storage().data());
   if (base_shape.size() == 0) {

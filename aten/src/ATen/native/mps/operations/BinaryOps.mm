@@ -103,10 +103,10 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
-  }
 
-  if (needsScatter) {
-    output_.copy_(output);
+    if (needsScatter) {
+      output_.copy_(output);
+    }
   }
 }
 

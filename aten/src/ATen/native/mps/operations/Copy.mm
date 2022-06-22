@@ -319,7 +319,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   } else {
     copy_cast_mps(dst_, src_, destBuffer, sourceBuffer);
   }
-  return dst;
+  return dst_;
 }
 
 at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
