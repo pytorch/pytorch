@@ -213,7 +213,7 @@ radixSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   const K invalid_key = [descending] {
     using radix_t = typename cub::Traits<key_t>::UnsignedBits;
     union {
-      key_t key;
+      K key;
       radix_t radix;
     } tmp;
     tmp.radix = descending ?
