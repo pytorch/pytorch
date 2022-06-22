@@ -268,23 +268,23 @@ class Module:
         torch._C._log_api_usage_once("python.nn_module")
 
         """
-        Calls object.__setattr__(self, 'a', a) instead of the typical self.a = a
+        Calls super.__setattr__(self, 'a', a) instead of the typical self.a = a
         to avoid Module.__setattr__ overhead. Module's __setattr__ has special
         handling for parameters, submodules, and buffers but simply calls into
-        object.__setattr__ for all other attributes.
+        super.__setattr__ for all other attributes.
         """
-        object.__setattr__(self, 'training', True)
-        object.__setattr__(self, '_parameters', OrderedDict())
-        object.__setattr__(self, '_buffers', OrderedDict())
-        object.__setattr__(self, '_non_persistent_buffers_set', set())
-        object.__setattr__(self, '_backward_hooks', OrderedDict())
-        object.__setattr__(self, '_is_full_backward_hook', None)
-        object.__setattr__(self, '_forward_hooks', OrderedDict())
-        object.__setattr__(self, '_forward_pre_hooks', OrderedDict())
-        object.__setattr__(self, '_state_dict_hooks', OrderedDict())
-        object.__setattr__(self, '_load_state_dict_pre_hooks', OrderedDict())
-        object.__setattr__(self, '_load_state_dict_post_hooks', OrderedDict())
-        object.__setattr__(self, '_modules', OrderedDict())
+        super.__setattr__(self, 'training', True)
+        super.__setattr__(self, '_parameters', OrderedDict())
+        super.__setattr__(self, '_buffers', OrderedDict())
+        super.__setattr__(self, '_non_persistent_buffers_set', set())
+        super.__setattr__(self, '_backward_hooks', OrderedDict())
+        super.__setattr__(self, '_is_full_backward_hook', None)
+        super.__setattr__(self, '_forward_hooks', OrderedDict())
+        super.__setattr__(self, '_forward_pre_hooks', OrderedDict())
+        super.__setattr__(self, '_state_dict_hooks', OrderedDict())
+        super.__setattr__(self, '_load_state_dict_pre_hooks', OrderedDict())
+        super.__setattr__(self, '_load_state_dict_post_hooks', OrderedDict())
+        super.__setattr__(self, '_modules', OrderedDict())
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -1269,7 +1269,7 @@ class Module:
                                         .format(torch.typename(value), name))
                     buffers[name] = value
                 else:
-                    object.__setattr__(self, name, value)
+                    super.__setattr__(self, name, value)
 
     def __delattr__(self, name):
         if name in self._parameters:
@@ -1280,7 +1280,7 @@ class Module:
         elif name in self._modules:
             del self._modules[name]
         else:
-            object.__delattr__(self, name)
+            super.__delattr__(self, name)
 
     def _register_state_dict_hook(self, hook):
         r"""These hooks will be called with arguments: `self`, `state_dict`,
