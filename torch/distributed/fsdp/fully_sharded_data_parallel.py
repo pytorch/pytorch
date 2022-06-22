@@ -4043,19 +4043,22 @@ class FullyShardedDataParallel(nn.Module):
             return allreduce_hook.AllReduceState(process_group=self.process_group)
 
     def register_comm_hook(self, state: object, hook: callable):
-        r"""
+        """
         Registers a communication hook which is an enhancement that provides a
         flexible hook to users where they can specify how FSDP aggregates gradients
         across multiple workers.
         This hook can be used to implement several algorithms like GossipGrad
         and gradient compression which involve different communication strategies for
         parameter syncs while running Fully Sharded Data Parallel training.
+
         .. warning::
             FSDP only support communication hooks for a ``NO_SHARD`` strategy at this time.
             If other strategies are used, an error will be raised.
+
         .. warning ::
             FSDP communication hook should be registered before running an initial forward pass
             and only once.
+
         Args:
             state (object): Passed to the hook to maintain any state information during the training process.
                             Examples include error feedback in gradient compression,
@@ -4063,11 +4066,12 @@ class FullyShardedDataParallel(nn.Module):
                             It is locally stored by each worker
                             and shared by all the gradient tensors on the worker.
             hook (callable): Callable with the following signature:
-                             ``hook: Callable[torch.Tensor] -> None``:
-                             This function takes in a python tensor, which represents a gradient
-                             of a loss function with respect to variables of a model
-                             for the local batch that needs to be communicated across ranks.
-                             It then performs all neccessary processing and returns nothing.
+                            ``hook: Callable[torch.Tensor] -> None``:
+                            This function takes in a python tensor, which represents a gradient
+                            of a loss function with respect to variables of a model
+                            for the local batch that needs to be communicated across ranks.
+                            It then performs all neccessary processing and returns nothing.
+
         """
         assert self.check_is_root(), "register_comm_hook can only be called on a root instance."
         assert not self._comm_hook_was_called, "register_comm_hook can be only called once"
