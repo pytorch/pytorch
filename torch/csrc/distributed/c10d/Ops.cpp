@@ -73,6 +73,18 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_(
           std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> gather_(
+    const std::vector<std::vector<at::Tensor>>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t root_rank,
+    int64_t timeout) {
+  return process_group->gather(
+      const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
+      const_cast<std::vector<at::Tensor>&>(input_tensors),
+      GatherOptions{root_rank, std::chrono::milliseconds(timeout)});
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup and Work definations are more like declarations.
   // They don't expose the details of the two classes into TorchScript.
@@ -96,6 +108,9 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "reduce_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
+  m.def(
+      "gather_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, gather_));
 }
 } // namespace
 
@@ -198,6 +213,27 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce(
       static_cast<uint64_t>(opts.reduceOp),
       opts.rootRank,
       opts.rootTensor,
+      opts.timeout.count());
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> gather(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<std::vector<at::Tensor>>& output_tensors,
+    const std::vector<at::Tensor>& input_tensors,
+    const GatherOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::gather_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           const std::vector<std::vector<at::Tensor>>&,
+                           const std::vector<at::Tensor>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t)>();
+  return op.call(
+      output_tensors,
+      input_tensors,
+      process_group,
+      opts.rootRank,
       opts.timeout.count());
 }
 

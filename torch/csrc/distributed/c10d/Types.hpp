@@ -44,7 +44,7 @@ struct AllgatherOptions {
 };
 
 struct GatherOptions {
-  int rootRank = 0;
+  int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
