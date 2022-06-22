@@ -20,6 +20,19 @@ def _canonicalize(fx_g):
     return fx_g
 
 
+def strip_overloads(gm):
+    """
+    Modifies the target of graph nodes in :attr:`gm` to strip overloads.
+
+    Args:
+        gm(fx.GraphModule): The input Fx graph module to be modified
+    """
+    for node in gm.graph.nodes:
+        if isinstance(node.target, torch._ops.OpOverload):
+            node.target = node.target.overloadpacket
+    gm.recompile()
+
+
 def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
     """
     Compiles the :attr:`fx_g` with Torchscript compiler.
@@ -45,6 +58,8 @@ def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
                 v = v.type
             new_kwargs[k] = v
         node.kwargs = new_kwargs
+
+    strip_overloads(fx_g)
 
     fx_g.graph.lint()
 
