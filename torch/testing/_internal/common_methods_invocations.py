@@ -20149,6 +20149,7 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
+        # AssertionError: Dtypes torch.float64 and torch.float32 are not equal!
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -20211,7 +20212,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.softmax",
         torch_opinfo_name="softmax",
-        supports_nvfuser=False
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sqrt",

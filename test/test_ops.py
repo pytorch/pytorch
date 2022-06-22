@@ -528,6 +528,11 @@ class TestCommon(TestCase):
         if executor == "nvfuser" and isinstance(op, ReductionPythonRefInfo):
             skip_zero_dim = True
 
+        # skip zero-dim tensors for some composites of reduction operations
+        normalization_ops = ["_refs.softmax", "_refs.logsumexp"]
+        if executor == "nvfuser" and op.name in normalization_ops:
+            skip_zero_dim = True
+
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
