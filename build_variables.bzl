@@ -1159,7 +1159,7 @@ aten_native_source_codegen_list = [
 aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/ao_sparse/library.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.cpp",
-    "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear.cpp",
+    "aten/src/ATen/native/ao_sparse/quantized/cpu/Linear.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_dynamic.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_prepack.cpp",
     "aten/src/ATen/native/ao_sparse/quantized/cpu/qlinear_unpack.cpp",
@@ -1185,7 +1185,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/quantized/cpu/qgelu.cpp",
     "aten/src/ATen/native/quantized/cpu/qhardsigmoid.cpp",
     "aten/src/ATen/native/quantized/cpu/qhardswish.cpp",
-    "aten/src/ATen/native/quantized/cpu/qlinear.cpp",
+    "aten/src/ATen/native/quantized/cpu/Linear.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_dynamic.cpp",
     "aten/src/ATen/native/quantized/cpu/qconv_dynamic.cpp",
     "aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp",
