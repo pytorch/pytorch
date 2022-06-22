@@ -73,6 +73,52 @@ SourceRange getPythonInterpreterSourceRange() {
   return SourceRange(source, 0, stack_trace_text.size());
 }
 
+std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing_dict(
+    const py::function& func,
+    const py::dict& inputs_dict,
+    Stack trace_inputs,
+    const py::function& var_name_lookup_fn,
+    bool strict,
+    bool force_outplace,
+    Module* self,
+    const std::vector<std::string>& argument_names) {
+  C10_LOG_API_USAGE_ONCE("torch.tracer");
+
+  auto lookup_fn_adapter =
+      [var_name_lookup_fn](const Variable& var) -> std::string {
+    pybind11::gil_scoped_acquire ag;
+    return py::cast<std::string>(var_name_lookup_fn(var));
+  };
+
+  std::vector<std::string> reordered_argument_names;
+  for (auto it = inputs_dict.begin(); it != inputs_dict.end(); it++) {
+    for (size_t i = 0; i < argument_names.size(); i++) {
+      if (py::cast<std::string>(it->first) == argument_names[i]) {
+        reordered_argument_names.push_back(argument_names[i]);
+        break;
+      }
+    }
+  }
+
+  auto outs = tracer::trace(
+      std::move(trace_inputs),
+      [&](Stack inputs) -> Stack {
+        auto out = func(**inputs_dict);
+        if (out.ptr() == Py_None) {
+          AT_ERROR(
+              "The traced function didn't return any values! Side-effects are not "
+              "captured in traces, so it would be a no-op.");
+        }
+        return {toTypeInferredIValue(out)};
+      },
+      lookup_fn_adapter,
+      strict,
+      force_outplace,
+      self,
+      reordered_argument_names);
+  return std::make_pair(std::get<0>(outs)->graph, std::get<1>(outs));
+}
+
 std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing(
     const py::function& func,
     Stack trace_inputs,

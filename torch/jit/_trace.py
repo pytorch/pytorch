@@ -440,7 +440,11 @@ def _check_trace(
 
         def run_mod_and_filter_tensor_outputs(mod, inputs, running_what):
             try:
-                outs = wrap_retval(mod(*_clone_inputs(inputs)))
+                if len(inputs) > 0:
+                    if isinstance(inputs[0], dict):
+                        outs = wrap_retval(mod(**inputs[0]))
+                    else:
+                        outs = wrap_retval(mod(*_clone_inputs(inputs)))
                 outs = [out for out in outs if isinstance(out, torch.Tensor)]
                 return outs
             except Exception as e:
@@ -971,17 +975,29 @@ def trace_module(
                 func = getattr(mod, method_name)
                 argument_names = get_callable_argument_names(func)
 
-            example_inputs = make_tuple(example_inputs)
+            if isinstance(example_inputs, dict):
+                module._c._create_method_from_trace_with_dict(
+                    method_name,
+                    func,
+                    example_inputs,
+                    var_lookup_fn,
+                    strict,
+                    _force_outplace,
+                    argument_names,
+                )
+            else:
+                example_inputs = make_tuple(example_inputs)
 
-            module._c._create_method_from_trace(
-                method_name,
-                func,
-                example_inputs,
-                var_lookup_fn,
-                strict,
-                _force_outplace,
-                argument_names,
-            )
+                module._c._create_method_from_trace(
+                    method_name,
+                    func,
+                    example_inputs,
+                    var_lookup_fn,
+                    strict,
+                    _force_outplace,
+                    argument_names,
+                )
+
             check_trace_method = module._c._get_method(method_name)
 
             # Check the trace against new traces created from user-specified inputs
