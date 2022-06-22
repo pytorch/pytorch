@@ -86,7 +86,7 @@ class TestQuantizationDocs(QuantizationTestCase):
             code = "".join([x[offset:] for x in content[line_num_start+1:last_line_num]])
 
             # want to make sure we are actually getting some code,
-            assert last_line_num-line_num_start>300, \
+            assert last_line_num-line_num_start>3, \
                 "The code in {} identified by {} seems suspiciously short:" \
                 "\n\n###code-start####\n{}###code-end####".format(path_to_file, unique_identifier,code)
             return code
