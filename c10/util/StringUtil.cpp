@@ -47,15 +47,14 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
   if (from.size() >= to.size()) {
     // If the replacement string is not larger than the original, we
     // can do the replacement in-place without allocating new storage.
-    char *s_data = &s[0];
+    char* s_data = &s[0];
 
     while ((cur_pos = s.find(from.data(), last_pos, from.size())) !=
            std::string::npos) {
       ++numReplaced;
       // Append input between replaced sub-strings
       if (write_pos != last_pos) {
-        std::copy(s_data + last_pos, s_data + cur_pos,
-                  s_data + write_pos);
+        std::copy(s_data + last_pos, s_data + cur_pos, s_data + write_pos);
       }
       write_pos += cur_pos - last_pos;
       // Append the replacement sub-string
@@ -67,8 +66,7 @@ size_t ReplaceAll(std::string& s, c10::string_view from, c10::string_view to) {
 
     // Append any remaining input after replaced sub-strings
     if (write_pos != last_pos) {
-      std::copy(s_data + last_pos, s_data + input.size(),
-                s_data + write_pos);
+      std::copy(s_data + last_pos, s_data + input.size(), s_data + write_pos);
       write_pos += input.size() - last_pos;
       s.resize(write_pos);
     }
