@@ -741,7 +741,7 @@ def tanh(a):
 
 def bfloat16(a: Tensor, *, memory_format: torch.memory_format = torch.preserve_format):
     if a.dtype == torch.bfloat16:
-        return out
+        return a
     out = prims.convert_element_type(a, torch.bfloat16)
     if memory_format != torch.preserve_format:
         raise NotImplementedError
