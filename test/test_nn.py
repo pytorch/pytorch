@@ -15157,9 +15157,10 @@ torch.cuda.synchronize()
                 [sys.executable, '-c', script],
                 cwd=os.path.dirname(os.path.realpath(__file__)),
                 capture_output=True,
+                text=True,
             )
 
-            output = str(p.stdout) + '\n' + str(p.stderr)
+            output = p.stdout + '\n' + p.stderr
 
             error_msg = error_msgs[module_name]
 

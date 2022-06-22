@@ -343,15 +343,22 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
     }
   }
   {
-    module->to(torch::kInt32);
-    for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter.dtype(), torch::kInt32);
-    }
-  }
-  {
     module->to(torch::kFloat64);
     for (auto& parameter : module->parameters()) {
       ASSERT_EQ(parameter.dtype(), torch::kFloat64);
+    }
+  }
+}
+
+TEST_F(ModuleTest, Conversion_NoGrad_MultiCUDA) {
+  Linear module(128, 64);
+  for (auto& parameter : module->parameters()) {
+    parameter.requires_grad_(false);
+  }
+  {
+    module->to(torch::kInt32);
+    for (auto& parameter : module->parameters()) {
+      ASSERT_EQ(parameter.dtype(), torch::kInt32);
     }
   }
   {
