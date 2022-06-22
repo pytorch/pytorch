@@ -1216,6 +1216,15 @@ class TestProfiler(TestCase):
                 x = x @ x
         basic_evaluation = _utils.BasicEvaluation(prof.profiler)
         self.assertFalse(basic_evaluation.compute_queue_depth())
+    
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_utils_compute_idle_time(self):
+        x = torch.ones((4096, 4096)).to("cuda")
+        with profile() as prof:
+            x = x @ x
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        for event_metrics in basic_evaluation.metrics.values():
+            self.assertTrue(event_metrics.fraction_idle_time >= 0.0 and event_metrics.fraction_idle_time <= 1.0)
 
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
