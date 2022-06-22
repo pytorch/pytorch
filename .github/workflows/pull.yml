@@ -191,7 +191,6 @@ jobs:
     name: linux-jammy-cuda11.6-cudnn8-py3.8-clang12
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-cuda11.6-cudnn8-py3.8-clang12
       docker-image-name: pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12
 
   linux-xenial-py3-clang5-mobile-custom-build-static:
