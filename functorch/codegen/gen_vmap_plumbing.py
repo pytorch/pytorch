@@ -3,7 +3,7 @@ from torchgen.api.types import (
 )
 from torchgen.model import (
     BaseTy, OptionalType, BaseType, ListType, NativeFunction, Type,
-    Argument, Return, SchemaKind, Tag
+    Argument, Return, SchemaKind
 )
 from torchgen.api.translate import translate
 from torchgen.context import method_with_native_function
@@ -198,7 +198,7 @@ def gen_vmap_plumbing(native_function: NativeFunction) -> str:
     if not accepts_at_least_one_tensor_input(schema):
         return None
     # in-place views need special handling
-    if native_function.tag == Tag.inplace_view:
+    if 'inplace_view' in native_function.tags:
         return None
 
     if schema.kind() == SchemaKind.inplace:
