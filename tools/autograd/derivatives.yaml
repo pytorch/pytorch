@@ -528,7 +528,7 @@
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
   self: div_tensor_self_backward(grad, other, self.scalar_type())
   other: div_tensor_other_backward(grad, self, other)
-  result: self_t / other_p - other_t * (self_p / other_p) / other_p
+  result: (self_t - other_t * result) / other_p
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
@@ -1031,11 +1031,11 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
+  self: grad.expand(self.sizes()) / self.numel()
   result: auto_linear
 
 - name: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
+  self: mean_backward(grad, self.sizes(), dim, self.numel(), keepdim)
   result: auto_linear
 
 - name: median(Tensor self) -> Tensor
@@ -1088,9 +1088,11 @@
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
+  result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
 - name: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
+  result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
   self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), self.layout(), 1)
@@ -1385,8 +1387,11 @@
   result: auto_element_wise
 
 - name: sgn(Tensor self) -> Tensor
-  self: sgn_backward(result, grad, self)
-  result: auto_element_wise
+  self: sgn_backward(self, grad, result)
+  # Cannot use auto_element_wise here because the Jacobian is *not* Hermitian (in fact, it is symmetric)
+  # The function is not holomorphic, so there's no reason for its Jacobian to be Hermitian
+  # auto_element_wise has a name that's a bit deceiving in the complex case
+  result: sgn_backward(self_p, self_t, result)
 
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos().conj()
@@ -1490,10 +1495,14 @@
 
 - name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
   self: std_backward(result, grad, self, dim, correction, keepdim)
-  result: handle_r_to_c(result.scalar_type(), var_jvp(self_t, self_p, result, dim, correction, keepdim) / (2 * result))
+  # pointwise (variance) + sum + sqrt
+  result: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result)).masked_fill_(result == 0, 0)
 
 - name: std_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, true)
+  self: std_mean_backward(grads[0], grads[1], self, result0, dim, correction, keepdim)
+  result0: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result0)).masked_fill_(result0 == 0, 0)
+  # linear
+  result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
 - name: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
@@ -1523,6 +1532,7 @@
 
 - name: nansum(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
+  result: at::where(self_p.isnan(), 0, self_t).sum(dim, keepdim, dtype)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
 - name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor Vh)
@@ -1684,10 +1694,14 @@
 
 - name: var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
   self: var_backward(grad, self, dim, correction, keepdim)
-  result: handle_r_to_c(result.scalar_type(), var_jvp(self_t, self_p, result, dim, correction, keepdim))
+  # pointwise + sum
+  result: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
 
 - name: var_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, false)
+  self: var_mean_backward(grads[0], grads[1], self, dim, correction, keepdim)
+  result0: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
+  # linear
+  result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
