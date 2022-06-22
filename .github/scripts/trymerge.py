@@ -342,12 +342,19 @@ def fetch_json(url: str,
     return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
 
-def gh_post_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
     if dry_run:
         print(comment)
         return []
-    return fetch_json(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/comments',
-                      data={"body": comment})
+    return fetch_json(url, data={"body": comment})
+
+
+def gh_post_pr_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/comments', comment, dry_run)
+
+
+def gh_post_commit_comment(org: str, project: str, sha: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/commits/{sha}/comments', comment, dry_run)
 
 
 def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
@@ -730,8 +737,8 @@ class GitHubPR:
             self.merge_ghstack_into(repo, force, comment_id=comment_id)
 
         repo.push(self.default_branch(), dry_run)
-        gh_post_comment(self.org, self.project, self.pr_num,
-                        f"@{self.get_pr_creator_login()} your PR has been successfully merged.", dry_run)
+        gh_post_pr_comment(self.org, self.project, self.pr_num,
+                           f"@{self.get_pr_creator_login()} your PR has been successfully merged.", dry_run)
         if not dry_run:
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
@@ -876,7 +883,7 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
                comment_id: Optional[int] = None,
                reason: Optional[str] = None) -> None:
     def post_comment(msg: str) -> None:
-        gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
+        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
     comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
@@ -904,17 +911,19 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
     rc = RE_DIFF_REV.search(msg)
     if rc is not None and not can_skip_internal_checks:
         raise RuntimeError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
+    revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
+    revert_msg += f" due to {reason}\n" if reason is not None else "\n"
     repo.checkout(pr.default_branch())
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
-    msg += f" due to {reason}\n" if reason is not None else "\n"
+    msg += revert_msg
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
     post_comment(f"@{pr.get_pr_creator_login()} your PR has been successfully reverted.")
     if not dry_run:
         gh_add_labels(pr.org, pr.project, pr.pr_num, ["reverted"])
+        gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:
@@ -1005,13 +1014,13 @@ def main() -> None:
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
-        gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
 
     msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
     msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
-    gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+    gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if args.revert:
         try:
@@ -1021,11 +1030,11 @@ def main() -> None:
         return
 
     if pr.is_closed():
-        gh_post_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
+        gh_post_pr_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
         return
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
-        gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
+        gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
     try:
