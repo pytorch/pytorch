@@ -79,7 +79,6 @@ class PassManager:
         passes=None,
         constraints=None,
         steps=None,
-        enable_debug_pass: bool = False,
         run_checks_after_each_pass: bool = False,
     ):
         if passes:
