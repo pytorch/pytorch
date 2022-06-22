@@ -787,7 +787,8 @@ std::vector<torch::lazy::Shape> compute_shape_logical_and(
       c10::ScalarType::Bool, at::infer_size(self.sizes(), other.sizes()))};
 }
 
-std::vector<torch::lazy::Shape> compute_shape_logical_not(const at::Tensor& self) {
+std::vector<torch::lazy::Shape> compute_shape_logical_not(
+    const at::Tensor& self) {
   return {Shape(c10::ScalarType::Bool, self.sizes().vec())};
 }
 
