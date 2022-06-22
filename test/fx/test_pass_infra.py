@@ -1,6 +1,9 @@
-import unittest
-import torch
+# Owner(s): ["oncall: fx"]
 
+import torch
+import torch.fx as fx
+
+from torch.testing._internal.common_utils import TestCase
 from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
@@ -26,7 +29,7 @@ class AddModule(torch.nn.Module):
         return z
 
 
-class TestPassManager(unittest.TestCase):
+class TestPassManager(TestCase):
     def test_pass_manager(self):
         """
         Tests that the pass manager runs the passes correctly.
@@ -64,7 +67,7 @@ class TestPassManager(unittest.TestCase):
         Tests that users can add in check functions correctly
         """
         m = AddModule()
-        traced_m = torch.fx.symbolic_trace(m)
+        traced_m = fx.symbolic_trace(m)
         pm = PassManager(passes=[replace_add_with_mul_pass, replace_mul_with_sub_pass])
 
         def check_div_target(graph_module):
@@ -84,7 +87,3 @@ class TestPassManager(unittest.TestCase):
 
         pm = PassManager()
         self.assertRaises(TypeError, pm.add_checks, check_bad_args)
-
-
-if __name__ == "__main__":
-    unittest.main()
