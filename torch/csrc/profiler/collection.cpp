@@ -46,11 +46,10 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         dim);
 
     tensor_metadata_.emplace_back(
-      /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
-      /*dtype_=*/t.scalar_type(),
-      /*dim_=*/(uint32_t)dim,
-      /*layout_=*/t.layout()
-    );
+        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*dtype_=*/t.scalar_type(),
+        /*dim_=*/(uint32_t)dim,
+        /*layout_=*/t.layout());
     tensor_sizes_.emplace_list(sizes);
     tensor_strides_.emplace_list(strides);
   } else {
@@ -65,24 +64,22 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_it = tensor_sizes_.begin(),
           ivals_it = ivalues_.begin(),
-          tensor_strides_it = tensor_strides_.begin()]
-          () mutable {
+          tensor_strides_it = tensor_strides_.begin()]() mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
       out.shapes_.emplace_back();
       out.strides_.emplace_back();
       switch (*tag_it) {
-        case Tag::Tensor:
-          {
-            out.ivalues_.emplace_back();
-            const auto& md = *tensor_metadata_it++;
-            for (const auto _ : c10::irange(md.dim_)) {
-              (void)_; // Suppress unused variable warning
-              out.shapes_.back().push_back(*tensor_size_it++);
-              out.strides_.back().push_back(*tensor_strides_it++);
-            }
-            out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+        case Tag::Tensor: {
+          out.ivalues_.emplace_back();
+          const auto& md = *tensor_metadata_it++;
+          for (const auto _ : c10::irange(md.dim_)) {
+            (void)_; // Suppress unused variable warning
+            out.shapes_.back().push_back(*tensor_size_it++);
+            out.strides_.back().push_back(*tensor_strides_it++);
+          }
+          out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
 
         case Tag::TensorListBegin:

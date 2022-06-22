@@ -9,8 +9,8 @@
 #include <vector>
 
 #include <c10/macros/Macros.h>
-#include <c10/util/Exception.h>
 #include <c10/util/ArrayRef.h>
+#include <c10/util/Exception.h>
 
 namespace torch {
 namespace profiler {
@@ -67,9 +67,9 @@ class AppendOnlyList {
     return next_++;
   }
 
-  T* emplace_list(c10::ArrayRef<T> arg_list){
+  T* emplace_list(c10::ArrayRef<T> arg_list) {
     // TODO: Optimize this frther at a future date
-    for (const auto &i : arg_list){
+    for (const auto& i : arg_list) {
       emplace_back(i);
     }
     return next_;
