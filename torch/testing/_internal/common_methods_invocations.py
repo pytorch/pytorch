@@ -20149,7 +20149,8 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        # AssertionError: Dtypes torch.float64 and torch.float32 are not equal!
+        # nvFuser test for float32 fails with AssertionError: Dtypes torch.float64 and torch.float32 are not equal!
+        # The test with int dtype passes
         supports_nvfuser=False,
     ),
     PythonRefInfo(
