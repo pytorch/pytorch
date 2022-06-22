@@ -314,7 +314,6 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('linalg.cholesky'),
         skip('msort'),
         xfail('nn.functional.dropout'),
-        xfail('polar'),
         xfail('to_sparse'),
         xfail('addcdiv'),
         xfail('cholesky'),
@@ -326,6 +325,8 @@ class TestEagerFusionOpInfo(TestCase):
         xfail('matrix_exp'),
         xfail('trapezoid'),
         xfail('trapz'),
+        xfail('corrcoef'),
+        xfail('cov'),
         skip('nn.functional.binary_cross_entropy_with_logits'),  # seems to fail sometimes?
         skip('nn.functional.margin_ranking_loss'),  # seems flaky
     })
