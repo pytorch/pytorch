@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import model_defs.word_language_model as word_language_model
 import numpy as np
-import onnx
 import parameterized
 import test_onnx_common
 import torchvision
@@ -9005,7 +9004,6 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
             dynamic_axes={"output_1": [1]},
         )
 
-
     @skipScriptTest(min_opset_version=11)  # dynamic split support addded in 11
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
@@ -9871,7 +9869,6 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
             atol=1e-5,
         )
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL)
-
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):
@@ -11627,7 +11624,6 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
 
         x = torch.zeros(1)
         self.run_test(torch.jit.script(M()), (x,))
-
 
     # NOTE: For quantization tests, choose scale and zero point carefully
     #       such that inputs and outputs do not always overflow/underflow.

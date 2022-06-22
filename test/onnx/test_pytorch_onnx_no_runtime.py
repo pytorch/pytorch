@@ -17,6 +17,7 @@ from torch.onnx._globals import GLOBALS
 from torch.testing._internal import common_utils
 import torch.nn.functional as F
 
+
 def export_to_onnx(
     model: Union[torch.nn.Module, torch.jit.ScriptFunction],
     input: Tuple[torch.Tensor],
@@ -781,6 +782,7 @@ class TestONNXExport(common_utils.TestCase):
             torch._C._check_onnx_proto(model.SerializeToString())
 
         self.assertRaises(RuntimeError, check_proto)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
