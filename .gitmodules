@@ -142,3 +142,9 @@
 [submodule "third_party/flatbuffers"]
 	path = third_party/flatbuffers
 	url = https://github.com/google/flatbuffers.git
+[submodule "third_party/ucx"]
+	path = third_party/ucx
+	url = https://github.com/openucx/ucx
+[submodule "third_party/ucc"]
+	path = third_party/ucc
+	url = https://github.com/openucx/ucc
