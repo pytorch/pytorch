@@ -33,8 +33,15 @@ class WeightNormSparsifier(BaseSparsifier):
     Args:
 
         sparsity_level: The target level of sparsity
-        sparse_block_shape: The shape of a sparse blockß
+        sparse_block_shape: The shape of a sparse block (see note below)
         zeros_per_block: Number of zeros in a sparse block
+
+    Note::
+        The `sparse_block_shape` is tuple representing (block_ROWS, block_COLS),
+        irrespective of what the rows / cols mean in the data tensor. That means,
+        if you were to sparsify a weight tensor in the nn.Linear, which has a
+        weight shape `(Cout, Cin)`, the `block_ROWS` would refer to the output
+        channels, while the `block_COLS` would refer to the input channels.
 
     Note::
         All arguments to the WeightNormSparsifier constructor are "default"
@@ -78,11 +85,17 @@ class WeightNormSparsifier(BaseSparsifier):
         dh = (block_h - h % block_h) % block_h
         dw = (block_w - w % block_w) % block_w
 
-        values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
-
         if mask is None:
             mask = torch.ones(h, w, device=data.device)
 
+        if sparsity_level >= 1.0:
+            mask.data = torch.zeros_like(mask)
+            return mask
+        elif sparsity_level <= 0.0:
+            mask.data = torch.ones_like(mask)
+            return mask
+
+        values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
         if values_per_block > 1:
             # Reduce the data
             data = F.avg_pool2d(
@@ -94,11 +107,8 @@ class WeightNormSparsifier(BaseSparsifier):
         data = data.repeat(1, values_per_block, 1)
 
         threshold_idx = int(round(sparsity_level * num_blocks))
-        try:
-            _, sorted_idx = torch.topk(data, k=threshold_idx, dim=2, largest=False)
-        except RuntimeError as e:
-            print('===> DEBUG', sparsity_level, num_blocks, data.shape)
-            raise e
+        threshold_idx = max(0, min(num_blocks - 1, threshold_idx))  # Sanity check
+        _, sorted_idx = torch.topk(data, k=threshold_idx, dim=2, largest=False)
 
         # Temp reshape for mask
         mask_reshape = mask.reshape(data.shape)  # data might be reshaped
@@ -127,7 +137,9 @@ class WeightNormSparsifier(BaseSparsifier):
         values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
 
         if values_per_block == zeros_per_block:
+            # Everything should be sparsified
             mask.data = torch.zeros_like(mask)
+            return mask
 
         # create a new padded tensor like data (to match the block_shape)
         padded_data = torch.ones(h + dh, w + dw, dtype=data.dtype, device=data.device)
@@ -148,7 +160,6 @@ class WeightNormSparsifier(BaseSparsifier):
 
     def update_mask(self, module, tensor_name, sparsity_level, sparse_block_shape,
                     zeros_per_block, **kwargs):
-        sparsity_level = min(1.0, sparsity_level)
         values_per_block = reduce((lambda x, y: x * y), sparse_block_shape)
         if zeros_per_block > values_per_block:
             raise ValueError(
