@@ -7,32 +7,27 @@ class APoTFakeQuantize():
     b: int
     k: int
     n: int
-    alpha: float
     gamma: float
-    signed: bool
     level_indices: torch.Tensor
     quantization_levels: torch.Tensor
     observer: APoTObserver
 
     def __init__(self, observer: APoTObserver):
-        super().__init__()
-
         self.observer = observer
         self.b = observer.b
         self.k = observer.k
-        self.signed = observer.signed
         self.max_val = observer.max_val
 
     def calculate_qparams(self, signed: bool):
-        self.observer = self.observer.calculate_qparams(signed=signed)[0]
-        self.gamma = self.observer[0]
-        self.quantization_levels = self.observer[1]
-        self.level_indices = self.observer[2]
+        qparams = self.observer.calculate_qparams(signed=signed)
+        self.gamma = qparams[0]
+        self.quantization_levels = qparams[1]
+        self.level_indices = qparams[2]
 
-        return self.observer
+        return qparams
 
-    def forward(self, X):
-        quantizer = APoTQuantizer(self.observer)
+    def forward(self, X: torch.Tensor, signed: bool):
+        quantizer = APoTQuantizer(self.b, self.k, self.max_val, signed)
 
         X = quantizer.quantize_APoT(X)
         X = quantizer.dequantize(X)
