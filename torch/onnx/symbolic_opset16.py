@@ -47,3 +47,41 @@ def grid_sampler(g, input, grid, mode_enum, padding_mode_enum, align_corners):
         mode_s=mode_s,
         padding_mode_s=padding_mode_s,
     )
+
+
+@symbolic_helper.parse_args("v", "i", "v", "v")
+def scatter_add(g, self, dim, index, src):
+    if symbolic_helper.is_caffe2_aten_fallback():
+        return g.at("scatter", self, dim, index, src, overload_name="src")
+
+    src_type = src.type().scalarType()
+    src_sizes = symbolic_helper._get_tensor_sizes(src)
+    index_sizes = symbolic_helper._get_tensor_sizes(index)
+
+    if src_sizes != index_sizes:
+        return symbolic_helper._unimplemented(
+            "scatter_add",
+            f"`index` ({index_sizes}) should have the same dimensionality as `src` ({src_sizes})",
+        )
+
+    src = symbolic_helper._maybe_get_scalar(src)
+    if symbolic_helper._is_value(src):
+        return g.op("ScatterElements", self, index, src, axis_i=dim, reduction_s="add")
+    else:
+        # Check if scalar "src" has same type as self (PyTorch allows different
+        # type for scalar src (but not when src is tensor)). If not, insert Cast node.
+        if self.type().scalarType() != src_type:
+            src = g.op(
+                "Cast",
+                src,
+                to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
+            )
+
+        return g.op(
+            "ScatterElements",
+            self,
+            index,
+            src,
+            axis_i=dim,
+            reduction_s="add",
+        )
