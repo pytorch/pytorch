@@ -11,7 +11,8 @@ class DataChunkDF(DataChunk):
 
     def __iter__(self):
         for df in self.items:
-            for record in df.to_records(index=False):
+            # for record in df.to_records(index=False):
+            for record in df:
                 yield record
 
     def __len__(self):

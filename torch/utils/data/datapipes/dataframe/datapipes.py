@@ -22,7 +22,8 @@ class DataFramesAsTuplesPipe(IterDataPipe):
 
     def __iter__(self):
         for df in self.source_datapipe:
-            for record in df.to_records(index=False):
+            # for record in df.to_records(index=False):
+            for record in df:
                 yield record
 
 
