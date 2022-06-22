@@ -634,16 +634,6 @@ def col2im_backward(
     return F.unfold(grad_output, kernel_size, dilation, padding, stride)  # type: ignore[arg-type]
 
 
-@register_decomposition(aten.masked_fill.Scalar)
-def masked_fill_Scalar(self: Tensor, mask: Tensor, value: float) -> Tensor:
-    return torch.where(mask, utils.dtype_to_type(self.dtype)(value), self)
-
-
-@register_decomposition(aten.masked_fill.Tensor)
-def masked_fill_Tensor(self: Tensor, mask: Tensor, value: Tensor) -> Tensor:
-    return torch.where(mask, value, self)
-
-
 @register_decomposition(aten.native_dropout_backward)
 @pw_cast_for_opmath
 def native_dropout_backward(grad_output: Tensor, mask: Tensor, scale: float):
