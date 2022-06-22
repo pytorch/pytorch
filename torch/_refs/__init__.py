@@ -551,9 +551,7 @@ def logsumexp(
     if not isinstance(dim, Iterable):
         dim = (dim,)
 
-    if a.numel() != 0 and (
-        utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)
-    ):
+    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
         # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
         a_max = torch.amax(a, dim, keepdim=True)
         print(a_max.shape, dim)
@@ -567,7 +565,6 @@ def logsumexp(
         )
     else:
         # This case covers boolean and integer dtypes and we use non-stabilized computation
-        # Also covers case with 0 elements
         result = torch.log(torch.sum(a.exp(), dim, keepdim=keepdim))
     return result
 
