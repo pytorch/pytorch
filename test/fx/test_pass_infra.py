@@ -1,6 +1,9 @@
-import unittest
-import torch
+# Owner(s): ["oncall: fx"]
 
+import torch
+import torch.fx as fx
+
+from torch.testing._internal.common_utils import TestCase
 from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
@@ -27,7 +30,7 @@ class AddModule(torch.nn.Module):
         return z
 
 
-class TestPassManager(unittest.TestCase):
+class TestPassManager(TestCase):
     def test_pass_manager(self):
         """
         Tests that the pass manager runs the passes correctly.
@@ -65,7 +68,7 @@ class TestPassManager(unittest.TestCase):
         Tests that users can add in check functions correctly
         """
         m = AddModule()
-        traced_m = torch.fx.symbolic_trace(m)
+        traced_m = fx.symbolic_trace(m)
         pm = PassManager(passes=[replace_add_with_mul_pass, replace_mul_with_sub_pass])
 
         def check_div_target(graph_module):
@@ -87,7 +90,7 @@ class TestPassManager(unittest.TestCase):
         self.assertRaises(TypeError, pm.add_checks, check_bad_args)
 
 
-class TestPassPipelineManager(unittest.TestCase):
+class TestPassPipelineManager(TestCase):
     def test_pass_pipeline_manager(self):
         """
         Tests that the pass pipeline manager runs the pass managers correctly.
@@ -105,7 +108,3 @@ class TestPassPipelineManager(unittest.TestCase):
         for node in traced_m.graph.nodes:
             if node.op == "call_function":
                 self.assertEqual(node.target, torch.div)
-
-
-if __name__ == "__main__":
-    unittest.main()
