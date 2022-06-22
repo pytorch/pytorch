@@ -40,6 +40,9 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
     """
     def __init__(self, rank, world):
         super(LonelyRankProcessGroup, self).__init__(rank, world)
+        assert rank == 0
+        assert world == 1
+
         self._rank = rank
         self._world = world
         self.wait_count = 0
@@ -80,7 +83,6 @@ class TestDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest, Test
         # replicate what MultiProcessTest _spawn_proccess does
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         self.rank = 0
-        # self.world_size = 1
 
     @property
     def world_size(self):
@@ -95,8 +97,6 @@ class TestDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest, Test
 
     def _get_process_group(self):
         store = self._get_store()
-        assert self.rank == 0
-        assert self.world_size == 1
         return LonelyRankProcessGroup(self.rank, self.world_size)
 
     def test_ddp_invoke_work_object(self):
@@ -123,14 +123,11 @@ class TestDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest, Test
         pg = LonelyRankProcessGroup(0, 1)      
 
         self._test_ddp_with_process_group(pg, [torch.device("cpu")], device_ids=None)
-    #         def _test_ddp_with_process_group(
-    #     self,
-    #     process_group,
-    #     devices,
-    #     device_ids,
-    #     multi_device=False,
-    #     gradient_as_bucket_view=False,
-    # ):
+
+    def test_ddp_with_pypg_with_grad_views(self):
+        pg = LonelyRankProcessGroup(0, 1)      
+
+        self._test_ddp_with_process_group(pg, [torch.device("cpu")], device_ids=None, gradient_as_bucket_view=True)
 
 
 if __name__ == '__main__':
