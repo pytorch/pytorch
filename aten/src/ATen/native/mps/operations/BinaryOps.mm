@@ -33,10 +33,17 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
   }
   MPSStream* mpsStream = getCurrentMPSStream();
 
-  auto output = output_.is_contiguous() ? output_ : output_.contiguous();
-
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
+
+  Tensor output = output_;
+  bool needsScatter = false;
+
+  // determine if this is an in-place operation on a view output
+  if (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_))) {
+    output = at::native::empty_mps(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS);
+    needsScatter = true;
+  }
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
@@ -91,15 +98,15 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
       feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha, getMPSScalarType(other.scalar_type()));
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, needsScatter ? output : output_);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
     };
     runMPSGraph(mpsStream, cachedGraph->graph(), feeds, results);
+  }
 
-    if (!output_.is_contiguous()) {
-      const_cast<Tensor&>(output_) = output;
-    }
+  if (needsScatter) {
+    output_.copy_(output);
   }
 }
 

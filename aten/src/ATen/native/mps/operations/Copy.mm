@@ -113,9 +113,9 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
   id<MTLBuffer> sourceBuffer = nil;
   if (!src_.is_contiguous()) {
-    Tensor gatherTensor = gatherViewTensor(src_);
-    if (gatherTensor.has_storage()) {
-      sourceBuffer = getMTLBufferStorage(gatherTensor);
+    src = gatherViewTensor(src_);
+    if (src.has_storage()) {
+      sourceBuffer = getMTLBufferStorage(src);
       storage_byte_offset = 0;
     } else {
       src = src_.expand_as(dst).contiguous();
@@ -270,9 +270,9 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   id<MTLBuffer> sourceBuffer = nil;
   Tensor src;
   if (!src_.is_contiguous()) {
-    Tensor gatherTensor = gatherViewTensor(src_);
-    if (gatherTensor.has_storage()) {
-      sourceBuffer = getMTLBufferStorage(gatherTensor);
+    src = gatherViewTensor(src_);
+    if (src.has_storage()) {
+      sourceBuffer = getMTLBufferStorage(src);
       src_byte_offset = 0;
     } else {
       src = src_.expand_as(dst_).contiguous();
@@ -282,6 +282,13 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   } else {
     src = src_;
     sourceBuffer = getMTLBufferStorage(src);
+  }
+
+  // Scatter to `dst` if the memory is not contiguous
+  // If the memory is not contiguous, it means that the tensor has strides and we would not be
+  // able to do the copy using a single blit
+  if (!dst_.is_contiguous()) {
+    return scatterViewTensor(src, dst_);
   }
 
   Tensor dst = dst_;

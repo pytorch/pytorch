@@ -54,6 +54,7 @@ std::string getStridedKey(const Tensor& self, const IntArrayRef sz,
                           const IntArrayRef strides, int64_t offset);
 // use has_storage() on the returned tensor to determine if src actually is a view
 Tensor gatherViewTensor(const at::Tensor& src);
+Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output);
 
 MPSShape* getMPSShape(const Tensor& t);
 MPSShape* getMPSShape(IntArrayRef sizes);
