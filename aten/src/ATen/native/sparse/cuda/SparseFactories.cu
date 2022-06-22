@@ -80,15 +80,17 @@ SparseTensor spdiags_sparse_cuda(
     const Tensor& offsets,
     IntArrayRef shape,
     c10::optional<Layout> layout) {
-  TORCH_CHECK(diagonals.dim() == 2, "Diagonals must be 2d");
+  auto diagonals_2d = diagonals.dim() == 1 ? diagonals.unsqueeze(0) : diagonals;
+  TORCH_CHECK(diagonals_2d.dim() == 2, "Diagonals must be vector or matrix");
   TORCH_CHECK(shape.size() == 2, "Output shape must be 2d");
-  TORCH_CHECK(offsets.dim() == 1, "Offsets must be 1d");
+  auto offsets_1d = offsets.dim() == 0 ? offsets.unsqueeze(0) : offsets;
+  TORCH_CHECK(offsets_1d.dim() == 1, "Offsets must be scalar or vector");
   TORCH_CHECK(
-      diagonals.size(0) == offsets.size(0),
+      diagonals_2d.size(0) == offsets_1d.size(0),
       "Number of diagonals (",
-      diagonals.size(0),
+      diagonals_2d.size(0),
       ") does not match the number of offsets (",
-      offsets.size(0),
+      offsets_1d.size(0),
       ")");
   if (layout) {
     TORCH_CHECK(
@@ -102,14 +104,18 @@ SparseTensor spdiags_sparse_cuda(
         Layout::SparseCsr,
         ") are supported");
   }
+  TORCH_CHECK(
+      offsets_1d.scalar_type() == at::kLong,
+      "spdiags(): Expected a LongTensor of offsets but got ",
+      offsets_1d.scalar_type());
 
   const int64_t n_row_out = shape[0];
   const int64_t n_col_out = shape[1];
-  const int64_t n_col_in = diagonals.size(1);
-  const int64_t n_diag = diagonals.size(0);
+  const int64_t n_col_in = diagonals_2d.size(1);
+  const int64_t n_diag = diagonals_2d.size(0);
 
-  auto offsets_cont = offsets.contiguous();
-  auto diagonals_cont = diagonals.contiguous();
+  auto offsets_cont = offsets_1d.contiguous();
+  auto diagonals_cont = diagonals_2d.contiguous();
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   at::cuda::ThrustAllocator alloc;
