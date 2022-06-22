@@ -9278,6 +9278,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: l1_loss_backward_out
+    MPS: l1_loss_backward_out_mps
 
 - func: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
   python_module: nn
