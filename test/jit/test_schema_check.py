@@ -168,6 +168,17 @@ class TestSchemaCheck(JitTestCase):
             with enable_torch_dispatch_mode(SchemaCheckMode()):
                 IncorrectAliasTensor(x).sin().add(IncorrectAliasTensor(y), alpha=2).relu()
 
+    # Tests that SchemaCheckMode wraps Torch.tensor when inputs alias
+    def test_alias_check_with_aliasing_inputs(self):
+        expected = torch.rand((3, 3))
+        x = expected
+        actual = torch.clone(expected)
+        y = actual
+        expected.add_(x)
+        with enable_torch_dispatch_mode(SchemaCheckMode()):
+            actual.add_(y)
+        self.assertEqual(expected, actual)
+
     # Tests that isAliasOf returns as expected
     def test_is_alias_of(self):
         x = torch.rand((3, 3), requires_grad=True)
