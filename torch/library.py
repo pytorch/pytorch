@@ -63,6 +63,24 @@ class Library:
                                "'s behavior for {} dispatch key and {} namespace.".
                                format(name.split("::")[-1], dispatch_key, self.ns))
 
+
+        if dispatch_key == "Meta":
+            dispatcher_op_name = name
+            if '::' not in dispatcher_op_name:
+                dispatcher_op_name = f'{self.ns}::{dispatcher_op_name}'
+            # get a string containing the names of every dispatch key that the operator has a registration for.
+            dispatch_key_registration = torch._C._dispatch_dump(dispatcher_op_name)
+            # Internally, we shouldn't be registering meta kernels for any operators that
+            # have CompositeImplicitAutograd kernels.
+            # Instead, we should be letting those decompositions run, and writing meta kernels
+            # only for the base operators.
+            if 'CompositeImplicitAutograd' in dispatch_key_registration:
+                raise RuntimeError(
+                    f"We should not register a meta kernel directly to the operator '{name}',"
+                    " because it has a CompositeImplicitAutograd kernel in core."
+                    " Instead we should let the operator decompose, and ensure that we have meta kernels"
+                    " for the base ops that it decomposes into.")
+
         self.m.impl(name, dispatch_key, fn)
         _impls.add(key)
         self._op_impls.add(key)
