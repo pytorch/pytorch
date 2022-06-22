@@ -125,7 +125,7 @@ class APoTObserver(ObserverBase):
         r"""Records the running minimum and maximum of ``x``."""
         if x_orig.numel() == 0:
             return x_orig
-        x = x_orig.detach()  # avoid keeping autograd tape
+        x = x_orig.detach()
         min_val, max_val = torch.aminmax(x)
         if self.min_val.numel():
             min_val = torch.min(min_val, self.min_val)
