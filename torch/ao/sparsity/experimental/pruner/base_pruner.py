@@ -182,6 +182,7 @@ class BasePruner(BaseSparsifier):
                 # now that we're working with a dict, does it have the new format?
                 if local_args.get('tensor_fqn', None) is not None:
                     tensor_fqn = local_args.get('tensor_fqn')
+                    assert isinstance(tensor_fqn, str)  # for mypy
                     info_from_tensor_fqn = get_arg_info_from_tensor_fqn(model, tensor_fqn)
 
                     for key in info_from_tensor_fqn.keys():
