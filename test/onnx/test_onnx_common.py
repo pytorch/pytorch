@@ -35,6 +35,8 @@ def _run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
+    kwargs["check_shape"] = test_suite.check_shape
+    kwargs["check_dtype"] = test_suite.check_dtype
     return verification.verify(*args, **kwargs)
 
 
@@ -42,6 +44,8 @@ class _TestONNXRuntime(unittest.TestCase):
     opset_version = _constants.onnx_default_opset
     keep_initializers_as_inputs = True  # For IR version 3 type export.
     is_script = False
+    check_shape = True
+    check_dtype = True
 
     def setUp(self):
         torch.manual_seed(0)

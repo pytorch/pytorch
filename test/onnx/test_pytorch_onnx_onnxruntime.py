@@ -68,8 +68,10 @@ def run_model_test(test_suite: Union[_TestONNXRuntime, TestCase], *args, **kwarg
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
-    kwargs["check_shape"] = test_suite.check_shape
-    kwargs["check_dtype"] = test_suite.check_dtype
+    if hasattr(test_suite, "check_shape"):
+        kwargs["check_shape"] = test_suite.check_shape
+    if hasattr(test_suite, "check_dtype"):
+        kwargs["check_dtype"] = test_suite.check_dtype
     return verification.verify(*args, **kwargs)
 
 
