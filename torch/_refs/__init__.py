@@ -539,6 +539,7 @@ def log_softmax(
     return _maybe_convert_to_dtype(a_ - logsumexp(a_, dim, keepdim=True), result_dtype)  # type: ignore[return-value]
 
 
+@register_decomposition(torch.ops.aten.logsumexp.default)
 @out_wrapper
 def logsumexp(
     a: TensorLikeType,
@@ -549,15 +550,25 @@ def logsumexp(
     # ATen specifies int[1] type dims which expands integers to tuples of length 1
     if not isinstance(dim, Iterable):
         dim = (dim,)
-    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
+
+    if a.numel() != 0 and (
+        utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype)
+    ):
         # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
-        a_max = amax(a, dim, keepdim=True)
-        a_max = where(abs(a_max) == float("inf"), 0.0, a_max)
-        a_max_squeezed = prims.squeeze(a_max, dim) if not keepdim else a_max
-        result = log(sum(exp(a - a_max), dim, keepdim=keepdim)) + a_max_squeezed
+        a_max = torch.amax(a, dim, keepdim=True)
+        print(a_max.shape, dim)
+        a_max = torch.where(a_max.abs() == float("inf"), 0.0, a_max)
+        a_max_squeezed = (
+            prims.squeeze(a_max, dim) if not keepdim and a_max.ndim > 0 else a_max
+        )
+        result = (
+            torch.log(torch.sum((a - a_max).exp(), dim, keepdim=keepdim))
+            + a_max_squeezed
+        )
     else:
         # This case covers boolean and integer dtypes and we use non-stabilized computation
-        result = log(sum(exp(a), dim, keepdim=keepdim))
+        # Also covers case with 0 elements
+        result = torch.log(torch.sum(a.exp(), dim, keepdim=keepdim))
     return result
 
 
