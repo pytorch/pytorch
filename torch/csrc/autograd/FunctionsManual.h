@@ -421,6 +421,13 @@ Tensor binary_cross_entropy_double_backward_target(
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction);
+Tensor binary_cross_entropy_with_logits_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& pos_weight_opt,
+    int64_t reduction);
 at::Tensor binary_cross_entropy_with_logits_target_backward(
     const at::Tensor& grad_output,
     const at::Tensor& self,
