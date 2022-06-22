@@ -1128,20 +1128,21 @@ class TestProfiler(TestCase):
                     for child in event_key.event.children
                 ]))
 
+def find_node_with_name(nodes, name):
+    for node in nodes:
+        if node.name() == name:
+            return node
+        result = find_node_with_name(node.children, name)
+        if result is not None:
+            return result
 
+class TestTorchTidyProfiler(TestCase):
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
             _ = torch.ones((1,))
 
-        def find_ones(nodes):
-            for n in nodes:
-                if n.name() == "aten::ones":
-                    return n
-                result = find_ones(n.children)
-                if result:
-                    return result
-
-        node = find_ones(p.profiler.kineto_results.experimental_event_tree())
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::ones")
         self.assertIsNotNone(node)
 
         self.assertIsInstance(
@@ -1157,6 +1158,25 @@ class TestProfiler(TestCase):
         self.assertIsInstance(
             node.children[0].children[0].extra_fields,
             torch._C._autograd._ExtraFields_Allocation)
+
+    def test_tensor_sizes(self):
+        x = torch.ones(10, 10)
+        y = torch.ones(1, 10)
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = x + y
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._autograd._ExtraFields_TorchOp)
+
+        # The alpha scalar has a [] size
+        self.assertEqual(node.extra_fields.inputs.shapes, [[10, 10], [1, 10], []])
+        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
 
 
 if __name__ == '__main__':
