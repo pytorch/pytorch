@@ -8,9 +8,9 @@ namespace {
 c10::intrusive_ptr<ProcessGroup::Work> broadcast_(
     at::TensorList tensors,
     const c10::intrusive_ptr<ProcessGroup>& process_group,
-    int64_t root_rank = 0,
-    int64_t root_tensor = 0,
-    int64_t timeout = -1) {
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
   auto tensor_vec = tensors.vec();
   return process_group->broadcast(
       tensor_vec,
@@ -56,6 +56,23 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter_(
           std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> reduce_(
+    at::TensorList tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t reduce_op,
+    int64_t root_rank,
+    int64_t root_tensor,
+    int64_t timeout) {
+  auto tensor_vec = tensors.vec();
+  return process_group->reduce(
+      tensor_vec,
+      ReduceOptions{
+          static_cast<ReduceOp>(reduce_op),
+          root_rank,
+          root_tensor,
+          std::chrono::milliseconds(timeout)});
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup and Work definations are more like declarations.
   // They don't expose the details of the two classes into TorchScript.
@@ -76,6 +93,9 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "reduce_scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_scatter_));
+  m.def(
+      "reduce_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, reduce_));
 }
 } // namespace
 
@@ -156,6 +176,28 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
       input_tensors,
       process_group,
       static_cast<uint64_t>(opts.reduceOp),
+      opts.timeout.count());
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> reduce(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList tensors,
+    const ReduceOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::reduce_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t,
+                           int64_t,
+                           int64_t,
+                           int64_t)>();
+  return op.call(
+      tensors,
+      process_group,
+      static_cast<uint64_t>(opts.reduceOp),
+      opts.rootRank,
+      opts.rootTensor,
       opts.timeout.count());
 }
 
