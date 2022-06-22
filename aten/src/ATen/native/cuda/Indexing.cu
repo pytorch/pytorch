@@ -230,7 +230,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
 }
 
 
-static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, const c10::List<c10::optional<at::Tensor>>& orig, bool check_range) {
+static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t>> makeLinearIndex(Tensor self, IOptTensorListRef orig, bool check_range) {
   checkIndexTensorTypes(orig);
   // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
   auto indices = expandTensors(self, orig);
@@ -1217,7 +1217,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
   TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
     "expected mask dtype to be Bool but got ", mask.scalar_type());
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "
