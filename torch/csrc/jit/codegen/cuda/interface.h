@@ -54,6 +54,7 @@ TORCH_API bool complyWith(
 
 TORCH_API bool isEnabled();
 TORCH_API bool setEnabled(bool is_enabled);
+TORCH_API bool canBeEnabled();
 
 struct TORCH_API NVFuserPassManager : public PassManager<NVFuserPassManager> {
   static bool registerPass(bool enabled) {
