@@ -1,14 +1,16 @@
 # Owner(s): ["oncall: quantization"]
 
+import re
+from os import getcwd
+from os.path import exists
+
 import torch
+
 # import torch.nn.quantized as nnq
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     SingleLayerLinearModel,
 )
-from os.path import exists
-from os import getcwd
-import re
 
 
 class TestQuantizationDocs(QuantizationTestCase):
@@ -19,7 +21,9 @@ class TestQuantizationDocs(QuantizationTestCase):
     they can be imported either in the test file or passed as a global input
     """
 
-    def _get_code(self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False):
+    def _get_code(
+        self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False
+    ):
         r"""
         This function reads in the code from the docs given a unique identifier.
         Most code snippets have a 2 space indentation, for other indentation levels,
@@ -27,6 +31,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         of smaller snippets, the check that this arg controls is used to make sure that
         we are not accidentally only importing a blank line or something.
         """
+
         def get_correct_path(path_from_pytorch):
             r"""
             Current working directory when CI is running test seems to vary, this function
@@ -36,17 +41,17 @@ class TestQuantizationDocs(QuantizationTestCase):
             """
 
             # check if cwd contains pytorch
-            if exists('./pytorch' + path_from_pytorch):
-                return './pytorch' + path_from_pytorch
+            if exists("./pytorch" + path_from_pytorch):
+                return "./pytorch" + path_from_pytorch
 
             # check if pytorch is cwd or a parent of cwd
             cur_dir_path = getcwd()
-            folders = cur_dir_path.split('/')[::-1]
-            path_prefix = './'
+            folders = cur_dir_path.split("/")[::-1]
+            path_prefix = "./"
             for folder in folders:
-                if folder == 'pytorch' and exists(path_prefix + path_from_pytorch):
-                    return(path_prefix + path_from_pytorch)
-                path_prefix = '.' + path_prefix
+                if folder == "pytorch" and exists(path_prefix + path_from_pytorch):
+                    return path_prefix + path_from_pytorch
+                path_prefix = "." + path_prefix
             # if not found
             return None
 
@@ -57,32 +62,37 @@ class TestQuantizationDocs(QuantizationTestCase):
 
             # it will register as having a newline at the end in python
             if "\n" not in unique_identifier:
-                unique_identifier+="\n"
+                unique_identifier += "\n"
 
-            assert unique_identifier in content, \
-                "could not find {} in {}".format(unique_identifier, path_to_file)
+            assert unique_identifier in content, "could not find {} in {}".format(
+                unique_identifier, path_to_file
+            )
 
             # get index of first line of code
-            line_num_start = content.index(unique_identifier)+1
+            line_num_start = content.index(unique_identifier) + 1
 
             # next find where the code chunk ends.
             # this regex will match lines that don't start
             # with a \n or "  " with number of spaces=offset
-            r = r=re.compile("^[^\n,"+" "*offset+"]")
+            r = r = re.compile("^[^\n," + " " * offset + "]")
             # this will return the line of first line that matches regex
             line_after_code = next(filter(r.match, content[line_num_start:]))
             last_line_num = content.index(line_after_code)
 
             # remove the first `offset` chars of each line and gather it all together
-            code = "".join([x[offset:] for x in content[line_num_start+1:last_line_num]])
+            code = "".join(
+                [x[offset:] for x in content[line_num_start + 1 : last_line_num]]
+            )
 
             # want to make sure we are actually getting some code,
-            assert last_line_num-line_num_start>3 or short_snippet, \
-                "The code in {} identified by {} seems suspiciously short:" \
-                "\n\n###code-start####\n{}###code-end####".format(path_to_file, unique_identifier,code)
+            assert last_line_num - line_num_start > 3 or short_snippet, (
+                "The code in {} identified by {} seems suspiciously short:"
+                "\n\n###code-start####\n{}###code-end####".format(
+                    path_to_file, unique_identifier, code
+                )
+            )
             return code
         return None
-
 
     def _test_code(self, code, global_inputs=None):
         r"""
