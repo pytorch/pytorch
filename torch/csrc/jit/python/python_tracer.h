@@ -24,7 +24,7 @@ Node* preRecordPythonTrace(
     at::ArrayRef<autograd::Variable> inputs,
     std::vector<THPObjectPtr> scalar_args);
 
-std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracing_dict(
+std::pair<std::shared_ptr<Graph>, Stack> createGraphByTracingWithDict(
     const py::function& func,
     const py::dict& inputs_dict,
     Stack inputs,

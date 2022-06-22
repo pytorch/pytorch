@@ -565,6 +565,7 @@ inline Stack toTraceableStack(const py::tuple& inputs) {
   return info.toTupleRef().elements().vec();
 }
 
+// Serialize the python dictionary into a traceable stack.
 inline Stack toTraceableStack(const py::dict& inputs) {
   Stack res;
   for(auto it = inputs.begin(); it != inputs.end(); it++) {

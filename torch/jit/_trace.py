@@ -976,6 +976,11 @@ def trace_module(
                 argument_names = get_callable_argument_names(func)
 
             if isinstance(example_inputs, dict):
+                # Raise exception when the user provided key names are not aligned with forward() method's arguments' name/
+                for key in example_inputs:
+                    if key not in argument_names:
+                        valid_arguments = "[" + ','.join(argument_names) + "]"
+                        raise NameError("'{}' is not in forward() method's arguments, valid arguments name are {}".format(key, valid_arguments))
                 module._c._create_method_from_trace_with_dict(
                     method_name,
                     func,
@@ -987,8 +992,7 @@ def trace_module(
                 )
             else:
                 example_inputs = make_tuple(example_inputs)
-
-                module._c._create_method_from_trace(
+                module._c._create_method_from_trace_with_tuple(
                     method_name,
                     func,
                     example_inputs,

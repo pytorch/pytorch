@@ -1183,7 +1183,7 @@ void initJitScriptBindings(PyObject* module) {
             m.register_attribute(name, type, toIValue(value, type));
           })
       .def(
-          "_create_method_from_trace",
+          "_create_method_from_trace_with_tuple",
           [](Module& self,
              const std::string& name,
              const py::function& func,
@@ -1233,7 +1233,7 @@ void initJitScriptBindings(PyObject* module) {
             auto typed_inputs = toTraceableStack(input_dict);
 
             std::shared_ptr<Graph> graph =
-                std::get<0>(tracer::createGraphByTracing_dict(
+                std::get<0>(tracer::createGraphByTracingWithDict(
                     func,
                     input_dict,
                     typed_inputs,
