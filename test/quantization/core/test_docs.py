@@ -6,7 +6,7 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
 )
 from os.path import exists
-
+import os
 
 class TestQuantizationDocs(QuantizationTestCase):
     r"""
@@ -25,6 +25,9 @@ class TestQuantizationDocs(QuantizationTestCase):
         the last line are `newlines`, this is to ensure that the addition of a new line
         in the docs does not shift the code chunk out of the selection window.
         """
+        assert exists(filename), \
+            "we can't find {}, we are at {} \n\nand the stuff in here is {}" \
+            "\n\nand the stuff in docs is {}".format(filename, os.getcwd(), os.listdir(), os.listdir("docs"))
         if exists(filename):
             file = open(filename)
             content = file.readlines()
@@ -82,7 +85,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         self._test_code(code, global_inputs)
 
     def test_quantization_doc_fx(self):
-        filename = "./docs/source/quantization.rst"
+        filename = "./docs/source/quantization.rstt"
         first_line = 330
         last_line = 383
 
