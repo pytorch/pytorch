@@ -5,7 +5,9 @@ set -ex
 install_ubuntu() {
   echo "Preparing to build sccache from source"
   apt-get update
-  apt-get install -y cargo pkg-config libssl-dev
+  # libssl-dev will not work as it is upgraded to libssl3 in Ubuntu-22.04.
+  # Instead use lib and headers from OpenSSL1.1 installed in `install_openssl.sh``
+  apt-get install -y cargo
   echo "Checking out sccache repo"
   git clone https://github.com/pytorch/sccache
   cd sccache
