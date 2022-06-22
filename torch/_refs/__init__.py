@@ -744,7 +744,7 @@ def bfloat16(a: Tensor, *, memory_format: torch.memory_format = torch.preserve_f
         return a
     out = prims.convert_element_type(a, torch.bfloat16)
     if memory_format != torch.preserve_format:
-        raise NotImplementedError
+        out = prims.clone(out, memory_format=memory_format)
     return out
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
