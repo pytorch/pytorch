@@ -182,8 +182,8 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
   auto running_var_a = conditional_accessor_1d<param_t>(running_var);
 
   if (all_contiguous) {
-    auto _mean = at::zeros({n_input}, input.options().dtype(dtype));
-    auto _var_sum = at::zeros({n_input}, input.options().dtype(dtype));
+    auto _mean = at::empty({n_input}, input.options().dtype(dtype));
+    auto _var_sum = at::empty({n_input}, input.options().dtype(dtype));
     auto _mean_a = _mean.accessor<param_t, 1>();
     auto _var_sum_a = _var_sum.accessor<param_t, 1>();
 
@@ -199,7 +199,8 @@ std::tuple<Tensor,Tensor> batch_norm_cpu_update_stats_template(
         }
         if (running_var.defined()) {
            accscalar_t unbiased_var = _var_sum_a[f] / (n - 1);
-           running_var_a[f] = momentum * unbiased_var + (1 - momentum) * running_var_a[f];
+           running_var_a[f] = static_cast<param_t>(
+               momentum * unbiased_var + (1 - momentum) * running_var_a[f]);
         }
       }
     });
