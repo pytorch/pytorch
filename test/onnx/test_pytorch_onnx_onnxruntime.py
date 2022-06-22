@@ -35,6 +35,8 @@ from test_pytorch_common import (
     skipIfUnsupportedMinOpsetVersion,
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
+    skipShapeChecking,
+    skipDtypeChecking,
 )
 from torchvision import ops
 from torchvision.models.detection.faster_rcnn import FastRCNNPredictor, TwoMLPHead
@@ -68,6 +70,8 @@ def run_model_test(
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
+    kwargs["check_shape"] = test_suite.check_shape
+    kwargs["check_dtype"] = test_suite.check_dtype
     return verification.verify(*args, **kwargs)
 
 
@@ -199,6 +203,8 @@ class _TestONNXRuntime:
 
     opset_version = -1  # Sub-classes must override
     keep_initializers_as_inputs = True  # For IR version 3 type export.
+    check_shape = True
+    check_dtype = True
 
     def setUp(self):
         torch.manual_seed(0)
@@ -1155,6 +1161,7 @@ class _TestONNXRuntime:
         y = torch.randint(10, (2, 3, 4))
         self.run_test(Model(), (x, y))
 
+    @skipDtypeChecking
     def test_primitive_input_floating(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1841,6 +1848,7 @@ class _TestONNXRuntime:
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x, remained_onnx_input_idx=[])
 
+    @skipDtypeChecking
     def test_arithmetic_prim_float(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x, y: float):
@@ -1863,6 +1871,7 @@ class _TestONNXRuntime:
         x = torch.randn(2, 3, 4)
         self.run_test(ArithmeticModule(), x, remained_onnx_input_idx=[])
 
+    @skipDtypeChecking
     def test_arithmetic_prim_bool(self):
         class ArithmeticModule(torch.nn.Module):
             def forward(self, x, y: int, z: bool, t: float):
@@ -3213,6 +3222,7 @@ class _TestONNXRuntime:
             torch.jit.script(ListUnpackSlice()), x, remained_onnx_input_idx=[]
         )
 
+    @skipDtypeChecking
     def test_pow(self):
         class PowModule(torch.nn.Module):
             def forward(self, x, y):
@@ -3259,6 +3269,7 @@ class _TestONNXRuntime:
     # add to(dtype=torch.long) to avoid ORT output type does not match expected type.
     # will be fixed in ONNX version 14.
     @skipIfUnsupportedMaxOpsetVersion(13)
+    @skipDtypeChecking
     def test_arithmeticOps_with_low_precision(self):
         class AddModule(torch.nn.Module):
             def forward(self, x, y):
@@ -5505,6 +5516,7 @@ class _TestONNXRuntime:
         ind = torch.tensor(-2, dtype=torch.long)
         self.run_test(GetItemModel(), (x, y, z, ind))
 
+    @skipDtypeChecking
     def test_item(self):
         class M(torch.nn.Module):
             def forward(self, x, y, i: int):
@@ -6311,6 +6323,7 @@ class _TestONNXRuntime:
         self.run_test(ZeroAndOnes(), (x,))
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipShapeChecking
     def test_tolist(self):
         class List(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -6843,6 +6856,7 @@ class _TestONNXRuntime:
         self.run_test(FullLikeModel(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
+    @skipDtypeChecking
     def test_full_like_value(self):
         class FullLikeModel(torch.nn.Module):
             def forward(self, x, y):
@@ -11903,6 +11917,7 @@ class _TestONNXRuntime:
         x = torch.ones(12, 3)
         self.run_test(M(), (x,), input_names=["x"], dynamic_axes={"x": [0]})
 
+    @skipShapeChecking
     def test_sum_empty_tensor(self):
         class M(torch.nn.Module):
             def forward(self, x):
