@@ -1272,27 +1272,11 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
 
   Tensor offset2bag_;
   if (indices.numel() != 0 && offset2bag.numel() == 0) {
-    // For Composite Compliance, if `offsets` is CCT then
-    // we want `offset2bag_` to be CCT as well because
-    // `make_offset2bag` calls `index_add_` on `offset2bag_`
-    // with `offsets` as one of the arguments.
-    if (isTensorSubclassLike(offsets)) {
-      offset2bag_ = offsets.new_zeros(
-       {indices.size(0) + 1}, offsets.options()); // offset2bag = [0 0 0 0 0]
-    } else {
-      offset2bag_ = at::zeros(
-       {indices.size(0) + 1}, offsets.options()); // offset2bag = [0 0 0 0 0]
-    }
+    offset2bag_ = offsets.new_zeros(
+      {indices.size(0) + 1}, offsets.options()); // offset2bag = [0 0 0 0 0]
 
     make_offset2bag(offsets, offset2bag_);
-    // For Composite Compliance, if `offset2bag_` is CCT
-    // then we can't call `resize_`. Instead we call `narrow`
-    // to slice the tensor.
-    if (isTensorSubclassLike(offset2bag_)) {
-      offset2bag_ = offset2bag_.narrow(0, 0, indices.size(0));
-    } else {
-      offset2bag_.resize_({indices.size(0)});
-    }
+    offset2bag_ = offset2bag_.narrow(0, 0, indices.size(0));
   } else {
     auto offset2bag_arg = TensorArg(offset2bag, "offset2bag", 1);
     checkScalarTypes("embedding_bag", offset2bag_arg, {kLong, kInt});
