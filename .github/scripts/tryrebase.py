@@ -6,7 +6,7 @@ import sys
 import re
 from typing import Any
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-from trymerge import gh_post_pr_comment as gh_post_comment, GitHubPR
+from trymerge import gh_post_comment, GitHubPR
 
 
 def parse_args() -> Any:
