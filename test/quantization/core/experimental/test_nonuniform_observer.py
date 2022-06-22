@@ -2,20 +2,21 @@
 
 from torch.ao.quantization.experimental.observer import APoTObserver
 import unittest
+import torch
 
 class TestNonUniformObserver(unittest.TestCase):
     """
-        Test case 1
+        Test case 1: calculate_qparams
         Test that error is thrown when k == 0
     """
     def test_calculate_qparams_invalid(self):
         obs = APoTObserver(b=0, k=0)
 
         with self.assertRaises(AssertionError):
-            obs_result = obs.calculate_qparams(signed=False)
+            obs_result = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([0]))
 
     """
-        Test case 2
+        Test case 2: calculate_qparams
         APoT paper example: https://arxiv.org/pdf/1909.13144.pdf
         Assume hardcoded parameters:
         * b = 4 (total number of bits across all terms)
@@ -25,7 +26,7 @@ class TestNonUniformObserver(unittest.TestCase):
     """
     def test_calculate_qparams_2terms(self):
         obs = APoTObserver(b=4, k=2)
-        obs_result = obs.calculate_qparams(max_val=1.0, signed=False)
+        obs_result = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
 
         # calculate expected gamma value
         gamma_test = 0
@@ -51,7 +52,7 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """
-        Test case 3
+        Test case 3: calculate_qparams
         Assume hardcoded parameters:
         * b = 6 (total number of bits across all terms)
         * k = 2 (base bitwidth, i.e. bitwidth of every term)
@@ -60,7 +61,7 @@ class TestNonUniformObserver(unittest.TestCase):
     def test_calculate_qparams_3terms(self):
         obs = APoTObserver(b=6, k=2)
 
-        obs_result = obs.calculate_qparams(max_val=1.0, signed=False)
+        obs_result = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
 
         # calculate expected gamma value
         gamma_test = 0
@@ -86,7 +87,7 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """
-        Test case 4
+        Test case 4: calculate_qparams
         Same as test case 2 but with signed = True
         Assume hardcoded parameters:
         * b = 4 (total number of bits across all terms)
@@ -96,7 +97,7 @@ class TestNonUniformObserver(unittest.TestCase):
     """
     def test_calculate_qparams_signed(self):
         obs = APoTObserver(b=4, k=2)
-        obs_result = obs.calculate_qparams(max_val=1.0, signed=True)
+        obs_result = obs.calculate_qparams(signed=True, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
 
         # calculate expected gamma value
         gamma_test = 0
@@ -128,6 +129,22 @@ class TestNonUniformObserver(unittest.TestCase):
         # check level indices unique elements
         level_indices_test_list = obs_result[2].tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
+
+    """
+        Test forward method on hard-coded tensor with arbitrary values.
+        Checks that alpha is max of abs value of max and min values in tensor.
+    """
+    def test_forward(self):
+        obs = APoTObserver(b=4, k=2)
+
+        X = torch.tensor([0.0, -100.23, 3.42, 8.93, 9.21, 87.92])
+
+        qparams = obs.calculate_qparams(False)
+
+        X = obs.forward(X)
+
+        self.assertEqual(obs.alpha, torch.tensor([100.23]))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -18,7 +18,10 @@ class TestQuantizedTensor(unittest.TestCase):
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
         orig_tensor2quantize = torch.clone(tensor2quantize)
 
-        quantizer = APoTQuantizer(4, 2, torch.max(tensor2quantize), False)
+        min_val = torch.min(tensor2quantize)
+        max_val = torch.max(tensor2quantize)
+
+        quantizer = APoTQuantizer(4, 2, min_val, max_val, False)
 
         # get apot quantized tensor result
         qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
