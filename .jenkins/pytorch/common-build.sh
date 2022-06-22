@@ -4,7 +4,7 @@
 
 if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
     # Save the absolute path in case later we chdir (as occurs in the gpu perf test)
-    script_dir="$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )"
+    script_dir="$( cd "$(dirname "${BASH_SOURCE[0]}")" || exit ; pwd -P )"
 
     if which sccache > /dev/null; then
     # Save sccache logs to file
