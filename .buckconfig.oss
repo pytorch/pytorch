@@ -3,9 +3,11 @@
 
 [buildfile]
   name = BUCK.oss
+  includes = //tools/build_defs/select.bzl
 
 [repositories]
   bazel_skylib = third_party/bazel-skylib/
+  ovr_config = .
 
 [download]
   in_build = true

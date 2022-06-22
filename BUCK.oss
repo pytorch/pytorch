@@ -1,5 +1,4 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
-load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load(
     ":build_variables.bzl",
     "aten_cpu_source_list",
@@ -21,13 +20,16 @@ load(
     "pt_operator_library",
     "get_pt_ops_deps",
     "aten_ufunc_generated_all_cpu_sources",
+    "pt_xplat_cxx_library",
     "TEMPLATE_SOURCE_LIST",
 )
 load(":buckbuild.bzl",
     "define_buck_targets",
 )
 
-define_buck_targets()
+define_buck_targets(
+    pt_xplat_cxx_library = pt_xplat_cxx_library,
+)
 
 cxx_library(
     name = "pthreadpool",
@@ -76,20 +78,6 @@ cxx_library(
     visibility = ['PUBLIC'],
 )
 
-cxx_library(
-    name = "common_core",
-    srcs = ['caffe2/core/common.cc'],
-    deps = [':caffe2_headers', '//c10:c10'],
-    exported_deps = [],
-    compiler_flags = ['-frtti', '-Os', '-Wno-unknown-pragmas', '-Wno-write-strings', '-Wno-unused-variable', '-Wno-unused-function', '-Wno-deprecated-declarations', '-Wno-shadow', '-Wno-global-constructors', '-Wno-missing-prototypes', '-std=gnu++17'],
-    preferred_linkage = "static",
-    header_namespace = "caffe2",
-    headers = [],
-    link_whole = True,
-    platform_preprocessor_flags = [['windows', ['-D_WINDOWS', '-D_WIN32', '-DWIN32', '-DNOMINMAX', '-D_CRT_SECURE_NO_WARNINGS', '-D_USE_MATH_DEFINES']], ['windows.*64$', ['-D_WIN64']]],
-    visibility = ['PUBLIC'],
-)
-
 build_aten_cpu(
     name = "aten_cpu",
     srcs = jit_core_sources +
@@ -107,35 +95,6 @@ build_aten_cpu(
         # Needed by ATen/native/EmbeddingBag.cpp
         "caffe2/perfkernels/embedding_lookup_idx.cc",
     ],
-)
-
-fb_xplat_genrule(
-    name = "generate_aten_config",
-    srcs = [
-        "aten/src/ATen/Config.h.in",
-    ],
-    cmd = " ".join([
-        "sed",
-        "-e 's/@AT_MKLDNN_ENABLED@/ATEN_MKLDNN_ENABLED_FBXPLAT/g'",
-        "-e 's/@AT_MKL_ENABLED@/ATEN_MKL_ENABLED_FBXPLAT/g'",
-        "-e 's/@AT_MKL_SEQUENTIAL@/ATEN_MKL_SEQUENTIAL_FBXPLAT/g'",
-        "-e 's/@AT_FFTW_ENABLED@/0/g'",
-        "-e 's/@AT_POCKETFFT_ENABLED@/0/g'",
-        "-e 's/@AT_NNPACK_ENABLED@/ATEN_NNPACK_ENABLED_FBXPLAT/g'",
-        "-e 's/@CAFFE2_STATIC_LINK_CUDA_INT@/CAFFE2_STATIC_LINK_CUDA_FBXPLAT/g'",
-        "-e 's/@AT_BUILD_WITH_BLAS@/USE_BLAS_FBXPLAT/g'",
-        "-e 's/@AT_PARALLEL_OPENMP@/AT_PARALLEL_OPENMP_FBXPLAT/g'",
-        "-e 's/@AT_PARALLEL_NATIVE@/AT_PARALLEL_NATIVE_FBXPLAT/g'",
-        "-e 's/@AT_PARALLEL_NATIVE_TBB@/AT_PARALLEL_NATIVE_TBB_FBXPLAT/g'",
-        "-e 's/@AT_BUILD_WITH_LAPACK@/USE_LAPACK_FBXPLAT/g'",
-        "-e 's/@AT_BLAS_F2C@/AT_BLAS_F2C_FBXPLAT/g'",
-        "-e 's/@AT_BLAS_USE_CBLAS_DOT@/AT_BLAS_USE_CBLAS_DOT_FBXPLAT/g'",
-        "aten/src/ATen/Config.h.in > $OUT/Config.h",
-    ]),
-    outs = {
-        "Config.h": ["Config.h"],
-    },
-    default_outs = ["."],
 )
 
 gen_aten_files(
@@ -173,87 +132,6 @@ cxx_library(
 gen_aten_libtorch_files(name = "gen_aten_libtorch")
 
 cxx_library(
-    name = "torch_mobile_observer",
-    srcs = [
-        "torch/csrc/jit/mobile/observer.cpp",
-        #"torch/fb/observers/MobileObserverUtil.cpp",
-    ],
-    header_namespace = "",
-    exported_headers = subdir_glob(
-        [
-            ("", "torch/csrc/jit/mobile/observer.h"),
-            #("", "torch/fb/observers/ObserverUtil.h"),
-            #("", "torch/fb/observers/MobileObserverUtil.h"),
-        ],
-    ),
-    visibility = ["PUBLIC"],
-    deps = [
-        "//c10:c10",
-    ],
-)
-
-python_library(
-    name = "aten_code_template",
-    srcs = subdir_glob([
-        ("aten", "src/ATen/code_template.py"),
-    ]),
-    base_module = "",
-    visibility = ["PUBLIC"],
-)
-
-
-cxx_library(
-    name = "torch_common",
-    srcs = core_sources_common,
-    compiler_flags = get_pt_compiler_flags(),
-    exported_preprocessor_flags = get_pt_preprocessor_flags(),
-    link_whole = True,
-    visibility = ["PUBLIC"],
-    deps = [
-        ":aten_cpu",
-        ":generated-autograd-headers",
-        ":torch_headers",
-        "//third_party:glog",
-        "//c10:c10",
-    ],
-)
-
-
-cxx_library(
-    name = "torch_mobile_deserialize_common",
-    srcs = [
-        "torch/csrc/jit/mobile/parse_bytecode.cpp",
-        "torch/csrc/jit/mobile/parse_operators.cpp",
-        "torch/csrc/jit/mobile/upgrader_mobile.cpp",
-        "torch/csrc/jit/serialization/import_read.cpp",
-        "torch/csrc/jit/serialization/unpickler.cpp",
-    ],
-    header_namespace = "",
-    exported_headers = [
-        "torch/csrc/jit/serialization/import_read.h",
-        "torch/csrc/jit/serialization/unpickler.h",
-    ],
-    compiler_flags = get_pt_compiler_flags(),
-    link_whole = True,
-    linker_flags = [
-        "-Wl,--no-as-needed",
-    ],
-    visibility = ["PUBLIC"],
-    exported_deps = [
-        ":aten_cpu",
-        ":caffe2_headers",
-        ":caffe2_serialize",
-        ":torch_common",
-        ":torch_headers",
-        ":torch_mobile_headers",
-        ":torch_mobile_module",
-        ":torch_mobile_observer",
-        "//third_party:glog",
-        "//c10:c10",
-    ],
-)
-
-cxx_library(
     name = "caffe2_serialize",
     srcs = [
         "caffe2/serialize/file_adapter.cc",
@@ -267,88 +145,6 @@ cxx_library(
         "//third_party:glog",
         "//c10:c10",
         "//third_party:miniz",
-    ],
-)
-
-cxx_library(
-    name = "torch_mobile_deserialize",
-    srcs = [
-        "torch/csrc/jit/mobile/import.cpp",
-    ],
-    header_namespace = "",
-    exported_headers = [
-        "torch/csrc/jit/mobile/import.h",
-    ],
-    compiler_flags = get_pt_compiler_flags(),
-    link_whole = True,
-    linker_flags = [
-        "-Wl,--no-as-needed",
-    ],
-    visibility = ["PUBLIC"],
-    exported_deps = [
-        ":aten_cpu",
-        ":caffe2_headers",
-        ":caffe2_serialize",
-        ":torch_common",
-        ":torch_headers",
-        ":torch_mobile_headers",
-        ":torch_mobile_module",
-        ":torch_mobile_observer",
-        "//third_party:glog",
-        "//c10:c10",
-        ":torch_mobile_deserialize_common",
-    ],
-)
-
-cxx_library(
-    name = "torch_mobile_module",
-    srcs = [
-        "torch/csrc/jit/mobile/function.cpp",
-        "torch/csrc/jit/mobile/interpreter.cpp",
-        "torch/csrc/jit/mobile/module.cpp",
-    ],
-    header_namespace = "",
-    exported_headers = [],
-    compiler_flags = get_pt_compiler_flags(),
-    link_whole = True,
-    linker_flags = [
-        "-Wl,--no-as-needed",
-    ],
-    visibility = ["PUBLIC"],
-    exported_deps = [
-        ":aten_cpu",
-        ":caffe2_headers",
-        ":torch_common",
-        ":torch_headers",
-        ":torch_mobile_headers",
-        ":torch_mobile_observer",
-        "//third_party:glog",
-        "//c10:c10",
-    ],
-)
-
-cxx_library(
-    name = "torch_mobile_core",
-    srcs = [],
-    header_namespace = "",
-    exported_headers = [],
-    compiler_flags = get_pt_compiler_flags(),
-    exported_preprocessor_flags = get_pt_preprocessor_flags(),
-    link_whole = True,
-    linker_flags = [
-        "-Wl,--no-as-needed",
-        # "-ldl",
-    ],
-    visibility = ["PUBLIC"],
-    deps = [
-        ":generated-autograd-headers",
-        ":torch_mobile_observer",
-        ":torch_mobile_headers",
-    ],
-    exported_deps = [
-        ":aten_cpu",
-        ":torch_common",
-        ":torch_mobile_deserialize",
     ],
 )
 
@@ -369,62 +165,6 @@ cxx_library(
         ],
         enable_flatbuffer = False,
     ),
-)
-
-python_library(
-    name = "gen_oplist_lib",
-    srcs = subdir_glob([
-        ("tools/code_analyzer", "gen_oplist.py"),
-        ("tools/code_analyzer", "gen_op_registration_allowlist.py"),
-    ]),
-    base_module = "",
-    deps = [
-        "//third_party:pyyaml",
-        "//tools/lite_interpreter:gen_selected_mobile_ops_header",
-        "//torchgen:torchgen",
-    ],
-)
-
-python_binary(
-    name = "gen_oplist",
-    main_module = "gen_oplist",
-    visibility = ["PUBLIC"],
-    deps = [
-        ":gen_oplist_lib",
-    ],
-)
-
-python_library(
-    name = "gen_operators_yaml_lib",
-    srcs = subdir_glob([
-        ("tools/code_analyzer", "gen_operators_yaml.py"),
-        ("tools/code_analyzer", "gen_op_registration_allowlist.py"),
-    ]),
-    base_module = "",
-    deps = [
-        "//third_party:pyyaml",
-        "//torchgen:torchgen",
-    ],
-)
-
-python_binary(
-    name = "gen_aten_bin",
-    main_module = "torchgen.gen",
-    visibility = [
-        "PUBLIC",
-    ],
-    deps = [
-        "//torchgen:torchgen",
-    ],
-)
-
-python_binary(
-    name = "gen_operators_yaml",
-    main_module = "gen_operators_yaml",
-    visibility = ["PUBLIC"],
-    deps = [
-        ":gen_operators_yaml_lib",
-    ],
 )
 
 cxx_binary(
