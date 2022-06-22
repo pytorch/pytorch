@@ -1,3 +1,4 @@
+
 import torch
 import torch.fx as fx
 from torch.utils._pytree import tree_flatten
@@ -56,3 +57,16 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
                 token_map[hash_val] = token
 
     return new_graph
+
+
+def strip_overloads(gm):
+    """
+    Modifies the target of graph nodes in :attr:`gm` to strip overloads.
+
+    Args:
+        gm(fx.GraphModule): The input Fx graph module to be modified
+    """
+    for node in gm.graph.nodes:
+        if isinstance(node.target, torch._ops.OpOverload):
+            node.target = node.target.overloadpacket
+    gm.recompile()
