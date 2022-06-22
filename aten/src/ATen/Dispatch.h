@@ -214,19 +214,23 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 // but we're just being safe (and it doesn't hurt.)  Note we must
 // use it to shut up warnings about unused store.
 
-#define AT_DISPATCH_SWITCH(TYPE, NAME, ...)                                  \
-  [&] {                                                                      \
-    const auto& the_type = TYPE;                                             \
-    constexpr const char* at_dispatch_name = NAME;                           \
-    /* don't use TYPE again in case it is an expensive or side-effect op */  \
-    at::ScalarType _st = ::detail::scalar_type(the_type);                    \
-    RECORD_KERNEL_FUNCTION_DTYPE(at_dispatch_name, _st);                     \
-    switch (_st) {                                                           \
-      __VA_ARGS__                                                            \
-      default:                                                               \
-        AT_ERROR(                                                            \
-            at_dispatch_name, " not implemented for '", toString(_st), "'"); \
-    }                                                                        \
+#define AT_DISPATCH_SWITCH(TYPE, NAME, ...)                                 \
+  [&] {                                                                     \
+    const auto& the_type = TYPE;                                            \
+    constexpr const char* at_dispatch_name = NAME;                          \
+    /* don't use TYPE again in case it is an expensive or side-effect op */ \
+    at::ScalarType _st = ::detail::scalar_type(the_type);                   \
+    RECORD_KERNEL_FUNCTION_DTYPE(at_dispatch_name, _st);                    \
+    switch (_st) {                                                          \
+      __VA_ARGS__                                                           \
+      default:                                                              \
+        AT_ERROR(                                                           \
+            '"',                                                            \
+            at_dispatch_name,                                               \
+            "\" not implemented for '",                                     \
+            toString(_st),                                                  \
+            "'");                                                           \
+    }                                                                       \
   }()
 
 #define AT_DISPATCH_CASE_FLOATING_TYPES(...)            \
