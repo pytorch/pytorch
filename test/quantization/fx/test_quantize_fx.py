@@ -5794,7 +5794,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
                 if self.is_module:
                     return self.op(input)
                 else:
-                    return self.op(input, self.inplace)
+                    return self.op(input, inplace=self.inplace)
 
         options = itertools.product([True, False], [True, False], self.static_quant_types, [True, False])
         quantized_nodes = {
