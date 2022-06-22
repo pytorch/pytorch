@@ -179,7 +179,7 @@ class BasicEvaluation:
         '''
         # Based on queue_depth_list, we can calculate idle time for all the events
         idle = False
-        idle_start = None
+        idle_start = 0
         idle_intervals: List[Interval] = []
         for data_point in self.queue_depth_list:
             if data_point.queue_depth == 0 and not idle:
