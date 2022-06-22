@@ -2882,7 +2882,7 @@ class _TestONNXRuntime:
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
 
-    @skipIfUnsupportedMinOpsetVersion(10)
+    @skipIfUnsupportedMinOpsetVersion(11)
     def test_interpolate_half_pixel(self):
         # testing whether it uses "half_pixel" or "pytorch_half_pixel"
         # see https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
@@ -2898,9 +2898,7 @@ class _TestONNXRuntime:
                     x, mode=self.mode, size=self.size
                 )
 
-        modes = ["nearest", "linear", "bicubic"]
-        if self.opset_version < 11:
-            modes = ["nearest"]
+        modes = ["linear", "bicubic"]
         x = [
             torch.randn(1, 2, 6, requires_grad=True),
             torch.randn(1, 2, 4, 6, requires_grad=True),
