@@ -143,7 +143,7 @@ const Output& Node::operand(size_t i) const {
 }
 const Output& Node::nullable_operand(size_t i) const {
   return i < operands_as_outputs_.size()
-    ? operands_as_outputs_.at(i)
+    ? operand(i)
     : torch::lazy::Value();
 }
 
