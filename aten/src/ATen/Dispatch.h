@@ -47,6 +47,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 #define RECORD_KERNEL_FUNCTION_DTYPE(NAME, enum_type)
 #endif
 
+// Avoid if_constexpr if possble, as it's more expensive to compile
 #if defined __cpp_if_constexpr
 #define AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type)   \
   do {                                                \
@@ -157,7 +158,7 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 //      AT_DISPATCH_ALL_TYPES(self.scalar_type(), "op_name", [&] {
 //          // Your code here, with 'scalar_t' now defined to
 //          // be the dtype in question
-//      })
+//      });
 //
 // There are many variations of this macro, so it's important to
 // understand exactly /which/ dtypes you want to get instantiated, as
@@ -208,6 +209,26 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 // functions. There is no risk of missing out on any code, so
 // it's mostly a risk of a Type-2 error, and not a Type-1 error.
 //
+// Switch-like syntax:
+// -------------------
+// There is also a switch-case like syntax which is useful if a kernel
+// needs to be specialized for particular scalar types
+//
+//      AT_DISPATCH_SWITCH(self.scalar_type(), "op_name",
+//          AT_DISPATCH_CASE_INTEGRAL_TYPES([&] {
+//            op_integral<scalar_t>(iter);
+//          })
+//          AT_DISPATCH_CASE_FLOATING_TYPES([&] {
+//            op_floating<scalar_t>(iter);
+//          })
+//          AT_DISPATCH_CASE(kBool, [&] {
+//            op_bool(iter);
+//          })
+//      );
+//
+// For each AT_DISPATCH_FOO macro, there is a corresponding
+// AT_DISPATCH_CASE_FOO macro which can be used inside of an
+// AT_DISPATCH_SWITCH block.
 
 // NB: the the_type variable is not used, but we have kept it for
 // backwards compatibility.  It's probably not used by anyone though;
@@ -514,4 +535,4 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
   AT_DISPATCH_SWITCH(                                   \
       TYPE,                                             \
       NAME,                                             \
-      AT_DISPATCH_ALL_TYPES_AND(at::ScalarType::Half, __VA_ARGS__))
+      AT_DISPATCH_CASE_ALL_TYPES_AND(at::ScalarType::Half, __VA_ARGS__))
