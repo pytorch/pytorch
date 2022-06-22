@@ -80,6 +80,8 @@ class _ConvNd(Module):
                  dtype=None) -> None:
         factory_kwargs = {'device': device, 'dtype': dtype}
         super(_ConvNd, self).__init__()
+        if groups <= 0:
+            raise ValueError('groups must be a positive integer')
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
@@ -191,6 +193,8 @@ class Conv1d(_ConvNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a one-element tuple.
 
@@ -213,6 +217,9 @@ class Conv1d(_ConvNd):
         ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
+
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -323,6 +330,8 @@ class Conv2d(_ConvNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation, a single
       number or a tuple.
 
@@ -352,6 +361,9 @@ class Conv2d(_ConvNd):
         ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
+
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -462,6 +474,8 @@ class Conv3d(_ConvNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of padding applied to the input. It
@@ -489,6 +503,9 @@ class Conv3d(_ConvNd):
         ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
+
+    Note:
+        This module supports complex data types i.e. ``complex32, complex64, complex128``.
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -663,6 +680,8 @@ class ConvTranspose1d(_ConvTransposeNd):
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero padding on both
@@ -791,6 +810,8 @@ class ConvTranspose2d(_ConvTransposeNd):
     `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 
@@ -946,6 +967,8 @@ class ConvTranspose3d(_ConvTransposeNd):
     `here`_ and the `Deconvolutional Networks`_ paper.
 
     This module supports :ref:`TensorFloat32<tf32_on_ampere>`.
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     * :attr:`stride` controls the stride for the cross-correlation.
 

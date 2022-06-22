@@ -48,6 +48,7 @@ def build_constructor_arg_db():
         torch.nn.CosineSimilarity: ((), {}),
         torch.nn.CrossEntropyLoss: ((), {}),
         torch.nn.CrossMapLRN2d: ((5,), {}),
+        torch.nn.Dropout1d: ((), {}),
         torch.nn.Dropout2d: ((), {}),
         torch.nn.Dropout3d: ((), {}),
         torch.nn.Dropout: ((), {}),
@@ -365,7 +366,6 @@ def generate_tests(test_cls, constructor_arg_db):
         torch.nn.Module,
         torch.nn.Container,  # deprecated
         torch.nn.NLLLoss2d,  # deprecated
-        torch.nn.quantized._ConvNd,  # base class in __all__ for some reason
         # TODO: Remove these 2 from this list once the ASan issue is fixed.
         # See https://github.com/pytorch/pytorch/issues/55396
         torch.nn.quantized.Embedding,

@@ -77,7 +77,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # we want to pin to version 3.10.
   if [ "$ANACONDA_PYTHON_VERSION" = "3.9" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
-    conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0 -c conda-forge
+    conda_install numpy=1.19.2 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0
   elif [ "$ANACONDA_PYTHON_VERSION" = "3.8" ]; then
     # Install llvm-8 as it is required to compile llvmlite-0.30.0 from source
     conda_install numpy=1.18.5 astunparse pyyaml mkl mkl-include setuptools cffi future six llvmdev=8.0.0

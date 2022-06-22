@@ -13,7 +13,7 @@ retryable_message_types = ["RREF_FORK_REQUEST",
                            "CLEANUP_AUTOGRAD_CONTEXT_REQ"]
 
 # The following messages incur the corresponding delay in seconds while being
-# processed in FaultyProcessGroupAgent's enqueueSend() function.
+# processed in FaultyTensorPipeAgent's enqueueSend() function.
 default_messages_to_delay = {
     "PYTHON_CALL": 1.5,  # Python UDF
     "SCRIPT_CALL": 1.5,  # Script/Builtin

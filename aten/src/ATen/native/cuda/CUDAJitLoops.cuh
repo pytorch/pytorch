@@ -81,16 +81,16 @@ static inline void launch_jitted_unrolled_kernel(
   if (!fn_ptr->function) {
     const std::lock_guard<std::mutex> lock{_jiterator_mutex};
     if (!fn_ptr->function) {
-      constexpr int nTensors = array_t::size();
-      constexpr bool dynamic_casting = !std::is_same<decltype(l),
-                                                     memory::LoadWithoutCast>() || !std::is_same<decltype(s),
-                                                     memory::StoreWithoutCast>();
+      constexpr int nInputs = array_t::size() - 1;
+      constexpr int nOutputs = 1;  // fix me
+      constexpr bool dynamic_casting = !std::is_same<decltype(l), memory::LoadWithoutCast>() ||
+                                       !std::is_same<decltype(s), memory::StoreWithoutCast>();
       std::string string_name{name};
       std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
       std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
       c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
-      auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
+      auto code = at::cuda::jit::generate_code(nInputs, nOutputs, f, string_name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                contiguous, dynamic_casting, scalar_pos, extra_args_types);
       *fn_ptr = at::cuda::jit::jit_pwise_function(code, name);
@@ -161,13 +161,14 @@ at::opmath_type<f_inputs_type> scalar_val, std::tuple<Args...> extra_args) {
     if (!fn_ptr->function) { // cache miss!
 
       // Generates program
-      constexpr int nTensors = array_t::size();
+      constexpr int nInputs = array_t::size() - 1;
+      constexpr int nOutputs = 1;  // fix me
       std::string string_name{name};
       std::string f_inputs_type_str = at::cuda::jit::typeName<f_inputs_type>();
       std::string compute_type_str = at::cuda::jit::typeName<at::opmath_type<f_inputs_type>>();
       std::string result_type_str = at::cuda::jit::typeName<result_type>();
       c10::SmallVector<std::string> extra_args_types = get_extra_args_typenames<Args...>();
-      auto code = at::cuda::jit::generate_code(nTensors, f, string_name,
+      auto code = at::cuda::jit::generate_code(nInputs, nOutputs, f, string_name,
                                                f_inputs_type_str, compute_type_str, result_type_str,
                                                /*contiguous=*/true, /*dynamic_casting=*/false,
                                                scalar_pos,
@@ -281,14 +282,10 @@ void jitted_gpu_kernel_impl(
   // Both require construction of a storer (this asserts 1 output) and one or more loaders
 
   // Creates store cast to output (the zeroth tensor in TensorIterator)
-  auto storer = memory::StoreWithCast(iter.dtype(0));
+  auto storer = memory::StoreWithCast<1>(iter);
 
   // Creates load casts from inputs (note offset indexing into the iterators 1...n tensors)
-  at::detail::Array<ScalarType, arity> dtypes;
-  for (auto i = decltype(arity){0}; i < arity; ++i) {
-    dtypes[i] = iter.dtype(i + 1);
-  }
-  auto loader = memory::LoadWithCast<arity>(dtypes);
+  auto loader = memory::LoadWithCast<arity>(iter);
 
   if (contiguous) {
     // Case 3: dynamic casting and contiguous

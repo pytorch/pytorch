@@ -1,8 +1,8 @@
 import contextlib
-from typing import Iterator
+from typing import Iterator, Set
 import functools
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, MetaInitErrorInfo
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, _restore_mode
 from torch._C import _get_torch_dispatch_mode, _set_torch_dispatch_mode
 from dataclasses import dataclass
 
@@ -65,7 +65,12 @@ def enable_torch_dispatch_mode(mode, *, replace=None, ignore_preexisting=False) 
 def _wrap_torch_dispatch(f):
     @functools.wraps(f)
     def wrapped(self, *args, **kwargs):
-        with enable_torch_dispatch_mode(self.inner):
+        if isinstance(f, classmethod):
+            raise RuntimeError("TorchDispatchMode's torch_dispatch function " +
+                               "should be a normal method not a class method")
+        inner = getattr(self, "inner", None)
+
+        with enable_torch_dispatch_mode(inner):
             return f(self, *args, **kwargs)
     return wrapped
 
@@ -82,10 +87,6 @@ def _wrap_torch_dispatch(f):
 # simplify the C++ API surface.  It would also have been valid to build in the
 # notion of mode stack directly into C++ but in this design it's substantially
 # more difficult to interact with TorchDispatchModeMeta.
-
-class TorchDispatchMetaInitErrorInfo(MetaInitErrorInfo):
-    def __init__(self):
-        super().__init__(mode_class_name="TorchDispatchMode", mode_name="torch_dispatch")
 
 class TorchDispatchModeMeta(type):
     """
@@ -104,7 +105,7 @@ class TorchDispatchModeMeta(type):
     """
     def __new__(metacls, name, bases, dct):
         if '__init__' in dct:
-            dct['__init__'] = _wrap_init(dct['__init__'], TorchDispatchMetaInitErrorInfo())
+            dct['__init__'] = _wrap_init(dct['__init__'])
         if '__torch_dispatch__' in dct:
             dct['__torch_dispatch__'] = _wrap_torch_dispatch(dct['__torch_dispatch__'])
         return super().__new__(metacls, name, bases, dct)
@@ -142,10 +143,33 @@ class TorchDispatchMode(metaclass=TorchDispatchModeMeta):
     """
     # Force metaclass to generate constructor at the base of the hierarchy
     def __init__(self):
-        pass
+        self.ancestors: Set[TorchDispatchMode]
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         raise NotImplementedError()
+
+    def __enter__(self):
+        old = _get_torch_dispatch_mode()
+        if hasattr(self, "inner"):
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version or use restore")
+        else:
+            self.inner = old
+            if old is None:
+                self.ancestors = set()
+            else:
+                self.ancestors = self.inner.ancestors.union({self.inner})
+        _set_torch_dispatch_mode(self)
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        _set_torch_dispatch_mode(self.inner)
+
+    @contextlib.contextmanager
+    def restore(self):
+        return _restore_mode(self, mode_info=TorchDispatchModeInfo())
+
+    @classmethod
+    def push(cls, *args, **kwargs):
+        return push_torch_dispatch_mode(functools.partial(cls, *args, **kwargs))
 
 
 class BaseTorchDispatchMode(TorchDispatchMode):

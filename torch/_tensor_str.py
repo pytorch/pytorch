@@ -335,9 +335,9 @@ def _str_intern(inp, *, tensor_contents=None):
         suffixes.append('device=\'' + str(self.device) + '\'')
 
     # Tensor printing performs tensor operations like slice, indexing, etc to make it in a
-    # representable format. These operations on xla/lazy tensor results in compilations. Hence,
+    # representable format. These operations on ipu/xla/lazy tensor results in compilations. Hence,
     # to avoid compilations, copying the tensor to cpu before printing.
-    if self.device.type == 'xla' or self.device.type == 'lazy':
+    if self.device.type in ['xla', 'lazy', 'ipu']:
         self = self.to('cpu')
 
     # TODO: add an API to map real -> complex dtypes
@@ -366,19 +366,23 @@ def _str_intern(inp, *, tensor_contents=None):
         if not has_default_dtype:
             suffixes.append('dtype=' + str(self.dtype))
         if not custom_contents_provided:
+            compressed_indices_method, plain_indices_method = {
+                torch.sparse_csr: (torch.Tensor.crow_indices, torch.Tensor.col_indices),
+                torch.sparse_csc: (torch.Tensor.ccol_indices, torch.Tensor.row_indices),
+                torch.sparse_bsr: (torch.Tensor.crow_indices, torch.Tensor.col_indices),
+                torch.sparse_bsc: (torch.Tensor.ccol_indices, torch.Tensor.row_indices),
+            }[self.layout]
             if self.layout in {torch.sparse_csr, torch.sparse_bsr}:
                 cdimname, pdimname = 'row', 'column'
             else:
                 cdimname, pdimname = 'column', 'row'
             compressed_indices_prefix = f'c{cdimname[:3]}_indices=tensor('
-            # TODO: revise using crow_indices() method per https://github.com/pytorch/pytorch/issues/76638
-            compressed_indices = self.crow_indices().detach()
+            compressed_indices = compressed_indices_method(self).detach()
             compressed_indices_str = _tensor_str(compressed_indices, indent + len(compressed_indices_prefix))
             if compressed_indices.numel() == 0:
                 compressed_indices_str += ', size=' + str(tuple(compressed_indices.shape))
             plain_indices_prefix = f'{pdimname[:3]}_indices=tensor('
-            # TODO: revise using col_indices() method per https://github.com/pytorch/pytorch/issues/76638
-            plain_indices = self.col_indices().detach()
+            plain_indices = plain_indices_method(self).detach()
             plain_indices_str = _tensor_str(plain_indices, indent + len(plain_indices_prefix))
             if plain_indices.numel() == 0:
                 plain_indices_str += ', size=' + str(tuple(plain_indices.shape))

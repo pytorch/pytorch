@@ -724,6 +724,9 @@ def conv2d(
     assert len(input) == 4
     return conv_output_size(input, weight, bias, stride, padding, dilation, groups)
 
+def conv_backwards(grad_output: List[int], input:List[int], weight:List[int], biases:Optional[List[int]]):
+    # Bias gradient is always generated regardess of if biases is supplied
+    return _copy(input), _copy(weight), [grad_output[1]]
 
 def batch_norm(
     input: List[int],
@@ -844,6 +847,12 @@ def flatten(input: List[int], start_dim: int, end_dim: int):
         shape.append(input[i])
     return shape
 
+def nonzero_lower_bound(input: List[int]):
+    return [0, len(input)]
+
+def nonzero_upper_bound(input: List[int]):
+    return [numel(input), len(input)]
+
 def _reduce_along_dim(self: List[int], dim: int, keepdim: bool):
     dim = maybe_wrap_dim(dim, len(self))
     out: List[int] = []
@@ -922,27 +931,34 @@ def native_batch_norm(input: List[int], weight: Optional[List[int]], bias: Optio
 #             broadcasted_shape = broadcast(broadcasted_shape, index_tensor_shape)
 #     return broadcasted_shape
 
-shape_compute_graph_mapping : Dict[str, torch._C.ScriptFunction] = {}
-script_func_map: Dict[Callable, torch._C.ScriptFunction] = {}
+ScriptFn = torch._C.ScriptFunction
+shape_compute_graph_mapping : Dict[str, ScriptFn ] = {}
+bounded_compute_graph_mapping : Dict[str, Tuple[ScriptFn, ScriptFn]] = {}
+script_func_map: Dict[Callable, ScriptFn] = {}
+
+def process_func(func: Callable):
+    if func not in script_func_map:
+        scripted_func = torch.jit.script(func)
+
+        torch._C._jit_pass_inline(scripted_func.graph)
+
+        for _ in range(2):
+            torch._C._jit_pass_peephole(scripted_func.graph)
+            torch._C._jit_pass_constant_propagation(scripted_func.graph)
+
+        script_func_map[func] = scripted_func
+    return script_func_map[func]
+
 
 def add_shape_compute_mapping(operator_schema: str, func: Callable):
     global shape_compute_graph_mapping
-    global shape_compute_graph_set
 
-    if func in script_func_map:
-        shape_compute_graph_mapping[operator_schema] = script_func_map[func]
-        return
+    shape_compute_graph_mapping[operator_schema] = process_func(func)
 
-    scripted_func = torch.jit.script(func)
-
-    torch._C._jit_pass_inline(scripted_func.graph)
-
-    for _ in range(2):
-        torch._C._jit_pass_peephole(scripted_func.graph)
-        torch._C._jit_pass_constant_propagation(scripted_func.graph)
-
-    script_func_map[func] = scripted_func
-    shape_compute_graph_mapping[operator_schema] = scripted_func
+def add_bounded_compute_mapping(operator_schema: str, lower_bound_func: Callable, upper_bound_func: Callable):
+    # Adds a shape compute function for both upper and lower bounds
+    fns = (process_func(lower_bound_func), process_func(upper_bound_func))
+    bounded_compute_graph_mapping[operator_schema] = fns
 
 add_shape_compute_mapping("aten::contiguous(Tensor(a) self, *, MemoryFormat memory_format=contiguous_format) -> Tensor(a)", unary)
 add_shape_compute_mapping("aten::rsub.Tensor(Tensor self, Scalar other, Scalar alpha=1) -> Tensor", unary)
@@ -980,6 +996,7 @@ add_shape_compute_mapping("aten::conv1d(Tensor input, Tensor weight, Tensor? bia
 add_shape_compute_mapping("aten::conv2d(Tensor input, Tensor weight, Tensor? bias=None, int[2] stride=1, int[2] padding=0, int[2] dilation=1, int groups=1) -> Tensor", conv2d)
 add_shape_compute_mapping("aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor", batch_norm)
 add_shape_compute_mapping("aten::conv3d(Tensor input, Tensor weight, Tensor? bias=None, int[3] stride=1, int[3] padding=0, int[3] dilation=1, int groups=1) -> Tensor", conv3d)
+add_shape_compute_mapping("aten::convolution_backward(Tensor grad_output, Tensor input, Tensor weight, int[]? bias_sizes, int[] stride, int[] padding, int[] dilation, bool transposed, int[] output_padding, int groups, bool[3] output_mask) -> (Tensor, Tensor, Tensor)", conv_backwards)
 add_shape_compute_mapping("aten::flatten.using_ints(Tensor(a) self, int start_dim=0, int end_dim=-1) -> Tensor(a)", flatten)
 add_shape_compute_mapping("aten::cat(Tensor[] tensors, int dim=0) -> Tensor", cat)
 add_shape_compute_mapping("aten::permute(Tensor(a) self, int[] dims) -> Tensor(a)", permute)
@@ -1014,3 +1031,6 @@ add_shape_compute_mapping("aten::where.ScalarSelf(Tensor condition, Scalar self,
 add_shape_compute_mapping("aten::add_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> Tensor(a!)", broadcast_inplace)
 
 # quantized_conv_prepack TODO
+
+# Shape Compute Fn with upper and lower bounds
+add_bounded_compute_mapping("aten::nonzero(Tensor self) -> (Tensor)", nonzero_lower_bound, nonzero_upper_bound)
