@@ -196,7 +196,6 @@ struct _cuda_scatter_large_index_internal_kernel {
     int64_t index_shape_host[ndim], index_strides_host[ndim], src_shape_host[ndim], src_strides_host[ndim];
     int64_t *index_shape_device, *index_strides_device, *src_shape_device, *src_strides_device;
 
-    // We need to reorder these in case the index tensor is noncontiguous
     bool index_is_noncontiguous = false;
     index_shape_host[0] = index_shape_data[0];
     index_strides_host[0] = index_strides_data[0];
@@ -211,6 +210,7 @@ struct _cuda_scatter_large_index_internal_kernel {
       src_shape_host[i] = src_shape_data[i];
       src_strides_host[i] = src_strides_data[i];
     }
+    // We need to reorder these in case the index tensor is noncontiguous
     if (index_is_noncontiguous) {
       for (int i = 0; i < ndim - 1; i++) {
         for (int j = i + 1; j < ndim; j++) {
