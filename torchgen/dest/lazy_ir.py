@@ -1,21 +1,26 @@
 from abc import ABC
+import itertools
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple
 from torchgen.context import method_with_native_function
 from torchgen.model import (
+    FunctionSchema,
+    Argument,
     BackendIndex,
     NativeFunction,
     NativeFunctionsGroup,
-    FunctionSchema,
 )
 from torchgen.api.types import (
     BaseCType,
+    Binding,
+    DispatcherSignature,
     OptionalCType,
     VectorCType,
     kernel_signature,
     deviceT,
 )
 import torchgen.api.dispatcher as dispatcher
+from torchgen.api.translate import translate
 from torchgen.api.lazy import (
     LazyIrProperties,
     LazyIrSchema,
@@ -121,6 +126,25 @@ def aten_symbol(schema: LazyIrSchema) -> str:
         return schema.aten_name
 
 
+# converts  all tensor-like arguments to meta tensors. Returns:
+# (1) a string containing all of the logic that does the conversions.
+# (2) a context, to be used by translate(), with all of the relevant bindings.
+def convert_to_meta_tensors(sig: DispatcherSignature) -> Tuple[str, List[Binding]]:
+    context: List[Binding] = []
+    unwrapped_tensor_args: List[str] = []
+    for arg in sig.arguments():
+        if isinstance(arg.argument, Argument) and arg.argument.type.is_tensor_like():
+            unwrapped_name = f"{arg.name}_meta"
+            unwrapped_tensor_args.append(
+                f"auto {unwrapped_name} = to_meta({arg.name});"
+            )
+            context.append(arg.with_name(unwrapped_name))
+        else:
+            context.append(arg)
+    unwrap_tensor_args_str = "\n        ".join(unwrapped_tensor_args)
+    return unwrap_tensor_args_str, context
+
+
 @dataclass(frozen=True)
 class GenLazyIR(ABC):
     backend_index: BackendIndex
@@ -206,7 +230,13 @@ class GenLazyIR(ABC):
         node_ctor_args = ", ".join(ctor_args)
 
         scalar_initializers = ",\n        ".join(
-            f"{a.name}({a.name})" for a in scalar_args
+            [
+                # This code is just special casing the mapping from string_view -> strings
+                f"{a.name}({a.name}.has_value() ? c10::make_optional(std::string(*{a.name})) : c10::nullopt)"
+                if a.lazy_type.cpp_type() == "c10::optional<c10::string_view>"
+                else f"{a.name}({a.name})"
+                for a in scalar_args
+            ]
         )
         if len(scalar_initializers):
             scalar_initializers = f",\n        {scalar_initializers}"
@@ -214,6 +244,8 @@ class GenLazyIR(ABC):
             [
                 f"std::string {a.name};"
                 if a.lazy_type.cpp_type() == "c10::string_view"
+                else f"c10::optional<std::string> {a.name};"
+                if a.lazy_type.cpp_type() == "c10::optional<c10::string_view>"
                 else f"{a.lazy_type.cpp_type()} {a.name};"
                 for a in scalar_args
             ]
@@ -314,19 +346,20 @@ class GenTSLazyIR(GenLazyIR):
         elif not schema.properties.CanBeReused:
             return ""
         value_comparison = []
-        for arg in schema.positional_values:
+        for arg in itertools.chain(schema.positional_values, schema.keyword_values):
             if isinstance(arg.lazy_type, OptionalCType):
                 value_comparison.append(
                     f"operand(i++) == {arg.name}.value_or(kNullValue)"
                 )
             else:
                 value_comparison.append(f"operand(i++) == {arg.name}")
-        for arg in schema.positional_scalars:
-            value_comparison.append(f"this->{arg.name} == {arg.name}")
-        for arg in schema.keyword_values:
-            value_comparison.append(f"operand(i++) == {arg.name}")
-        for arg in schema.keyword_scalars:
-            value_comparison.append(f"this->{arg.name} == {arg.name}")
+        for arg in itertools.chain(schema.positional_scalars, schema.keyword_scalars):
+            if isinstance(arg.lazy_type, OptionalCType):
+                value_comparison.append(
+                    f"((!this->{arg.name}&&!{arg.name}) || (this->{arg.name}&&{arg.name} && *(this->{arg.name}) == *{arg.name}))"
+                )
+            else:
+                value_comparison.append(f"this->{arg.name} == {arg.name}")
         value_comparison_str = " &&\n        ".join(value_comparison)
 
         return f"""{signature} {{
@@ -428,9 +461,20 @@ class GenLazyNativeFuncDefinition:
         all_args = schema.filtered_args()
         returns_length = len(schema.returns)
         # call the meta kernel if it exists, to compute output shape/dtype for our IR
-        if func.structured or func.structured_delegate is not None:
-            meta_out = """std::vector<torch::lazy::Shape> shapes{
-        torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
+        # Note [Generated LTC Shape Functions]
+        # LTC uses meta tensors from core to do shape inference when possible, and otherwise
+        # we generate a shape function declaration that needs to be manually implemented.
+        # How do we detect which ops are eligible to use meta tensors?
+        # In general we should be able to use meta tensors not just on structured operators,
+        # but also on composite operators that are implemented in terms of structured kernels.
+        # We don't currently have a way of knowing at codegen time which ops are implemented that way.
+        # This is the case for all view and view_copy operators however, so we're going to
+        # use them specifically for all of the view_copy ops (instead of manually writing shape rules for all of them).
+        is_view_copy_op = "view_copy" in func.tags
+        is_structured = func.structured or func.structured_delegate is not None
+        if is_structured or is_view_copy_op:
+            meta_out = """
+std::vector<torch::lazy::Shape> shapes{torch::lazy::Shape(out_meta.scalar_type(), out_meta.sizes().vec())};"""
             if returns_length > 1:
 
                 def this_shape(i: int) -> str:
@@ -439,8 +483,28 @@ class GenLazyNativeFuncDefinition:
                 shapes_str = ",".join([this_shape(i) for i in range(returns_length)])
                 meta_out = "std::vector<torch::lazy::Shape> shapes{" + shapes_str + "};"
 
-            shape_str = f"""auto out_meta = at::meta::{schema.aten_name}({', '.join(str(a.name) for a in all_args)});
-            {meta_out}"""
+            # Convert tensor args to the meta device and call it.
+            # (We can't pass in the input tensors directly, because they are "functional wrappers".
+            # If any of the meta kernels call a tensor op and redispatch, we don't want to hit the functionalize kernels.)
+            # Even at::meta:: functions might redispatch, e.g. if they call into view ops.
+            dispatcher_sig = DispatcherSignature.from_schema(func.func)
+            meta_conversion_str, meta_call_ctx = convert_to_meta_tensors(dispatcher_sig)
+            meta_call_args = [
+                e.expr
+                for e in translate(
+                    meta_call_ctx, dispatcher_sig.arguments(), method=False
+                )
+            ]
+            if is_view_copy_op:
+                # view_copy ops always have a CompositeExplicitAutogradNonFunctional kernel
+                assert func.has_composite_explicit_autograd_non_functional_kernel
+                dispatch_ns = "compositeexplicitautogradnonfunctional"
+            else:
+                dispatch_ns = "meta"
+            shape_str = f"""\
+        {meta_conversion_str}
+        auto out_meta = at::{dispatch_ns}::{schema.aten_name}({', '.join(meta_call_args)});
+        {meta_out}"""
         else:
             shape_sig = ComputeShapeSignature(metadata.kernel, func)
             shape_str = f"""
@@ -571,13 +635,14 @@ class GenLazyShapeInferenceDefinition:
         metadata = self.backend_index.get_kernel(f)
         assert metadata is not None
 
-        # Only generate shape/dtype fn for non-structured kernels,
-        # since we just use the meta function for structured kernels
-        if not f.structured and f.structured_delegate is None:
+        # See Note [Generated LTC Shape Functions]
+        is_view_copy_op = "view_copy" in f.tags
+        is_structured = f.structured or f.structured_delegate is not None
+        if is_structured or is_view_copy_op:
+            return []
+        else:
             shape_sig = ComputeShapeSignature(metadata.kernel, f)
             return ["\n".join([f"{shape_sig.shape_decl};"])]
-        else:
-            return []
 
 
 def generate_non_native_lazy_ir_nodes(

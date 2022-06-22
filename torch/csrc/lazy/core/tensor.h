@@ -242,6 +242,36 @@ TORCH_API LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(
 TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor);
 TORCH_API at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 
+// Given a non-lazy tensor, creates a lazy tensor on the specified (lazy)
+// device. The functionalize_output determines whether or not we should wrap the
+// output in a "functional wrapper".
+//
+// How do you know whether to pass true/false for functionalize_output?
+//
+// Case 1: nonlazy -> lazy
+//   If you're implementing a function that takes in nonlazy tensors and returns
+//   lazy tensors, then you should think of that function as an "entrypoint" to
+//   functionalization, and use functionalize_output=true Examples include:
+//   - factory functions (the LTC kernel for at::empty)
+//   - CPU -> Lazy device converions (the LTC kernel for at::to_device)
+//
+// Case 2: lazy -> lazy
+//   If you're implementing a function that takes in lazy tensors and returns
+//   lazy tensors,
+//   **but** requires creating lazy tensors internally,
+//   then you can assume that the current function is running inside of some
+//   outer context where functionalization is already running, that will take
+//   care of doing the wrapping for you, and use functionalize_output=true
+//   Examples include:
+//   - CPU fallback (takes in lazy tensors, converts to cpu, calls kernel,
+//   converts returns back to lazy tensors).
+TORCH_API at::Tensor to_lazy_tensor(
+    const at::Tensor& self,
+    const c10::TensorOptions& options,
+    at::Device device,
+    bool non_blocking,
+    bool functionalize_output);
+
 template <size_t... Indices>
 auto TupleAtenFromLtcTensorsImpl(
     const std::vector<LazyTensorPtr>& tensors,

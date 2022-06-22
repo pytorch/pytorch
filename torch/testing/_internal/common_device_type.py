@@ -486,6 +486,25 @@ class CUDATestBase(DeviceTypeTestBase):
         # Acquires the current device as the primary (test) device
         cls.primary_device = 'cuda:{0}'.format(torch.cuda.current_device())
 
+# See Note [Lazy Tensor tests in device agnostic testing]
+lazy_ts_backend_init = False
+class LazyTestBase(DeviceTypeTestBase):
+    device_type = 'lazy'
+
+    def _should_stop_test_suite(self):
+        return False
+
+    @classmethod
+    def setUpClass(cls):
+        import torch._lazy
+        import torch._lazy.metrics
+        import torch._lazy.ts_backend
+        global lazy_ts_backend_init
+        if not lazy_ts_backend_init:
+            # Nead to connect the TS backend to lazy key before running tests
+            torch._lazy.ts_backend.init()
+            lazy_ts_backend_init = True
+
 class MPSTestBase(DeviceTypeTestBase):
     device_type = 'mps'
 
@@ -570,7 +589,7 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class.
 # See note "Generic Device Type Testing."
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -592,6 +611,14 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(device_type_test_bases,
                                                                  except_for, only_for)
+    if include_lazy:
+        # Note [Lazy Tensor tests in device agnostic testing]
+        # Right now, test_view_ops.py runs with LazyTensor.
+        # We don't want to opt every device-agnostic test into using the lazy device,
+        # because many of them will fail.
+        # So instead, the only way to opt a specific device-agnostic test file into
+        # lazy tensor testing is with include_lazy=True
+        desired_device_type_test_bases.append(LazyTestBase)
 
     def split_if_not_empty(x: str):
         return x.split(",") if len(x) != 0 else []

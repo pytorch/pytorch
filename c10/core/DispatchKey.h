@@ -217,7 +217,6 @@ enum class DispatchKey : uint16_t {
   // Out-of-core key for Fake Tensor in torchdistx.
   // See https://pytorch.org/torchdistx/latest/fake_tensor.html
   Fake,
-
   // See Note [Out-of-tree vmap+grad prototype]. The purpose of this key
   // is to insert code after the "autograd subsystem" runs, so this key should
   // be directly after ADInplaceOrView and all of the autograd keys.
