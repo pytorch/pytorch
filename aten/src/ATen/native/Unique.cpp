@@ -23,10 +23,14 @@ namespace native{
 
 namespace {
 
+// Extract the unique elements from [begin, end) into a new Tensor
 template <typename scalar_t>
 Tensor unique_elements(const scalar_t* begin, const scalar_t* end,
                        bool sorted, const TensorOptions &options) {
+  // Create unordered set of elements
   auto set = std::unordered_set<scalar_t>(begin, end);
+
+  // Write the output tensor
   Tensor output = at::empty({static_cast<int64_t>(set.size())}, options);
   scalar_t *output_data = output.data_ptr<scalar_t>();
   std::copy(set.begin(), set.end(), output_data);
@@ -36,8 +40,12 @@ Tensor unique_elements(const scalar_t* begin, const scalar_t* end,
   return output;
 }
 
+// Specialization for boolean inputs, since we can't construct a set
+// directly from an array of bool as it won't handle invalid byte values.
+// See NOTE [Loading boolean values]
 Tensor unique_elements(const bool* begin, const bool* end,
                        bool /*sorted*/, const TensorOptions &options) {
+  // Instead of a set, track whether a value has been seen
   std::array<bool, 2> seen;
   seen.fill(false);
 
@@ -48,6 +56,7 @@ Tensor unique_elements(const bool* begin, const bool* end,
     }
   }
 
+  // Write the output tensor
   int64_t num_elem = seen[false] + seen[true];
   Tensor output = at::empty({num_elem}, options);
   bool *output_data = output.data_ptr<bool>();
