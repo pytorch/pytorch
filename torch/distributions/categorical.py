@@ -102,6 +102,10 @@ class Categorical(Distribution):
         return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
 
     @property
+    def mode(self):
+        return self.probs.argmax(axis=-1)
+
+    @property
     def variance(self):
         return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
 

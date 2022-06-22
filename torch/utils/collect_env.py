@@ -42,6 +42,7 @@ SystemEnv = namedtuple('SystemEnv', [
     'hip_runtime_version',
     'miopen_runtime_version',
     'caching_allocator_config',
+    'is_xnnpack_available',
 ])
 
 
@@ -87,20 +88,28 @@ def run_and_return_first_line(run_lambda, command):
 
 
 def get_conda_packages(run_lambda):
-    if get_platform() == 'win32':
-        system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
-        findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-        grep_cmd = r'{} /R "torch numpy cudatoolkit soumith mkl magma mypy"'.format(findstr_cmd)
-    else:
-        grep_cmd = r'grep "torch\|numpy\|cudatoolkit\|soumith\|mkl\|magma\|mypy"'
     conda = os.environ.get('CONDA_EXE', 'conda')
-    out = run_and_read_all(run_lambda, conda + ' list | ' + grep_cmd)
+    out = run_and_read_all(run_lambda, "{} list".format(conda))
     if out is None:
         return out
-    # Comment starting at beginning of line
-    comment_regex = re.compile(r'^#.*\n')
-    return re.sub(comment_regex, '', out)
 
+    return "\n".join(
+        line
+        for line in out.splitlines()
+        if not line.startswith("#")
+        and any(
+            name in line
+            for name in {
+                "torch",
+                "numpy",
+                "cudatoolkit",
+                "soumith",
+                "mkl",
+                "magma",
+                "mkl",
+            }
+        )
+    )
 
 def get_gcc_version(run_lambda):
     return run_and_parse_first_match(run_lambda, 'gcc --version', r'gcc (.*)')
@@ -274,13 +283,19 @@ def get_pip_packages(run_lambda):
     # People generally have `pip` as `pip` or `pip3`
     # But here it is incoved as `python -mpip`
     def run_with_pip(pip):
-        if get_platform() == 'win32':
-            system_root = os.environ.get('SYSTEMROOT', 'C:\\Windows')
-            findstr_cmd = os.path.join(system_root, 'System32', 'findstr')
-            grep_cmd = r'{} /R "numpy torch mypy"'.format(findstr_cmd)
-        else:
-            grep_cmd = r'grep "torch\|numpy\|mypy"'
-        return run_and_read_all(run_lambda, pip + ' list --format=freeze | ' + grep_cmd)
+        out = run_and_read_all(run_lambda, "{} list --format=freeze".format(pip))
+        return "\n".join(
+            line
+            for line in out.splitlines()
+            if any(
+                name in line
+                for name in {
+                    "torch",
+                    "numpy",
+                    "mypy",
+                }
+            )
+        )
 
     pip_version = 'pip3' if sys.version[0] == '3' else 'pip'
     out = run_with_pip(sys.executable + ' -mpip')
@@ -292,6 +307,12 @@ def get_cachingallocator_config():
     ca_config = os.environ.get('PYTORCH_CUDA_ALLOC_CONF', '')
     return ca_config
 
+def is_xnnpack_available():
+    if TORCH_AVAILABLE:
+        import torch.backends.xnnpack
+        return str(torch.backends.xnnpack.enabled)  # type: ignore[attr-defined]
+    else:
+        return "N/A"
 
 def get_env_info():
     run_lambda = run
@@ -339,6 +360,7 @@ def get_env_info():
         clang_version=get_clang_version(run_lambda),
         cmake_version=get_cmake_version(run_lambda),
         caching_allocator_config=get_cachingallocator_config(),
+        is_xnnpack_available=is_xnnpack_available(),
     )
 
 env_info_fmt = """
@@ -362,6 +384,7 @@ Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
+Is XNNPACK available: {is_xnnpack_available}
 
 Versions of relevant libraries:
 {pip_packages}

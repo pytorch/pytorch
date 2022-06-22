@@ -67,6 +67,7 @@ TEST(TorchDeployGPUTest, UsesDistributed) {
   }
 }
 
+#ifdef FBCODE_CAFFE2
 TEST(TorchDeployGPUTest, TensorRT) {
   if (!torch::cuda::is_available()) {
     GTEST_SKIP();
@@ -85,6 +86,7 @@ TEST(TorchDeployGPUTest, TensorRT) {
         output.allclose(model(at::IValue{input}).toIValue().toTensor()));
   }
 }
+#endif
 
 // OSS build does not have bultin numpy support yet. Use this flag to guard the
 // test case.

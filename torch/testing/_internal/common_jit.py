@@ -272,14 +272,15 @@ class JitCommonTestCase(TestCase):
                 fusion_nodes_not_found.append(node)
         found_all_fusible_nodes = len(fusion_nodes_found) == len(fusible_nodes)
 
-        err_msg = self.autoDiffErrorMessage(should_autodiff_node,
-                                            nodes_not_in_diff_graph,
-                                            fusion_nodes_not_found,
-                                            non_fusible_nodes_being_fused,
-                                            fusion_nodes_found,
-                                            nodes_in_diff_graph)
-        self.assertEqual(should_autodiff_node,
-                         found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
+        if should_autodiff_node is not None:
+            err_msg = self.autoDiffErrorMessage(should_autodiff_node,
+                                                nodes_not_in_diff_graph,
+                                                fusion_nodes_not_found,
+                                                non_fusible_nodes_being_fused,
+                                                fusion_nodes_found,
+                                                nodes_in_diff_graph)
+            self.assertEqual(should_autodiff_node,
+                             found_all_nonfusible_nodes and found_all_fusible_nodes, err_msg)
 
     def checkShapeAnalysis(self, out_sizes: Union[List[int], List[List[int]]],
                            traced_graph, assert_propagation, constant_prop=True):

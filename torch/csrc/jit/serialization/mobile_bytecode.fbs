@@ -1,3 +1,5 @@
+file_identifier "PTMF";
+
 namespace torch.jit.mobile.serialization;
 
 struct Int {
@@ -184,7 +186,15 @@ table ExtraFile {
 }
 
 table Module {
-  version:int;
+  // denotes the bytecode version of the mobile Module
+  // this starts from 9 for a flatbuffer file
+  // versions 8 and below are reserved pickle
+  // Version is bumped when changes in model serialization/execution
+  // can no longer work in current version
+  // To read more:
+  // https://github.com/pytorch/pytorch/blob/master/caffe2/serialize/versions.h#L96
+  bytecode_version:uint;
+
   extra_files:[ExtraFile];
   methods:[uint];  // index to ivalues
   state_obj:uint; // index to ivalues
@@ -192,6 +202,21 @@ table Module {
   storage_data_size:int;  // number of storage data;
   storage_data:[StorageData];
   object_types:[ObjectType];
+  jit_sources:[ExtraFile];
+  jit_constants:[uint];  // index to ivalues
+
+  // version of operator
+  // Version is bumped when changes in operator
+  // can no longer work in current version
+  // To read more:
+  // https://github.com/pytorch/rfcs/blob/master/RFC-0017-PyTorch-Operator-Versioning.md
+  operator_version:uint;
+
+  // Size of ivalue that comes from the mobile module.
+  // Because the ivalues array above can also have ivalues that cames from
+  // the jit::Module that got it's source attached to flatbuffer file.
+  // this should be smaller than ivalues.size()
+  mobile_ivalue_size:uint;
 }
 
 root_type Module;

@@ -451,8 +451,9 @@ class KLDivLoss(_Loss):
         >>> target = F.softmax(torch.rand(3, 5))
         >>> output = kl_loss(input, target)
 
+        >>> kl_loss = nn.KLDivLoss(reduction="batchmean", log_target=True)
         >>> log_target = F.log_softmax(torch.rand(3, 5))
-        >>> output = kl_loss(input, log_target, log_target=True)
+        >>> output = kl_loss(input, log_target)
     """
     __constants__ = ['reduction']
 
@@ -1124,7 +1125,9 @@ class CrossEntropyLoss(_WeightedLoss):
         - Target: If containing class indices, shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with
           :math:`K \geq 1` in the case of K-dimensional loss where each value should be between :math:`[0, C)`.
           If containing class probabilities, same shape as the input and each value should be between :math:`[0, 1]`.
-        - Output: If reduction is 'none', same shape as the target. Otherwise, scalar.
+        - Output: If reduction is 'none', shape :math:`()`, :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 1`
+          in the case of K-dimensional loss, depending on the shape of the input. Otherwise, scalar.
+
 
         where:
 
@@ -1216,7 +1219,7 @@ class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label :math:`y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
-    using the cosine distance, and is typically used for learning nonlinear
+    using the cosine similarity, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
     The loss function for each sample is:
@@ -1449,9 +1452,9 @@ class TripletMarginLoss(_Loss):
             specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
 
     Shape:
-        - Input: :math:`(N, D)` or :math`(D)` where :math:`D` is the vector dimension.
+        - Input: :math:`(N, D)` or :math:`(D)` where :math:`D` is the vector dimension.
         - Output: A Tensor of shape :math:`(N)` if :attr:`reduction` is ``'none'`` and
-                  input shape is :math`(N, D)`; a scalar otherwise.
+          input shape is :math:`(N, D)`; a scalar otherwise.
 
     Examples::
 

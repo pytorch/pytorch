@@ -230,7 +230,7 @@ static CompilerConfig& getConfig() {
 // understand for AVX512. When we need better CPU performance this
 // optimization can be re-enabled by tracking down the platforms where
 // this error occurs and only selectively disabling it.
-#ifdef _MSC_VER
+#if (defined(_MSC_VER) && !defined(_M_ARM64))
 // According to https://stackoverflow.com/a/29178079, we are able to
 // detect which arch level is supported by the vectorizer using
 // the macro __isa_available. It is added during runtime.

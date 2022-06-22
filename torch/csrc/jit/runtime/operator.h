@@ -27,6 +27,7 @@ namespace torch {
 namespace jit {
 
 struct Node;
+using ::c10::Argument;
 using ::c10::FunctionSchema;
 using ::c10::Symbol;
 
@@ -86,6 +87,23 @@ struct TORCH_API Operator {
             c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
 
   Operator(
+      std::string name,
+      std::string overload_name,
+      std::vector<Argument> arguments,
+      std::vector<Argument> returns,
+      Operation op,
+      c10::AliasAnalysisKind alias_analysis)
+      : op_(c10::make_right<C10Operator, JitOnlyOperator>(JitOnlyOperator{
+            c10::make_left<FunctionSchema, UnparsedFunctionSchema>(
+                varArgSchemaWithName(
+                    name,
+                    overload_name,
+                    arguments,
+                    returns,
+                    alias_analysis)),
+            c10::make_left<Operation, OperationCreator>(std::move(op))})) {}
+
+  Operator(
       std::string schema,
       OperationCreator op_creator,
       c10::AliasAnalysisKind alias_analysis)
@@ -142,6 +160,16 @@ struct TORCH_API Operator {
         });
   }
 
+  c10::ArrayRef<at::Tag> getTags() const {
+    return op_.fold<c10::ArrayRef<at::Tag>>(
+        [](const C10Operator& op) { return op.handle_.getTags(); },
+        [](const JitOnlyOperator& op) {
+          // Returns empty list of tags for JitOnlyOperators since it
+          // doesn't save c10::OperatorHandle
+          return c10::ArrayRef<at::Tag>();
+        });
+  }
+
   bool isC10Op() const {
     return op_.is_left();
   }
@@ -176,6 +204,23 @@ struct TORCH_API Operator {
         {},
         /*is_vararg*/ true,
         /*is_varret*/ true);
+    result.setAliasAnalysis(alias_analysis);
+    return result;
+  }
+
+  static FunctionSchema varArgSchemaWithName(
+      std::string name,
+      std::string overload_name,
+      std::vector<Argument> arguments,
+      std::vector<Argument> returns,
+      AliasAnalysisKind alias_analysis) {
+    auto result = FunctionSchema(
+        name,
+        overload_name,
+        arguments,
+        returns,
+        /*is_vararg*/ false,
+        /*is_varret*/ false);
     result.setAliasAnalysis(alias_analysis);
     return result;
   }
@@ -243,6 +288,23 @@ c10::optional<Operator> OperatorGenerator(
     Func&& op,
     AliasAnalysisKind alias_analysis) {
   return c10::nullopt;
+}
+
+template <typename Func>
+c10::optional<Operator> OperatorGenerator(
+    const std::string name,
+    const std::string overload_name,
+    const std::vector<c10::Argument> arguments,
+    const std::vector<c10::Argument> returns,
+    Func&& op,
+    AliasAnalysisKind alias_analysis) {
+  return c10::optional<Operator>(Operator(
+      name,
+      overload_name,
+      arguments,
+      returns,
+      std::forward<Func>(op),
+      alias_analysis));
 }
 
 } // namespace jit

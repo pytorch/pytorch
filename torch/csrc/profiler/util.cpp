@@ -1,9 +1,10 @@
-#include <torch/csrc/profiler/util.h>
+#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/profiler/util.h>
 
 #include <c10/util/ArrayRef.h>
-#include <fmt/format.h>
 #include <c10/util/irange.h>
+#include <fmt/format.h>
 
 #ifdef USE_KINETO
 #include <libkineto.h>
@@ -13,13 +14,86 @@ namespace torch {
 namespace profiler {
 namespace impl {
 
+ApproximateClockToUnixTimeConverter::ApproximateClockToUnixTimeConverter()
+    : start_times_(measurePairs()) {}
+
+ApproximateClockToUnixTimeConverter::UnixAndApproximateTimePair
+ApproximateClockToUnixTimeConverter::measurePair() {
+  // Take a measurement on either side to avoid an ordering bias.
+  auto fast_0 = getApproximateTime();
+  auto wall = std::chrono::system_clock::now();
+  auto fast_1 = getApproximateTime();
+
+  TORCH_INTERNAL_ASSERT(fast_1 >= fast_0, "getCount is non-monotonic.");
+  auto t = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      wall.time_since_epoch());
+
+  // `x + (y - x) / 2` is a more numerically stable average than `(x + y) / 2`.
+  return {t.count(), fast_0 + (fast_1 - fast_0) / 2};
+}
+
+ApproximateClockToUnixTimeConverter::time_pairs
+ApproximateClockToUnixTimeConverter::measurePairs() {
+  static constexpr auto n_warmup = 5;
+  for (C10_UNUSED const auto _ : c10::irange(n_warmup)) {
+    getApproximateTime();
+    steady_clock_t::now();
+  }
+
+  time_pairs out;
+  for (const auto i : c10::irange(out.size())) {
+    out[i] = measurePair();
+  }
+  return out;
+}
+
+std::function<time_t(approx_time_t)> ApproximateClockToUnixTimeConverter::
+    makeConverter() {
+  auto end_times = measurePairs();
+
+  // Compute the real time that passes for each tick of the approximate clock.
+  std::array<long double, replicates> scale_factors{};
+  for (const auto i : c10::irange(replicates)) {
+    auto delta_ns = end_times[i].t_ - start_times_[i].t_;
+    auto delta_approx = end_times[i].approx_t_ - start_times_[i].approx_t_;
+    scale_factors[i] = (double)delta_ns / (double)delta_approx;
+  }
+  std::sort(scale_factors.begin(), scale_factors.end());
+  long double scale_factor = scale_factors[replicates / 2 + 1];
+
+  // We shift all times by `t0` for better numerics. Double precision only has
+  // 16 decimal digits of accuracy, so if we blindly multiply times by
+  // `scale_factor` we may suffer from precision loss. The choice of `t0` is
+  // mostly arbitrary; we just need a factor that is the correct order of
+  // magnitude to bring the intermediate values closer to zero. We are not,
+  // however, guaranteed that `t0_approx` is *exactly* the getApproximateTime
+  // equivilent of `t0`; it is only an estimate that we have to fine tune.
+  auto t0 = start_times_[0].t_;
+  auto t0_approx = start_times_[0].approx_t_;
+  std::array<double, replicates> t0_correction{};
+  for (const auto i : c10::irange(replicates)) {
+    auto dt = start_times_[i].t_ - t0;
+    auto dt_approx =
+        (double)(start_times_[i].approx_t_ - t0_approx) * scale_factor;
+    t0_correction[i] = dt - (time_t)dt_approx;
+  }
+  t0 += t0_correction[t0_correction.size() / 2 + 1];
+
+  return [=](approx_time_t t_approx) {
+    // See above for why this is more stable than `A * t_approx + B`.
+    return (time_t)((double)(t_approx - t0_approx) * scale_factor) + t0;
+  };
+}
+
 // ----------------------------------------------------------------------------
 // -- NVTX --------------------------------------------------------------------
 // ----------------------------------------------------------------------------
 std::string getNvtxStr(
     const char* name,
     int64_t sequence_nr,
-    const std::vector<std::vector<int64_t>>& shapes) {
+    const std::vector<std::vector<int64_t>>& shapes,
+    at::RecordFunctionHandle op_id,
+    const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
   if (sequence_nr >= -1 || shapes.size() > 0) {
     std::string str;
     if (sequence_nr >= 0) {
@@ -32,31 +106,18 @@ std::string getNvtxStr(
       str = name;
 #endif
     }
-    if (shapes.size() > 0) {
-      std::stringstream s;
-      s << str;
-      s << ", sizes = [";
-      for (const auto idx : c10::irange(shapes.size())) {
-        if (shapes[idx].size() > 0) {
-          s << "[";
-          for (const auto dim : c10::irange(shapes[idx].size())) {
-            s << shapes[idx][dim];
-            if (dim < shapes[idx].size() - 1) {
-              s << ", ";
-            }
-          }
-          s << "]";
-        } else {
-          s << "[]";
-        }
-        if (idx < shapes.size() - 1) {
-          s << ", ";
-        }
-      }
-      s << "]";
-      return s.str();
+    if (op_id > 0) {
+      str = fmt::format("{}, op_id = {}", str, op_id);
     }
-
+    if (shapes.size() > 0) {
+      str = fmt::format("{}, sizes = {}", str, shapesToStr(shapes));
+    }
+    // Include the op ids of the input edges so
+    // you can build the network graph
+    if (input_op_ids.size() > 0) {
+      str = fmt::format(
+          "{}, input_op_ids = {}", str, inputOpIdsToStr(input_op_ids));
+    }
     return str;
   } else {
     return name;
@@ -115,17 +176,45 @@ std::string stacksToStr(
   return "\"" + rc + "\"";
 }
 
-std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
+std::vector<std::vector<int64_t>> flattenList(
+    c10::List<c10::IValue> list,
+    std::string fn_name) {
+  std::vector<std::vector<int64_t>> tensor_dims;
+  for (const c10::IValue input : list) {
+    if (input.isTensor()) {
+      const at::Tensor& tensor = input.toTensor();
+      if (tensor.defined()) {
+        tensor_dims.push_back(input.toTensor().sizes().vec());
+      }
+    }
+  }
+  return tensor_dims;
+}
+
+std::vector<std::vector<int64_t>> inputSizes(
+    const at::RecordFunction& fn,
+    bool flatten_list_enabled) {
   std::vector<std::vector<int64_t>> sizes;
   sizes.reserve(fn.inputs().size());
   for (const c10::IValue& input : fn.inputs()) {
-    if (!input.isTensor()) {
-      sizes.emplace_back();
-      continue;
-    }
-    const at::Tensor& tensor = input.toTensor();
-    if (tensor.defined()) {
-      sizes.push_back(input.toTensor().sizes().vec());
+    if (input.isTensor()) {
+      const at::Tensor& tensor = input.toTensor();
+      if (tensor.defined()) {
+        sizes.push_back(input.toTensor().sizes().vec());
+      } else {
+        sizes.emplace_back();
+      }
+    } else if (input.isList()) {
+      std::vector<std::vector<int64_t>> tmp_sizes;
+      if (flatten_list_enabled) {
+        tmp_sizes = flattenList(input.toList(), std::string(fn.name()));
+      }
+      // Extend the current sizes array by the array returned from input sizes
+      if (!tmp_sizes.empty()) {
+        sizes.insert(sizes.end(), tmp_sizes.begin(), tmp_sizes.end());
+      } else {
+        sizes.emplace_back();
+      }
     } else {
       sizes.emplace_back();
     }
@@ -134,23 +223,39 @@ std::vector<std::vector<int64_t>> inputSizes(const at::RecordFunction& fn) {
 }
 
 std::string shapesToStr(const std::vector<std::vector<int64_t>>& shapes) {
-  std::ostringstream oss;
-  oss << "[";
+  std::string str("[");
   for (const auto t_idx : c10::irange(shapes.size())) {
     if (t_idx > 0) {
-      oss << ", ";
+      str = fmt::format("{}, ", str);
     }
-    oss << "[";
+    str = fmt::format("{}[", str);
     for (const auto s_idx : c10::irange(shapes[t_idx].size())) {
       if (s_idx > 0) {
-        oss << ", ";
+        str = fmt::format("{}, ", str);
       }
-      oss << shapes[t_idx][s_idx];
+      str = fmt::format("{}{}", str, shapes[t_idx][s_idx]);
     }
-    oss << "]";
+    str = fmt::format("{}]", str);
   }
-  oss << "]";
-  return oss.str();
+  str = fmt::format("{}]", str);
+  return str;
+}
+
+std::string inputOpIdsToStr(
+    const std::list<std::pair<at::RecordFunctionHandle, int>>& input_op_ids) {
+  std::string str("[");
+  int idx = 0;
+
+  for (const auto& op_id_info_pair : input_op_ids) {
+    if (idx++ > 0) {
+      str = fmt::format("{}, ", str);
+    }
+    // (OpId,OutputNr)
+    str = fmt::format(
+        "{}({},{})", str, op_id_info_pair.first, op_id_info_pair.second);
+  }
+  str = fmt::format("{}]", str);
+  return str;
 }
 
 std::string dtypesToStr(const std::vector<std::string>& types) {
@@ -220,7 +325,7 @@ static constexpr auto kMat2Size = "mat2_size";
 static bool validateInput(
     const std::string& op_name,
     size_t min_size,
-    const std::vector<c10::IValue>& inputs,
+    c10::ArrayRef<const c10::IValue> inputs,
     const c10::ArrayRef<int>& should_be_tensor) {
   std::stringstream ss;
   if (inputs.size() < min_size) {
@@ -245,7 +350,7 @@ std::unordered_map<std::string, c10::IValue> saveExtraArgs(
     const at::RecordFunction& fn) {
   // for specific types of fn, return the saved extra args for computing flops
   std::unordered_map<std::string, c10::IValue> map;
-  std::vector<c10::IValue> inputs = fn.inputs();
+  auto inputs = fn.inputs();
   std::string fname(fn.name());
 
   if (inputs.empty()) {

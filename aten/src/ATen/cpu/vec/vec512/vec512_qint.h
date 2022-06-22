@@ -5,7 +5,7 @@
 
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
-#include <ATen/native/quantized/affine_quantizer_base.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/qint32.h>
@@ -430,6 +430,11 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     // constructor for moving the enum
     Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) { }
 
+    // This is added to avoid error: definition of implicit copy assignment operator
+    // for 'Vectorized<c10::qint8>' is deprecated because it has a user-declared
+    // copy constructor [-Werror,-Wdeprecated-copy]
+    Vectorized& operator=(const Vectorized<c10::qint8>&) = default;
+
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
             memcpy(ptr, &vals, count * sizeof(value_type));
@@ -588,6 +593,11 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     }
 
     Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) { }
+
+    // This is added to avoid error: definition of implicit copy assignment operator
+    // for 'Vectorized<c10::quint8>' is deprecated because it has a user-declared
+    // copy constructor [-Werror,-Wdeprecated-copy]
+    Vectorized& operator=(const Vectorized<c10::quint8>&) = default;
 
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
@@ -909,7 +919,7 @@ Vectorized<c10::qint32> inline operator*(
     const Vectorized<c10::qint32>& a,
     const Vectorized<c10::qint32>& b) {
   Vectorized<c10::qint32> retval;
-  for (size_t i = 0; i < std::decay_t<decltype(a)>::size(); ++i) {
+  for (const auto i : c10::irange(std::decay_t<decltype(a)>::size())) {
     retval.vals[i] = a.vals[i] * b.vals[i];
   }
   return retval;
@@ -920,7 +930,7 @@ Vectorized<c10::qint32> inline operator+(
     const Vectorized<c10::qint32>& a,
     const Vectorized<c10::qint32>& b) {
   Vectorized<c10::qint32> retval;
-  for (size_t i = 0; i < std::decay_t<decltype(a)>::size(); ++i) {
+  for (const auto i : c10::irange(std::decay_t<decltype(a)>::size())) {
     retval.vals[i] = a.vals[i] + b.vals[i];
   }
   return retval;

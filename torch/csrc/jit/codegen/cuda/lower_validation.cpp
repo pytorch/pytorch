@@ -1,16 +1,18 @@
 #include <torch/csrc/jit/codegen/cuda/lower_validation.h>
 
+#include <torch/csrc/jit/codegen/cuda/contiguity.h>
 #include <torch/csrc/jit/codegen/cuda/expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
-#include <torch/csrc/jit/codegen/cuda/kernel_ir_printer.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/lower_utils.h>
+#include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_replay.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 
+#include <ATen/cuda/CUDAContext.h>
 #include <limits>
 
 namespace torch {
@@ -20,23 +22,80 @@ namespace cuda {
 
 namespace {
 
-//! A parallel type validation pass to make sure all the outputs of
-//!   welford ops are parallelized the same way. Will infer and modify serial
-//!   parallel types if other output/s are parallelized, so that
-//!   user wouldn't have to specify the same parallelization
-//!   3 times. Will throw if conflicts are detected, i.e.
-//!   TIDx vs BIDx etc.
-class ValidateParallelType : public IterVisitor {
+//! Validate multiple output tensors of the same expression, i.e.,
+//! siblings, have valid domains and parallel types. Since siblings
+//! are placed in the same loop nest, they must be parallelized the
+//! same way. Will infer and modify serial parallel types if other
+//! output/s are parallelized, so that user wouldn't have to specify
+//! the same parallelization 3 times. Will throw if conflicts are
+//! detected, i.e. TIDx vs BIDx etc.
+class ValidateSiblings : public IterVisitor {
  public:
   static void validate(Fusion* fusion) {
-    ValidateParallelType VPT;
-    VPT.traverse(fusion);
+    ValidateSiblings validator;
+    validator.traverse(fusion);
   }
 
  private:
   using IterVisitor::handle;
+
+  void handle(Expr* expr) final {
+    if (!ir_utils::isTvOp(expr) || expr->outputs().size() < 2) {
+      IterVisitor::handle(expr);
+      return;
+    }
+
+    auto ref_output = expr->outputs().at(0)->as<TensorView>();
+    auto ref_ndims = ref_output->nDims();
+    const auto& ref_root = ref_output->getRootDomain();
+    std::unordered_map<IterDomain*, IterDomain*> id_map;
+
+    for (const auto sibling :
+         ir_utils::filterByType<TensorView>(expr->outputs())) {
+      if (ref_output == sibling) {
+        continue;
+      }
+
+      TORCH_INTERNAL_ASSERT(
+          sibling->nDims() == ref_ndims,
+          "Mismatched dimensionality detected. Expr: ",
+          expr->toString(),
+          "Ref output: ",
+          ref_output->toString(),
+          ". Sibling: ",
+          sibling->toString());
+
+      for (const auto i : c10::irange(ref_ndims)) {
+        validateParallelTypes(ref_output->axis(i), sibling->axis(i));
+      }
+
+      for (const auto i : c10::irange(ref_root.size())) {
+        id_map[ref_root[i]] = sibling->getRootDomain().at(i);
+      }
+
+      BestEffortReplay replay(
+          sibling->domain()->domain(), ref_output->domain()->domain(), id_map);
+      for (const auto i : c10::irange(ref_ndims)) {
+        auto it = replay.getReplay().find(ref_output->axis(i));
+        TORCH_INTERNAL_ASSERT(
+            it != replay.getReplay().end(),
+            "Matching sibling ID not found. Expr: ",
+            expr->toString(),
+            "Ref ID: ",
+            ref_output->axis(i)->toString());
+        auto sibling_id = it->second;
+        TORCH_INTERNAL_ASSERT(
+            sibling->axis(i) == sibling_id,
+            "Invalid matching sinbling ID detected. Expr: ",
+            expr->toString(),
+            "Sibling ID: ",
+            sibling_id->toString());
+      }
+    }
+  }
+
   // Parallelize id1 and id0 consistently if one is serial and the other isn't
-  void convertIterDomain(IterDomain* id0, IterDomain* id1) {
+  void validateParallelTypes(IterDomain* id0, IterDomain* id1) {
     const auto ptype0 = id0->getParallelType();
     const auto ptype1 = id1->getParallelType();
 
@@ -62,20 +121,6 @@ class ValidateParallelType : public IterVisitor {
       if (ptype1 == ParallelType::Serial) {
         id1->parallelize(ptype0);
       }
-    }
-  }
-
-  void handle(WelfordOp* wop) override {
-    auto out_avg = wop->outAvg()->as<TensorView>();
-    auto out_var = wop->outVar()->as<TensorView>();
-    auto out_n = wop->outN()->as<TensorView>();
-    TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_var->nDims());
-    TORCH_INTERNAL_ASSERT(out_avg->nDims() == out_n->nDims());
-    for (const auto i : c10::irange(out_avg->nDims())) {
-      // TODO: can be cleaner.
-      convertIterDomain(out_avg->axis(i), out_var->axis(i));
-      convertIterDomain(out_avg->axis(i), out_n->axis(i));
-      convertIterDomain(out_n->axis(i), out_var->axis(i));
     }
   }
 };
@@ -132,26 +177,8 @@ void validateIr(Fusion* fusion) {
 
   fusion->validateInputs();
 
-  // Convert all input broadcast iterdomains to strided
-  for (auto tv : ir_utils::filterByType<TensorView>(fusion->inputs())) {
-    for (auto id : tv->getMaybeRFactorDomain()) {
-      if (id->isBroadcast()) {
-        id->toStridedBroadcast();
-      }
-    }
-  }
-
-  // Convert all output broadcast iterdomains to strided
-  for (auto tv : ir_utils::filterByType<TensorView>(fusion->outputs())) {
-    for (auto id : tv->getMaybeRFactorDomain()) {
-      if (id->isBroadcast()) {
-        id->toStridedBroadcast();
-      }
-    }
-  }
-
   // Validate Parallelization
-  ValidateParallelType::validate(fusion);
+  ValidateSiblings::validate(fusion);
 
   validateIterDomainUsage(fusion);
 }
@@ -261,6 +288,35 @@ class VectorizeValidator : public OptInDispatch {
     domains_.insert(m->inner());
   }
 
+  // For the producer tensor, it's indexed first by transformed like
+  // the consumer. So, to find its contig merged domain, use the
+  // consumer TensorDomain with the producer contiguity info.
+  static std::vector<bool> mapProducerContiguity(
+      TensorView* producer_tv,
+      TensorView* consumer_tv) {
+    const auto c2p = PairwiseRootDomainMap(producer_tv, consumer_tv)
+                         .mapConsumerToProducer(
+                             consumer_tv->domain(), producer_tv->domain());
+
+    std::vector<bool> producer_contiguity;
+
+    for (auto consumer_root_id : consumer_tv->getRootDomain()) {
+      auto producer_root_id = c2p.at(consumer_root_id);
+      auto producer_root_it = std::find(
+          producer_tv->getMaybeRFactorDomain().begin(),
+          producer_tv->getMaybeRFactorDomain().end(),
+          producer_root_id);
+      TORCH_INTERNAL_ASSERT(
+          producer_root_it != producer_tv->getMaybeRFactorDomain().end());
+      auto producer_root_id_offset = std::distance(
+          producer_tv->getMaybeRFactorDomain().begin(), producer_root_it);
+      producer_contiguity.push_back(
+          producer_tv->domain()->contiguity().at(producer_root_id_offset));
+    }
+
+    return producer_contiguity;
+  }
+
  private:
   std::unordered_set<IterDomain*> domains_;
   IterDomain* vectorized_id_ = nullptr;
@@ -285,8 +341,10 @@ class VectorizeValidator : public OptInDispatch {
       }
     }
 
-    // If no vectorized id's found simply return;
-    if (v_id == nullptr) {
+    // If no vectorized ids found simply return. If vectorized access is
+    // broadcast, it won't generate an actual vector instruction, so can safely
+    // be ignore
+    if (v_id == nullptr || v_id->isBroadcast()) {
       return;
     }
 
@@ -319,7 +377,10 @@ class VectorizeValidator : public OptInDispatch {
         vector_size,
         " however, vector sizes only upto and including 16 bytes are supported.");
 
-    auto replay_exprs = ExprSort::getExprs(fusion, {v_id});
+    auto replay_exprs = DependencyCheck::getAllExprsBetween(
+        {tv->getMaybeRFactorDomain().begin(),
+         tv->getMaybeRFactorDomain().end()},
+        {v_id});
 
     VectorizeValidator validator(v_id);
 
@@ -377,12 +438,54 @@ class VectorizeValidator : public OptInDispatch {
         "Vectorized dim has to be from a contiguous inner most position: ",
         tv,
         "\n");
+
+    // Save info required to lowering and runtime validation
+    auto consumer_word_size_it =
+        GpuLower::current()->vectorizedAccesses().find(tv);
+    if (consumer_word_size_it !=
+        GpuLower::current()->vectorizedAccesses().end()) {
+      consumer_word_size_it->second = std::max(
+          (int)vector_size_optional.value(), consumer_word_size_it->second);
+    } else {
+      GpuLower::current()->vectorizedAccesses().emplace(
+          tv, (int)vector_size_optional.value());
+    }
+    auto producer_tv = tv->definition()->inputs().at(0)->as<TensorView>();
+    auto producer_word_size_it =
+        GpuLower::current()->vectorizedAccesses().find(producer_tv);
+    if (producer_word_size_it !=
+        GpuLower::current()->vectorizedAccesses().end()) {
+      producer_word_size_it->second = std::max(
+          (int)vector_size_optional.value(), producer_word_size_it->second);
+    } else {
+      GpuLower::current()->vectorizedAccesses().emplace(
+          producer_tv, (int)vector_size_optional.value());
+    }
+
+    VectorizedSetInfo vectorized_set_info;
+    vectorized_set_info.consumer_tv = tv;
+    vectorized_set_info.producer_tv = producer_tv;
+    // Note that VectorizedSetInfo is about each instance of
+    // vectorized set operations, so the word size is the size of this
+    // specific vectorized set.
+    vectorized_set_info.word_size = (int)vector_size_optional.value();
+    vectorized_set_info.vectorized_leaf_id = v_id;
+    vectorized_set_info.vectorized_root_id = validator.vectorized_id_;
+    // For aligned vectorize, the extent of a vectorized domain must
+    // be divisible by the vector word size. The domain is usually
+    // just one of the root domains, but can be a merged domain of
+    // contiguous domains. Those domains are saved in
+    // VectorizedSetInfo.contig_root_ids at the time of indexing.
+    GpuLower::current()->vectorizedSetInfo().emplace_back(vectorized_set_info);
   }
 };
 
 } // namespace
 
-void validateVectorize(Fusion* fusion) {
+// Uses ContigIDs to find root contig domains that a vectorized domain
+// depends on. As ContigIDs depends on HaloInfo, this must be done
+// after HaloInfo is created.
+void validateAndCollectVectorizeInfo(Fusion* fusion) {
   FUSER_PERF_SCOPE("GpuLower::Lower::validateVectorize");
   FusionGuard fg(fusion);
 
@@ -403,7 +506,8 @@ void validateVectorize(Fusion* fusion) {
     for (const auto i : c10::irange(tv->nDims())) {
       IterDomain* id = tv->axis(i);
       IterDomain* concrete_id =
-          GpuLower::current()->caParallelMap().getConcreteMappedID(id);
+          GpuLower::current()->caMap()->getConcreteMappedID(
+              id, IdMappingMode::LOOP);
 
       auto ptype = concrete_id->getParallelType();
 
@@ -439,11 +543,16 @@ void validateVectorize(Fusion* fusion) {
           tv->definition() == nullptr ||
               (tv->definition()->isA<UnaryOp>() &&
                tv->definition()->as<UnaryOp>()->getUnaryOpType() ==
-                   UnaryOpType::Set),
+                   UnaryOpType::Set) ||
+              tv->definition()->isA<LoadStoreOp>(),
           "Vectorized accesses cannot be inline with computation, they are only supported with a Set operation.",
           "TensorView: ",
           tv);
     }
+    // Validate the vectorized domain maps to the innermost domain of
+    // tv. Note that we don't need to validate its producer tv as
+    // both Vectorize and MisalignedVectorize can only be used with
+    // UnaryOp::Set.
     if (has_vectorize_dim || has_misaligned_vectorize_dim) {
       VectorizeValidator::validate(tv);
     }
@@ -452,164 +561,106 @@ void validateVectorize(Fusion* fusion) {
 
 namespace {
 
-// Validate parallelization of a single tensor
-void validateParallelizationOfTensor(TensorView* tv) {
-  // Each ParallelType can be used only once.
-  ParallelTypeBitmap pt_map;
-  for (size_t i = 0; i < tv->nDims(); ++i) {
-    auto axis = tv->axis(i);
-    auto ptype = axis->getParallelType();
-    if (!isParallelTypeThread(ptype)) {
-      continue;
-    }
+void fillVectorizedContigRootDomains(
+    const TensorView* tv,
+    const ContigIDs& contig_finder,
+    IterDomain* vectorized_root_id,
+    VectorizedSetInfo& info) {
+  const auto& root_dom = tv->getMaybeRFactorDomain();
 
+  // Find the root domains that are dependency of the merged contig
+  // domain.
+
+  auto consumer_indexed_it =
+      contig_finder.rootToIndexedID().find(vectorized_root_id);
+  TORCH_INTERNAL_ASSERT(
+      consumer_indexed_it != contig_finder.rootToIndexedID().end(),
+      "Contiguity information not found for root domain: ",
+      vectorized_root_id->toString());
+  auto consumer_indexed_id = consumer_indexed_it->second;
+
+  // Actual indexed root domains for this root domain. If
+  // contig merge is done, multiple root domains are included.
+  std::unordered_set<IterDomain*> indexed_root_ids;
+
+  if (consumer_indexed_id == vectorized_root_id) {
+    // Indexed domain is equal to the root domain, meaning no contig
+    // merge is involved.
+    indexed_root_ids.insert(vectorized_root_id);
+  } else {
+    auto consumer_within_contig_it =
+        contig_finder.withinContigIDs().find(consumer_indexed_id);
     TORCH_INTERNAL_ASSERT(
-        !pt_map.get(ptype),
-        "Multiple use of ",
-        ptype,
-        " in tensor t",
-        tv->name(),
-        ": ",
-        tv);
-    pt_map.set(ptype);
+        consumer_within_contig_it != contig_finder.withinContigIDs().end());
+    const auto& within_ids = consumer_within_contig_it->second;
+    std::copy_if(
+        root_dom.begin(),
+        root_dom.end(),
+        std::inserter(indexed_root_ids, indexed_root_ids.end()),
+        [&](IterDomain* root_id) {
+          return within_ids.find(root_id) != within_ids.end();
+        });
   }
 
-  // If this tensor is predicated by a paralel type, it should not be
-  // used to parallelize any domain of this tensor
-
-  const auto thread_pred =
-      GpuLower::current()->threadPredMap().getPredicateInfo(tv);
-
-  auto predicated_parallel_types = pt_map & thread_pred.limited_types;
-
-  TORCH_INTERNAL_ASSERT(
-      predicated_parallel_types.none(),
-      "Invalid parallelization of tensor t",
-      tv->name(),
-      ". The tensor is parallelized with ",
-      predicated_parallel_types.toString(),
-      ", but it's invalid to use the types as the tensor is also predicated with them.",
-      ", thread prd: ",
-      thread_pred.limited_types.toString());
+  // Store the contig merged root domains. If it is already set, pick
+  // the smaller one as it is used for validating divisibility of the
+  // merged extent.
+  if (info.contig_root_ids.empty() ||
+      indexed_root_ids.size() < info.contig_root_ids.size()) {
+    info.contig_root_ids = indexed_root_ids;
+  }
 }
 
 } // namespace
 
-void validateParallelize(Fusion* fusion) {
-  FUSER_PERF_SCOPE("GpuLower::Lower::validateParallelize");
-  FusionGuard fg(fusion);
-
-  const auto& par_map = GpuLower::current()->caParallelMap();
-  const auto& loop_map = GpuLower::current()->caLoopMap();
-  const auto& pred_map = GpuLower::current()->threadPredMap();
-
-  auto exprs = ExprSort::getExprs(fusion);
-
-  for (auto expr : exprs) {
-    if (!ir_utils::isTVOp(expr)) {
-      continue;
-    }
-    // Validate parallelization of each consumer by itself
-    for (auto consumer : ir_utils::filterByType<TensorView>(expr->outputs())) {
-      validateParallelizationOfTensor(consumer);
-    }
-    // Validate parallelization between a producer and a consumer
-    for (auto producer : ir_utils::filterByType<TensorView>(expr->inputs())) {
-      // Parallelization on input tensors have no effect.
-      if (producer->isFusionInput()) {
-        continue;
-      }
-      const auto parallel_bcast_doms =
-          pred_map.getParallelBroadcastDomains(producer);
-      for (const auto i : c10::irange(producer->nDims())) {
-        // If a producer axis is threaded, either with threadIdx or
-        // blockIdx, there must be a mapped consumer axis with the
-        // same ParallelType. An exception is when the producer is
-        // allocated on shared memory and its parallelized with
-        // threadIdx. In that case, there is no parallelization
-        // constraint on the consumer as syncthreads will be inserted
-        // when necessary.
-        auto producer_axis = producer->axis(i);
-        auto producer_ptype =
-            par_map.getConcreteMappedID(producer_axis)->getParallelType();
-        if (!isParallelTypeThread(producer_ptype)) {
-          continue;
-        }
-        // When the producer axis is a broadcast, it is not really
-        // parallelized unless thread-predicated
-        if (producer_axis->isBroadcast() &&
-            !parallel_bcast_doms.get(producer_ptype)) {
-          continue;
-        }
-        // No constraint on the consumer tensor when the producer
-        // axis is parallelized with threadIdx and allocates on
-        // shared memory
-        if (isParallelTypeThreadDim(producer_ptype) &&
-            producer->getMemoryType() == MemoryType::Shared) {
-          continue;
-        }
-        // There should be also nothing to validate when the producer
-        // axis is reduction.
-        if (producer_axis->isReduction()) {
-          continue;
-        }
-        // There must be a consumer axis that uses the same indexing
-        // with the same parallel type as the producer axis. The loop
-        // map is used to to find such an axis. Broadcast forwarding
-        // does not cause any inconsistent parallelization as indexing
-        // takes care of the forwarding.
-        for (auto consumer :
-             ir_utils::filterByType<TensorView>(expr->outputs())) {
-          auto it = std::find_if(
-              consumer->domain()->domain().begin(),
-              consumer->domain()->domain().end(),
-              [&](IterDomain* consumer_axis) {
-                return loop_map.areMapped(producer_axis, consumer_axis);
-              });
-          TORCH_INTERNAL_ASSERT(
-              it != consumer->domain()->domain().end(),
-              "Inconsistent parallelization found between TV",
-              producer->name(),
-              " (",
-              producer,
-              ") and TV",
-              consumer->name(),
-              "(",
-              consumer,
-              "). ",
-              "TV",
-              consumer->name(),
-              " does not have a matching axis for parallelized producer axis, ",
-              producer_axis,
-              ". CA Map: ",
-              loop_map.toString());
-          auto consumer_axis = *it;
-          auto consumer_ptype =
-              par_map.getConcreteMappedID(consumer_axis)->getParallelType();
-          TORCH_INTERNAL_ASSERT(
-              producer_ptype == consumer_ptype,
-              "Inconsistent parallelization found between TV",
-              producer->name(),
-              " (",
-              producer,
-              ") and TV",
-              consumer->name(),
-              "(",
-              consumer,
-              "). "
-              "Producer axis, ",
-              producer_axis,
-              " is parallelized with ",
-              stringifyThread(producer_ptype),
-              ", but the parallel type of its matching consumer axis, ",
-              consumer_axis,
-              " is ",
-              stringifyThread(consumer_ptype),
-              ".");
-        }
-      }
-    }
+void fillConsumerVectorizedContigRootDomains(
+    const TensorView* consumer_tv,
+    const ContigIDs& contig_finder) {
+  auto& info_vector = GpuLower::current()->vectorizedSetInfo();
+  auto it = std::find_if(
+      info_vector.begin(), info_vector.end(), [&consumer_tv](auto& info) {
+        return info.consumer_tv == consumer_tv;
+      });
+  if (it == info_vector.end()) {
+    return;
   }
+
+  VectorizedSetInfo& info = *it;
+
+  // info.vectorized_root_id is validated at this point to be the
+  // last concrete root domain in consumer.
+  auto consumer_root_id = info.vectorized_root_id;
+
+  fillVectorizedContigRootDomains(
+      consumer_tv, contig_finder, consumer_root_id, info);
+}
+
+void fillProducerVectorizedContigRootDomains(
+    const TensorView* producer_tv,
+    const TensorView* consumer_tv,
+    const std::unordered_map<IterDomain*, IterDomain*>& c2p_map,
+    const ContigIDs& contig_finder) {
+  auto& info_vector = GpuLower::current()->vectorizedSetInfo();
+  auto it = std::find_if(
+      info_vector.begin(),
+      info_vector.end(),
+      [&producer_tv, &consumer_tv](auto& info) {
+        return info.consumer_tv == consumer_tv &&
+            info.producer_tv == producer_tv;
+      });
+  if (it == info_vector.end()) {
+    return;
+  }
+
+  VectorizedSetInfo& info = *it;
+
+  // info.vectorized_root_id is validated at this point to be the
+  // last concrete root domain in consumer.
+  auto consumer_root_id = info.vectorized_root_id;
+
+  auto root_id = c2p_map.at(consumer_root_id);
+
+  fillVectorizedContigRootDomains(producer_tv, contig_finder, root_id, info);
 }
 
 namespace {
@@ -630,7 +681,7 @@ namespace {
 // each tensor that needs to be computed.
 std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> getLiveRangeOffsets(
     Fusion* fusion) {
-  auto exprs = ExprSort::getExprs(fusion);
+  auto exprs = StmtSort::getExprs(fusion);
 
   std::unordered_map<IterDomain*, std::pair<int64_t, int64_t>> map;
 
@@ -760,7 +811,9 @@ void validatePartialSplit(Fusion* fusion) {
   auto range_info = getLiveRangeOffsets(fusion);
 
   for (auto tv : ir_utils::allTvs(fusion)) {
-    auto exprs = ir_utils::historyOf(tv);
+    auto exprs = StmtSort::getExprs(
+        tv->fusion(),
+        {tv->domain()->domain().begin(), tv->domain()->domain().end()});
     for (auto split : ir_utils::filterByType<Split>(exprs)) {
       // When the start and stop offsets are not zero, make sure the
       // range defined by the split includes the required range to
@@ -789,6 +842,197 @@ void validatePartialSplit(Fusion* fusion) {
         validateSplit(
             split->stopOffset(), valid_range.second, err_msg_prefix.str());
       }
+    }
+  }
+}
+
+namespace {
+
+//! Utility to make sure targeted gpu capability is
+//!  higher than provided major.minor.
+void validateMinimumArch(int major, int minor) {
+  // Skip checking arch if disabled.
+  if (isDisabled(DisableOption::ArchCheck)) {
+    return;
+  }
+
+  auto prop = at::cuda::getCurrentDeviceProperties();
+  TORCH_INTERNAL_ASSERT(prop->major >= major);
+  if (prop->major == major) {
+    TORCH_INTERNAL_ASSERT(prop->minor >= minor);
+  }
+}
+
+//! Validates that the operand and result tensors
+//!  of mma ops are swizzled and also validates
+//!  specialization of tidx as lane id.
+void validateMmaTensors(MmaOp* mma) {
+  bool tidx_validated = false;
+  std::vector<TensorView*> to_validate = {
+      mma->inA()->as<TensorView>(),
+      mma->inB()->as<TensorView>(),
+      mma->out()->as<TensorView>()};
+
+  for (auto tv : to_validate) {
+    for (auto id : tv->domain()->domain()) {
+      auto ptype = id->getParallelType();
+      if (ptype == ParallelType::TIDx) {
+        TORCH_INTERNAL_ASSERT(
+            id->isMmaSwizzled(),
+            "TIDx for mma input/output must be set by WarpMmaSwizzler",
+            id,
+            tv);
+        if (!tidx_validated) {
+          // Check that TIDx is exact lane_id
+          const auto& paralel_dim_map =
+              GpuLower::current()->parallelDimensionMap();
+          TORCH_INTERNAL_ASSERT(
+              paralel_dim_map.isExact(ptype) &&
+                  paralel_dim_map.get(ptype)->isConstInt() &&
+                  paralel_dim_map.get(ptype)->evaluateInt() ==
+                      at::cuda::warp_size(),
+              "TIDx is reserved for lane id in mma kernels, and it needs to be exactly a warp");
+          tidx_validated = true;
+        }
+      }
+    }
+  }
+
+  // Note: this check will be relaxed in a follow up.
+  auto validate_operand_ids = [](const TensorView* tv) {
+    TORCH_INTERNAL_ASSERT(
+        std::all_of(
+            tv->domain()->domain().begin() + tv->getComputeAtPosition(),
+            tv->domain()->domain().end(),
+            [](IterDomain* id) {
+              return id->isMmaSwizzled() ||
+                  (id->isBroadcast() &&
+                   id->getParallelType() == ParallelType::Serial);
+            }),
+        "All id's on the right of CA pos needs to be mma-swizzled by WarpMmaSwizzler\n",
+        tv);
+  };
+
+  validate_operand_ids(mma->inA()->as<TensorView>());
+  validate_operand_ids(mma->inB()->as<TensorView>());
+}
+
+//! Note and TODO:
+//!   Currently relying on ldmatrix to
+//!     obtain the correct data layout for turing/ampere
+//!     mma's.
+//!   This restriction will eventually not
+//!    be necessary once the scatter swizzle is ready.
+void validateTuringMmaInput(TensorView* tv) {
+  // Pattern matching here to make sure LDMatrix is the right format.
+  //  Format is done through swizzling in the scheduling and
+  //  we check that swizzling to make sure it's correctly setup for LDMatrix.
+  //  We could in theory support patterns LDMatrix doesn't support,
+  //  but that would also mean the MMA isn't supported and
+  //  so we would have to lower to something completely different.
+
+  // MemCpy async is a more generic utility that we can use.
+  // Currently only allowed input paths are:
+  //  ldmatrix -> mma or
+  //  ldmatrix -> broadcast -> mma
+  // We actually wouldn't want too much flexibility here since
+  //  this path is very perf critical. But the check itself
+  //  can be made cleaner once we have the correct swizzle
+  //  labeling.
+  // The most generic support would involve build out to
+  //  support any pointwise ops that does not change the
+  //  datalayout.
+  auto tv_def = tv->definition();
+  TORCH_INTERNAL_ASSERT(tv_def);
+  if (tv_def->isA<BroadcastOp>()) {
+    tv_def = tv_def->input(0)->definition();
+  }
+  TORCH_INTERNAL_ASSERT(tv_def);
+  TORCH_INTERNAL_ASSERT(ir_utils::isLdMatrixOp(tv_def));
+}
+
+// Output of ldmatrix is swizzled with the mma format, so it
+//  currently should not be fused with any pointwise ops. This
+//  check is to protect against these cases.
+// This would also not be needed once scatter swizzle ready, should
+//  just become a swizzle format check if we wanted to fuse ldmatrix
+//  with any op other than mma.
+void validateLdMatrixOutput(TensorView* tv) {
+  const auto& out_uses = tv->fusion()->unordered_uses(tv);
+  if (out_uses.empty()) {
+    return;
+  }
+  // TODO: restricting to single use pipelines for now which
+  //  is true to matmul mainloop. This Could be relaxed to
+  //  support more complex mma usage.
+  TORCH_INTERNAL_ASSERT(out_uses.size() == 1);
+  auto out_use = *(out_uses.begin());
+
+  if (out_use->isA<BroadcastOp>()) {
+    validateLdMatrixOutput(out_use->output(0)->as<TensorView>());
+    return;
+  }
+
+  TORCH_INTERNAL_ASSERT(
+      out_use->isA<MmaOp>(),
+      "validateLdMatrixOutput: currently only supports single mma use for ldmatrix",
+      out_use);
+}
+
+// Checks that the memory ops are supported on the targeted GPU
+void validateArchMemoryOp(LoadStoreOp* ldst) {
+  switch (ldst->opType()) {
+    case LoadStoreOpType::LdMatrix:
+    case LoadStoreOpType::LdMatrixTranspose:
+      validateMinimumArch(7, 5);
+      validateLdMatrixOutput(ldst->out()->as<TensorView>());
+      return;
+    case LoadStoreOpType::CpAsync:
+      validateMinimumArch(8, 0);
+      return;
+    default:
+      return;
+  }
+}
+
+} // namespace
+
+//! Validate data format and GPU arch compatibility of scheduled
+//!  mma operators on the fusion.
+void validateMma(Fusion* fusion) {
+  auto exprs = StmtSort::getExprs(fusion);
+
+  for (auto expr : exprs) {
+    if (auto mma = dynamic_cast<MmaOp*>(expr)) {
+      validateMmaTensors(mma);
+
+      switch (mma->options().macro) {
+        case MmaOptions::MacroType::Volta_16_16_4:
+          validateMinimumArch(7, 0);
+          break;
+        case MmaOptions::MacroType::Turing_16_8_16:
+          validateMinimumArch(7, 5);
+
+          // Check that operands come from ldmatrix, can be
+          //  relaxed once swizzles can be labeled on iterdomains.
+          validateTuringMmaInput(mma->inA()->as<TensorView>());
+          validateTuringMmaInput(mma->inB()->as<TensorView>());
+          break;
+        case MmaOptions::MacroType::Ampere_16_8_16:
+          validateMinimumArch(8, 0);
+
+          // Check that operands come from ldmatrix, can be
+          //  relaxed once swizzles can be labeled on iterdomains.
+          validateTuringMmaInput(mma->inA()->as<TensorView>());
+          validateTuringMmaInput(mma->inB()->as<TensorView>());
+          break;
+        default:
+          TORCH_INTERNAL_ASSERT(false, "validate mma: unsupported macro");
+          break;
+      }
+    }
+    if (auto ldst = dynamic_cast<LoadStoreOp*>(expr)) {
+      validateArchMemoryOp(ldst);
     }
   }
 }

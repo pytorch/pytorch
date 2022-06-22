@@ -114,15 +114,18 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"data", "prim"},
            {"shape", "prim"},
            {"is_cuda", "prim"},
+           {"is_cpu", "prim"},
            {"is_xpu", "prim"},
            {"is_sparse", "prim"},
            {"is_sparse_csr", "prim"},
            {"is_mkldnn", "prim"},
-           {"is_mlc", "prim"},
+           {"is_mps", "prim"},
            {"is_quantized", "prim"},
            {"is_vulkan", "prim"},
+           {"is_ipu", "prim"},
            {"is_meta", "prim"},
            {"is_leaf", "aten"},
+           {"is_nested", "prim"},
            {"requires_grad", "prim"},
            {"layout", "prim"},
            {"T", "prim"},
@@ -219,6 +222,14 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
   // Handle calling tolist() on a Tensor.
   if (value_->type()->isSubtypeOf(*TensorType::get()) && field == "tolist") {
     return SpecialFormValue::create(prim::tolist);
+  }
+
+  // Handle calling __getitem__() directly on a Tensor, it needs special
+  // handling because desired method name (`__getitem__`) doesn't match `aten`
+  // operator name of `aten::index`.
+  if (value_->type()->isSubtypeOf(*TensorType::get()) &&
+      field == "__getitem__") {
+    return SpecialFormValue::create(aten::index);
   }
 
   ErrorReport report(loc);
@@ -650,6 +661,7 @@ std::shared_ptr<SugaredValue> ClassValue::call(
   // Generate a new object of the right type, then call `__init__` on it
   auto& g = *m.graph();
   auto self = g.insertNode(g.createObject(type_))->output();
+  self->node()->setSourceRange(loc);
   if (!type_->findMethod("__init__")) {
     throw ErrorReport(loc) << "Class " << type_->name()->name()
                            << " does not have an __init__ function defined";

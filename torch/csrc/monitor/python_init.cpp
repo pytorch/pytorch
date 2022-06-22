@@ -133,8 +133,37 @@ void initMonitorBindings(PyObject* module) {
       m,
       "Stat",
       R"DOC(
-        Parent class for all aggregating stat implementations.
+        Stat is used to compute summary statistics in a performant way over
+        fixed intervals. Stat logs the statistics as an Event once every
+        ``window_size`` duration. When the window closes the stats are logged
+        via the event handlers as a ``torch.monitor.Stat`` event.
+
+        ``window_size`` should be set to something relatively high to avoid a
+        huge number of events being logged. Ex: 60s. Stat uses millisecond
+        precision.
+
+        If ``max_samples`` is set, the stat will cap the number of samples per
+        window by discarding `add` calls once ``max_samples`` adds have
+        occurred. If it's not set, all ``add`` calls during the window will be
+        included. This is an optional field to make aggregations more directly
+        comparable across windows when the number of samples might vary.
+
+        When the Stat is destructed it will log any remaining data even if the
+        window hasn't elapsed.
       )DOC")
+      .def(
+          py::init<
+              std::string,
+              std::vector<Aggregation>,
+              std::chrono::milliseconds,
+              int64_t>(),
+          py::arg("name"),
+          py::arg("aggregations"),
+          py::arg("window_size"),
+          py::arg("max_samples") = std::numeric_limits<int64_t>::max(),
+          R"DOC(
+           Constructs the ``Stat``.
+          )DOC")
       .def(
           "add",
           &Stat<double>::add,
@@ -163,47 +192,6 @@ void initMonitorBindings(PyObject* module) {
           R"DOC(
             Number of data points that have currently been collected. Resets
             once the event has been logged.
-          )DOC");
-
-  py::class_<IntervalStat<double>, Stat<double>>(
-      m,
-      "IntervalStat",
-      R"DOC(
-        IntervalStat is a Stat that logs once every ``window_size`` duration. This
-        should be set to something relatively high to avoid a huge number of
-        events being logged. Ex: 60s.
-        The stat will be logged as an event on the next ``add`` call after the
-        window ends.
-      )DOC")
-      .def(
-          py::init<
-              std::string,
-              std::vector<Aggregation>,
-              std::chrono::milliseconds>(),
-          py::arg("name"),
-          py::arg("aggregations"),
-          py::arg("window_size"),
-          R"DOC(
-           Constructs the ``IntervalStat``.
-          )DOC");
-
-  py::class_<FixedCountStat<double>, Stat<double>>(
-      m,
-      "FixedCountStat",
-      R"DOC(
-        FixedCountStat is a Stat that logs every ``window_size`` number of
-        ``add`` calls. For high performance stats this window size should be
-        fairly large to ensure that the event logging frequency is in the range
-        of 1s to 60s under normal usage. Core stats should error on the side of
-        logging less frequently.
-      )DOC")
-      .def(
-          py::init<std::string, std::vector<Aggregation>, int64_t>(),
-          py::arg("name"),
-          py::arg("aggregations"),
-          py::arg("window_size"),
-          R"DOC(
-           Constructs the ``FixedCountStat``.
           )DOC");
 
   py::class_<Event>(
@@ -269,7 +257,7 @@ void initMonitorBindings(PyObject* module) {
       m,
       "data_value_t",
       R"DOC(
-        data_value_t is one of of ``str``, ``float``, ``int``, ``bool``.
+        data_value_t is one of ``str``, ``float``, ``int``, ``bool``.
       )DOC");
 
   py::implicitly_convertible<std::string, data_value_t>();

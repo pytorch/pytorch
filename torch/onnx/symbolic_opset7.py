@@ -1,24 +1,31 @@
-from torch.onnx.symbolic_helper import _block_list_in_opset
+"""
+Note [ONNX operators that are added/updated from opset 7 to opset 8]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+New operators:
+  Expand
 
-import torch.onnx.symbolic_opset9 as sym_opset9
+Updated operators:
+  Min, Max, Sum, Mean: supports multidirectional broadcasting.
+  MaxPool: added optional indices output.
+  Scan
+"""
 
 import warnings
 
-
-# Note [ONNX operators that are added/updated from opset 7 to opset 8]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# New operators:
-#   Expand
-#
-# Updated operators:
-#   Min, Max, Sum, Mean: supports multidirectional broadcasting.
-#   MaxPool: added optional indices output.
-#   Scan
+from torch.onnx import symbolic_helper
+from torch.onnx import symbolic_opset9 as opset9
 
 block_listed_operators = [
-    "scan", "expand", "expand_as", "meshgrid",
-    "adaptive_max_pool1d", "adaptive_max_pool2d", "adaptive_max_pool3d",
-    "max_pool1d_with_indices", "max_pool2d_with_indices", "max_pool3d_with_indices"
+    "scan",
+    "expand",
+    "expand_as",
+    "meshgrid",
+    "adaptive_max_pool1d",
+    "adaptive_max_pool2d",
+    "adaptive_max_pool3d",
+    "max_pool1d_with_indices",
+    "max_pool2d_with_indices",
+    "max_pool3d_with_indices",
 ]
 
 
@@ -28,20 +35,25 @@ block_listed_operators = [
 def max(g, self, dim_or_y=None, keepdim=None):
     # torch.max(input, other)
     if keepdim is None and dim_or_y is not None:
-        warnings.warn("Multidirectional broadcasting is not supported in opset 7. "
-                      "This might cause the onnx model to be incorrect, if inputs to max operators "
-                      "have different shapes")
-    return sym_opset9.max(g, self, dim_or_y, keepdim)
+        warnings.warn(
+            "Multidirectional broadcasting is not supported in opset 7. "
+            "This might cause the onnx model to be incorrect, if inputs to max operators "
+            "have different shapes"
+        )
+    return opset9.max(g, self, dim_or_y, keepdim)
 
 
 def min(g, self, dim_or_y=None, keepdim=None):
     # torch.min(input, other)
     if keepdim is None and dim_or_y is not None:
-        warnings.warn("Multidirectional broadcasting is not supported in opset 7. "
-                      "This might cause the onnx model to be incorrect, if inputs to min operators "
-                      "have different shapes")
-    return sym_opset9.min(g, self, dim_or_y, keepdim)
+        warnings.warn(
+            "Multidirectional broadcasting is not supported in opset 7. "
+            "This might cause the onnx model to be incorrect, if inputs to min operators "
+            "have different shapes"
+        )
+    return opset9.min(g, self, dim_or_y, keepdim)
 
 
 for block_listed_op in block_listed_operators:
-    vars()[block_listed_op] = _block_list_in_opset(block_listed_op)
+    vars()[block_listed_op] = symbolic_helper._block_list_in_opset(block_listed_op)
+    vars()[block_listed_op].__module__ = "torch.onnx.symbolic_opset7"

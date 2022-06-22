@@ -16,10 +16,10 @@ class PredicateCompute {
   // ignore_internal_syncthread_ops will prevent creation of predicates on
   // block/grid broadcast/reduce as these have syncthread calls within them
   // so all threads need to execute the function.
-  static kir::Bool* getInlinePredicate(
-      const kir::Expr* expr,
+  static Bool* getInlinePredicate(
+      const Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
-      kir::Bool* thread_pred,
+      Bool* thread_pred,
       PredicateType pred_type);
 };
 
@@ -40,31 +40,31 @@ class ParallelizedDomainPredicate {
     explicit PredicateInfo(ParallelType pt) : pt_(pt) {}
 
     //! Adds a domain that is parallized by the same paralell type
-    bool addDomain(kir::IterDomain* id);
+    bool addDomain(IterDomain* id);
 
-    const std::vector<kir::IterDomain*>& ids() const {
+    const std::vector<IterDomain*>& ids() const {
       return ids_;
     }
 
     //! Generates a predicate Val from predicate information
-    kir::Bool* getPredicate() const;
+    Bool* getPredicate() const;
 
    private:
     ParallelType pt_;
     //! Domains parallelized by the same parallel type
-    std::vector<kir::IterDomain*> ids_;
+    std::vector<IterDomain*> ids_;
   };
 
   //! Returns a predicate Val for parallelied domains of an expression.
-  static kir::Bool* getPredicate(
-      const kir::Expr* expr,
+  static Bool* getPredicate(
+      const Expr* expr,
       const std::vector<kir::ForLoop*>& loops);
 
   //! Returns predicate information for parallelied domains of an
   //! expression.
   static std::unordered_map<ParallelType, PredicateInfo, TypeHash>
   getPredicateMap(
-      const kir::Expr* expr,
+      const Expr* expr,
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitched_loop = nullptr);
 };
@@ -80,8 +80,9 @@ class UnswitchPredicateKey {
   UnswitchPredicateKey();
 
   UnswitchPredicateKey(
-      IterDomain* predicated_concrete_id,
-      const ReferenceTensor& reference);
+      IterDomain* predicated_consumer_id,
+      TensorView* consumer_tv,
+      IterDomain* predicated_concrete_id);
 
   bool operator==(const UnswitchPredicateKey& other) const {
     return predicated_concrete_id_ == other.predicated_concrete_id_ &&
@@ -121,7 +122,7 @@ struct UnswitchPredicateKeyHash {
 
 class TORCH_CUDA_CU_API UnswitchPredicate {
  public:
-  static kir::Bool* get(
+  static Bool* get(
       const std::vector<kir::ForLoop*>& outer_loops,
       kir::ForLoop* unrolled_loop);
 
@@ -132,11 +133,11 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
     struct Info {
       //! Most restrictive static predicate. Nullptr if no static
       //! predicate found.
-      kir::Bool* static_pred = nullptr;
+      Bool* static_pred = nullptr;
       //! The offset value of static_pred
       int64_t static_offset = 0;
       //! List of dynamic predicates.
-      std::vector<kir::Bool*> dynamic_preds;
+      std::vector<Bool*> dynamic_preds;
     };
     UnswitchPredicateKey predicate_key;
     Info start;
@@ -147,7 +148,7 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
       std::vector<kir::ForLoop*> outer_loops,
       kir::ForLoop* unrolled_loop);
 
-  void predicateOn(kir::Expr*);
+  void predicateOn(Expr*);
 
   void openLoop(kir::ForLoop*);
 
@@ -160,10 +161,13 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
   //! static, only pick the most restrictive one, e.g., the one with the
   //! minimum offset for the start predication.
   void mergeUnswitchPredicateOffsets(
-      const std::vector<kir::Bool*>& predicates,
-      const std::vector<kir::Val*>& offsets,
+      Bool* predicate,
+      Val* offset,
       MergedPredicates::Info& merged_predicate_info,
       bool is_start);
+
+  //! Adds new predicates for parallelized domains
+  void addParallelizedDomainPredicates(Expr*);
 
  private:
   //! Track which iter domains have been predicated
@@ -181,7 +185,7 @@ class TORCH_CUDA_CU_API UnswitchPredicate {
       parallelized_dom_predicates_;
 
   //! The predicates that have been generated.
-  std::vector<kir::Bool*> predicates_;
+  std::vector<Bool*> predicates_;
 
   std::vector<kir::ForLoop*> for_loops_;
 

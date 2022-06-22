@@ -36,7 +36,9 @@ TEST(BackendDeviceTest, Basic2) {
 
 TEST(BackendDeviceTest, Basic3) {
   struct TestType : public BackendDeviceType {
-    std::string toString() const override { return "Test"; }
+    std::string toString() const override {
+      return "Test";
+    }
   };
 
   auto device = BackendDevice(std::make_shared<TestType>(), 1);
@@ -74,9 +76,14 @@ TEST(BackendDeviceTest, FromAten) {
   auto device = c10::Device(c10::kCPU);
   EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
 
-  // TODO(alanwaketan): Update the following test once we have TorchScript backend upstreamed.
   device = c10::Device(c10::kLazy);
+#ifndef FBCODE_CAFFE2
+  auto backend_device = atenDeviceToBackendDevice(device);
+#else
+  // Lazy Tensor is disabled in FBCODE until addressing non-virtual methods
+  // (e.g. sizes) in TensorImpl
   EXPECT_THROW(atenDeviceToBackendDevice(device), c10::Error);
+#endif // FBCODE_CAFFE2
 }
 
 TEST(BackendDeviceTest, ToAten) {
@@ -86,7 +93,8 @@ TEST(BackendDeviceTest, ToAten) {
   EXPECT_EQ(device.index(), 0);
 }
 
-// TODO(alanwaketan): Update the following test once we have TorchScript backend upstreamed.
+// TODO(alanwaketan): Update the following test once we have TorchScript backend
+// upstreamed.
 TEST(BackendDeviceTest, GetBackendDevice1) {
   auto tensor = torch::rand({0, 1, 3, 0});
   EXPECT_FALSE(GetBackendDevice(tensor));
@@ -99,5 +107,5 @@ TEST(BackendDeviceTest, GetBackendDevice2) {
   EXPECT_FALSE(GetBackendDevice(tensor1, tensor2));
 }
 
-}  // namespace lazy
-}  // namespace torch
+} // namespace lazy
+} // namespace torch

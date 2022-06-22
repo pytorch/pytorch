@@ -5,39 +5,22 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 import unittest
+import itertools
 
 from torch.testing._internal.common_utils import suppress_warnings, num_profiled_runs, run_tests
 
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, TensorExprTestOptions
 
 
 class BaseTestClass(JitTestCase):
     def setUp(self):
-        self.old_profiling_executor = torch._C._jit_set_profiling_executor(True)
-        self.old_profiling_mode = torch._C._jit_set_profiling_mode(True)
-
-        self.old_cpu_fuser_state = torch._C._jit_can_fuse_on_cpu()
-        self.old_gpu_fuser_state = torch._C._jit_can_fuse_on_gpu()
-        torch._C._jit_override_can_fuse_on_cpu(True)
-        torch._C._jit_override_can_fuse_on_gpu(True)
-        self.texpr_fuser_state = torch._C._jit_texpr_fuser_enabled()
-        torch._C._jit_set_texpr_fuser_enabled(True)
-        self.old_fusion_inlining = torch._C._debug_get_fusion_group_inlining()
-        torch._C._debug_set_fusion_group_inlining(False)
-        self.old_te_must_use_llvm_cpu = torch._C._jit_get_te_must_use_llvm_cpu()
-        torch._C._jit_set_te_must_use_llvm_cpu(False)
-
+        super(BaseTestClass, self).setUp()
+        self.tensorexpr_options = TensorExprTestOptions()
         self.devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
 
     def tearDown(self):
-        torch._C._jit_set_profiling_executor(self.old_profiling_executor)
-        torch._C._jit_set_profiling_mode(self.old_profiling_mode)
-
-        torch._C._jit_set_texpr_fuser_enabled(self.texpr_fuser_state)
-        torch._C._jit_override_can_fuse_on_gpu(self.old_gpu_fuser_state)
-        torch._C._jit_override_can_fuse_on_cpu(self.old_cpu_fuser_state)
-        torch._C._debug_set_fusion_group_inlining(self.old_fusion_inlining)
-        torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
+        self.tensorexpr_options.restore()
+        super(BaseTestClass, self).tearDown()
 
     def assertLastGraphAllFused(self):
         self.assertAllFused(torch.jit.last_executed_optimized_graph())
@@ -1577,6 +1560,53 @@ class TestTensorExprFuser(BaseTestClass):
             exp = traced(a, b, c)
             exp = traced(a, b, c)
             self.assertEqual(ref, exp)
+
+    def test_propagated_mem_layout(self):
+        def foo(a, b, c):
+            t_next = c + 1
+            t5 = t_next * b
+            t7 = a * t5
+            return t7
+
+        def foo_multi_outputs(a, b, c):
+            t_next = c + 1
+            t5 = b * t_next
+            t7 = a * t5
+            return (t7, t5, t_next)
+
+        def foo_multi_outputs_i_nhwc_o_nchw(a, b, c):
+            t_next = c + 1
+            t5 = b * t_next
+            t7 = a * t5
+            t8 = t7.to(memory_format=torch.contiguous_format)
+            return (t8, t7, t5, t_next)
+
+        def run_foo_case(foo, a, b, c):
+            traced_contiguous = torch.jit.trace(foo, (a, b, c))
+            ref = foo(a, b, c)
+            exp = traced_contiguous(a, b, c)
+            exp = traced_contiguous(a, b, c)
+            self.assertEqual(ref, exp)
+
+        mem_layouts = list(itertools.product([torch.contiguous_format, torch.channels_last], repeat=3))
+        shapes = [(2, 3, 4, 5), (2, 1, 1, 5), (1, 1, 1, 1)]
+        permutes = [(0, 3, 2, 1), (0, 3, 1, 2)]
+        funcs = [foo, foo_multi_outputs, foo_multi_outputs_i_nhwc_o_nchw]
+        configs = itertools.product(funcs, shapes, mem_layouts, permutes)
+        for strategy in ["STATIC", "DYNAMIC"]:
+            old_strategy = torch.jit.set_fusion_strategy([(strategy, 10)])
+            for _func, _shape, _mem_layouts, _permute in configs:
+                a = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[0])
+                b = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[1])
+                c = torch.rand(_shape, dtype=torch.float32).to(memory_format=_mem_layouts[2])
+                run_foo_case(_func, a, b, c)
+
+                a = a.permute(dims=_permute)
+                b = b.permute(dims=_permute)
+                c = c.permute(dims=_permute)
+                run_foo_case(_func, a, b, c)
+
+            torch.jit.set_fusion_strategy(old_strategy)
 
 if __name__ == '__main__':
     run_tests()

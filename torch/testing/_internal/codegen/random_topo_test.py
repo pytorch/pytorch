@@ -370,7 +370,7 @@ if __name__ == '__main__':
     # Turn off profiling executor
     if not args.profiling_executor:
         torch._C._jit_set_profiling_executor(False)
-        torch._C._jit_set_profiling_mode(False)
+        torch._C._get_graph_executor_optimize(False)
 
     # factor sorta control the depth of the model
     GRAPH_FACTOR = args.depth_factor

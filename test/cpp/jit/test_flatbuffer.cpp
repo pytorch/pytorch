@@ -19,19 +19,25 @@
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
 #include <unordered_set>
 // Tests go in torch::jit
 namespace torch {
 namespace jit {
 
-mobile::Module parse_mobile_module(void* data, size_t) {
+mobile::Module parse_mobile_module(
+    void* data,
+    size_t,
+    bool should_copy_tensor_memory = false) {
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
-  return initialize_mobile_module(flatbuffer_module);
+  return initialize_mobile_module(
+      flatbuffer_module, c10::nullopt, should_copy_tensor_memory);
 }
 
 TEST(FlatbufferTest, UpsampleNearest2d) {
@@ -57,6 +63,37 @@ TEST(FlatbufferTest, UpsampleNearest2d) {
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  auto res2 = bc2.forward(inputs);
+  auto resd2 = res2.toTensor();
+  ASSERT_TRUE(resd2.equal(refd));
+}
+
+TEST(FlatbufferTest, UpsampleNearest2dWithCopyTensorMemory) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({1, 3, 128, 128}));
+  inputs.emplace_back(at::Scalar(2.0));
+  auto ref = m.forward(inputs);
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  IValue res;
+  res = bc.forward(inputs);
+
+  auto resd = res.toTensor();
+  auto refd = ref.toTensor();
+  ASSERT_TRUE(resd.equal(refd));
+
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
+
+  buff = flatbuffers::DetachedBuffer();
+
   auto res2 = bc2.forward(inputs);
   auto resd2 = res2.toTensor();
   ASSERT_TRUE(resd2.equal(refd));
@@ -137,6 +174,55 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
+#if !defined(FB_XPLAT_BUILD)
+TEST(FlatbufferTest, FlatbufferBackPortTest) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, true);
+
+  std::stringstream oss;
+  bool backPortSuccess = _backport_for_mobile(ss, oss, 5);
+  ASSERT_TRUE(backPortSuccess);
+}
+#endif // !defined(FB_XPLAT_BUILD)
+
+TEST(FlatbufferTest, ExtraFiles) {
+  const auto script = R"JIT(
+    def forward(self):
+        x = torch.rand(5, 5)
+        x = x.mm(x)
+        return x
+  )JIT";
+
+  auto module =
+      std::make_shared<Module>("Module", std::make_shared<CompilationUnit>());
+  module->define(script);
+  std::ostringstream oss;
+  std::unordered_map<std::string, std::string> extra_files;
+  extra_files["metadata.json"] = "abc";
+  extra_files["mobile_info.json"] = "{\"key\": 23}";
+
+  std::unordered_map<std::string, std::string> loaded_extra_files;
+  std::stringstream ss;
+  module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
+
+  loaded_extra_files["metadata.json"] = "";
+  auto mobile_module = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+
+  // load it twice using the same stream
+  auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
+
+  ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
+  ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
+}
+
 TEST(FlatbufferTest, Conv) {
   auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
   if (s && strcmp(s, "1") == 0)
@@ -179,6 +265,50 @@ TEST(FlatbufferTest, Conv) {
       outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
 }
 
+TEST(FlatbufferTest, ConvWithCopyTensorMemory) {
+  auto s = std::getenv("PYTORCH_TEST_WITH_TSAN");
+  if (s && strcmp(s, "1") == 0)
+    return;
+
+  std::vector<torch::jit::IValue> inputs;
+
+  Module m("m");
+  m.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
+  m.register_parameter("bias", torch::ones({20}), false);
+  m.define(R"(
+    def forward(self, input):
+      return torch._convolution(input, self.weight, self.bias, [1, 1], [0, 0], [1, 1], False, [0, 0], 1, False, False, True, True)
+  )");
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers,modernize-use-emplace)
+  inputs.push_back(torch::ones({1, 1, 28, 28}));
+
+  auto outputref = m.forward(inputs).toTensor();
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  IValue res;
+  for (int i = 0; i < 3; ++i) {
+    res = bc.get_method("forward")(inputs);
+  }
+  auto output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(
+      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
+  buff = flatbuffers::DetachedBuffer();
+
+  for (int i = 0; i < 3; ++i) {
+    res = bc2.get_method("forward")(inputs);
+  }
+  output = res.toTensor();
+  AT_ASSERT(outputref.dim() == output.dim());
+  AT_ASSERT(
+      outputref[0][0][0][0].item<int>() == output[0][0][0][0].item<int>());
+}
+
 TEST(FlatbufferTest, Inline) {
   Module m("m");
   m.define(R"JIT(
@@ -199,6 +329,32 @@ TEST(FlatbufferTest, Inline) {
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+  std::vector<torch::jit::IValue> inputs2({torch::ones({})});
+  output = bc2.get_method("foo3")(inputs2);
+  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+}
+
+TEST(FlatbufferTest, InlineWithCopyTensorMemory) {
+  Module m("m");
+  m.define(R"JIT(
+  def foo1(self, x):
+      return x + 1
+
+  def foo2(self, x):
+      return self.foo1(x) + 2
+
+  def foo3(self, x):
+      return self.foo2(x) + 3
+  )JIT");
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  std::vector<torch::jit::IValue> inputs({torch::ones({})});
+  auto output = bc.get_method("foo3")(inputs);
+  AT_ASSERT(output.toTensor().item<float>() == 7.0);
+
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size(), true);
+  buff = flatbuffers::DetachedBuffer();
   std::vector<torch::jit::IValue> inputs2({torch::ones({})});
   output = bc2.get_method("foo3")(inputs2);
   AT_ASSERT(output.toTensor().item<float>() == 7.0);
@@ -1040,6 +1196,28 @@ TEST(FlatbufferTest, OperatorSize1) {
       func2.get_code().operators_.size());
 }
 
+TEST(FlatbufferTest, BoolAndDoubleList) {
+  Module m("m");
+  c10::List<bool> boollist;
+  boollist.push_back(false);
+  IValue boollist_ival = boollist;
+  IValue doublelist = std::vector<double>{2.0};
+  m.register_attribute("bool_list", boollist_ival.type(), boollist_ival);
+  m.register_attribute("double_list", doublelist.type(), doublelist);
+
+  CompilationOptions options;
+  mobile::Module bc = jitModuleToMobile(m, options);
+  auto buff = save_mobile_module_to_bytes(bc);
+  mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
+
+  // if the variables read are wrong type the conversion will raise exception
+  auto boolval = bc2.attr("bool_list", {}).toBoolList().get(0);
+  auto doubleval = bc2.attr("double_list", {}).toDoubleList().get(0);
+
+  ASSERT_EQ(boolval, false);
+  ASSERT_EQ(doubleval, 2.0);
+}
+
 TEST(FlatbufferTest, OperatorTest2) { // NOLINT (use =delete in gtest)
   const std::vector<std::string> test_programs{
       // test invoking a method with default parameter
@@ -1081,6 +1259,533 @@ TEST(FlatbufferTest, OperatorTest2) { // NOLINT (use =delete in gtest)
         func2.get_code().operators_.size());
   }
 }
+
+Module jitModuleFromBuffer(void* data) {
+  auto* flatbuffer_module = mobile::serialization::GetMutableModule(data);
+  FlatbufferLoader loader;
+  mobile::Module mobilem = loader.parseModule(flatbuffer_module);
+  ExtraFilesMap files;
+  std::vector<IValue> constants;
+  loader.extractJitSourceAndConstants(&files, &constants);
+  return jitModuleFromSourceAndConstants(
+      mobilem._ivalue(), files, constants, 8);
+}
+
+TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
+  Module m("m");
+  m.define(R"(
+    def forward(self, input: Tensor, scale:float):
+      return torch.upsample_nearest2d(input, [1, 1], float(scale), float(scale))
+  )");
+
+  std::vector<IValue> inputs;
+  inputs.emplace_back(torch::rand({1, 3, 128, 128}));
+  inputs.emplace_back(at::Scalar(2.0));
+  auto ref = m.forward(inputs);
+
+  std::stringstream ss;
+  m._save_for_mobile(ss, {}, false, /*use_fatbuffer=*/true);
+  auto mm = _load_for_mobile(ss);
+  auto m2 = load(ss);
+
+  auto res = m2.forward(inputs);
+  auto resm = mm.forward(inputs);
+
+  auto resd = res.toTensor();
+  auto refd = ref.toTensor();
+  auto resmd = resm.toTensor();
+  ASSERT_TRUE(resd.equal(refd));
+  ASSERT_TRUE(resmd.equal(refd));
+}
+
+TEST(TestSourceFlatbuffer, CheckAttrAccess) {
+  Module m("m");
+  m.register_attribute("mobile_optimized", BoolType::get(), true);
+  auto data = save_jit_module_to_bytes(m);
+  Module m2 = jitModuleFromBuffer(data.data());
+  bool mobile_optimized = m2.attr("mobile_optimized", false).toBool();
+  AT_ASSERT(mobile_optimized);
+  mobile::Module m3 = parse_mobile_module(data.data(), data.size());
+  mobile_optimized = m3.attr("mobile_optimized", false).toBool();
+  AT_ASSERT(mobile_optimized);
+}
+
+TEST(TestSourceFlatbuffer,
+     MethodInvocation) { // NOLINT (use =delete in gtest)
+  const std::vector<std::string> test_programs{
+      // test invoking a method with default parameter
+      R"(
+      def test_func(self, x, b : int = 4):
+        return self.foo + x + b
+      )",
+      // inner method call with default parameter (gets inlined)
+      R"(
+      def add_with_default_arg(self, x, b : int = 4):
+        return self.foo + x + b
+      def test_func(self, x):
+        return self.add_with_default_arg(x)  # invoke method w/ default arg
+      )",
+      // simple method call
+      R"(
+      def test_func(self, x):
+        b = 4
+        return self.foo + x + b
+      )",
+  };
+  for (const auto& test_program : test_programs) {
+    Module m("m");
+    m.register_parameter("foo", torch::ones({}), false);
+    m.define(test_program);
+
+    const int fortyTwo = 42; // (keep linter happy)
+    auto minput = fortyTwo * torch::ones({});
+    auto ref = m.run_method("test_func", minput);
+
+    auto data = save_jit_module_to_bytes(m);
+    Module m2 = jitModuleFromBuffer(data.data());
+    const auto& test_func = m2.get_method("test_func");
+    IValue res;
+    for (int i = 0; i < 3; ++i) {
+      res = test_func({minput});
+    }
+    auto resd = res.toTensor().item<float>();
+    auto refd = ref.toTensor().item<float>();
+    AT_ASSERT(resd == refd);
+
+    mobile::Module m3 = parse_mobile_module(data.data(), data.size());
+    const auto& test_func3 = m3.get_method("test_func");
+    for (int i = 0; i < 3; ++i) {
+      res = test_func3({minput});
+    }
+    resd = res.toTensor().item<float>();
+    refd = ref.toTensor().item<float>();
+    AT_ASSERT(resd == refd);
+  }
+}
+
+#if !defined FB_XPLAT_BUILD
+// The following test run in fbcode only
+TEST(FlatbufferUpgraderTest, DivTensorV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append("upgrader_models/test_versioned_div_tensor_v2.ptl.ff");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('LOAD', 2, 0),
+       ('LOAD', 3, 0),
+       ('OP', 0, 0),
+       ('LOAD', 2, 0),
+       ('LOAD', 3, 0),
+       ('OP', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 2, 0),
+       ('TUPLE_CONSTRUCT', 3, 0),
+       ('RET', 0, 0))),
+     ('operators',
+      (('aten::div', 'Tensor'),
+       ('aten::div', 'Tensor'),
+       ('aten::div', 'Tensor'))),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+
+  */
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // 3 operators will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 3);
+
+  std::vector<IValue> inputs = {
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  auto actual_output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output_list = actual_output.toTuple()->elements();
+  ASSERT_TRUE(actual_output_list[0].toTensor().equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivTensorOutV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_tensor_out_v2.ptl.ff");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 4),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('MOVE', 4, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div', 'out'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 4))),)
+  */
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{
+      IValue(6 * torch::ones({1})),
+      IValue(3 * torch::ones({1})),
+      IValue(torch::empty({1}))};
+  m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = inputs[2].toTensor();
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivTensorInplaceV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_tensor_inplace_v2.ptl.ff");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div_', 'Tensor'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+  */
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{
+      IValue(6 * torch::ones({1})), IValue(3 * torch::ones({1}))};
+  m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = inputs[0].toTensor();
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivScalarFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_float_v2.ptl.ff");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+    (('STOREN', 1, 3),
+    ('DROPR', 1, 0),
+    ('MOVE', 2, 0),
+    ('MOVE', 3, 0),
+    ('OP', 0, 0),
+    ('RET', 0, 0))),
+    ('operators', (('aten::div', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivScalarReciprocalFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_reciprocal_float_v2.ptl.ff");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('OP', 0, 0),
+      ('MOVE', 3, 0),
+      ('OP', 1, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::reciprocal', ''), ('aten::mul', 'Scalar'))),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 0.5 * torch::ones({1});
+  auto actual_output = output.toTensor();
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivScalarReciprocalIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_reciprocal_int_v2.ptl.ff");
+  /*
+  (('__torch__.MyModuleInt.forward',
+  (('instructions',
+    (('STOREN', 1, 3),
+     ('DROPR', 1, 0),
+     ('MOVE', 2, 0),
+     ('OP', 0, 0),
+     ('MOVE', 3, 0),
+     ('OP', 1, 0),
+     ('RET', 0, 0))),
+   ('operators', (('aten::reciprocal', ''), ('aten::mul', 'Scalar'))),
+   ('constants', ()),
+   ('types', ()),
+   ('register_size', 3))),)
+  */
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 0.5 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivScalarScalarV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_scalar_v2.ptl.ff");
+  /*
+  (('__torch__.MyModule.forward',
+    (('instructions',
+      (('STOREN', 1, 5),
+      ('DROPR', 1, 0),
+      ('LOAD', 2, 0),
+      ('LOAD', 3, 0),
+      ('OP', 0, 0),
+      ('MOVE', 2, 0),
+      ('LOAD', 4, 0),
+      ('OP', 1, 0),
+      ('LOAD', 3, 0),
+      ('MOVE', 4, 0),
+      ('OP', 2, 0),
+      ('MOVE', 3, 0),
+      ('MOVE', 5, 0),
+      ('OP', 3, 0),
+      ('TUPLE_CONSTRUCT', 4, 0),
+      ('RET', 0, 0))),
+    ('operators',
+      (('aten::div', ''),
+      ('aten::div', 'float'),
+      ('aten::div', ''),
+      ('aten::div', 'int'))),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 5))),)
+  */
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // No operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 0);
+
+  std::vector<IValue> inputs{IValue(20.0), IValue(10), IValue(2.0), IValue(5)};
+  auto output = m_module.forward(inputs);
+  auto output_list = output.toTupleRef().elements();
+  auto expect_output = std::vector<IValue>(
+      {IValue(2.0), IValue(10.0), IValue(5.0), IValue(2.0)});
+  // auto actual_output = output.toTensor();
+  for (size_t i = 0; i < expect_output.size(); i++) {
+    ASSERT_EQ(output_list[i], expect_output[i]);
+  }
+}
+
+TEST(FlatbufferUpgraderTest, DivScalarIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_int_v2.ptl.ff");
+  /*
+  (('__torch__.MyModuleInt.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('MOVE', 3, 0),
+      ('OP', 0, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::div', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivScalarInplaceFloatV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_inplace_float_v2.ptl.ff");
+  /*
+  (('__torch__.MyModuleFloat.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+      ('DROPR', 1, 0),
+      ('MOVE', 2, 0),
+      ('MOVE', 3, 0),
+      ('OP', 0, 0),
+      ('RET', 0, 0))),
+    ('operators', (('aten::div_', 'Scalar'),)),
+    ('constants', ()),
+    ('types', ()),
+    ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3.0)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+TEST(FlatbufferUpgraderTest, DivScalarInplaceIntV2) {
+  std::string filePath(__FILE__);
+  auto test_model_file = filePath.substr(0, filePath.find_last_of("/\\") + 1);
+  test_model_file.append(
+      "upgrader_models/test_versioned_div_scalar_inplace_int_v2.ptl.ff");
+  /*
+  (('__torch__.MyModuleInt.forward',
+    (('instructions',
+      (('STOREN', 1, 3),
+       ('DROPR', 1, 0),
+       ('MOVE', 2, 0),
+       ('MOVE', 3, 0),
+       ('OP', 0, 0),
+       ('RET', 0, 0))),
+     ('operators', (('aten::div_', 'Scalar'),)),
+     ('constants', ()),
+     ('types', ()),
+     ('register_size', 3))),)
+  */
+
+  mobile::Module m_module = load_mobile_module_from_file(test_model_file);
+
+  auto intrsuction_list =
+      m_module.get_method("forward").function().get_code().instructions_;
+  uint64_t number_of_call_instruction = 0;
+  for (auto& instruction : intrsuction_list) {
+    number_of_call_instruction += (instruction.op == OpCode::CALL);
+  }
+  // One operator will use upgrader
+  ASSERT_EQ(number_of_call_instruction, 1);
+
+  std::vector<IValue> inputs{IValue(6 * torch::ones({1})), IValue(3)};
+  auto output = m_module.forward(inputs);
+  auto expect_output = 2.0 * torch::ones({1});
+  auto actual_output = output.toTensor();
+
+  // The out argument will be overwritten with the output
+  ASSERT_TRUE(actual_output.equal(expect_output));
+}
+
+#endif // !defined(FB_XPLAT_BUILD)
 
 } // namespace jit
 } // namespace torch

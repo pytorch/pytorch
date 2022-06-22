@@ -1,7 +1,7 @@
-from typing import Callable, Dict, Set, Optional, Union
+import re
+from typing import Callable, Dict, Optional, Set, Union
 
 import torch.fx
-import torch.fx.experimental.fx_acc.acc_utils as acc_utils
 from torch.fx.node import map_arg
 from torch.fx.passes.split_module import split_module
 
@@ -22,6 +22,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
         graph: torch.fx.Graph,
         const_subgraph: Optional[torch.fx.Graph] = None,
         fx_const_folded_attrs_name: str = None,
+        device_for_folded_attrs: str = "cuda",
     ):
         # In init, we set graph's owning module to root which will make graph's
         # owning module be None because graph already have a owning module. We
@@ -36,6 +37,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
         )
         self.has_folding_been_run = False
         self.fx_const_folded_attrs_name = fx_const_folded_attrs_name
+        self.device_for_folded_attrs = device_for_folded_attrs
 
     def __call__(self, *args, **kwargs):
         if not self.has_folding_been_run:
@@ -58,10 +60,19 @@ class FoldedGraphModule(torch.fx.GraphModule):
         # subgraphs output a single Tensor while multiple outputs are returned as
         # Tuple[Tensor,].
         folded_attrs = self.const_subgraph_module()
+
+        def _create_param(i):
+            return torch.nn.Parameter(
+                i
+                if not isinstance(i, int)
+                else torch.Tensor([i]).to(device=self.device_for_folded_attrs),
+                requires_grad=i.requires_grad if isinstance(i, torch.Tensor) else False,
+            )
+
         params = (
-            torch.nn.ParameterList([torch.nn.Parameter(i) for i in folded_attrs])
+            torch.nn.ParameterList([_create_param(i) for i in folded_attrs])
             if isinstance(folded_attrs, tuple)
-            else torch.nn.Parameter(folded_attrs)
+            else _create_param(folded_attrs)
         )
         setattr(self, self.fx_const_folded_attrs_name, params)
 
@@ -111,9 +122,30 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
     gm.graph.eliminate_dead_code()
 
 
+def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) -> str:
+    """
+    Make sure the name is unique (in a module) and can represents an attr.
+    """
+    # Delete all characters that are illegal in a Python identifier.
+    name = re.sub("[^0-9a-zA-Z_]+", "_", name)
+    if name[0].isdigit():
+        name = f"_{name}"
+    # Now make sure it is in fact unique to the module by incrementing suffix value.
+    while hasattr(mod_traced, name):
+        match = re.match(r"(.*)_(\d+)$", name)
+        if match is None:
+            name = name + "_1"
+        else:
+            base, num = match.group(1, 2)
+            name = f"{base}_{int(num) + 1}"
+
+    return name
+
+
 def split_const_subgraphs(
     module: Union[torch.nn.Module, torch.fx.GraphModule],
-    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None
+    skip_folding_node_fn: Optional[Callable[[torch.fx.Node], bool]] = None,
+    device_for_folded_attrs: str = "cpu",
 ) -> FoldedGraphModule:
     """
     Looks through `module` for any nodes that have all constant attribute inputs
@@ -139,7 +171,9 @@ def split_const_subgraphs(
 
         # If the node itself is constant, or all of its inputs are constant,
         # then tag it as constant.
-        if node.op != "get_attr" and not set(node.all_input_nodes).issubset(const_nodes):
+        if node.op != "get_attr" and not set(node.all_input_nodes).issubset(
+            const_nodes
+        ):
             continue
 
         # If provided skip folding function says to skip, then skip.
@@ -222,7 +256,7 @@ def split_const_subgraphs(
     # folded tensor(s) that result from constant folding. Note that we don't need to
     # worry about whether this is one or more tensors because the original graph
     # correctly uses getitem to extract individual tensors if there are multiple folded.
-    fx_const_folded_attrs_name = acc_utils.get_unique_attr_name_in_module(
+    fx_const_folded_attrs_name = get_unique_attr_name_in_module(
         split, "_FX_CONST_FOLDED_ATTRS"
     )
     setattr(
@@ -246,5 +280,9 @@ def split_const_subgraphs(
     _inline_module(split, non_const_mod_name)
 
     return FoldedGraphModule(
-        split, split.graph, root_const_gm.graph, fx_const_folded_attrs_name
+        split,
+        split.graph,
+        root_const_gm.graph,
+        fx_const_folded_attrs_name,
+        device_for_folded_attrs,
     )

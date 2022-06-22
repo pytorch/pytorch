@@ -12,13 +12,13 @@ namespace jit {
 namespace te = torch::jit::tensorexpr;
 namespace F = torch::nn::functional;
 
+#ifdef TORCH_ENABLE_LLVM
+
 // Generate test data with few bits of precision, to minimize error
 // accumulation from floating-point reordering.
 static at::Tensor genTestData(c10::IntArrayRef args) {
   return at::trunc(at::randn(args) * 256.0f) / 256.0f;
 }
-
-#ifdef TORCH_ENABLE_LLVM
 
 TEST(Conv, DepthwiseConv2D) {
   constexpr int N = 1, C = 72, H = 56, W = 56;
@@ -191,7 +191,7 @@ TEST(Conv, Conv2D) {
 
   te::Tensor conv = te::Reduce(
       "conv",
-      {{N, "n"}, {K, "k"}, {OH, "oh"}, {OW, "ow"}},
+      {N, K, OH, OW},
       te::Sum(),
       // FIXME: We have to use a `std::vector` parameter here and then unpack
       // it, because we don't have an overload allowing for an arbitrary number
@@ -211,7 +211,7 @@ TEST(Conv, Conv2D) {
       },
       // FIXME: If you forget one of the reduction dims, you get a segfault.
       // Could that be caught by a verifier?
-      {{C, "c"}, {R, "r"}, {S, "s"}});
+      {C, R, S});
 
   // FIXME: It'd be nice to have a single header that pulls in things like
   // LoopNest, IRSimplifier, etc.

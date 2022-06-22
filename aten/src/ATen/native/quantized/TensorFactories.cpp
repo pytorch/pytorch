@@ -66,6 +66,40 @@ Tensor empty_per_channel_affine_quantized(
       quantizer);
 }
 
+Tensor empty_unknown_quantized(
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  TORCH_CHECK(
+    !(options_.has_memory_format() && optional_memory_format.has_value()),
+    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+    "the redundant setter.");
+  auto options = options_.merge_memory_format(optional_memory_format);
+  TORCH_CHECK(
+      options.has_dtype(),
+      "Must provide data type for Tensor creation functions.");
+  QuantizerPtr quantizer = make_unknown_quantizer(typeMetaToScalarType(options.dtype()));
+  return new_qtensor(size, options, quantizer);
+}
+
+Tensor empty_strided_unknown_quantized(
+    IntArrayRef size,
+    IntArrayRef strided,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+
+  TORCH_CHECK(false, "empty_strided not supported on quantized tensors yet see https://github.com/pytorch/pytorch/issues/74540")
+
+}
+
 // Provide better error message if dtype is wrong
 Tensor empty_affine_quantized_other_backends_stub(
     IntArrayRef,

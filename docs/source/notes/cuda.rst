@@ -59,7 +59,8 @@ Below you can find a small example showcasing this::
 TensorFloat-32(TF32) on Ampere devices
 --------------------------------------
 
-Starting in PyTorch 1.7, there is a new flag called `allow_tf32` which defaults to true.
+Starting in PyTorch 1.7, there is a new flag called `allow_tf32`. This flag
+defaults to True in PyTorch 1.7 to PyTorch 1.11, and False in PyTorch 1.12 and later.
 This flag controls whether PyTorch is allowed to use the TensorFloat32 (TF32) tensor cores,
 available on new NVIDIA GPUs since Ampere, internally to compute matmul (matrix multiplies
 and batched matrix multiplies) and convolutions.
@@ -72,7 +73,8 @@ matmuls and convolutions are controlled separately, and their corresponding flag
 
 .. code:: python
 
-  # The flag below controls whether to allow TF32 on matmul. This flag defaults to True.
+  # The flag below controls whether to allow TF32 on matmul. This flag defaults to False
+  # in PyTorch 1.12 and later.
   torch.backends.cuda.matmul.allow_tf32 = True
 
   # The flag below controls whether to allow TF32 on cuDNN. This flag defaults to True.
@@ -95,6 +97,7 @@ To get an idea of the precision and speed, see the example code below:
   b = b_full.float()
 
   # Do matmul at TF32 mode.
+  torch.backends.cuda.matmul.allow_tf32 = True
   ab_tf32 = a @ b  # takes 0.016s on GA100
   error = (ab_tf32 - ab_full).abs().max()  # 0.1747
   relative_error = error / mean  # 0.0022
@@ -106,7 +109,7 @@ To get an idea of the precision and speed, see the example code below:
   relative_error = error / mean  # 0.000039
 
 From the above example, we can see that with TF32 enabled, the speed is ~7x faster, relative error
-compared to double precision is approximately 2 orders of magnitude larger.  If the full FP32 precision
+compared to double precision is approximately 2 orders of magnitude larger.  If full FP32 precision
 is needed, users can disable TF32 by:
 
 .. code:: python
@@ -364,6 +367,26 @@ Available options:
   :meth:`~torch.cuda.memory_summary` methods are useful for tuning.  This
   option should be used as a last resort for a workload that is aborting
   due to 'out of memory' and showing a large amount of inactive split blocks.
+* ``roundup_power2_divisions`` helps with rounding the requested allocation
+  size to nearest power-2 division and making better use of the blocks. In
+  the current CUDACachingAllocator, the sizes are rounded up in multiple
+  of blocks size of 512, so this works fine for smaller sizes. However, this
+  can be inefficient for large near-by allocations as each will go to different
+  size of blocks and re-use of those blocks are minimized. This might create
+  lots of unused blocks and will waste GPU memory capacity. This option enables
+  the rounding of allocation size to nearest power-2 division. For example, if
+  we need to round-up size of 1200 and if number of divisions is 4,
+  the size 1200 lies between 1024 and 2048 and if we do 4 divisions between
+  them, the values are 1024, 1280, 1536, and 1792. So, allocation size of 1200
+  will be rounded to 1280 as the nearest ceiling of power-2 division.
+* ``garbage_collection_threshold`` helps actively reclaiming unused GPU memory to
+  avoid triggering expensive sync-and-reclaim-all operation (release_cached_blocks),
+  which can be unfavorable to latency-critical GPU applications (e.g., servers).
+  Upon setting this threshold (e.g., 0.8), the allocator will start reclaiming
+  GPU memory blocks if the GPU memory capacity usage exceeds the threshold (i.e.,
+  80% of the total memory allocated to the GPU application). The algorithm prefers
+  to free old & unused blocks first to avoid freeing blocks that are actively being
+  reused. The threshold value should be between greater than 0.0 and less than 1.0.
 
 .. _cufft-plan-cache:
 

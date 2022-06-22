@@ -1,19 +1,14 @@
 #pragma once
+#include <ATen/cuda/CUDAConfig.h>
+#include <string>
 
-// USE_JITERATOR, controls whether we jit some elementwise kernels
+// AT_USE_JITERATOR(), controls whether we jit some elementwise kernels
 // Currently unsupported on ROCm GPUs
-#ifndef USE_ROCM
-    #define USE_JITERATOR true
-    #define jiterator_stringify(...) std::string(#__VA_ARGS__);
+#if !AT_ROCM_ENABLED()
+#define AT_USE_JITERATOR() true
+#define jiterator_stringify(...) std::string(#__VA_ARGS__);
 #else
-    // TODO: update this to become a static assertion
-    #define jiterator_stringify(...) std::string("USE_JITERATOR is undefined");
+#define AT_USE_JITERATOR() false
+#define jiterator_stringify(...) \
+  static_assert(false, "Jiterator is not supported on ROCm");
 #endif // USE_ROCM
-
-// BUILD_JITERATOR_WITH_CACHE, controls whether jitted kernels can be cached
-// Currently unsupported on Windows
-#ifndef _WIN32
-    #define BUILD_JITERATOR_WITH_CACHE true
-#else
-    #define BUILD_JITERATOR_WITH_CACHE false
-#endif // _WIN32

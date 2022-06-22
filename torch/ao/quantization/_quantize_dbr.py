@@ -2,12 +2,12 @@ import torch
 
 from ._dbr.auto_trace import add_auto_observation, add_auto_convert
 from ._dbr.fusion import get_module_fusion_fqns
-from ._dbr.qconfig_dict_utils import normalize_object_types
+from ._dbr.qconfig_mapping_utils import normalize_object_types
 
-from .qconfig_dict_utils import (
+from .qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
-    convert_dict_to_ordered_dict,
 )
+from torch.ao.quantization.qconfig_mapping import QConfigMapping
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_dynamic_quant_module_mappings,
@@ -30,6 +30,8 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
 
     Supported `prepare_custom_config_dict` keys:
       * `non_traceable_module_class` - same meaning as in prepare_fx
+      * `output_dtypes` - expected dtypes of model outputs, must match actual
+        output structure.
 
     TODO(future PR): better docblock
     """
@@ -38,15 +40,16 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
     if prepare_custom_config_dict is None:
         prepare_custom_config_dict = {}
 
-    for qconfig_dict_option in ('module_name_regex', 'module_name_object_type_order'):
-        if qconfig_dict_option in qconfig_dict:
-            assert len(qconfig_dict[qconfig_dict_option]) == 0, \
-                f'{qconfig_dict_option} option of qconfig_dict is not ' + \
-                'implemented yet in define-by-run quantization'
+    # TODO: change signature to use QConfigMapping instead of qconfig_dict
+    qconfig_mapping = QConfigMapping.from_dict(qconfig_dict)
 
-    normalize_object_types(qconfig_dict)
-    convert_dict_to_ordered_dict(qconfig_dict)
-    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_dict)
+    assert len(qconfig_mapping.module_name_regex_qconfigs) == 0, \
+        'qconfig_mapping.set_module_name_regex is not supported yet in define-by-run quantization'
+    assert len(qconfig_mapping.module_name_object_type_order_qconfigs) == 0, \
+        'qconfig_mapping.set_module_name_object_type_order is not supported yet in define-by-run quantization'
+
+    normalize_object_types(qconfig_mapping)
+    flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
     torch.quantization.propagate_qconfig_(model, flattened_qconfig_dict)
 
     # if parts of the model are non traceable, delete qconfig from
@@ -65,11 +68,19 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
         # automatically fuse modules
         old_class = model.__class__
         model = add_auto_observation(
-            model, qconfig_dict, example_inputs,
+            model, qconfig_mapping, example_inputs,
             prepare_custom_config_dict=prepare_custom_config_dict)
         module_fusion_fqns = get_module_fusion_fqns(model)
         if len(module_fusion_fqns):
             model = torch.quantization.fuse_modules(model, module_fusion_fqns)
+
+            # Since we are reusing the auto_trace machinery to find fusion
+            # FQNs, we need to do some surgery to get qconfigs on modules
+            # after module fusion to be correct.
+            for _, child in model.named_modules():
+                if isinstance(child, torch.nn.intrinsic._FusedModule):
+                    if hasattr(child[0], 'qconfig'):
+                        child.qconfig = child[0].qconfig
 
         # delete all the DBR state from the model, so add_auto_observation
         # can start from a clean slate
@@ -79,6 +90,15 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
                 parents_to_delete_auto_quant_state.append(v)
         for v in parents_to_delete_auto_quant_state:
             del v._auto_quant_state
+
+        del model._fqn_to_auto_quant_state_map
+
+        for p in model.parameters():
+            if hasattr(p, '_qtensor_info'):
+                del p._qtensor_info
+        for b in model.buffers():
+            if hasattr(b, '_qtensor_info'):
+                del b._qtensor_info
 
         # the model hierarchy might have changed during fusion, so we
         # have to delete the cached module hook types
@@ -100,14 +120,13 @@ def prepare(model, qconfig_dict, example_inputs, inplace=False, allow_list=None,
             child.qconfig = None  # type: ignore[assignment]
         elif isinstance(child, torch.nn.LSTM):
             # TODO: fix LSTM handling in eager mode static quant and remove this
-            child.qconfig = None
+            qconfig_mapping.object_type_qconfigs[torch.nn.LSTM] = None
 
-    model = torch.quantization.prepare(
-        model, inplace, allow_list, observer_non_leaf_module_list,
-        prepare_custom_config_dict)
+    # TODO(future PR): do the QAT module swap
+
     assert not inplace
     model = add_auto_observation(
-        model, qconfig_dict, example_inputs,
+        model, qconfig_mapping, example_inputs,
         prepare_custom_config_dict=prepare_custom_config_dict)
     return model
 

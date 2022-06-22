@@ -25,6 +25,7 @@ sourceSets {
         java {
             srcDir '../src/androidTest/java'
             exclude '**/PytorchInstrumented*'
+            exclude '**/PytorchLiteInstrumented*'
         }
         resources.srcDirs = ["../src/androidTest/assets"]
     }

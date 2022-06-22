@@ -34,6 +34,10 @@ class StudentT(Distribution):
         return m
 
     @property
+    def mode(self):
+        return self.loc
+
+    @property
     def variance(self):
         m = self.df.clone(memory_format=torch.contiguous_format)
         m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)

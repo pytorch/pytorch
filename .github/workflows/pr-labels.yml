@@ -3,6 +3,7 @@ name: pr-labels
 on:
   push:
     branches:
+      - master
       - main
 
 jobs:
@@ -23,17 +24,9 @@ jobs:
         id: commit
         env:
           SHA1: ${{ github.sha }}
-        run: |
-          MERGER=$(python .github/scripts/process_commit.py "${SHA1}")
-          echo "::set-output name=merger::${MERGER}"
-
-      - name: Ping merger responsible for labeling if necessary
-        if: ${{ steps.commit.outputs.merger != '' }}
-        uses: mshick/add-pr-comment@v1
-        env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          message: |
-            Hey ${{ steps.commit.outputs.merger }}!
+        run: python .github/scripts/process_commit.py "${SHA1}"
 
-            You merged this PR, but no release notes category and topic labels were added. The list of valid release and topic labels is available at https://github.com/pytorch/pytorch/labels?q=release and https://github.com/pytorch/pytorch/blob/master/.github/scripts/process_commit.py
+concurrency:
+  group: pr-labels-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

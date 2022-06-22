@@ -270,7 +270,7 @@ on them and append them to the :class:`Graph`.
         graph : fx.Graph = tracer_class().trace(model)
         new_graph = fx.Graph()
         env = {}
-        tracer = torch.fx.proxy.GraphAppendingTracer(graph)
+        tracer = torch.fx.proxy.GraphAppendingTracer(new_graph)
         for node in graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
                 # By wrapping the arguments with proxies,
@@ -1109,3 +1109,13 @@ API Reference
   :members:
 
 .. autofunction:: torch.fx.replace_pattern
+
+
+.. The experimental and passes submodules are missing docs.
+.. Adding it here for coverage but this doesn't add anything to the
+.. rendered doc.
+.. py:module:: torch.fx.passes
+.. py:module:: torch.fx.passes.tests
+.. py:module:: torch.fx.experimental
+.. py:module:: torch.fx.experimental.unification
+.. py:module:: torch.fx.experimental.unification.multipledispatch

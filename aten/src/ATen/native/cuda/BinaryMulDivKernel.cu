@@ -5,6 +5,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/JitLoops.cuh>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/TypeSafeSignMath.h>
@@ -38,13 +39,30 @@ struct MulFunctor<bool> {
   }
 };
 
-
+const char div_name[] = "div_kernel";
 void div_true_kernel_cuda(TensorIteratorBase& iter) {
+  auto common_dtype = iter.common_dtype();
+  if (iter.common_dtype() == kComplexHalf) {
+    using scalar_t = c10::complex<at::Half>;
+    #if AT_USE_JITERATOR()
+      static const auto div_string = jiterator_stringify(
+        template <typename T>
+        T div_kernel(T a, T b) {
+          return a / b;
+        }
+      );
+      opmath_jitted_gpu_kernel_with_scalars<div_name, scalar_t, scalar_t>(iter, div_string);
+    #else
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_gpu_kernel_with_scalars<scalar_t>(iter, DivFunctor<opmath_t>());
+    #endif
+    return;
+  }
   if (iter.is_cpu_scalar(2)) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_true_cuda", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, common_dtype, "div_true_cuda", [&]() {
       using opmath_t = at::opmath_type<scalar_t>;
       auto inv_b = opmath_t(1.0) / iter.scalar_value<opmath_t>(2);
       iter.remove_operand(2);
@@ -52,7 +70,7 @@ void div_true_kernel_cuda(TensorIteratorBase& iter) {
         MulFunctor<opmath_t>(), inv_b));
     });
   } else {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "div_true_cuda", [&]() {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, common_dtype, "div_true_cuda", [&]() {
       DivFunctor<scalar_t> f;
       gpu_kernel_with_scalars(iter, f);
     });
@@ -171,11 +189,29 @@ void div_floor_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
+const char mul_name[] = "mul_kernel";
 void mul_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "mul_cuda", [&]() {
-    using opmath_t = at::opmath_type<scalar_t>;
-    opmath_gpu_kernel_with_scalars<scalar_t>(iter, MulFunctor<opmath_t>());
-  });
+  auto common_dtype = iter.common_dtype();
+  if (common_dtype == kComplexHalf) {
+    using scalar_t = c10::complex<at::Half>;
+    #if AT_USE_JITERATOR()
+      static const auto mul_string = jiterator_stringify(
+        template <typename T>
+        T mul_kernel(T a, T b) {
+          return a * b;
+        }
+      );
+      opmath_jitted_gpu_kernel_with_scalars<mul_name, scalar_t, scalar_t>(iter, mul_string);
+    #else
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, MulFunctor<opmath_t>());
+    #endif
+  } else {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kHalf, kBFloat16, kBool, iter.common_dtype(), "mul_cuda", [&]() {
+      using opmath_t = at::opmath_type<scalar_t>;
+      opmath_symmetric_gpu_kernel_with_scalars<scalar_t>(iter, MulFunctor<opmath_t>());
+    });
+  }
 }
 
 REGISTER_DISPATCH(div_true_stub, &div_true_kernel_cuda);

@@ -78,6 +78,10 @@ public:
   // assigning another ref to this assigns the underlying value
   ListElementReference& operator=(ListElementReference&& rhs) &&;
 
+  const IValue& get() const& {
+    return *iterator_;
+  }
+
   friend void swap<T, Iterator>(ListElementReference&& lhs, ListElementReference&& rhs);
 
 private:
@@ -235,6 +239,7 @@ public:
   using value_type = T;
   using size_type = typename c10::detail::ListImpl::list_type::size_type;
   using iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
+  using const_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::iterator>;
   using reverse_iterator = impl::ListIterator<T, typename c10::detail::ListImpl::list_type::reverse_iterator>;
 
   /**
@@ -475,4 +480,4 @@ namespace torch {
   template<class T> using List = c10::List<T>;
 }
 
-#include <ATen/core/List_inl.h>
+#include <ATen/core/List_inl.h>  // IWYU pragma: keep

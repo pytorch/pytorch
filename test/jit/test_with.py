@@ -621,7 +621,7 @@ class TestWith(JitTestCase):
         function_events = p.function_events
         # Event with name "foo" should be recorded.
         rf_events = [evt for evt in function_events if evt.name == "foo"]
-        self.assertTrue(len(rf_events), 1)
+        self.assertEqual(len(rf_events), 1)
         rf_event = rf_events[0]
         child_events = rf_event.cpu_children
         # Ensure we find nested record_function event

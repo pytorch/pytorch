@@ -125,13 +125,25 @@ void mkl_result_copy_(const Tensor& input, sparse_matrix_t mkl_desc) {
   auto col_indices = input.col_indices();
   auto input_values = input.values();
 
-  // MKL Sparse Inspector-Executor doesn't have a way to provide external
-  // buffers So we have to copy the memory allocated by MKL
-  std::memcpy(
-      input_values.data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
-  std::memcpy(col_indices.data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
-  std::memcpy(
-      crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+  // NB: When nnz is zero it is possible that input_values.data_ptr<scalar_t> is
+  // a nullptr, if input was created via empty. As such we need to check that
+  // nnz is not zero to avoid passing nullptr to std::memcpy. We will apply
+  // the same precautions to crow_indices.data_ptr<MKL_INT>.
+  //
+  // Otherwise ASAN will complain.
+
+  if (nnz > 0) {
+    // MKL Sparse Inspector-Executor doesn't have a way to provide external
+    // buffers So we have to copy the memory allocated by MKL
+    std::memcpy(
+        input_values.data_ptr<scalar_t>(), values, nnz * sizeof(scalar_t));
+    std::memcpy(
+        col_indices.data_ptr<MKL_INT>(), columns, nnz * sizeof(MKL_INT));
+  }
+  if (rows > 0) {
+    std::memcpy(
+        crow_indices.data_ptr<MKL_INT>(), rows_start, rows * sizeof(MKL_INT));
+  }
   crow_indices.data_ptr<MKL_INT>()[rows] = nnz;
 }
 #endif
@@ -203,6 +215,58 @@ void addmm_dense_result(
   if (!C.is_same(*C_)) {
     C.copy_(*C_);
   }
+#endif
+}
+
+/*
+  Computes a sparse matrix-sparse matrix product with dense result defined as
+  C <- alpha*(A*B) + beta*C
+
+  Args:
+  * `A` - Sparse Tensor storing m x k matrix.
+  * `B` - Sparse Tensor storing k x n matrix.
+  * `C` - [in] Dense Tensor storing matrix of size m x n.
+          [out] result of the operation.
+*/
+void addmm_sparse_input_dense_result(
+    const Tensor& A,
+    const Tensor& B,
+    const Scalar& beta,
+    const Scalar& alpha,
+    const Tensor& C) {
+#if !AT_USE_MKL_SPARSE()
+  TORCH_CHECK(
+      false,
+      "Calling addmm on a sparse CPU tensor requires Linux platform. ",
+      "Please use PyTorch built with MKL on Linux.");
+#else
+  // MKL function computes C <- A*B
+  // So we need a temporary matrix to store the result
+  // and then add it to C
+  auto C_ = at::empty(C.sizes(), C.options());
+  auto order = SPARSE_LAYOUT_ROW_MAJOR;
+  auto ldc = C_.stride(-2);
+
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      C.scalar_type(), "addmm_sparse_input_dense_result", [&] {
+        auto mkl_A = at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(A);
+        auto mkl_B = at::mkl::sparse::MklSparseCsrDescriptor<scalar_t>(B);
+        at::mkl::sparse::spmmd<scalar_t>(
+            SPARSE_OPERATION_NON_TRANSPOSE,
+            mkl_A.descriptor(),
+            mkl_B.descriptor(),
+            order,
+            C_.data_ptr<scalar_t>(),
+            ldc);
+      });
+
+  // If beta is zero NaN and Inf should not be propagated to the result
+  if (beta.toComplexDouble() == 0.) {
+    C.zero_();
+  } else {
+    C.mul_(beta);
+  }
+  C.add_(C_, alpha);
 #endif
 }
 
@@ -288,14 +352,29 @@ void addmm_out_sparse_csr(
     const Scalar& alpha,
     const Tensor& result) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
-  if (mat2.layout() == kStrided && result.layout() == kStrided) {
+  if ((mat1.layout() == kSparseCsr || mat1.layout() == kSparseBsr) &&
+      mat2.layout() == kStrided && result.layout() == kStrided) {
     return addmm_dense_result(mat1, mat2, beta, alpha, result);
-  } else if (mat2.is_sparse_csr() && result.is_sparse_csr()) {
-    return addmm_sparse_result(mat1, mat2, beta, alpha, result);
-  } else {
-    TORCH_INTERNAL_ASSERT(
-        false, "addmm: Received unexpected tensor layouts as input.");
   }
+  if (mat1.layout() == kStrided && mat2.is_sparse_csr() &&
+      result.layout() == kStrided) {
+    // TODO: Use MKL's transposition flags instead of this costly conversion to
+    // CSR
+    return addmm_dense_result(
+        mat2.transpose(0, 1).to_sparse_csr(),
+        mat1.transpose(0, 1),
+        beta,
+        alpha,
+        result.transpose(0, 1));
+  }
+  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.layout() == kStrided) {
+    return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);
+  }
+  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
+    return addmm_sparse_result(mat1, mat2, beta, alpha, result);
+  }
+  TORCH_CHECK(false, "addmm: computation on CPU is not implemented for ",
+              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
 }
 
 /*

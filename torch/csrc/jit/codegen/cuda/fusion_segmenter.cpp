@@ -7,6 +7,7 @@
 #include <torch/csrc/jit/codegen/cuda/ir_graphviz.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/debug_utils.h>
 
 #include <sstream>
 
@@ -250,6 +251,32 @@ std::string toString(const SegmentedEdge* edge) {
   return ss.str();
 }
 
+std::unique_ptr<SegmentedFusion> SegmentedFusion::fromCompleteFusion(
+    std::unique_ptr<Fusion> fusion_ptr,
+    ScheduleHeuristic heuristic) {
+  auto fusion = fusion_ptr.get();
+
+  auto segmented_fusion_ptr =
+      std::make_unique<SegmentedFusion>(std::move(fusion_ptr));
+
+  // Make a group for the single fusion
+  auto single_group = segmented_fusion_ptr->newGroup();
+
+  // Add input and output vals
+  single_group->input_vals = fusion->inputs();
+  single_group->output_vals = fusion->outputs();
+
+  // Get ordered expression list
+  single_group->resetExprList();
+
+  // Assign heuristics and id for the complete fusion
+  //  to share the runtime path of segmented fusion.
+  single_group->setHeuristic(heuristic);
+  single_group->setID(0);
+
+  return segmented_fusion_ptr;
+}
+
 SegmentedFusion::SegmentedFusion(std::unique_ptr<Fusion> fusion)
     : impl_(this), complete_fusion_(std::move(fusion)) {
   segmented_fusion_name_ = segmentedFusionName();
@@ -322,7 +349,7 @@ void SegmentedFusion::draw() {
 
   for (auto group : groups()) {
     for (auto expr : group->exprs()) {
-      if (ir_utils::isTVOp(expr)) {
+      if (ir_utils::isTvOp(expr)) {
         expr_color_map[expr] = group_index;
       }
     }
@@ -559,7 +586,10 @@ std::vector<Expr*> groupExprPrintSorting(const std::vector<Expr*>& exprs) {
   std::unordered_set<Expr*> exprs_to_print_set(exprs.begin(), exprs.end());
   std::unordered_set<Expr*> exprs_visited;
   std::vector<Expr*> sorted_list;
-  while (sorted_list.size() != exprs_to_print.size()) {
+  while (!std::all_of(
+      exprs_to_print.begin(),
+      exprs_to_print.end(),
+      [&exprs_visited](auto expr) { return exprs_visited.count(expr); })) {
     bool expr_added_to_sorted_list = false;
     for (auto expr : exprs_to_print) {
       if (!exprs_visited.count(expr)) {
@@ -652,15 +682,15 @@ TensorView* castIntermediateValueInCompleteFusion(
     // Keep broadcast axes and remove reduction axes
     size_t i = 0;
     auto no_reduction_root_domain =
-        TensorDomain::noReductions(original_tv->getRootDomain());
+        TensorDomain::noReductions(original_tv->getMaybeRFactorDomain());
     std::vector<IterDomain*> new_root_domain(no_reduction_root_domain.size());
     for (const auto& dom : no_reduction_root_domain) {
-      new_root_domain[i++] = dom->clone();
+      new_root_domain[i++] = dom->cloneWithoutRFactor();
     }
 
     // Create the actual domain and tv.
-    return new TensorView(
-        new TensorDomain(
+    return IrBuilder::create<TensorView>(
+        IrBuilder::create<TensorDomain>(
             new_root_domain, std::vector<bool>(new_root_domain.size(), true)),
         data_type);
   };
@@ -680,8 +710,8 @@ TensorView* castIntermediateValueInCompleteFusion(
   }
 
   // Insert the cast ops.
-  new UnaryOp(UnaryOpType::Cast, half_precision_tv, original_tv);
-  new UnaryOp(UnaryOpType::Cast, fp32_tv, half_precision_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, half_precision_tv, original_tv);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Cast, fp32_tv, half_precision_tv);
 
   // Return the new tv to replace original tv with
   //  on the segmented edges.
@@ -721,7 +751,7 @@ void SegmentedFusion::finalize() {
     //            \ -> half2float -> other uses in group
     // The conversion back and forth from half precision can hurt numerics.
     // Collect expressions that use the edge value of concern within the from
-    // group to avoid replacing with the casted tensor.
+    // group to avoid replacing with the cast tensor.
     std::unordered_set<Expr*> uses_in_from_group;
 
     // All expressions in the from group of the edge
@@ -1125,6 +1155,7 @@ std::ostream& operator<<(
         return group_order.at(edge_a->from) < group_order.at(edge_b->from);
       });
 
+  os << "Segmented_Fusion Dump: -- fusion segments:\n";
   os << "Segmented_Fusion{ \n";
   os << "groups: \n";
   for (const auto g : sorted_groups_to_print) {
@@ -1143,6 +1174,9 @@ std::ostream& operator<<(
 }
 
 void SegmentedFusion::print() const {
+  std::cout << "Segmented_Fusion Dump: -- Re-written complete fusion:{\n";
+  completeFusion()->printMath();
+  std::cout << "} // {Re-written complete fusion}\n";
   std::cout << this << "\n";
 }
 
@@ -1170,12 +1204,22 @@ std::unique_ptr<Fusion> SegmentedFusion::makeFusion(SegmentedGroup* sg) {
     fusion_segment->removeOutput(out);
   }
 
+  std::vector<TensorView*> view_tvs;
   for (auto inp : getAllInputs(sg)) {
-    fusion_segment->addInput(complete_to_segment_map.clone(inp));
+    auto clone_tv = complete_to_segment_map.clone(inp);
+    fusion_segment->addInput(clone_tv);
+    if (inp->isDefinitionType(ExprType::ViewOp)) {
+      TORCH_INTERNAL_ASSERT(clone_tv != nullptr && clone_tv->isA<TensorView>());
+      view_tvs.push_back(clone_tv->as<TensorView>());
+    }
   }
 
   for (auto out : getAllOutputs(sg)) {
     fusion_segment->addOutput(complete_to_segment_map.clone(out));
+  }
+
+  for (auto tv : view_tvs) {
+    tv->convertRfactorToRootDomain();
   }
 
   return fusion_segment;
@@ -1570,6 +1614,8 @@ c10::optional<ScheduleHeuristic> tryMerge(
     SegmentedGroup* b = nullptr) {
   FusionSegmentGuard fsg(fusion, getAllInputs(a, b), getAllOutputs(a, b));
 
+  scheduler_debug_utils::canScheduleMessage(
+      "\n**Segmenter** Considering fusion:\n", fusion);
   return SchedulerEntry::proposeHeuristics(fusion, runtime_info);
 }
 
@@ -1581,6 +1627,8 @@ c10::optional<ScheduleHeuristic> tryMerge(
       fusion,
       allInputsIfTrueElseOutputs(segmented_groups, true),
       allInputsIfTrueElseOutputs(segmented_groups, false));
+  scheduler_debug_utils::canScheduleMessage(
+      "\n**Segmenter** Considering fusion:\n", fusion);
   return SchedulerEntry::proposeHeuristics(fusion, runtime_info);
 }
 
@@ -1740,9 +1788,10 @@ TranslateApplicableWelford::TranslateApplicableWelford(
     Fusion* fusion,
     const at::ArrayRef<IValue>& runtime_inputs)
     : runtime_inputs_(runtime_inputs) {
+  auto exprs = fusion->exprs();
   std::vector<WelfordOp*> orignal_welfords(
-      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).begin(),
-      ir_utils::filterByType<WelfordOp>(fusion->unordered_exprs()).end());
+      ir_utils::filterByType<WelfordOp>(exprs).begin(),
+      ir_utils::filterByType<WelfordOp>(exprs).end());
 
   if (wouldTranslateToPersistent(orignal_welfords)) {
     for (auto welford : orignal_welfords) {
@@ -1829,6 +1878,14 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
       [&original_to_test_map](auto welford) {
         return original_to_test_map.clone(welford);
       });
+  // Copied welfords will be invalidated on translation, but Vals will be
+  // reused, keep a reference to them.
+  std::vector<Val*> welford_avgs;
+  std::vector<Val*> welford_vars;
+  for (auto welford : copied_welfords) {
+    welford_avgs.push_back(welford->outAvg());
+    welford_vars.push_back(welford->outVar());
+  }
 
   // Translate the welford ops
   for (auto welford_to_translate : copied_welfords) {
@@ -1859,6 +1916,21 @@ bool TranslateApplicableWelford::wouldTranslateToPersistent(
         [&original_to_test_map](Val* out) {
           return original_to_test_map.clone(out);
         });
+
+    // If only average is used from welford, we should still translate, but we
+    // might not detect persistence if variance isn't actually used/marked as an
+    // output in the test.
+    for (auto outs_i : c10::irange(welford_avgs.size())) {
+      auto avg = welford_avgs[outs_i];
+      auto var = welford_vars[outs_i];
+      if (avg->uses().empty()) {
+        test_group_outputs_.push_back(avg);
+      }
+
+      if (var->uses().empty()) {
+        test_group_outputs_.push_back(var);
+      }
+    }
 
     // Temporarily localize test copy around
     //  the group boundary
@@ -1891,29 +1963,40 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   auto out_N = welford->outN()->as<TensorView>();
 
   fusion->removeExpr(welford);
+  // Not safe to use welford anymore
+  welford = nullptr;
 
   // Create normalization based welford graph
   //  largely taken from batchnorm cpp benchmark
-  auto& in_root = in_val->getRootDomain();
-  auto& out_root = out_avg->getRootDomain();
+  const auto& in_root =
+      TensorDomain::noReductions(in_val->getMaybeRFactorDomain());
+  const auto& out_root = out_avg->getRootDomain();
   std::vector<int> red_axes;
+
+  TORCH_INTERNAL_ASSERT(
+      in_root.size() == out_root.size(),
+      "Invalid root domains of Welford input and output.",
+      " Input: ",
+      ir_utils::toString(in_root),
+      ". Output: ",
+      ir_utils::toString(out_root));
 
   // Create scalar version of the feature element
   //  counting.
-  Val* num_features = new Double(1);
+  Val* num_features = IrBuilder::create<Double>(1);
   std::vector<bool> broadcast_mask(in_root.size(), false);
   for (const auto i : c10::irange(in_root.size())) {
-    if (out_root[i]->isReduction()) {
+    if (out_root.at(i)->isReduction()) {
       red_axes.push_back(i);
       broadcast_mask[i] = true;
-      num_features = mul(num_features, out_root[i]->extent());
+      num_features = mul(num_features, out_root.at(i)->extent());
     }
   }
 
   // Build a normalization expression group that is
   //  equivalent to a welford operation.
   auto x_sum = sum(in_val, red_axes);
-  new BinaryOp(BinaryOpType::Div, out_avg, x_sum, num_features);
+  IrBuilder::create<BinaryOp>(BinaryOpType::Div, out_avg, x_sum, num_features);
   // welford.avg may be broadcast. Reuse it if found.
   TensorView* x_avg_bcast = nullptr;
   for (auto& use_expr : out_avg->uses()) {
@@ -1949,8 +2032,12 @@ void TranslateApplicableWelford::translateSingleWelford(WelfordOp* welford) {
   }
 
   auto x_mean_sub_pow = mul(x_mean_sub, x_mean_sub);
-  new ReductionOp(BinaryOpType::Add, new Double(0.0), out_var, x_mean_sub_pow);
-  new UnaryOp(UnaryOpType::Set, out_N, num_features);
+  IrBuilder::create<ReductionOp>(
+      BinaryOpType::Add,
+      IrBuilder::create<Double>(0.0),
+      out_var,
+      x_mean_sub_pow);
+  IrBuilder::create<UnaryOp>(UnaryOpType::Set, out_N, num_features);
 
   // out_avg, out_N are now outputs of a pointwise ops and we
   //  need to clear out its reduction domains.
@@ -2584,7 +2671,8 @@ void SegmentCandidateFinder::findSegments() {
     while (!to_visit.empty()) {
       auto expr = to_visit.front();
       to_visit.pop_front();
-      if (expr->getExprType().value() != ExprType::UnaryOp) {
+      if (expr->getExprType().value() != ExprType::UnaryOp ||
+          expr->output(0)->isFusionOutput()) {
         continue;
       }
 
@@ -2687,14 +2775,20 @@ void SegmentCandidateFinder::findSegments() {
     }
   }
 
+  auto reduction_ops = ir_utils::getReductionOps(
+      segmented_fusion_->completeFusion(), true /* ignore_trivial */);
+  auto welford_ops = ir_utils::filterByType<WelfordOp>(reduction_ops);
+
   if (options_.run_translate_welford &&
-      segmented_fusion_->completeFusion()->hasWelford()) {
+      (welford_ops.begin() != welford_ops.end())) {
     TranslateApplicableWelford::run(segmented_fusion_.get(), runtime_inputs_);
   }
 
   for (auto group : groups()) {
-    // Set heuristics in case single reduction kernels were left out
-    group->setHeuristic(deriveHeuristic(group));
+    if (!group->outputs().empty()) {
+      // Set heuristics in case single reduction kernels were left out
+      group->setHeuristic(deriveHeuristic(group));
+    }
   }
 
   // Remove all scalar edges since they do not represent actual
@@ -2764,12 +2858,12 @@ void SegmentCandidateFinder::findSegments() {
 
   if (options_.run_final_merge) {
     // TODO: consider interleaving herrmman merge and bruteforce merge, as
-    // bruteforce merge can introduce
-    //  opportunities for more herrmann merge
+    // bruteforce merge can introduce opportunities for more herrmann merge
     finalMerge();
   }
 
   finalize();
+
   if (isDebugDumpEnabled(DebugDumpOption::FusionSegmentsDrawing)) {
     segmented_fusion_->draw();
   }
@@ -2913,7 +3007,7 @@ void SegmentCandidateFinder::resolveInputsInGroup(SegmentedGroup* group) {
   group->input_vals = IterVisitor::getInputsTo(group->inputs());
 
   // Grab all expressions needed to produce to_visit
-  auto input_exprs = ExprSort::getExprs(completeFusion(), to_visit);
+  auto input_exprs = StmtSort::getExprs(completeFusion(), to_visit);
 
   // Insert those expressions at the beginning of the group
   group->exprs_.insert(
@@ -2978,6 +3072,7 @@ void SegmentCandidateFinder::finalize() {
 
   // Finalize each group, fill in the missing inputs, i.e. tensor dims.
   for (auto g : groups()) {
+    g->setHeuristic(deriveHeuristic(g));
     g->finalize();
   }
 }
@@ -3102,8 +3197,7 @@ void SegmentedFusion::annotateFP16IntermediateTensors() {
   }
 }
 
-TORCH_CUDA_CU_API std::string toString(
-    const SegmentCandidateFinderOptions& segment_options) {
+std::string toString(const SegmentCandidateFinderOptions& segment_options) {
   std::stringstream ss;
   ss << "segmentation phases {\n";
   if (segment_options.run_combine_reductions) {

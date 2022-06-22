@@ -28,11 +28,17 @@ Features described in this documentation are classified by release status:
   binary distributions like PyPI or Conda, except sometimes behind run-time
   flags, and are at an early stage for feedback and testing.
 
+.. toctree::
+   :glob:
+   :maxdepth: 1
+   :caption: Community
+
+   community/*
 
 .. toctree::
    :glob:
    :maxdepth: 1
-   :caption: Notes
+   :caption: Developer Notes
 
    notes/*
 
@@ -54,13 +60,15 @@ Features described in this documentation are classified by release status:
    tensors
    tensor_attributes
    tensor_view
+   torch.amp <amp>
    torch.autograd <autograd>
+   torch.library <library>
    cuda
-   torch.cuda.amp <amp>
    torch.backends <backends>
    torch.distributed <distributed>
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
+   torch.distributed.fsdp <fsdp>
    torch.distributed.optim <distributed.optim>
    torch.distributions <distributions>
    torch.fft <fft>
@@ -83,6 +91,7 @@ Features described in this documentation are classified by release status:
    quantization
    rpc
    torch.random <random>
+   nested
    sparse
    storage
    torch.testing <testing>
@@ -91,6 +100,7 @@ Features described in this documentation are classified by release status:
    torch.utils.checkpoint <checkpoint>
    torch.utils.cpp_extension <cpp_extension>
    torch.utils.data <data>
+   torch.utils.jit <jit_utils>
    torch.utils.dlpack <dlpack>
    torch.utils.mobile_optimizer <mobile_optimizer>
    torch.utils.model_zoo <model_zoo>
@@ -98,24 +108,19 @@ Features described in this documentation are classified by release status:
    type_info
    named_tensor
    name_inference
-   torch.__config__ <__config__>
+   torch.__config__ <config_mod>
 
 .. toctree::
    :maxdepth: 1
    :caption: Libraries
 
    torchaudio <https://pytorch.org/audio/stable>
+   TorchData <https://pytorch.org/data>
+   TorchRec <https://pytorch.org/torchrec>
+   TorchServe <https://pytorch.org/serve>
    torchtext <https://pytorch.org/text/stable>
    torchvision <https://pytorch.org/vision/stable>
-   TorchServe <https://pytorch.org/serve>
    PyTorch on XLA Devices <http://pytorch.org/xla/>
-
-.. toctree::
-   :glob:
-   :maxdepth: 1
-   :caption: Community
-
-   community/*
 
 Indices and tables
 ==================

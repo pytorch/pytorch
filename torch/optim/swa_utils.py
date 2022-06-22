@@ -1,6 +1,7 @@
 import itertools
 import math
 from copy import deepcopy
+import warnings
 
 import torch
 from torch.nn import Module
@@ -203,7 +204,7 @@ class SWALR(_LRScheduler):
             (default: "cos")
         last_epoch (int): the index of the last epoch (default: -1)
 
-    The :class:`SWALR` scheduler is can be used together with other
+    The :class:`SWALR` scheduler can be used together with other
     schedulers to switch to a constant learning rate late in the training
     as in the example below.
 

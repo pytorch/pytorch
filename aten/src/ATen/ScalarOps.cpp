@@ -15,8 +15,8 @@ inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
 
 namespace detail {
 Tensor& scalar_fill(Tensor& self, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-      kHalf, kBool, kBFloat16, self.scalar_type(), "fill_out", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      kComplexHalf, kHalf, kBool, kBFloat16, self.scalar_type(), "fill_out", [&]() {
         fill_inplace<scalar_t>(self, value);
       });
   return self;

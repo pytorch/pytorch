@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Load.h>
 #include <c10/util/irange.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/cpu/IsContiguous.h>
@@ -49,8 +50,8 @@ typename traits::ArgsTuple
 dereference_impl(char* C10_RESTRICT data[], const int64_t* strides, int64_t i,
                  std::index_sequence<INDEX...>) {
   return std::make_tuple(
-      *(typename traits::template arg<INDEX>::type*)
-        (data[INDEX] + i * strides[INDEX])...);
+      c10::load<typename traits::template arg<INDEX>::type>(
+          data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename traits>
@@ -231,7 +232,7 @@ vectorized_loop(char** C10_RESTRICT data_, int64_t n, int64_t S, func_t&& op, ve
 
 template <typename traits, typename cb_t>
 static inline void unroll_contiguous_scalar_checks(
-    const int64_t* strides,
+    const int64_t* /*strides*/,
     std::index_sequence<>,
     cb_t&& cb) {
   cb(0);

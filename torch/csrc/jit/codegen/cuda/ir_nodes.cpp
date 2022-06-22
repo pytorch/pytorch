@@ -4,7 +4,9 @@
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
+#include <torch/csrc/jit/codegen/cuda/kernel.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/root_domain_map.h>
 #include <torch/csrc/jit/codegen/cuda/transform_iter.h>
 #include <torch/csrc/jit/codegen/cuda/transform_rfactor.h>
@@ -38,19 +40,19 @@ class ScalarCheck : OptInConstDispatch {
   }
 
  private:
-  void handle(const Bool* b) override {
+  void handle(const Bool* b) final {
     same_ = v1_->as<Bool>()->sameAs(v2_->as<Bool>());
   }
 
-  void handle(const Double* d) override {
+  void handle(const Double* d) final {
     same_ = v1_->as<Double>()->sameAs(v2_->as<Double>());
   }
 
-  void handle(const Int* i) override {
+  void handle(const Int* i) final {
     same_ = v1_->as<Int>()->sameAs(v2_->as<Int>());
   }
 
-  void handle(const NamedScalar* ns) override {
+  void handle(const NamedScalar* ns) final {
     same_ = v1_->as<NamedScalar>()->sameAs(v2_->as<NamedScalar>());
   }
 
@@ -70,6 +72,16 @@ bool areEqualScalars(Val* v1, Val* v2) {
   return ScalarCheck::sameAs(v1, v2);
 }
 
+Bool::Bool(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::Scalar, DataType::Bool),
+      maybe_value_{c10::nullopt} {}
+
+Bool::Bool(IrBuilderPasskey passkey, bool value)
+    : Val(passkey, ValType::Scalar, DataType::Bool), maybe_value_{value} {}
+
+Bool::Bool(IrBuilderPasskey passkey, c10::optional<bool> value)
+    : Val(passkey, ValType::Scalar, DataType::Bool), maybe_value_{value} {}
+
 Bool::Bool(const Bool* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
@@ -87,6 +99,16 @@ bool Bool::sameAs(const Statement* other) const {
   return false;
 }
 
+Double::Double(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::Scalar, DataType::Double),
+      maybe_value_{c10::nullopt} {}
+
+Double::Double(IrBuilderPasskey passkey, ScalarType value)
+    : Val(passkey, ValType::Scalar, DataType::Double), maybe_value_{value} {}
+
+Double::Double(IrBuilderPasskey passkey, c10::optional<ScalarType> value)
+    : Val(passkey, ValType::Scalar, DataType::Double), maybe_value_{value} {}
+
 Double::Double(const Double* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
 
@@ -102,6 +124,16 @@ bool Double::sameAs(const Statement* other) const {
     return *value() == *(other_double->value());
   return false;
 }
+
+Int::Int(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::Scalar, DataType::Int),
+      maybe_value_{c10::nullopt} {}
+
+Int::Int(IrBuilderPasskey passkey, ScalarType value)
+    : Val(passkey, ValType::Scalar, DataType::Int), maybe_value_{value} {}
+
+Int::Int(IrBuilderPasskey passkey, c10::optional<ScalarType> value)
+    : Val(passkey, ValType::Scalar, DataType::Int), maybe_value_{value} {}
 
 Int::Int(const Int* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
@@ -120,11 +152,43 @@ bool Int::sameAs(const Statement* other) const {
   return false;
 }
 
-UnaryOp::UnaryOp(UnaryOpType type, Val* out, Val* in)
-    : Expr(ExprType::UnaryOp), unary_op_type_{type}, out_{out}, in_{in} {
+ComplexDouble::ComplexDouble(IrBuilderPasskey passkey)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{c10::nullopt} {}
+
+ComplexDouble::ComplexDouble(IrBuilderPasskey passkey, ScalarType value)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{value} {}
+
+ComplexDouble::ComplexDouble(
+    IrBuilderPasskey passkey,
+    c10::optional<ScalarType> value)
+    : Val(passkey, ValType::Scalar, DataType::ComplexDouble),
+      maybe_value_{value} {}
+
+ComplexDouble::ComplexDouble(const ComplexDouble* src, IrCloner* ir_cloner)
+    : Val(src, ir_cloner), maybe_value_(src->maybe_value_) {}
+
+bool ComplexDouble::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (!other->isA<ComplexDouble>()) {
+    return false;
+  }
+  const auto other_complex = other->as<ComplexDouble>();
+  if (isConst() && other_complex->isConst())
+    return *value() == *(other_complex->value());
+  return false;
+}
+
+UnaryOp::UnaryOp(IrBuilderPasskey passkey, UnaryOpType type, Val* out, Val* in)
+    : Expr(passkey, ExprType::UnaryOp),
+      unary_op_type_{type},
+      out_{out},
+      in_{in} {
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 UnaryOp::UnaryOp(const UnaryOp* src, IrCloner* ir_cloner)
@@ -146,8 +210,13 @@ bool UnaryOp::sameAs(const Statement* other) const {
   return Expr::sameAs(other);
 }
 
-BinaryOp::BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs)
-    : Expr(ExprType::BinaryOp),
+BinaryOp::BinaryOp(
+    IrBuilderPasskey passkey,
+    BinaryOpType type,
+    Val* out,
+    Val* lhs,
+    Val* rhs)
+    : Expr(passkey, ExprType::BinaryOp),
       binary_op_type_{type},
       out_{out},
       lhs_{lhs},
@@ -155,7 +224,6 @@ BinaryOp::BinaryOp(BinaryOpType type, Val* out, Val* lhs, Val* rhs)
   addOutput(out);
   addInput(lhs);
   addInput(rhs);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 BinaryOp::BinaryOp(const BinaryOp* src, IrCloner* ir_cloner)
@@ -178,8 +246,14 @@ bool BinaryOp::sameAs(const Statement* other) const {
   return Expr::sameAs(other);
 }
 
-TernaryOp::TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3)
-    : Expr(ExprType::TernaryOp),
+TernaryOp::TernaryOp(
+    IrBuilderPasskey passkey,
+    TernaryOpType type,
+    Val* out,
+    Val* in1,
+    Val* in2,
+    Val* in3)
+    : Expr(passkey, ExprType::TernaryOp),
       ternary_op_type_{type},
       out_{out},
       in1_{in1},
@@ -189,7 +263,6 @@ TernaryOp::TernaryOp(TernaryOpType type, Val* out, Val* in1, Val* in2, Val* in3)
   addInput(in1);
   addInput(in2);
   addInput(in3);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 TernaryOp::TernaryOp(const TernaryOp* src, IrCloner* ir_cloner)
@@ -213,8 +286,12 @@ bool TernaryOp::sameAs(const Statement* other) const {
   return Expr::sameAs(other);
 }
 
-BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
-    : Expr(ExprType::BroadcastOp),
+BroadcastOp::BroadcastOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in,
+    std::vector<bool> is_broadcast_dims)
+    : Expr(passkey, ExprType::BroadcastOp),
       out_(out),
       in_(in),
       is_broadcast_dims_(std::move(is_broadcast_dims)) {
@@ -226,12 +303,18 @@ BroadcastOp::BroadcastOp(Val* out, Val* in, std::vector<bool> is_broadcast_dims)
   auto in_type = in->getValType().value();
 
   TORCH_INTERNAL_ASSERT(
-      out_type == ValType::TensorView && in_type == ValType::TensorView,
+      (out_type == ValType::TensorView && in_type == ValType::TensorView) ||
+          (out_type == ValType::TensorIndex && in_type == ValType::TensorIndex),
       "Cannot braodcast a non-tensor object.");
 
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+
+  if (!out->isA<TensorView>() || !in->isA<TensorView>()) {
+    return;
+  }
+
+  passkey.ir_container_->registerExpr(exprPasskey(), this);
 
   // This is a generic check that root dims of a consumer and producer match.
   // Maybe we shouldn't relegate it to this constructor.
@@ -294,37 +377,100 @@ bool BroadcastOp::sameAs(const Statement* other) const {
 }
 
 ReductionOp::ReductionOp(
+    IrBuilderPasskey passkey,
     BinaryOpType reduction_op_type,
     Val* init,
     Val* out,
-    Val* in)
-    : Expr(ExprType::ReductionOp),
+    Val* in,
+    bool is_allreduce,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
       reduction_op_type_(reduction_op_type),
       init_(init),
       out_(out),
-      in_(in) {
-  TORCH_CHECK(out->getValType().value() == ValType::TensorView);
+      in_(in),
+      is_allreduce_(is_allreduce) {
+  TORCH_CHECK(
+      out->getValType().value() == ValType::TensorView ||
+      out->getValType().value() == ValType::TensorIndex);
 
   TORCH_INTERNAL_ASSERT(
-      in->getValType() == ValType::TensorView &&
-          out->getValType() == ValType::TensorView,
+      (in->getValType() == ValType::TensorView &&
+       out->getValType() == ValType::TensorView) ||
+          (in->getValType() == ValType::TensorIndex &&
+           out->getValType() == ValType::TensorIndex),
       "Reduction operation was created that does not have tensor inputs and outputs.");
 
-  TORCH_INTERNAL_ASSERT(
-      TensorDomain::noReductions(in->as<TensorView>()->getMaybeRFactorDomain())
-              .size() == out->as<TensorView>()->getRootDomain().size(),
-      "Reduction operation created with mismatched domains.");
-
+  if (in->isA<TensorView>()) {
+    TORCH_INTERNAL_ASSERT(
+        TensorDomain::noReductions(
+            in->as<TensorView>()->getMaybeRFactorDomain())
+                .size() == out->as<TensorView>()->getRootDomain().size(),
+        "Reduction operation created with mismatched domains.");
+  }
   TORCH_INTERNAL_ASSERT(
       init->isConstScalar(),
       "Tried to create a reduction operation whith an initial value that isn't a constant.");
 
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+GroupedReductionOp::GroupedReductionOp(
+    IrBuilderPasskey passkey,
+    std::vector<BinaryOpType> reduction_op_types,
+    std::vector<Val*> init_vals,
+    std::vector<Val*> outputs,
+    std::vector<Val*> inputs,
+    bool is_fused,
+    ExprType expr_type)
+    : Expr(passkey, expr_type),
+      reduction_op_types_(std::move(reduction_op_types)),
+      init_vals_(std::move(init_vals)),
+      is_allreduce_(is_fused) {
+  for (auto out : outputs) {
+    addOutput(out);
+  }
+
+  for (auto in : inputs) {
+    addInput(in);
+  }
+}
+
+GroupedReductionOp::GroupedReductionOp(
+    const GroupedReductionOp* src,
+    IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      reduction_op_types_(src->reduction_op_types_),
+      init_vals_(ir_cloner->clone(src->init_vals_)),
+      is_allreduce_(src->is_allreduce_) {}
+
+bool GroupedReductionOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+
+  auto grouped_rop = dynamic_cast<const GroupedReductionOp*>(other);
+  if (grouped_rop == nullptr) {
+    return false;
+  }
+
+  if (!Expr::sameAs(other) ||
+      getReductionOpTypes() != grouped_rop->getReductionOpTypes()) {
+    return false;
+  }
+
+  for (const auto i : c10::irange(numReductions())) {
+    if (!initVal(i)->sameAs(grouped_rop->initVal(i))) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 WelfordOp::WelfordOp(
+    IrBuilderPasskey passkey,
     Val* out_avg,
     Val* out_var,
     Val* out_N,
@@ -333,8 +479,9 @@ WelfordOp::WelfordOp(
     Val* init_N,
     Val* in_avg,
     Val* in_var,
-    Val* in_N)
-    : Expr(ExprType::WelfordOp),
+    Val* in_N,
+    bool is_fused)
+    : Expr(passkey, ExprType::WelfordOp),
       out_avg_(out_avg),
       out_var_(out_var),
       out_N_(out_N),
@@ -342,12 +489,19 @@ WelfordOp::WelfordOp(
       init_var_(init_var),
       init_N_(init_N),
       in_avg_(in_avg),
-      in_var_(in_var),
-      in_N_(in_N) {
+      in_var_(in_var == nullptr ? in_avg->container()->zeroVal() : in_var),
+      in_N_(in_N),
+      is_allreduce_(is_fused) {
   // Check output type
-  TORCH_INTERNAL_ASSERT(out_avg->getValType().value() == ValType::TensorView);
-  TORCH_INTERNAL_ASSERT(out_var->getValType().value() == ValType::TensorView);
-  TORCH_INTERNAL_ASSERT(out_N->getValType().value() == ValType::TensorView);
+  TORCH_INTERNAL_ASSERT(
+      out_avg->getValType().value() == ValType::TensorView ||
+      out_avg->getValType().value() == ValType::TensorIndex);
+  TORCH_INTERNAL_ASSERT(
+      out_var->getValType().value() == ValType::TensorView ||
+      out_var->getValType().value() == ValType::TensorIndex);
+  TORCH_INTERNAL_ASSERT(
+      out_N->getValType().value() == ValType::TensorView ||
+      out_N->getValType().value() == ValType::TensorIndex);
 
   // check initial value
   TORCH_INTERNAL_ASSERT(init_N->getValType().value() == ValType::Scalar);
@@ -356,36 +510,48 @@ WelfordOp::WelfordOp(
     // initial value with a count of 1 is un-common enough that I'll push
     // the responsibility of creating all-zero var tensors to the user
     TORCH_INTERNAL_ASSERT(
-        init_avg && init_avg->getValType().value() == ValType::TensorView);
+        init_avg &&
+        (init_avg->getValType().value() == ValType::TensorView ||
+         init_avg->getValType().value() == ValType::TensorIndex));
     TORCH_INTERNAL_ASSERT(
-        init_var && init_var->getValType().value() == ValType::TensorView);
+        init_var &&
+        (init_var->getValType().value() == ValType::TensorView ||
+         init_var->getValType().value() == ValType::TensorIndex));
   }
 
   TORCH_INTERNAL_ASSERT(
-      in_avg && in_avg->getValType().value() == ValType::TensorView);
+      in_avg &&
+          (in_avg->getValType().value() == ValType::TensorView ||
+           in_avg->getValType().value() == ValType::TensorIndex),
+      in_avg->getValType().value());
   // check input
   TORCH_INTERNAL_ASSERT(
       in_N->getValType().value() == ValType::Scalar ||
-      in_N->getValType().value() == ValType::TensorView);
+      in_N->getValType().value() == ValType::TensorView ||
+      in_N->getValType().value() == ValType::TensorIndex);
   if (!in_N->isOneInt()) {
     // when input is only one value, only the value is required through avg
     // input the var part is implicitly 0 and codegen will handle that.
     TORCH_INTERNAL_ASSERT(
-        in_var && in_var->getValType().value() == ValType::TensorView);
+        in_var &&
+        (in_var->getValType().value() == ValType::TensorView ||
+         in_var->getValType().value() == ValType::TensorIndex));
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        in_var == nullptr || in_var->isZeroInt(),
+        "Invalid var input, which must be either nullptr or scalar zero when the N input is one.");
   }
 
-  addOutput(out_avg);
-  addOutput(out_var);
-  addOutput(out_N);
+  addOutput(out_avg_);
+  addOutput(out_var_);
+  addOutput(out_N_);
 
-  addInput(in_avg);
-  // Conditionally adding this input?
-  if (!in_N->isOneInt()) {
-    addInput(in_var);
-  }
-  addInput(in_N);
-
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+  addInput(in_avg_);
+  // Previously in_var_ was allowed to be null
+  TORCH_INTERNAL_ASSERT(
+      in_var_ != nullptr, "Welford var input nullptr not allowed");
+  addInput(in_var_);
+  addInput(in_N_);
 }
 
 WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
@@ -398,7 +564,8 @@ WelfordOp::WelfordOp(const WelfordOp* src, IrCloner* ir_cloner)
       init_N_(ir_cloner->clone(src->init_N_)),
       in_avg_(ir_cloner->clone(src->in_avg_)),
       in_var_(src->in_var_ ? ir_cloner->clone(src->in_var_) : nullptr),
-      in_N_(ir_cloner->clone(src->in_N_)) {}
+      in_N_(ir_cloner->clone(src->in_N_)),
+      is_allreduce_(src->is_allreduce_) {}
 
 namespace {
 inline bool sameOptionalVal(Val* a, Val* b) {
@@ -421,12 +588,80 @@ bool WelfordOp::sameAs(const Statement* other) const {
   return false;
 }
 
+std::vector<Val*> WelfordOp::getInitVals() const {
+  std::vector<Val*> init_vals({init_avg_, init_var_, init_N_});
+  return init_vals;
+}
+
+MmaOp::MmaOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in_a,
+    Val* in_b,
+    Val* init)
+    : Expr(passkey, ExprType::MmaOp),
+      out_(out),
+      in_a_(in_a),
+      in_b_(in_b),
+      init_(init) {
+  // Check output type
+  TORCH_INTERNAL_ASSERT(
+      out->getValType().value() == ValType::TensorView ||
+      out->getValType().value() == ValType::TensorIndex);
+
+  TORCH_INTERNAL_ASSERT(
+      in_a->getValType().value() == ValType::TensorView ||
+          in_a->getValType().value() == ValType::TensorIndex,
+      in_a->getValType().value());
+
+  TORCH_INTERNAL_ASSERT(
+      in_b->getValType().value() == ValType::TensorView ||
+          in_b->getValType().value() == ValType::TensorIndex,
+      in_b->getValType().value());
+
+  addOutput(out);
+  addInput(in_a);
+  addInput(in_b);
+}
+
+MmaOp::MmaOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in_a,
+    Val* in_b,
+    Val* init,
+    MmaOptions options)
+    : MmaOp(passkey, out, in_a, in_b, init) {
+  options_ = options;
+}
+
+MmaOp::MmaOp(const MmaOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_a_(ir_cloner->clone(src->in_a_)),
+      in_b_(ir_cloner->clone(src->in_b_)),
+      init_(ir_cloner->clone(src->init_)),
+      options_(src->options_) {}
+
+bool MmaOp::sameAs(const Statement* other) const {
+  if (this == other) {
+    return true;
+  }
+  if (auto other_mma = dynamic_cast<const MmaOp*>(other)) {
+    return out_->sameAs(other_mma->out_) && in_a_->sameAs(other_mma->in_a_) &&
+        in_b_->sameAs(other_mma->in_b_) && init_->sameAs(other_mma->init_) &&
+        options_ == other_mma->options_;
+  }
+  return false;
+}
+
 ReductionOp::ReductionOp(const ReductionOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       reduction_op_type_(src->reduction_op_type_),
       init_(ir_cloner->clone(src->init_)),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {}
+      in_(ir_cloner->clone(src->in_)),
+      is_allreduce_(src->is_allreduce_) {}
 
 bool ReductionOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -444,10 +679,11 @@ bool ReductionOp::sameAs(const Statement* other) const {
 }
 
 TransposeOp::TransposeOp(
+    IrBuilderPasskey passkey,
     TensorView* out,
     TensorView* in,
-    std::vector<int> new2old)
-    : Expr(ExprType::TransposeOp),
+    std::vector<int64_t> new2old)
+    : Expr(passkey, ExprType::TransposeOp),
       out_(out),
       in_(in),
       new2old_(std::move(new2old)) {
@@ -455,17 +691,14 @@ TransposeOp::TransposeOp(
   // should be checked at function transpose.
 
   TORCH_INTERNAL_ASSERT(
-      !in->hasRFactor(), "Transposing rFactor tensors is not supported.");
+      TensorDomain::noReductions(in->getMaybeRFactorDomain()).size() ==
+      out->getMaybeRFactorDomain().size());
 
-  TORCH_INTERNAL_ASSERT(
-      TensorDomain::noReductions(in->getRootDomain()).size() ==
-      out->getRootDomain().size());
-
-  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getRootDomain().size());
+  TORCH_INTERNAL_ASSERT(new2old_.size() == out->getMaybeRFactorDomain().size());
 
   // Make sure the entries of new2old are unique and range from 0 to
   // N-1, where N == new2old.size().
-  std::set<int> old_positions(new2old_.begin(), new2old_.end());
+  std::set<int64_t> old_positions(new2old_.begin(), new2old_.end());
   TORCH_INTERNAL_ASSERT(old_positions.size() == new2old_.size());
   // old_positions is sorted, so the first entry must be 0.
   TORCH_INTERNAL_ASSERT(
@@ -481,7 +714,6 @@ TransposeOp::TransposeOp(
 
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
@@ -490,12 +722,56 @@ TransposeOp::TransposeOp(const TransposeOp* src, IrCloner* ir_cloner)
       in_(ir_cloner->clone(src->in_)),
       new2old_(src->new2old_) {}
 
-ShiftOp::ShiftOp(Val* out, Val* in, std::vector<int> offsets, bool pad)
-    : Expr(ExprType::ShiftOp),
+std::vector<int64_t> TransposeOp::old2new() const {
+  std::vector<int64_t> old2new(new2old_.size());
+  for (auto new_axis : c10::irange(new2old_.size())) {
+    auto old_axis = new2old_.at(new_axis);
+    old2new[old_axis] = new_axis;
+  }
+  return old2new;
+}
+
+ExpandOp::ExpandOp(
+    IrBuilderPasskey passkey,
+    TensorView* out,
+    TensorView* in,
+    std::vector<Val*> _expanded_extents)
+    : Expr(passkey, ExprType::ExpandOp),
+      out_(out),
+      in_(in),
+      expanded_extents_(std::move(_expanded_extents)) {
+  addOutput(out);
+  addInput(in);
+  for (auto expanded_extent : expanded_extents_) {
+    TORCH_INTERNAL_ASSERT(expanded_extent != nullptr);
+    TORCH_INTERNAL_ASSERT(
+        expanded_extent->dtype() == DataType::Int,
+        "Expanded extents must be of Int type.");
+    addInput(expanded_extent);
+  }
+}
+
+ExpandOp::ExpandOp(const ExpandOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {
+  expanded_extents_.reserve(src->expanded_extents_.size());
+  for (const auto expanded_extent : src->expanded_extents_) {
+    expanded_extents_.push_back(ir_cloner->clone(expanded_extent));
+  }
+}
+
+ShiftOp::ShiftOp(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in,
+    std::vector<int> offsets,
+    std::vector<int> pad_width)
+    : Expr(passkey, ExprType::ShiftOp),
       out_(out),
       in_(in),
       offsets_(std::move(offsets)),
-      pad_(pad) {
+      pad_width_(std::move(pad_width)) {
   // clang-tidy complains about out_ that it may be null.
   TORCH_INTERNAL_ASSERT(out_ != nullptr);
   TORCH_INTERNAL_ASSERT(in_ != nullptr);
@@ -514,9 +790,15 @@ ShiftOp::ShiftOp(Val* out, Val* in, std::vector<int> offsets, bool pad)
       "Invalid offset vector: ",
       offsets_);
 
+  TORCH_INTERNAL_ASSERT(
+      pad_width_.size() ==
+          TensorDomain::noReductions(in_->as<TensorView>()->getRootDomain())
+              .size(),
+      "Invalid padding width vector: ",
+      pad_width_);
+
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
@@ -524,7 +806,7 @@ ShiftOp::ShiftOp(const ShiftOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)),
       offsets_(src->offsets_),
-      pad_(src->pad_) {}
+      pad_width_(src->pad_width_) {}
 
 bool ShiftOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -541,11 +823,12 @@ bool ShiftOp::sameAs(const Statement* other) const {
 }
 
 GatherOp::GatherOp(
+    IrBuilderPasskey passkey,
     Val* out,
     Val* in,
-    std::vector<Int*> window_shape,
-    std::vector<std::vector<Int*>> pad_width)
-    : Expr(ExprType::GatherOp),
+    std::vector<int> window_shape,
+    std::vector<std::vector<int>> pad_width)
+    : Expr(passkey, ExprType::GatherOp),
       out_(out),
       in_(in),
       window_shape_(std::move(window_shape)),
@@ -578,28 +861,14 @@ GatherOp::GatherOp(
 
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 GatherOp::GatherOp(const GatherOp* src, IrCloner* ir_cloner)
     : Expr(src, ir_cloner),
       out_(ir_cloner->clone(src->out_)),
-      in_(ir_cloner->clone(src->in_)) {
-  std::transform(
-      src->window_shape_.begin(),
-      src->window_shape_.end(),
-      std::back_inserter(window_shape_),
-      [&ir_cloner](const auto& x) { return ir_cloner->clone(x); });
-  for (const auto& pad : src->pad_width_) {
-    std::vector<Int*> pad_clone;
-    std::transform(
-        pad.begin(),
-        pad.end(),
-        std::back_inserter(pad_clone),
-        [&ir_cloner](const auto& x) { return ir_cloner->clone(x); });
-    pad_width_.push_back(pad_clone);
-  }
-}
+      in_(ir_cloner->clone(src->in_)),
+      window_shape_(src->window_shape_),
+      pad_width_(src->pad_width_) {}
 
 bool GatherOp::sameAs(const Statement* other) const {
   if (this == other) {
@@ -609,22 +878,9 @@ bool GatherOp::sameAs(const Statement* other) const {
     return false;
   }
   const auto other_op = other->as<GatherOp>();
-  if (windowShape().size() != other_op->windowShape().size()) {
+  if (windowShape() != other_op->windowShape() ||
+      padWidth() != other_op->padWidth()) {
     return false;
-  }
-  for (const auto i : c10::irange(windowShape().size())) {
-    if (!windowShape()[i]->sameAs(other_op->windowShape()[i])) {
-      return false;
-    }
-  }
-  if (padWidth().size() != other_op->padWidth().size()) {
-    return false;
-  }
-  for (const auto i : c10::irange(padWidth().size())) {
-    if (!padWidth()[i][0]->sameAs(other_op->padWidth()[i][0]) ||
-        !padWidth()[i][1]->sameAs(other_op->padWidth()[i][1])) {
-      return false;
-    }
   }
   return Expr::sameAs(other);
 }
@@ -638,11 +894,32 @@ int GatherOp::gatherAxis(int axis) const {
   return int(windowShape().size()) + axis;
 }
 
-ViewOp::ViewOp(TensorView* out, TensorView* in)
-    : Expr(ExprType::ViewOp), out_(out), in_(in) {
+ViewAsScalar::ViewAsScalar(
+    IrBuilderPasskey passkey,
+    Val* out,
+    Val* in,
+    IterDomain* vector_id,
+    Val* index)
+    : Expr(passkey, ExprType::ViewAsScalar),
+      out_(out),
+      in_(in),
+      vector_id_(vector_id),
+      index_(index) {
   addOutput(out);
   addInput(in);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
+}
+
+ViewAsScalar::ViewAsScalar(const ViewAsScalar* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)),
+      vector_id_(ir_cloner->clone(src->vector_id_)),
+      index_(ir_cloner->clone(src->index_)) {}
+
+ViewOp::ViewOp(IrBuilderPasskey passkey, TensorView* out, TensorView* in)
+    : Expr(passkey, ExprType::ViewOp), out_(out), in_(in) {
+  addOutput(out);
+  addInput(in);
 }
 
 ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
@@ -650,34 +927,144 @@ ViewOp::ViewOp(const ViewOp* src, IrCloner* ir_cloner)
       out_(ir_cloner->clone(src->out_)),
       in_(ir_cloner->clone(src->in_)) {}
 
-IterDomain::IterDomain(
-    Val* start,
-    Val* extent,
-    ParallelType parallel_type,
-    IterType iter_type,
-    bool is_rfactor_domain)
-    : IterDomain(
-          start,
-          extent,
-          nullptr,
-          parallel_type,
-          iter_type,
-          is_rfactor_domain) {}
+LoadStoreOp::LoadStoreOp(
+    IrBuilderPasskey passkey,
+    LoadStoreOpType op_type,
+    Val* out,
+    Val* in)
+    : Expr(passkey, ExprType::LoadStoreOp),
+      load_store_type_(op_type),
+      out_(out),
+      in_(in) {
+  addOutput(out);
+  addInput(in);
+}
+
+LoadStoreOp::LoadStoreOp(const LoadStoreOp* src, IrCloner* ir_cloner)
+    : Expr(src, ir_cloner),
+      load_store_type_(src->load_store_type_),
+      out_(ir_cloner->clone(src->out_)),
+      in_(ir_cloner->clone(src->in_)) {}
+
+IterDomainBuilder::IterDomainBuilder(Val* _start, Val* _extent)
+    : start_(_start), extent_(_extent) {
+  TORCH_INTERNAL_ASSERT(
+      start_ != nullptr && extent_ != nullptr,
+      "Start and extent are required to build an iter domain.");
+}
+
+IterDomainBuilder::IterDomainBuilder(const IterDomain* id)
+    : start_(id->start()),
+      extent_(id->extent()),
+      expanded_extent_(
+          id->hasExpandedExtent() ? id->expandedExtent() : nullptr),
+      stop_offset_(id->stopOffset()),
+      parallel_type_(id->getParallelType()),
+      iter_type_(id->getIterType()),
+      is_rfactor_domain_(id->isRFactorProduct()),
+      is_padded_dimension_(id->hasPaddingToMultipleOfWarp()),
+      padded_to_size_(id->getMaybeSizeAfterPadding()),
+      is_mma_swizzled_(id->isMmaSwizzled()) {}
+
+IterDomainBuilder& IterDomainBuilder::resetSchedulingParams() {
+  parallel_type_ = ParallelType::Serial;
+  is_rfactor_domain_ = false;
+  is_padded_dimension_ = false;
+  padded_to_size_ = c10::nullopt;
+  is_mma_swizzled_ = false;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::resetRfactor() {
+  return is_rfactor_domain(false);
+}
+
+IterDomainBuilder& IterDomainBuilder::start(Val* _start) {
+  start_ = _start;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::extent(Val* _extent) {
+  extent_ = _extent;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::expanded_extent(Val* _expanded_extent) {
+  expanded_extent_ = _expanded_extent;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::stop_offset(Val* _stop_offset) {
+  stop_offset_ = _stop_offset;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::parallel_type(
+    ParallelType _parallel_type) {
+  parallel_type_ = _parallel_type;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::iter_type(IterType _iter_type) {
+  iter_type_ = _iter_type;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_rfactor_domain(
+    bool _is_rfactor_domain) {
+  is_rfactor_domain_ = _is_rfactor_domain;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_padded_dimension(
+    bool _is_padded_dimension) {
+  is_padded_dimension_ = _is_padded_dimension;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::padded_to_size(
+    c10::optional<int64_t> _padded_to_size) {
+  padded_to_size_ = _padded_to_size;
+  return *this;
+}
+
+IterDomainBuilder& IterDomainBuilder::is_mma_swizzled(bool _is_mma_swizzled) {
+  is_mma_swizzled_ = _is_mma_swizzled;
+  return *this;
+}
+
+IterDomain* IterDomainBuilder::build() const {
+  TORCH_INTERNAL_ASSERT(
+      start_ != nullptr && extent_ != nullptr,
+      "Start and extent are required to build an iter domain.");
+  return IrBuilder::create<IterDomain>(start_->container(), *this);
+}
 
 IterDomain::IterDomain(
+    IrBuilderPasskey passkey,
     Val* start,
     Val* extent,
+    Val* expanded_extent,
     Val* stop_offset,
     ParallelType parallel_type,
     IterType iter_type,
-    bool is_rfactor_domain)
-    : Val(ValType::IterDomain, DataType::Int, false),
+    bool is_rfactor_domain,
+    bool is_padded_dimension,
+    c10::optional<int64_t> padded_to_size,
+    bool is_mma_swizzled)
+    : Val(passkey, ValType::IterDomain, DataType::Int),
       start_(start),
       extent_(extent),
-      stop_offset_(stop_offset == nullptr ? new Int(0) : stop_offset),
+      expanded_extent_(expanded_extent),
+      stop_offset_(
+          stop_offset == nullptr ? passkey.ir_container_->zeroVal()
+                                 : stop_offset),
       parallel_type_(parallel_type),
       iter_type_(iter_type),
-      is_rfactor_domain_(is_rfactor_domain) {
+      is_rfactor_domain_(is_rfactor_domain),
+      is_padded_dimension_(is_padded_dimension),
+      padded_to_size_(padded_to_size),
+      is_mma_swizzled_(is_mma_swizzled) {
   TORCH_CHECK(
       !(isRFactorProduct() && isBroadcast()),
       "IterDomain cannot be both a broadcast and rfactor domain.");
@@ -693,20 +1080,37 @@ IterDomain::IterDomain(
       "Cannot create an iter domain with a start that is not an int but received ",
       start,
       " .");
-
-  name_ = fusion_->registerVal(this);
 }
+
+IterDomain::IterDomain(IrBuilderPasskey passkey, const IterDomainBuilder& args)
+
+    : IterDomain(
+          passkey,
+          args.start_,
+          args.extent_,
+          args.expanded_extent_,
+          args.stop_offset_,
+          args.parallel_type_,
+          args.iter_type_,
+          args.is_rfactor_domain_,
+          args.is_padded_dimension_,
+          args.padded_to_size_,
+          args.is_mma_swizzled_) {}
 
 IterDomain::IterDomain(const IterDomain* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner),
       start_(ir_cloner->clone(src->start_)),
       extent_(ir_cloner->clone(src->extent_)),
+      expanded_extent_(
+          src->hasExpandedExtent() ? ir_cloner->clone(src->expandedExtent())
+                                   : nullptr),
       stop_offset_(ir_cloner->clone(src->stop_offset_)),
       parallel_type_(src->parallel_type_),
       iter_type_(src->iter_type_),
       is_rfactor_domain_(src->is_rfactor_domain_),
       is_padded_dimension_(src->is_padded_dimension_),
-      padded_to_size_(src->padded_to_size_) {}
+      padded_to_size_(src->padded_to_size_),
+      is_mma_swizzled_(src->is_mma_swizzled_) {}
 
 bool IterDomain::sameAs(const Statement* other) const {
   if (other == this) {
@@ -720,13 +1124,22 @@ bool IterDomain::sameAs(const Statement* other) const {
   const IterDomain* other_id = other->as<IterDomain>();
 
   bool is_same = isReduction() == other_id->isReduction() &&
-      getParallelType() == other_id->getParallelType();
+      getParallelType() == other_id->getParallelType() &&
+      isVectorComponent() == other_id->isVectorComponent();
   is_same = is_same && ScalarCheck::sameAs(extent(), other_id->extent());
   is_same = is_same && ScalarCheck::sameAs(start(), other_id->start());
   is_same =
       is_same && ScalarCheck::sameAs(stopOffset(), other_id->stopOffset());
 
   return is_same;
+}
+
+// Returns a new IterDomain matching properties of this except for
+// is_rfactor_domain_
+IterDomain* IterDomain::cloneWithoutRFactor() const {
+  auto cloned = IterDomainBuilder(this).resetRfactor().build();
+
+  return cloned;
 }
 
 std::vector<IterDomain*> IterDomain::clone(
@@ -736,7 +1149,7 @@ std::vector<IterDomain*> IterDomain::clone(
       domains.begin(),
       domains.end(),
       std::back_inserter(cloned_domains),
-      [](auto id) { return id->clone(); });
+      [](auto id) { return id->cloneWithoutRFactor(); });
   return cloned_domains;
 }
 
@@ -764,12 +1177,7 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
   IterType itype = outer->getIterType();
 
   if (outer->isBroadcast() && inner->isBroadcast()) {
-    if (outer->getIterType() == IterType::BroadcastWithStride ||
-        inner->getIterType() == IterType::BroadcastWithStride) {
-      itype = IterType::BroadcastWithStride;
-    } else {
-      itype = IterType::BroadcastWithoutStride;
-    }
+    itype = IterType::Broadcast;
   } else if (outer->isBroadcast() || inner->isBroadcast()) {
     itype = IterType::Iteration;
   }
@@ -781,14 +1189,14 @@ IterDomain* IterDomain::merge(IterDomain* outer, IterDomain* inner) {
     itype = IterType::Iteration;
   }
 
-  IterDomain* merged_id = new IterDomain(
-      new Int(0),
-      merged_id_size->as<Int>(),
-      outer->getParallelType(),
-      itype,
-      outer->isRFactorProduct() || inner->isRFactorProduct());
+  IterDomain* merged_id =
+      IterDomainBuilder(
+          outer->container()->zeroVal(), merged_id_size->as<Int>())
+          .parallel_type(outer->getParallelType())
+          .iter_type(itype)
+          .build();
 
-  new Merge(merged_id, outer, inner);
+  IrBuilder::create<Merge>(outer->container(), merged_id, outer, inner);
 
   return merged_id;
 }
@@ -811,7 +1219,8 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
   if (factor->getValType() == ValType::Scalar) {
     TORCH_CHECK(
         factor->isConstScalar() ||
-            FusionGuard::getCurFusion()->hasInput(factor),
+            (FusionGuard::getCurFusion() == factor->fusion() &&
+             factor->isFusionInput()),
         factor,
         " is not a constant nor an input. It must be one or the other to be used in a split.",
         " If you want a symbolic split based on a thread dimension please use IterDomain::split(IterDomain*, ParallelType);");
@@ -832,24 +1241,31 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
         in->definition() == nullptr,
         "Partial split is only allowed with root domains");
   }
-
   // outer loop IterDomain
-  IterDomain* ido = new IterDomain(
-      new Int(0),
-      inner_split ? remainder->as<Int>() : factor,
-      in->getParallelType(),
-      in->getIterType(),
-      in->isRFactorProduct());
+  IterDomain* ido = IterDomainBuilder(
+                        in->container()->zeroVal(),
+                        inner_split ? remainder->as<Int>() : factor)
+                        .parallel_type(in->getParallelType())
+                        .iter_type(in->getIterType())
+                        .build();
 
   // inner loop IterDomain
-  IterDomain* idi = new IterDomain(
-      new Int(0),
-      inner_split ? factor : remainder->as<Int>(),
-      in->getParallelType(),
-      in->getIterType(),
-      in->isRFactorProduct());
+  IterDomain* idi = IterDomainBuilder(
+                        in->container()->zeroVal(),
+                        inner_split ? factor : remainder->as<Int>())
+                        .parallel_type(in->getParallelType())
+                        .iter_type(in->getIterType())
+                        .build();
 
-  new Split(ido, idi, in, factor, inner_split, start_offset, stop_offset);
+  IrBuilder::create<Split>(
+      in->container(),
+      ido,
+      idi,
+      in,
+      factor,
+      inner_split,
+      start_offset,
+      stop_offset);
   return {ido, idi};
 }
 
@@ -864,7 +1280,9 @@ std::pair<IterDomain*, IterDomain*> IterDomain::split(
 }
 
 std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
-  auto split_out = IterDomain::split(this, new Int(factor), true);
+  // Use partial split so that only valid values are retained
+  auto split_out = IterDomain::split(
+      this, IrBuilder::create<Int>(container(), factor), true, true);
 
   split_out.second->iter_type_ = IterType::Stride;
   split_out.first->is_rfactor_domain_ = true;
@@ -877,7 +1295,11 @@ std::pair<IterDomain*, IterDomain*> IterDomain::stridedSplit(int factor) {
 // vectorize to the left of the computeAt domain, and could allow us to do some
 // simple validation of vectorize as it's inputs are right most and contiguous.
 void IterDomain::parallelize(ParallelType t) {
-  parallel_type_ = t;
+  if (parallel_type_ == t) {
+    // No op, don't do any more checks, it was already set to this value.
+    return;
+  }
+
   if (t == ParallelType::Unroll || isParallelTypeVectorize(t)) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
@@ -888,6 +1310,22 @@ void IterDomain::parallelize(ParallelType t) {
         extent(),
         " .");
   }
+
+  if (isMmaSwizzled()) {
+    // Mma swizzled axes represent data representation within a warp
+    //  so only allow updates that keep the parallelization within
+    //  a warp.
+    // Note && TODO: this check is actually used to allow indexing path
+    //  to make copies of the iterdomains. We might eventually just want
+    //  to lock these parallel types and not allowing any changes once
+    //  they are swizzled.
+    TORCH_CHECK(
+        t == ParallelType::Vectorize || t == ParallelType::TIDx ||
+            t == ParallelType::Serial,
+        "Parallel type other than serial, tidx, vectorize not allowed for mma swizzled ids");
+  }
+
+  parallel_type_ = t;
 }
 
 bool IterDomain::maybePartial() const {
@@ -907,9 +1345,10 @@ Val* IterDomain::stop() const {
 }
 
 TensorDomain::TensorDomain(
+    IrBuilderPasskey passkey,
     std::vector<IterDomain*> root_domain,
     std::vector<bool> contiguity)
-    : Val(ValType::TensorDomain, DataType::Null, false),
+    : Val(passkey, ValType::TensorDomain, DataType::Null),
       root_domain_(std::move(root_domain)),
       contiguity_(
           contiguity.empty() ? std::vector<bool>(root_domain_.size(), false)
@@ -925,14 +1364,14 @@ TensorDomain::TensorDomain(
   has_nontrivial_reduction_ = false;
   domain_ = root_domain_;
   resetDomains();
-  name_ = fusion_->registerVal(this);
 }
 
 TensorDomain::TensorDomain(
+    IrBuilderPasskey passkey,
     std::vector<IterDomain*> root_domain,
     std::vector<IterDomain*> domain,
     std::vector<bool> contiguity)
-    : Val(ValType::TensorDomain, DataType::Null, false),
+    : Val(passkey, ValType::TensorDomain, DataType::Null),
       root_domain_(std::move(root_domain)),
       domain_(std::move(domain)),
       contiguity_(
@@ -963,15 +1402,15 @@ TensorDomain::TensorDomain(
   // Just due to clang-tidy, correct value set in resetDomains
   has_nontrivial_reduction_ = false;
   resetDomains();
-  name_ = fusion_->registerVal(this);
 }
 
 TensorDomain::TensorDomain(
+    IrBuilderPasskey passkey,
     std::vector<IterDomain*> root_domain,
     std::vector<IterDomain*> rfactor_domain,
     std::vector<IterDomain*> domain,
     std::vector<bool> contiguity)
-    : Val(ValType::TensorDomain, DataType::Null, false),
+    : Val(passkey, ValType::TensorDomain, DataType::Null),
       root_domain_(std::move(root_domain)),
       domain_(std::move(domain)),
       rfactor_domain_(std::move(rfactor_domain)),
@@ -1013,7 +1452,6 @@ TensorDomain::TensorDomain(
   // Just due to clang-tidy, correct value set in resetDomains
   has_nontrivial_reduction_ = false;
   resetDomains();
-  name_ = fusion_->registerVal(this);
 }
 
 TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
@@ -1025,6 +1463,18 @@ TensorDomain::TensorDomain(const TensorDomain* src, IrCloner* ir_cloner)
       rfactor_domain_(ir_cloner->clone(src->rfactor_domain_)),
       contiguity_(src->contiguity()),
       has_nontrivial_reduction_(src->has_nontrivial_reduction_) {}
+
+bool TensorDomain::hasBlockBroadcast() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isBroadcast() && id->isThreadDim();
+  });
+}
+
+bool TensorDomain::hasGridBroadcast() const {
+  return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
+    return id->isBroadcast() && id->isBlockDim();
+  });
+}
 
 bool TensorDomain::operator==(const TensorDomain& other) const {
   // Checks equality of each class field. Should not be necessary to
@@ -1123,6 +1573,22 @@ bool TensorDomain::hasRFactor() const {
   return !rfactor_domain_.empty();
 }
 
+bool TensorDomain::hasViewLikeRFactor() const {
+  if (!hasRFactor()) {
+    // Can't have view like rfactor if there is no rfactor domain
+    return false;
+  }
+
+  // If there's an rfactor domain and no rfactor product is a reduction, this is
+  // a view like rfactor
+  return std::none_of(
+      getMaybeRFactorDomain().begin(),
+      getMaybeRFactorDomain().end(),
+      [](IterDomain* id) {
+        return id->isReduction() && id->isRFactorProduct();
+      });
+}
+
 bool TensorDomain::hasVectorize() const {
   return std::any_of(domain_.begin(), domain_.end(), [](IterDomain* id) {
     return id->getParallelType() == ParallelType::Vectorize ||
@@ -1200,6 +1666,10 @@ void TensorDomain::split(
         "Partial split is only allowed with root domains");
   }
 
+  TORCH_INTERNAL_ASSERT(
+      !id->isMmaSwizzled(),
+      "Further transformation on warp mapped id's not allowed.");
+
   auto split_ids =
       IterDomain::split(id, factor, inner_split, trim_out_of_bounds);
   domain_.erase(domain_.begin() + axis_);
@@ -1234,6 +1704,10 @@ void TensorDomain::merge(int axis_o, int axis_i) {
 
   IterDomain* first = axis(axis_o);
   IterDomain* second = axis(axis_i);
+
+  TORCH_INTERNAL_ASSERT(
+      !first->isMmaSwizzled() && !second->isMmaSwizzled(),
+      "Further transformation on warp mapped id's not allowed.");
 
   IterDomain* merged_id = IterDomain::merge(first, second);
 
@@ -1339,56 +1813,61 @@ TensorDomain* TensorDomain::view(
   return transformView(this, transforms);
 }
 
+TensorDomain* TensorDomain::flatten(int64_t start_dim, int64_t end_dim) {
+  if (start_dim < 0) {
+    start_dim += nDims();
+  }
+  if (end_dim < 0) {
+    end_dim += nDims();
+  }
+
+  std::vector<IterDomain*> new_root_domain;
+  auto inp_domain = noReductions(getMaybeRFactorDomain());
+  new_root_domain.reserve(inp_domain.size());
+  for (auto id : inp_domain) {
+    new_root_domain.push_back(id->cloneWithoutRFactor());
+  }
+
+  std::vector<IterDomain*> rfactor_domain;
+  rfactor_domain.reserve(new_root_domain.size() - (end_dim - start_dim));
+  for (auto i : c10::irange(start_dim)) {
+    rfactor_domain.push_back(new_root_domain[i]);
+  }
+
+  IterDomain* merged_id = new_root_domain[start_dim];
+  for (auto i : c10::irange(start_dim + 1, end_dim + 1)) {
+    IterDomain* new_merged_id =
+        IterDomainBuilder(
+            merged_id->container()->zeroVal(),
+            mul(merged_id->extent(), new_root_domain[i]->extent()))
+            .is_rfactor_domain(true)
+            .build();
+    IrBuilder::create<Merge>(new_merged_id, merged_id, new_root_domain[i]);
+    merged_id = new_merged_id;
+  }
+  rfactor_domain.push_back(merged_id);
+
+  for (auto i : c10::irange(end_dim + 1, nDims())) {
+    rfactor_domain.push_back(new_root_domain[i]);
+  }
+
+  return IrBuilder::create<TensorDomain>(
+      new_root_domain,
+      rfactor_domain,
+      rfactor_domain,
+      std::vector<bool>(rfactor_domain.size(), true));
+}
+
 // TODO: Rfactor a Welford
 
 // pair is in order where second is the consumer of first
 std::pair<TensorDomain*, TensorDomain*> TensorDomain::rFactor(
     const std::vector<int>& axes_) {
-  TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim domain");
-
-  std::vector<int> axes(axes_.size());
-
-  auto ndims = nDims();
-  std::transform(axes_.begin(), axes_.end(), axes.begin(), [ndims](int i) {
-    return i < 0 ? i + ndims : i;
-  });
-
-  TORCH_CHECK(
-      std::none_of(
-          axes.begin(),
-          axes.end(),
-          [ndims](int i) { return i < 0 || (unsigned int)i >= ndims; }),
-      "RFactor axes less than 0 or >= ndims.");
-
-  // We might be able to lift this constraint in some instances, but needs more
-  // investigation.
-  TORCH_CHECK(
-      !hasRFactor(), "Cannot call rfactor on the same tensor domain twice.");
-
-  std::unordered_set<int> axes_set(axes.begin(), axes.end());
-
-  bool rfactor_found = false;
-  bool reduction_found = false;
-  for (decltype(nDims()) i{0}; i < nDims(); i++) {
-    if (axis(i)->isReduction()) {
-      if (axes_set.find(i) != axes_set.end()) {
-        rfactor_found = true;
-      } else {
-        reduction_found = true;
-      }
-    }
-  }
-
-  TORCH_CHECK(
-      rfactor_found && reduction_found,
-      "Invalid rfactor found, rfactor must be provided at least one reduction axis, but not all reduction axes.");
-
-  return std::pair<TensorDomain*, TensorDomain*>{
-      TransformRFactor::runReplay(this, axes),
-      TransformRFactor::runReplay2(this, axes)};
+  return TransformRFactor::runReplay(this, axes_);
 }
 
 Split::Split(
+    IrBuilderPasskey passkey,
     IterDomain* outer,
     IterDomain* inner,
     IterDomain* in,
@@ -1396,14 +1875,18 @@ Split::Split(
     bool inner_split,
     Val* start_offset,
     Val* stop_offset)
-    : Expr(ExprType::Split),
+    : Expr(passkey, ExprType::Split),
       outer_{outer},
       inner_{inner},
       in_{in},
       factor_{factor},
       inner_split_{inner_split},
-      start_offset_{start_offset != nullptr ? start_offset : new Int(0)},
-      stop_offset_{stop_offset != nullptr ? stop_offset : new Int(0)} {
+      start_offset_{
+          start_offset != nullptr ? start_offset
+                                  : passkey.ir_container_->zeroVal()},
+      stop_offset_{
+          stop_offset != nullptr ? stop_offset
+                                 : passkey.ir_container_->zeroVal()} {
   TORCH_INTERNAL_ASSERT(
       factor_->isAnInt(),
       "Attempted to create a Split node with a non-integer factor.");
@@ -1412,7 +1895,6 @@ Split::Split(
   addInput(in);
   // TODO add factor as an input, need to check Split::Split during validation
   // and need to check BestEffortReplay::findFirstMismatchedID addInput(factor);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 Split::Split(const Split* src, IrCloner* ir_cloner)
@@ -1453,12 +1935,15 @@ bool Split::sameAs(const Statement* other) const {
       stopOffset()->sameAs(other->as<Split>()->stopOffset());
 }
 
-Merge::Merge(IterDomain* out, IterDomain* outer, IterDomain* inner)
-    : Expr(ExprType::Merge), out_{out}, outer_{outer}, inner_{inner} {
+Merge::Merge(
+    IrBuilderPasskey passkey,
+    IterDomain* out,
+    IterDomain* outer,
+    IterDomain* inner)
+    : Expr(passkey, ExprType::Merge), out_{out}, outer_{outer}, inner_{inner} {
   addOutput(out);
   addInput(outer);
   addInput(inner);
-  name_ = FusionGuard::getCurFusion()->registerExpr(this);
 }
 
 Merge::Merge(const Merge* src, IrCloner* ir_cloner)
@@ -1476,6 +1961,12 @@ bool Merge::sameAs(const Statement* other) const {
   }
   return Expr::sameAs(other);
 }
+
+NamedScalar::NamedScalar(
+    IrBuilderPasskey passkey,
+    std::string name,
+    DataType dtype)
+    : Val(passkey, ValType::NamedScalar, dtype), name_(std::move(name)) {}
 
 NamedScalar::NamedScalar(const NamedScalar* src, IrCloner* ir_cloner)
     : Val(src, ir_cloner), name_(src->name_) {}
@@ -1495,13 +1986,15 @@ NamedScalar* NamedScalar::getParallelDim(ParallelType p_type) {
       isParallelTypeThread(p_type),
       "Cannot get parallel dim of non thread type, received: ",
       p_type);
+  TORCH_INTERNAL_ASSERT(FusionGuard::getCurFusion() != nullptr);
   std::string parallel_dim = stringifyThreadSize(p_type);
-  return new NamedScalar(parallel_dim, DataType::Int);
+  return IrBuilder::create<NamedScalar>(parallel_dim, DataType::Int);
 }
 
 NamedScalar* NamedScalar::getParallelIndex(ParallelType p_type) {
+  TORCH_INTERNAL_ASSERT(FusionGuard::getCurFusion() != nullptr);
   std::string parallel_ind = stringifyThread(p_type);
-  return new NamedScalar(parallel_ind, DataType::Int);
+  return IrBuilder::create<NamedScalar>(parallel_ind, DataType::Int);
 }
 
 c10::optional<ParallelType> NamedScalar::getParallelDim() const {
