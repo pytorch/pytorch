@@ -69,9 +69,9 @@ Diagram::
                        /
      linear_weight_int8
 
-API example::
+PTDQ API Example::
 
-  import torch_cause_an_error
+  import torch
 
   # define a floating point model
   class M(torch.nn.Module):
@@ -124,9 +124,9 @@ Diagram::
                         /
       linear_weight_int8
 
-API Example::
+PTSQ API Example::
 
-  import torch
+  import torch_cause_error
 
   # define a floating point model where some layers could be statically quantized
   class M(torch.nn.Module):
@@ -222,7 +222,7 @@ Diagram::
                        /
      linear_weight_int8
 
-API Example::
+QAT API Example::
 
   import torch
 
@@ -325,7 +325,7 @@ to do the following in addition:
 
 There are multiple quantization types in post training quantization (weight only, dynamic and static) and the configuration is done through `qconfig_mapping` (an argument of the `prepare_fx` function).
 
-API Example::
+FXPTQ API Example::
 
   import torch
   from torch.ao.quantization import QConfigMapping
@@ -794,106 +794,101 @@ on that output. The observer will be stored under the `activation_post_process` 
 as an attribute of the custom module instance. Relaxing these restrictions may
 be done at a future time.
 
-Example::
+Custom API Example::
 
-    import torch
-    import torch.nn.quantized as nnq
-    from torch.quantization import QConfigMapping
-    import torch.quantization.quantize_fx
+  import torch
+  import torch.nn.quantized as nnq
+  from torch.ao.quantization import QConfigMapping
+  import torch.ao.quantization.quantize_fx
 
-    # original fp32 module to replace
-    class CustomModule(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.linear = torch.nn.Linear(3, 3)
+  # original fp32 module to replace
+  class CustomModule(torch.nn.Module):
+      def __init__(self):
+          super().__init__()
+          self.linear = torch.nn.Linear(3, 3)
 
-        def forward(self, x):
-            return self.linear(x)
+      def forward(self, x):
+          return self.linear(x)
 
-    # custom observed module, provided by user
-    class ObservedCustomModule(torch.nn.Module):
-        def __init__(self, linear):
-            super().__init__()
-            self.linear = linear
+  # custom observed module, provided by user
+  class ObservedCustomModule(torch.nn.Module):
+      def __init__(self, linear):
+          super().__init__()
+          self.linear = linear
 
-        def forward(self, x):
-            return self.linear(x)
+      def forward(self, x):
+          return self.linear(x)
 
-        @classmethod
-        def from_float(cls, float_module):
-            assert hasattr(float_module, 'qconfig')
-            observed = cls(float_module.linear)
-            observed.qconfig = float_module.qconfig
-            return observed
+      @classmethod
+      def from_float(cls, float_module):
+          assert hasattr(float_module, 'qconfig')
+          observed = cls(float_module.linear)
+          observed.qconfig = float_module.qconfig
+          return observed
 
-    # custom quantized module, provided by user
-    class StaticQuantCustomModule(torch.nn.Module):
-        def __init__(self, linear):
-            super().__init__()
-            self.linear = linear
+  # custom quantized module, provided by user
+  class StaticQuantCustomModule(torch.nn.Module):
+      def __init__(self, linear):
+          super().__init__()
+          self.linear = linear
 
-        def forward(self, x):
-            return self.linear(x)
+      def forward(self, x):
+          return self.linear(x)
 
-        @classmethod
-        def from_observed(cls, observed_module):
-            assert hasattr(observed_module, 'qconfig')
-            assert hasattr(observed_module, 'activation_post_process')
-            observed_module.linear.activation_post_process = \
-                observed_module.activation_post_process
-            quantized = cls(nnq.Linear.from_float(observed_module.linear))
-            return quantized
+      @classmethod
+      def from_observed(cls, observed_module):
+          assert hasattr(observed_module, 'qconfig')
+          assert hasattr(observed_module, 'activation_post_process')
+          observed_module.linear.activation_post_process = \
+              observed_module.activation_post_process
+          quantized = cls(nnq.Linear.from_float(observed_module.linear))
+          return quantized
 
-    #
-    # example API call (Eager mode quantization)
-    #
+  #
+  # example API call (Eager mode quantization)
+  #
 
-    m = torch.nn.Sequential(CustomModule()).eval()
-
-    prepare_custom_config_dict = {
-        "float_to_observed_custom_module_class": {
-            CustomModule: ObservedCustomModule
-        }
-    }
-    convert_custom_config_dict = {
-        "observed_to_quantized_custom_module_class": {
-            ObservedCustomModule: StaticQuantCustomModule
-        }
-    }
-
-    m.qconfig = torch.quantization.default_qconfig
-    mp = torch.quantization.prepare(
-        m, prepare_custom_config_dict=prepare_custom_config_dict)
-    # calibration (not shown)
-    mq = torch.quantization.convert(
-        mp, convert_custom_config_dict=convert_custom_config_dict)
-
-    #
-    # example API call (FX graph mode quantization)
-    #
-
-    m = torch.nn.Sequential(CustomModule()).eval()
-
-    qconfig_mapping = QConfigMapping().set_global(torch.quantization.default_qconfig)
-    prepare_custom_config_dict = {
-        "float_to_observed_custom_module_class": {
-            "static": {
-                CustomModule: ObservedCustomModule,
-            }
-        }
-    }
-    convert_custom_config_dict = {
-        "observed_to_quantized_custom_module_class": {
-            "static": {
-                ObservedCustomModule: StaticQuantCustomModule,
-            }
-        }
-    }
-    mp = torch.quantization.quantize_fx.prepare_fx(
-        m, qconfig_mapping, prepare_custom_config_dict=prepare_custom_config_dict)
-    # calibration (not shown)
-    mq = torch.quantization.quantize_fx.convert_fx(
-        mp, convert_custom_config_dict=convert_custom_config_dict)
+  m = torch.nn.Sequential(CustomModule()).eval()
+  prepare_custom_config_dict = {
+      "float_to_observed_custom_module_class": {
+          CustomModule: ObservedCustomModule
+      }
+  }
+  convert_custom_config_dict = {
+      "observed_to_quantized_custom_module_class": {
+          ObservedCustomModule: StaticQuantCustomModule
+      }
+  }
+  m.qconfig = torch.ao.quantization.default_qconfig
+  mp = torch.ao.quantization.prepare(
+      m, prepare_custom_config_dict=prepare_custom_config_dict)
+  # calibration (not shown)
+  mq = torch.ao.quantization.convert(
+      mp, convert_custom_config_dict=convert_custom_config_dict)
+  #
+  # example API call (FX graph mode quantization)
+  #
+  m = torch.nn.Sequential(CustomModule()).eval()
+  qconfig_mapping = QConfigMapping().set_global(torch.ao.quantization.default_qconfig)
+  prepare_custom_config_dict = {
+      "float_to_observed_custom_module_class": {
+          "static": {
+              CustomModule: ObservedCustomModule,
+          }
+      }
+  }
+  convert_custom_config_dict = {
+      "observed_to_quantized_custom_module_class": {
+          "static": {
+              ObservedCustomModule: StaticQuantCustomModule,
+          }
+      }
+  }
+  mp = torch.ao.quantization.quantize_fx.prepare_fx(
+      m, qconfig_mapping, torch.randn(3,3), prepare_custom_config=prepare_custom_config_dict)
+  # calibration (not shown)
+  mq = torch.ao.quantization.quantize_fx.convert_fx(
+      mp, convert_custom_config=convert_custom_config_dict)
 
 Best Practices
 --------------
