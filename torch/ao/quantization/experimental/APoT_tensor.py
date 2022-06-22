@@ -1,18 +1,16 @@
 import torch
-from torch import Tensor
+from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 
 # test1.3
 
 # class to store APoT quantized tensor
 class TensorAPoT(torch.Tensor):
-    @staticmethod
-    def quantize_APoT(tensor2quantize: Tensor) -> Tensor:
+    quantizer: APoTQuantizer
+
+    def __init__(self, quantizer):
         raise NotImplementedError
 
-    def dequantize(self) -> Tensor:
-        raise NotImplementedError
-
-    def q_apot_alpha(self) -> float:
+    def int_repr(self):
         raise NotImplementedError
 
 # test1.1 test1.1
