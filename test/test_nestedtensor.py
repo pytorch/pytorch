@@ -584,7 +584,7 @@ class TestNestedTensorDeviceType(TestCase):
 
         # Mismatch of nested tensor last dim and weight dimension
         weight2 = torch.randn(2, 4, device=device, dtype=dtype)
-        msg = r"Shape mismatch for NestedTensor Linear. NestedTensor last_dim: 2 vs. dim 1 of rhs: 4"
+        msg = r"Shape mismatch for NestedTensor Linear: Expected input's \(a nested tensor\) 'last_dim' to equal 'weight.size\(1\), but got: last_dim = 2, and weight.size\(1\) = 4"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.functional.F.linear(nt, weight2, bias)
 

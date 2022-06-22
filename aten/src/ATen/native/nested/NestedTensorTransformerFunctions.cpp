@@ -24,8 +24,8 @@ void check_nested_tensor_matrix_constraints(
   TORCH_CHECK(
       nested_tensor.dim() == 3 && dense_matrix.dim() == 2,
       caller,
-      " requires nested_tensor.dim == 3 and dense_matrix.dim == 2. "
-      "Nested tensor dim: ",
+      " requires nested_tensor.dim == 3 and dense_matrix.dim == 2."
+      " Nested tensor dim: ",
       nested_tensor.dim(),
       ". Dense tensor dim: ",
       dense_matrix.dim());
@@ -34,9 +34,8 @@ void check_nested_tensor_matrix_constraints(
       last_dim == dense_matrix.size(1),
       "Shape mismatch for NestedTensor ",
       caller,
-      ". NestedTensor last_dim: ",
-      last_dim,
-      " vs. dim 1 of rhs: ",
+      ": Expected input's (a nested tensor) 'last_dim' to equal 'weight.size(1),",
+      " but got: last_dim = ", last_dim,", and weight.size(1) = ",
       dense_matrix.size(1));
 }
 } // namespace
