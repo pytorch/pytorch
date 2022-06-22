@@ -502,7 +502,8 @@ struct map_types_to_values final {
 template <class... Types>
 struct map_types_to_values<typelist<Types...>> final {
   template <class Func>
-  static std::tuple<std::invoke_result_t<Func(type_<Types>)>...> call(Func&& func) {
+  static std::tuple<std::invoke_result_t<Func(type_<Types>)>...> call(
+      Func&& func) {
     return std::tuple<std::invoke_result_t<Func(type_<Types>)>...>{
         std::forward<Func>(func)(type_<Types>())...};
   }

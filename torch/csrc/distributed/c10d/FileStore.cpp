@@ -22,7 +22,7 @@
 #include <sstream>
 #include <system_error>
 #include <thread>
-#include <typetraits>
+#include <type_traits>
 
 #include <c10/util/Exception.h>
 

@@ -80,7 +80,8 @@ class LeftRight final {
 
   template <typename F>
 #if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-  auto read(F&& readFunc) const -> typename std::invoke_result<F(const T&)>::type {
+  auto read(F&& readFunc) const ->
+      typename std::invoke_result<F(const T&)>::type {
 #else
   auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
 #endif
@@ -225,7 +226,8 @@ class RWSafeLeftRightWrapper final {
 
   template <typename F>
 #if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-  auto read(F&& readFunc) const -> typename std::invoke_result<F(const T&)>::type {
+  auto read(F&& readFunc) const ->
+      typename std::invoke_result<F(const T&)>::type {
 #else
   auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
 #endif

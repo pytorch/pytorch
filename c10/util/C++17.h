@@ -161,7 +161,6 @@ CUDA_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
 
 #undef CUDA_HOST_DEVICE
 
-
 #if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
 template <typename Functor, typename... Args>
 typename std::enable_if<
