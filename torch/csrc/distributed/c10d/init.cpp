@@ -989,7 +989,7 @@ Arguments:
               "broadcast",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
-                 ::c10d::BroadcastOptions opts) {
+                 const ::c10d::BroadcastOptions& opts) {
                 return ::c10d::ops::broadcast(self, tensors, opts);
               },
               py::arg("tensors"),
@@ -1013,7 +1013,7 @@ Arguments:
               "allreduce",
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<at::Tensor>& tensors,
-                 ::c10d::AllreduceOptions opts) {
+                 const ::c10d::AllreduceOptions& opts) {
                 return ::c10d::ops::allreduce(self, tensors, opts);
               },
               py::arg("tensors"),
@@ -1087,7 +1087,7 @@ Arguments:
               [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
                  const std::vector<std::vector<at::Tensor>>& output_tensors,
                  const std::vector<at::Tensor>& input_tensor,
-                 ::c10d::AllgatherOptions opts) {
+                 const ::c10d::AllgatherOptions& opts) {
                 return ::c10d::ops::allgather(
                     self, output_tensors, input_tensor, opts);
               },
@@ -1178,7 +1178,13 @@ Arguments:
 
           .def(
               "reduce_scatter",
-              &::c10d::ProcessGroup::reduce_scatter,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& output_tensors,
+                 const std::vector<std::vector<at::Tensor>>& input_tensors,
+                 const ::c10d::ReduceScatterOptions& opts) {
+                return ::c10d::ops::reduce_scatter(
+                    self, output_tensors, input_tensors, opts);
+              },
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
@@ -1186,7 +1192,7 @@ Arguments:
 
           .def(
               "reduce_scatter",
-              [](::c10d::ProcessGroup& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                  at::Tensor& output,
                  std::vector<at::Tensor>& input,
                  ::c10d::ReduceOp op) {
@@ -1194,7 +1200,7 @@ Arguments:
                 std::vector<std::vector<at::Tensor>> inputs = {input};
                 ::c10d::ReduceScatterOptions opts;
                 opts.reduceOp = op;
-                return pg.reduce_scatter(outputs, inputs, opts);
+                return ::c10d::ops::reduce_scatter(pg, outputs, inputs, opts);
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
