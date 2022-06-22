@@ -1,16 +1,14 @@
 
-import operator_benchmark as op_bench, cross_product_configs
+import operator_benchmark as op_bench
 import torch
 from torch import nn
 
 from torch.ao import sparsity
 
-from pt import configs
-
 
 """Microbenchmarks for sparsifier."""
 
-sparse_configs_short = op_bench.cross_product_configs(
+sparse_configs_short = op_bench.config_list(
     attr_names=["M", "SL", "SBS", "ZPB"],
     attrs=[
         [(32, 16), 0.3, (4, 1), 2],
@@ -32,22 +30,22 @@ class WeightNormSparsifierBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, M, SL, SBS, ZPB):
         weight = torch.ones(M)
         model = nn.Module()
-        model.weight = weight
+        model.register_buffer("weight", weight)
 
-        sparse_config = [model]
+        sparse_config = [{"tensor_fqn": "weight"}]
         self.sparsifier = sparsity.WeightNormSparsifier(
             sparsity_level=SL,
             sparse_block_shape=SBS,
             zeros_per_block=ZPB,
         )
         self.sparsifier.prepare(model, config=sparse_config)
-        self.set_module_name("sparsifier")
+        self.inputs = {}  # All benchmarks need inputs :)
+        self.set_module_name("weight_norm_sparsifier_step")
 
     def forward(self):
         self.sparsifier.step()
 
 all_tests = sparse_configs_short + sparse_configs_long
-
 op_bench.generate_pt_test(all_tests, WeightNormSparsifierBenchmark)
 
 
