@@ -1,20 +1,25 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
-import sys
-from functools import wraps, partial
 
 import torch
 import torch.distributed as dist
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    TestCase,
+    run_tests,
+)
 from torch.futures import Future
-import torch.distributed as dist
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 import test_c10d_common
 import weakref
 import tempfile
+from torch._C._distributed_c10d import _create_work_from_future
 
+def create_work(result):
+    future = Future()
+    future.set_result(result)
+    return _create_work_from_future(future)
 
 class MyWork(dist._Work):
     def __init__(self, result, pg):
@@ -38,7 +43,7 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
     """
     This PG only supports world_size of 1
     """
-    def __init__(self, rank, world):
+    def __init__(self, rank, world, use_wrapper):
         super(LonelyRankProcessGroup, self).__init__(rank, world)
         assert rank == 0
         assert world == 1
@@ -47,9 +52,12 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
         self._world = world
         self.wait_count = 0
         self.get_future_count = 0
+        self.use_wrapper = use_wrapper
         self._work = []
 
     def broadcast(self, tensor_list, opts):
+        if self.use_wrapper:
+            return create_work(tensor_list)
         res = MyWork(tensor_list, self)
         self._work.append(res)
         return res
@@ -57,6 +65,8 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
     def allgather(self, output_tensors, input_tensor, opts):
         for o, i in zip(output_tensors[0], input_tensor):
             o.copy_(i)
+        if self.use_wrapper:
+            return create_work(output_tensors)
 
         res = MyWork(output_tensors, self)
         self._work.append(res)
@@ -64,6 +74,8 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
         return res
 
     def allreduce(self, tensors, opts):
+        if self.use_wrapper:
+            return create_work(tensors)
         res = MyWork(tensors, self)
         self._work.append(res)
         return res
@@ -77,9 +89,10 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
     def __repr__(self):
         return f"PLG w:{self._world} r:{self._rank}"
 
-class TestDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest, TestCase):
+# We cannot use parametrize as some tests are defined on the base class and use _get_process_group
+class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def setUp(self):
-        super(TestDDPSingleRank, self).setUp()
+        super(AbstractDDPSingleRank, self).setUp()
         # replicate what MultiProcessTest _spawn_proccess does
         self.file_name = tempfile.NamedTemporaryFile(delete=False).name
         self.rank = 0
@@ -89,18 +102,17 @@ class TestDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest, Test
         return 1
 
     def tearDown(self):
-        super(TestDDPSingleRank, self).tearDown()
+        super(AbstractDDPSingleRank, self).tearDown()
         try:
             os.remove(self.file_name)
         except OSError:
             pass
 
     def _get_process_group(self):
-        store = self._get_store()
-        return LonelyRankProcessGroup(self.rank, self.world_size)
+        return LonelyRankProcessGroup(self.rank, self.world_size, self.use_wrapper)
 
     def test_ddp_invoke_work_object(self):
-        pg = LonelyRankProcessGroup(0, 1)      
+        pg = self._get_process_group()
 
         torch.manual_seed(123)
         model = nn.Sequential(
@@ -108,27 +120,38 @@ class TestDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest, Test
             nn.ReLU()
         )
         wrapped_model = model
+        input_tensor = torch.rand(2)
         model = DDP(model, process_group=pg)
-        model(torch.tensor([0.99, 0.77])).sum().backward()
-        
+        model(input_tensor).sum().backward()
+
         ddp_grad = wrapped_model[0].bias.grad.clone()
 
         wrapped_model.zero_grad()
-        wrapped_model(torch.tensor([0.99, 0.77])).sum().backward()
+        wrapped_model(input_tensor).sum().backward()
         self.assertEqual(wrapped_model[0].bias.grad, ddp_grad)
-        self.assertTrue(pg.wait_count > 0)
-        self.assertTrue(pg.get_future_count > 0)
+        if not self.use_wrapper:
+            self.assertTrue(pg.wait_count > 0)
+            self.assertTrue(pg.get_future_count > 0)
 
     def test_ddp_with_pypg(self):
-        pg = LonelyRankProcessGroup(0, 1)      
+        pg = self._get_process_group()
 
         self._test_ddp_with_process_group(pg, [torch.device("cpu")], device_ids=None)
 
     def test_ddp_with_pypg_with_grad_views(self):
-        pg = LonelyRankProcessGroup(0, 1)      
+        pg = self._get_process_group()
 
         self._test_ddp_with_process_group(pg, [torch.device("cpu")], device_ids=None, gradient_as_bucket_view=True)
 
+class TestDDPWithWorkSubclass(AbstractDDPSingleRank, TestCase):
+    def setUp(self):
+        super(TestDDPWithWorkSubclass, self).setUp()
+        self.use_wrapper = False
+
+class TestDDPWithWorkWrapper(AbstractDDPSingleRank, TestCase):
+    def setUp(self):
+        super(TestDDPWithWorkWrapper, self).setUp()
+        self.use_wrapper = True
 
 if __name__ == '__main__':
     run_tests()
