@@ -92,11 +92,6 @@ Tensor _nested_from_padded_backward(
     const Tensor& grad,
     const Tensor& input,
     const bool do_transform_0213);
-std::tuple<Tensor, Tensor, Tensor> NestedTensor_linear_backward(
-    const Tensor& grad,
-    const Tensor& self,
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt);
 Tensor linalg_vector_norm_jvp(
     const Tensor& self_p,
     const Tensor& self_t,

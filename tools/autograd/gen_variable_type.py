@@ -795,7 +795,7 @@ def gen_variable_type_func(
             f"https://github.com/pytorch/pytorch/tree/master/aten/src/ATen/native#choosing-the-right-dispatch-keyword "
             f"for instructions to choose the right dispatch keyword."
         )
-        # assert f.is_abstract, msg
+        assert f.is_abstract, msg
 
     return {
         "type_derived_method_definitions": [type_definition],

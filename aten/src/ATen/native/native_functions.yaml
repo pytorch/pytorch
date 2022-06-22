@@ -2728,7 +2728,7 @@
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
   dispatch:
-    CPU, CUDA: linear
+    CompositeImplicitAutograd: linear
     MPS: _mps_linear
     NestedTensorCPU, NestedTensorCUDA: nested_linear
 
