@@ -10,6 +10,7 @@ from torch import distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     OptimStateKeyType,
+    StateDictType,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
@@ -134,7 +135,7 @@ class NestedModel(torch.nn.Module):
         loss.backward()
 
     @staticmethod
-    def wrap(model, group=None) -> torch.nn.Module:
+    def wrap(model, group=None, ignore_modules: bool = False) -> torch.nn.Module:
         # Flatten Bias0; then flatten weight and Bias1 together into `block1`
         model.block1.bias_module0 = FSDP(
             model.block1.bias_module0, process_group=group,
@@ -149,7 +150,10 @@ class NestedModel(torch.nn.Module):
         )
         model.block2[1] = FSDP(model.block2[1], process_group=group)
         # Flatten weight, Bias, bias into `block2[2]`
-        model.block2[2] = FSDP(model.block2[2], process_group=group)
+        ignored_modules = [model.block2[2].bias_module0] if ignore_modules else None
+        model.block2[2] = FSDP(
+            model.block2[2], process_group=group, ignored_modules=ignored_modules,
+        )
         return model
 
     @staticmethod
@@ -463,6 +467,22 @@ class TestFSDPOptimState(FSDPTest):
         self._check_same_state(
             full_osd, ref_osd, check_same_param_keys=check_same_param_keys,
         )
+
+    @skip_if_lt_x_gpu(2)
+    def test_full_optim_state_dict_keys(self):
+        """Tests that the parameter keys returned by
+        :meth:`full_optim_state_dict` match those of :meth:`state_dict` with
+        full ``state_dict_type`` for a non-FSDP-root model with nested FSDP
+        instances and ignored modules."""
+        device = torch.device("cuda")
+        model = NestedModel().to(device)
+        wrapped_model = NestedModel.wrap(model, ignore_modules=True)
+        optim = torch.optim.Adam(wrapped_model.parameters(), lr=1e-3)
+        self._step_model(model, optim, device)
+        optim_state_dict = FSDP.full_optim_state_dict(wrapped_model, optim, rank0_only=False)
+        with FSDP.state_dict_type(wrapped_model, StateDictType.FULL_STATE_DICT):
+            state_dict = wrapped_model.state_dict()
+        self.assertEqual(optim_state_dict["state"].keys(), state_dict.keys())
 
     @skip_if_lt_x_gpu(2)
     def test_full_optim_state_dict_nested_invalid(self):

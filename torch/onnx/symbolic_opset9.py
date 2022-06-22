@@ -1063,20 +1063,19 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     self_rank = symbolic_helper._get_tensor_rank(self)
+    weight_sizes = symbolic_helper._get_tensor_sizes(weight)
+    weight_rank = len(weight_sizes)
     if self_rank is not None:
         if self_rank > 2:
             # make weight unidirectional broadcastable
             weight = symbolic_helper._unsqueeze_helper(
                 g, weight, list(range(1, self_rank - 1))
             )
-        elif self_rank == 0:
-            # weight is always rank 1. torch allows scalar self, and ONNX is ambiguous
-            # about whether this is allowed, but some implementations enforce
-            # rank(self) >= rank(weight), which makes sense.
-            self = symbolic_helper._unsqueeze_helper(g, self, [0])
-            self_rank = 1
+        elif self_rank == 0 and weight_sizes == [1]:
+            # self and weight are both scalar but weight has rank == 1, squeeze weight.
+            weight = symbolic_helper._squeeze_helper(g, weight, [0])
+            weight_rank = 0
 
-    weight_rank = symbolic_helper._get_tensor_rank(weight)
     if self_rank is not None and weight_rank is not None:
         assert (
             self_rank >= weight_rank
@@ -4079,7 +4078,7 @@ def _any(g, *args):
     input_sum = symbolic_helper._reducesum_helper(
         g, input, axes_i=dim, keepdims_i=keepdim
     )
-    return gt(g, input_sum, g.op("Constant", value_t=torch.LongTensor([0])))
+    return gt(g, input_sum, g.op("Constant", value_t=torch.tensor(0, dtype=torch.long)))
 
 
 def _all(g, *args):
@@ -4545,7 +4544,14 @@ def index(g, self, index):
 
 
 @symbolic_helper.parse_args("v", "v", "is", "i", "v")
-def linalg_norm(g, self, ord, dim, keepdim, dtype):
+def linalg_norm(
+    g,
+    self: torch._C.Value,
+    ord: torch._C.Value,
+    dim: List[int],
+    keepdim: int,
+    dtype: torch._C.Value,
+):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.norm.html
     ord_value = None
     if dim is None:
@@ -4572,11 +4578,18 @@ def linalg_norm(g, self, ord, dim, keepdim, dtype):
 
 
 @symbolic_helper.parse_args("v", "f", "is", "i", "v")
-def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
+def linalg_vector_norm(
+    g,
+    self: torch._C.Value,
+    ord: float,
+    dim: List[int],
+    keepdim: int,
+    dtype: torch._C.Value,
+):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.vector_norm.html
     if dim is None:
         self = symbolic_helper._reshape_helper(g, self, [-1])
-        keepdim = None
+        keepdim = 0
 
     if ord == math.inf:
         result = g.op("ReduceMax", g.op("Abs", self), axes_i=dim, keepdims_i=keepdim)
@@ -4587,20 +4600,31 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
             "linalg_vector_norm", 9, 11, "ord=0 not supported"
         )
     else:
-        ord_op = g.op("Constant", value_t=torch.FloatTensor([ord]))
+        ord_op = g.op("Constant", value_t=torch.tensor(ord, dtype=torch.float32))
         result = symbolic_helper._reducesum_helper(
             g, g.op("Pow", g.op("Abs", self), ord_op), axes_i=dim, keepdims_i=keepdim
         )
         result = g.op(
             "Pow",
             result,
-            g.op("Div", g.op("Constant", value_t=torch.FloatTensor([1])), ord_op),
+            g.op(
+                "Div",
+                g.op("Constant", value_t=torch.tensor(1, dtype=torch.float32)),
+                ord_op,
+            ),
         )
     return result
 
 
 @symbolic_helper.parse_args("v", "v", "is", "i", "v")
-def linalg_matrix_norm(g, self, ord, dim, keepdim, dtype):
+def linalg_matrix_norm(
+    g,
+    self: torch._C.Value,
+    ord: torch._C.Value,
+    dim: List[int],
+    keepdim: int,
+    dtype: torch._C.Value,
+):
     # Conditions based on https://pytorch.org/docs/stable/generated/torch.linalg.matrix_norm.html
     ord_value = symbolic_helper._parse_arg(ord, "s")
     if ord_value == "fro":
