@@ -26,5 +26,8 @@ void TORCH_API manual_seed_all(uint64_t seed);
 /// Waits for all kernels in all streams on a CUDA device to complete.
 void TORCH_API synchronize(int64_t device_index = -1);
 
+/// Sets memory fraction for a process.
+void TORCH_API set_per_process_memory_fraction(float fraction, int64_t device_index = -1);
+
 } // namespace cuda
 } // namespace torch

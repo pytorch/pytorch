@@ -3,6 +3,7 @@
 #include <ATen/Context.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/util/irange.h>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 #include <cstddef>
 
@@ -59,6 +60,21 @@ void synchronize(int64_t device_index) {
       "Device index out of range: ",
       device_index);
   at::detail::getCUDAHooks().deviceSynchronize(device_index);
+}
+
+void set_per_process_memory_fraction(float fraction, int64_t device_index) {
+  TORCH_CHECK(is_available(), "No CUDA GPUs are available");
+  int64_t num_gpus = cuda::device_count();
+  TORCH_CHECK(
+      device_index == -1 || device_index < num_gpus,
+      "Device index out of range: ",
+      device_index);
+  TORCH_CHECK(
+      fraction >= 0.0 || fraction <= 1.0,
+      "Memory fraction should be between 0 and 1, got: ",
+      fraction
+      );
+  c10::cuda::CUDACachingAllocator::setMemoryFraction(fraction, int(device_index));
 }
 
 } // namespace cuda
