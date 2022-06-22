@@ -450,7 +450,7 @@ class FlatParamHandle:
         chunks = torch.flatten(tensor).chunk(world_size)
         if len(chunks) < (rank + 1):
             # This rank gets an empty chunk fully padded with zeros since there
-            # not enough chunks across ranks
+            # are not enough chunks across ranks
             chunk = chunks[0].new_empty(0)
         else:
             chunk = chunks[rank]
