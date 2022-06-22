@@ -1171,15 +1171,16 @@ def clamp(
 ) -> TensorLikeType:
     a, min, max = _maybe_broadcast(a, min, max)
 
+    a_isnan = isnan(a)
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
     if min is not None:
-        condition = prims.ge(a, min)
-        return prims.where(condition, a, min)
+        condition = bitwise_or(ge(a, min), a_isnan)
+        a = prims.where(condition, a, min)
     if max is not None:
-        condition = prims.le(a, max)
-        return prims.where(condition, a, max)
+        condition = bitwise_or(le(a, max), a_isnan)
+        a = prims.where(condition, a, max)
 
     return a
 
@@ -1194,7 +1195,7 @@ def clamp_min(
     min: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
     self, min = _maybe_broadcast(self, min)
-    condition = prims.ge(self, min)
+    condition = bitwise_or(ge(self, min), isnan(self))
 
     return prims.where(condition, self, min)
 
@@ -1209,7 +1210,7 @@ def clamp_max(
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
     self, max = _maybe_broadcast(self, max)
-    condition = prims.le(self, max)
+    condition = bitwise_or(le(self, max), isnan(self))
 
     return prims.where(condition, self, max)
 
