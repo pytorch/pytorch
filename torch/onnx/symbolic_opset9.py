@@ -1063,20 +1063,19 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     self_rank = symbolic_helper._get_tensor_rank(self)
+    weight_sizes = symbolic_helper._get_tensor_sizes(weight)
+    weight_rank = len(weight_sizes)
     if self_rank is not None:
         if self_rank > 2:
             # make weight unidirectional broadcastable
             weight = symbolic_helper._unsqueeze_helper(
                 g, weight, list(range(1, self_rank - 1))
             )
-        elif self_rank == 0:
-            # weight is always rank 1. torch allows scalar self, and ONNX is ambiguous
-            # about whether this is allowed, but some implementations enforce
-            # rank(self) >= rank(weight), which makes sense.
-            self = symbolic_helper._unsqueeze_helper(g, self, [0])
-            self_rank = 1
+        elif self_rank == 0 and weight_sizes == [1]:
+            # self and weight are both scalar but weight has rank == 1, squeeze weight.
+            weight = symbolic_helper._squeeze_helper(g, weight, [0])
+            weight_rank = 0
 
-    weight_rank = symbolic_helper._get_tensor_rank(weight)
     if self_rank is not None and weight_rank is not None:
         assert (
             self_rank >= weight_rank
