@@ -54,11 +54,12 @@ class SchemaCheckMode(TorchDispatchMode):
             return False
 
         def is_aliasing(output_alias_info, arg_alias_pairs):
-            if output_alias_info is None:
-                return False
             for arg in arg_alias_pairs:
-                if arg.alias_info is not None and bool(len(output_alias_info.after_set & arg.alias_info.after_set)):
-                    return True
+                if arg.alias_info is not None:
+                    if '*' in arg.alias_info.after_set:
+                        return True
+                    elif output_alias_info is not None and bool(len(output_alias_info.after_set & arg.alias_info.after_set)):
+                        return True
             return False
 
         def are_args_aliasing(lhs, rhs):
@@ -114,7 +115,8 @@ class SchemaCheckMode(TorchDispatchMode):
         u_out = [tree_map(unwrap, tree_flatten(i)[0]) for i in tuple_out]
 
         # Construct an aliasing map between op arguments for verifying aliasing pairs
-        # between op arguments and op outputs
+        # between op arguments and op outputs. This is used to allow cases where two aliasing arguments
+        # cause a non-mutable/non-aliasing argument to mutate or alias.
         arg_alias_pairs_map = {standardize_name(arg.name) : [arg] for arg in func._schema.arguments}
 
         # Construct an aliasing set for each output for verifying aliasing pairs

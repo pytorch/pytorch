@@ -228,6 +228,14 @@ class TestSchemaCheck(JitTestCase):
             actual = torch.linalg.multi_dot([a, b, c])
         self.assertEqual(expected, actual)
 
+    # Tests that SchemaCheckMode wraps torch.Tensor with an op that has the (a -> *) notation
+    def test_schema_check_mode_functionality_wildcard_after(self):
+        x = torch.rand((3, 3))
+        expected = x.chunk(6)
+        with enable_torch_dispatch_mode(SchemaCheckMode()):
+            actual = x.chunk(6)
+        self.assertEqual(expected, actual)
+
     # Tests that SchemaCheckMode wraps torch.Tensor when there is a kwarg tensor input
     def test_schema_check_mode_functionality_kwarg_tensor(self):
         x = torch.rand((3, 5))
