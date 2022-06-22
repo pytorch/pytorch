@@ -10659,9 +10659,6 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False)),
-                    # skips=(
-                    #     DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-                    # )),
     BinaryUfuncInfo('clamp_min',
                     ref=_clamp_min_numpy,
                     dtypes=all_types_and(torch.bfloat16),
@@ -10670,9 +10667,6 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False)),
-                    # skips=(
-                    #     DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
-                    # )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
                     dtypes=all_types_and_complex_and(torch.chalf, torch.float16, torch.bfloat16, torch.bool),
