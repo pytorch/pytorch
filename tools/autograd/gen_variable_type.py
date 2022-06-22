@@ -141,6 +141,8 @@ DONT_REQUIRE_DERIVATIVE = {
     "logical_xor",
     "logical_not",
     "logical_or",
+    # This function returns nested_tensor shape as a tensor that is non-differentiable
+    "_nested_tensor_size",
 }
 
 # The C -> R functions at the time of adding this are still being audited and tested
@@ -236,6 +238,8 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "exp",
     "nonzero",
     "mean",
+    "std_mean",
+    "var_mean",
     "inverse",
     "solve",
     "linalg_cholesky",
