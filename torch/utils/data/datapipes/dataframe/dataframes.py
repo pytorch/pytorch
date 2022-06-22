@@ -94,12 +94,22 @@ class Capture(object):
         self.ctx['operations'].append(t)
         return var
 
+    # TODO(VitalyFedyunin): Add tests
+    def __call__(self, *args, **kwargs):
+        print(ctx=self.ctx, args=args, kwargs=kwargs)
+        res = CaptureCall(self, ctx=self.ctx, args=args, kwargs=kwargs)
+        var = CaptureVariable(res, ctx=self.ctx)
+        t = CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
+        self.ctx['operations'].append(t)
+        return var
+
 
 class CaptureF(Capture):
     def __init__(self, ctx=None, **kwargs):
         if ctx is None:
             self.ctx = {'operations': [], 'variables': []}
-        self.ctx = ctx
+        else:
+            self.ctx = ctx
         self.kwargs = kwargs
 
 
