@@ -20868,29 +20868,23 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
-        # RuntimeError: Tried to reduce a 0-dim tensor
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
-        supports_nvfuser=False
     ),
     ReductionPythonRefInfo(
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.std",
@@ -20907,7 +20901,6 @@ python_ref_db = [
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True,
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.prod",
