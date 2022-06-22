@@ -1224,6 +1224,7 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
 
 
 @register_decomposition(torch.ops.aten.kl_div_backward)
+@pw_cast_for_opmath
 def kl_div_backward(
     grad_output: Tensor,
     self: Tensor,
