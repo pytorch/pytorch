@@ -15,6 +15,9 @@ on:
       MERGEBOT_TOKEN:
         required: true
         description: Permissions for opening PR
+      PYTORCHBOT_TOKEN:
+        required: true
+        description: Permissions for approving PR
 
 env:
   NEW_BRANCH_NAME: update-${{ inputs.repo-name }}-commit-hash/${{ github.run_id }}-${{ github.run_number }}-${{ github.run_attempt }}
@@ -36,59 +39,15 @@ jobs:
           git clone https://github.com/pytorch/${{ inputs.repo-name }}.git --depth=1 --quiet
 
       - name: Check if there already exists a PR
-        uses: actions/github-script@v6
-        id: already-existing
-        with:
-          result-encoding: string
-          script: |
-            const { repo, owner } = context.repo;
-            const open_prs = await github.rest.search.issuesAndPullRequests({
-              q: `is:pr is:open in:title author:pytorchmergebot repo:${owner}/${repo} ${{ inputs.repo-name }} hash update`
-            });
-            if (open_prs.data.total_count != 0) {
-              const pr = await github.rest.pulls.get({
-                owner,
-                repo,
-                pull_number: open_prs.data.items[0].number,
-              });
-              return pr.data.head.ref
-            } else { return ''; }
-
-      - name: Get new commit hash, update file, push to branch
         shell: bash
         env:
-          BRANCH_NAME: ${{ steps.already-existing.outputs.result || env.NEW_BRANCH_NAME }}
+          REPO_NAME: ${{ inputs.repo-name }}
+          BRANCH: ${{ inputs.branch }}
+          MERGEBOT_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          PYTORCHBOT_TOKEN: ${{ secrets.PYTORCHBOT_TOKEN }}
         run: |
-          pushd ${{ inputs.repo-name }}
-          git rev-parse ${{ inputs.branch }} > ../.github/${{ inputs.repo-name }}_commit_hash.txt
-          popd
+          # put this here instead of the script to prevent accidentally changing the config when running the script locally
+          git config --global user.name "PyTorch MergeBot"
+          git config --global user.email "pytorchmergebot@users.noreply.github.com"
 
-          if [[ $(git diff --exit-code .github/${{ inputs.repo-name }}_commit_hash.txt) ]]; then
-            git config --global user.email "pytorchmergebot@users.noreply.github.com"
-            git config --global user.name "PyTorch MergeBot"
-
-            git checkout -b "${BRANCH_NAME}"
-            git add .github/${{ inputs.repo-name }}_commit_hash.txt
-            git commit -m "update ${{ inputs.repo-name }} commit hash"
-            git push --set-upstream origin "${BRANCH_NAME}" -f
-          fi
-
-      - name: Create Pull Request
-        uses: actions/github-script@v6
-        if: ${{ !steps.already-existing.outputs.result }}
-        with:
-          github-token: ${{ secrets.MERGEBOT_TOKEN }}
-          script: |
-            const { repo, owner } = context.repo;
-            const { NEW_BRANCH_NAME } = process.env;
-            const result = await github.rest.pulls.create({
-              title: '[${{ inputs.repo-name }} hash update] update the pinned ${{ inputs.repo-name }} hash',
-              owner,
-              repo,
-              head: `${NEW_BRANCH_NAME}`,
-              base: 'master',
-              body: [
-                'This PR is auto-generated nightly by [this action](https://github.com/pytorch/pytorch/blob/master/.github/workflows/_update-commit-hash.yml).\n',
-                `Update the pinned ${{ inputs.repo-name }} hash.`
-              ].join('')
-            });
+          python .github/scripts/update_commit_hashes.py --repo-name "${REPO_NAME}" --branch "${BRANCH}"
