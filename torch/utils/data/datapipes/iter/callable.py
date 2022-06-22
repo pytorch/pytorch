@@ -134,23 +134,31 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
 def _collate_helper(conversion, item):
     # TODO(VitalyFedyunin): Verify that item is any sort of batch
     if len(item.items) > 1:
-        print(item.items)
         # TODO(VitalyFedyunin): Compact all batch dataframes into the one
         raise Exception("Only supports one DataFrame per batch")
     df = item[0]
     columns_name = df_wrapper.get_columns(df)
     tuple_names: List = []
     tuple_values: List = []
+
+    for name in conversion.keys():
+        if name not in columns_name:
+            raise Exception("Conversion keys missmatch")
+    
     for name in columns_name:
         if name in conversion:
             if not callable(conversion[name]):
                 raise Exception('Collate (DF)DataPipe requires callable as dict values')
-            tuple_names.append(str(name))
-            value = conversion[name](getattr(df, name))
-            tuple_values.append(value)
+            collation_fn = conversion[name]
+        else:
+            #TODO(VitalyFedyunin): Add default collation into df_wrapper
+            import torcharrow.pytorch as tap
+            collation_fn = tap.rec.Default()
+        tuple_names.append(str(name))
+        value = collation_fn(df[name])
+        tuple_values.append(value)
 
-    if len(tuple_names) != len(conversion.keys()):
-        raise Exception("Conversion keys missmatch")
+    # print(tuple_names)
 
     # TODO(VitalyFedyunin): We can dynamically extract types from the tuple_values here
     tpl_cls = namedtuple("CollateResult", tuple_names)  # type: ignore
