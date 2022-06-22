@@ -22,13 +22,6 @@ if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   export HSA_FORCE_FINE_GRAIN_PCIE=1
 fi
 
-# This token is used by a parser on Jenkins logs for determining
-# if a failure is a legitimate problem, or a problem with the build
-# system; to find out more, grep for this string in ossci-job-dsl.
-echo "ENTERED_USER_LAND"
-
-trap_add cleanup EXIT
-
 if [[ "$BUILD_ENVIRONMENT" != *win-* ]]; then
   if which sccache > /dev/null; then
     # Save sccache logs to file
