@@ -5,6 +5,7 @@ import logging
 import contextlib
 import itertools
 from torch.utils._python_dispatch import TorchDispatchMode, push_torch_dispatch_mode
+from torch.utils._mode_utils import no_dispatch
 
 
 # How the chain of calls works for LoggingTensor:
@@ -20,6 +21,26 @@ from torch.utils._python_dispatch import TorchDispatchMode, push_torch_dispatch_
 #    for the wrapped Tensor and the LoggingTensor itself cannot require gradients.
 # WARNING: We allow these two possibilities for testing purposes. You should NEVER use both in a single
 # test or you might get surprising behavior.
+
+def match_elem_view(inputs, outputs):
+    outputs = outputs if isinstance(outputs, tuple) else (outputs,)
+    for o in outputs:
+        if not isinstance(o, torch.Tensor):
+            continue
+        # Should use storage match. But we can't access them from python right now
+        o_obj = getattr(o, "elem", o)
+        o_ptr = o_obj.data_ptr()
+        o_ptr -= (o_obj.storage_offset() * o_obj.element_size())
+        for i in inputs:
+            if not isinstance(i, torch.Tensor):
+                continue
+            # Should use storage match. But we can't access them from python right now
+            i_obj = getattr(i, "elem", i)
+            i_ptr = i_obj.data_ptr()
+            i_ptr -= (i_obj.storage_offset() * i_obj.element_size())
+            if o_ptr == i_ptr:
+                with no_dispatch():
+                    o.set_(i, o.storage_offset(), o.size(), o.stride())
 
 # TODO: TensorBase should work
 class LoggingTensor(torch.Tensor):
@@ -60,6 +81,7 @@ class LoggingTensor(torch.Tensor):
 
         with cls.context():
             rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+        match_elem_view(args, rs)
         logging.getLogger("LoggingTensor").info(f"{func.__module__}.{func.__name__}", args, kwargs, rs)
         return rs
 

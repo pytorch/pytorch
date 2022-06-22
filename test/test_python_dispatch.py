@@ -9,13 +9,12 @@ import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
 from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
-    log_input, capture_logs, capture_logs_with_logging_tensor_mode
+    log_input, capture_logs, capture_logs_with_logging_tensor_mode, match_elem_view
 from torch.utils._pytree import tree_map
 from torch.utils._python_dispatch import enable_torch_dispatch_mode, push_torch_dispatch_mode, TorchDispatchMode
 
 import logging
 from functools import partial
-
 
 class TestPythonRegistration(TestCase):
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
@@ -78,7 +77,7 @@ class TestPythonRegistration(TestCase):
 
         def my_sum(*args, **kwargs):
             run[0] = True
-            return args[0]
+            return args[0].clone()
 
         my_lib1 = Library("aten", "IMPL")
         my_lib1.impl('aten::sum', my_sum, "CPU")
@@ -214,7 +213,7 @@ class TestPythonRegistration(TestCase):
 
     def test_extend_library_with_dispatch_key_arg(self):
         def my_sum(*args, **kwargs):
-            return args[0]
+            return args[0].clone()
         my_lib1 = Library("aten", "IMPL", dispatch_key="CPU")
 
         # RuntimeError: Explicitly provided dispatch key (Conjugate) is
@@ -1056,7 +1055,9 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
                 outermost = find_outermost_mode(modes)
                 with outermost.restore():
-                    return func(*args, **kwargs)
+                    res = func(*args, **kwargs)
+                match_elem_view(args, res)
+                return res
 
         class Mode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1072,7 +1073,9 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                     else:
                         return t
 
-                return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
+                res = wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
+                match_elem_view(args, res)
+                return res
 
         class BasicMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
@@ -1325,6 +1328,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                     return SubclassWithNone(e) if isinstance(e, torch.Tensor) else e
 
                 rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs)))
+                match_elem_view(args, rs)
                 if func.overloadpacket.__name__ == "add":
                     return None
                 else:
