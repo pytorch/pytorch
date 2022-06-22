@@ -1180,7 +1180,8 @@ def clamp(
         if isinstance(min, TensorLike):
             condition = bitwise_and(condition, bitwise_not(isnan(min)))
         a = prims.where(condition, a, min)
-    if max is not None: a_isnan = isnan(a)
+    if max is not None:
+        a_isnan = isnan(a)
         if isinstance(max, TensorLike):
             condition = bitwise_and(condition, bitwise_not(isnan(max)))
         condition = bitwise_or(le(a, max), a_isnan)
