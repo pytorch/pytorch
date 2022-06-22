@@ -6,7 +6,8 @@ from torch.testing._internal.common_quantization import (
     SingleLayerLinearModel,
 )
 from os.path import exists
-import os
+from os import getcwd
+
 
 class TestQuantizationDocs(QuantizationTestCase):
     r"""
@@ -15,7 +16,7 @@ class TestQuantizationDocs(QuantizationTestCase):
     must be provided in the test.
     """
 
-    def _get_code(self, filename, first_line, last_line, offset=2, strict=True):
+    def _get_code(self, path_from_pytorch, first_line, last_line, offset=2, strict=True):
         r"""
         This function reads in the code from the docs, note that first and last
         line refer to the line number (first line of doc is 1), the offset due to
@@ -25,18 +26,39 @@ class TestQuantizationDocs(QuantizationTestCase):
         the last line are `newlines`, this is to ensure that the addition of a new line
         in the docs does not shift the code chunk out of the selection window.
         """
-        assert exists(filename), \
-            "we can't find {}, we are at {} \n\nand the stuff in here is {}" \
-            "and the stuff up one level is {}".format(filename, os.getcwd(), os.listdir(), os.listdir(".."))
-        if exists(filename):
-            file = open(filename)
+        def get_correct_path(path_from_pytorch):
+            r"""
+            Current working directory when CI is running test seems to vary, this function
+            looks for the pytorch directory and if it finds it looks for the path to the
+            file and if the file exists returns that path, otherwise keeps looking. Will
+            only work if cwd contains pytorch or is somewhere in the pytorch repo.
+            """
+
+            # check if cwd contains pytorch
+            if exists('./pytorch' + path_from_pytorch):
+                return './pytorch' + path_from_pytorch
+
+            # check if pytorch is cwd or a parent of cwd
+            cur_dir_path = getcwd()
+            folders = cur_dir_path.split('/')[::-1]
+            path_prefix = './'
+            for folder in folders:
+                if folder == 'pytorch' and exists(path_prefix + path_from_pytorch):
+                    return(path_prefix + path_from_pytorch)
+                path_prefix = '.' + path_prefix
+            # if not found
+            return None
+
+        path_to_file = get_correct_path(path_from_pytorch)
+        if path_to_file:
+            file = open(path_to_file)
             content = file.readlines()
             if strict:
                 assert content[first_line - 2] == "\n" and content[last_line] == "\n", (
                     "The line before and after the code chunk should be a newline."
-                    " If new material was added to {}, please update this test with"
+                    "If new material was added to {}, please update this test with"
                     "the new code chunk line numbers, previously the lines were "
-                    "{} to {}".format(filename, first_line, last_line)
+                    "{} to {}".format(path_to_file, first_line, last_line)
                 )
 
             code_to_test = ""
@@ -57,21 +79,21 @@ class TestQuantizationDocs(QuantizationTestCase):
             exec(expr, global_inputs)
 
     def test_quantization_doc_ptdq(self):
-        filename = "./docs/source/quantization.rst"
+        path_from_pytorch = "docs/source/quantization.rst"
         first_line = 74
         last_line = 96
-        code = self._get_code(filename, first_line, last_line)
+        code = self._get_code(path_from_pytorch, first_line, last_line)
         self._test_code(code)
 
     def test_quantization_doc_ptsq(self):
-        filename = "./docs/source/quantization.rst"
+        path_from_pytorch = "docs/source/quantization.rst"
         first_line = 129
         last_line = 187
-        code = self._get_code(filename, first_line, last_line)
+        code = self._get_code(path_from_pytorch, first_line, last_line)
         self._test_code(code)
 
     def test_quantization_doc_qat(self):
-        filename = "./docs/source/quantization.rst"
+        path_from_pytorch = "docs/source/quantization.rst"
         first_line = 227
         last_line = 283
 
@@ -81,11 +103,11 @@ class TestQuantizationDocs(QuantizationTestCase):
         input_fp32 = torch.randn(1, 1, 1, 1)
         global_inputs = {"training_loop": _dummy_func, "input_fp32": input_fp32}
 
-        code = self._get_code(filename, first_line, last_line)
+        code = self._get_code(path_from_pytorch, first_line, last_line)
         self._test_code(code, global_inputs)
 
     def test_quantization_doc_fx(self):
-        filename = "./docs/source/quantization.rstt"
+        path_from_pytorch = "docs/source/quantization.rst"
         first_line = 330
         last_line = 383
 
@@ -95,5 +117,5 @@ class TestQuantizationDocs(QuantizationTestCase):
         input_fp32 = SingleLayerLinearModel().get_example_inputs()
         global_inputs = {"UserModel": SingleLayerLinearModel, "input_fp32": input_fp32}
 
-        code = self._get_code(filename, first_line, last_line)
+        code = self._get_code(path_from_pytorch, first_line, last_line)
         self._test_code(code, global_inputs)
