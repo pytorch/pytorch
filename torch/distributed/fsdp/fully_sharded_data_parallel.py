@@ -3,7 +3,6 @@ import contextlib
 import copy
 import functools
 import itertools
-import logging
 import math
 import traceback
 import warnings
@@ -97,8 +96,6 @@ FSDP_WRAPPED_MODULE = "_fsdp_wrapped_module"
 FSDP_PREFIX = FSDP_WRAPPED_MODULE + "." + FPW_MODULE + "."
 
 _PARAM_BROADCAST_BUCKET_SIZE = int(250 * 1024 * 1024)
-
-logger = logging.getLogger(__name__)
 
 def _default_meta_device_init_fn(module):
     """
@@ -729,7 +726,6 @@ class FullyShardedDataParallel(nn.Module):
                 sync_module_states=sync_module_states,
             )
 
-        self._comm_hook_was_called = False
         self.process_group = process_group or _get_default_group()
         self.rank = self.process_group.rank()
         self.world_size = self.process_group.size()
