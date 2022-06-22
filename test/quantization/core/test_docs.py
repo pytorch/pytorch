@@ -27,7 +27,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         """
         assert exists(filename), \
             "we can't find {}, we are at {} \n\nand the stuff in here is {}" \
-            "".format(filename, os.getcwd(), os.listdir())
+            "and the stuff up one level is {}".format(filename, os.getcwd(), os.listdir(), os.listdir(".."))
         if exists(filename):
             file = open(filename)
             content = file.readlines()
