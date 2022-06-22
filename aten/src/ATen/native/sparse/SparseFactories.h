@@ -25,8 +25,8 @@ Tensor spdiags_impl(
     const Tensor& offsets,
     IntArrayRef shape,
     c10::optional<Layout> layout,
-    setup_func_t& setup_func,
-    kernel_func_t& kernel_func) {
+    const setup_func_t& setup_func,
+    const kernel_func_t& kernel_func) {
   auto diagonals_2d = diagonals.dim() == 1 ? diagonals.unsqueeze(0) : diagonals;
   TORCH_CHECK(diagonals_2d.dim() == 2, "Diagonals must be vector or matrix");
   TORCH_CHECK(shape.size() == 2, "Output shape must be 2d");
