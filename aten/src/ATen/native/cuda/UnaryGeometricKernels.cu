@@ -11,15 +11,42 @@
 
 namespace at { namespace native {
 
+const char acos_name[] = "acos";
 void acos_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  auto common_dtype = iter.common_dtype();
+  if(at::isComplexType(common_dtype)) {
+#if AT_USE_JITERATOR
+  static const auto acos_string = jiterator_stringify(
+    template <typename T>
+    T acos(T a) {
+        return std::acos(a);
+    }
+  );
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "acos_name", [&]() {
+    jitted_gpu_kernel<
+        /*name=*/ acos_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, acos_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "acos_name", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        using opmath_t = at::opmath_type<scalar_t>;
+        return ::acos(static_cast<opmath_t>(a));
+    });
+  });
+#endif
+  } else {
+  AT_DISPATCH_FLOATING_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.common_dtype(), "acos_cuda",
+      common_dtype, "acos_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return ::acos(a);
         });
       });
+  }
 }
 
 const char asin_name[] = "asin";
@@ -285,37 +312,118 @@ void tanh_kernel_cuda(TensorIteratorBase& iter) {
   }
 }
 
+const char acosh_name[] = "acosh";
 void acosh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  auto common_dtype = iter.common_dtype();
+  if(at::isComplexType(common_dtype)) {
+#if AT_USE_JITERATOR
+  static const auto acosh_string = jiterator_stringify(
+    template <typename T>
+    T acosh(T a) {
+        return std::acosh(a);
+    }
+  );
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "acosh_name", [&]() {
+    jitted_gpu_kernel<
+        /*name=*/ acosh_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, acosh_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "acosh_name", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        using opmath_t = at::opmath_type<scalar_t>;
+        return ::acosh(static_cast<opmath_t>(a));
+    });
+  });
+#endif
+  } else {
+  AT_DISPATCH_FLOATING_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.common_dtype(), "acosh_cuda",
+      common_dtype, "acosh_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return ::acosh(a);
         });
       });
+  }
 }
 
+const char asinh_name[] = "asinh";
 void asinh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  auto common_dtype = iter.common_dtype();
+  if(at::isComplexType(common_dtype)) {
+#if AT_USE_JITERATOR
+  static const auto asinh_string = jiterator_stringify(
+    template <typename T>
+    T asinh(T a) {
+        return std::asinh(a);
+    }
+  );
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "asinh_name", [&]() {
+    jitted_gpu_kernel<
+        /*name=*/ asinh_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, asinh_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "asinh_name", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        using opmath_t = at::opmath_type<scalar_t>;
+        return ::asinh(static_cast<opmath_t>(a));
+    });
+  });
+#endif
+  } else {
+  AT_DISPATCH_FLOATING_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.common_dtype(), "asinh_cuda",
+      common_dtype, "asinh_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return ::asinh(a);
         });
       });
+  }
 }
 
+const char atanh_name[] = "atanh";
 void atanh_kernel_cuda(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+  auto common_dtype = iter.common_dtype();
+  if(at::isComplexType(common_dtype)) {
+#if AT_USE_JITERATOR
+  static const auto atanh_string = jiterator_stringify(
+    template <typename T>
+    T atanh(T a) {
+        return std::atanh(a);
+    }
+  );
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "atanh_name", [&]() {
+    jitted_gpu_kernel<
+        /*name=*/ atanh_name,
+        /*return_dtype=*/ scalar_t,
+        /*common_dtype=*/ scalar_t,
+        /*arity=*/ 1>(iter, atanh_string);
+  });
+#else
+  AT_DISPATCH_COMPLEX_TYPES_AND(kComplexHalf, common_dtype, "atanh_name", [&]() {
+    gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+        using opmath_t = at::opmath_type<scalar_t>;
+        return ::atanh(static_cast<opmath_t>(a));
+    });
+  });
+#endif
+  } else {
+  AT_DISPATCH_FLOATING_AND2(
       ScalarType::Half, ScalarType::BFloat16,
-      iter.common_dtype(), "atanh_cuda",
+      common_dtype, "atanh_cuda",
       [&]() {
         gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
           return ::atanh(a);
         });
       });
+  }
 }
 
 const char tan_name[] = "tan";
