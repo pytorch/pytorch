@@ -71,7 +71,7 @@ Diagram::
 
 API example::
 
-  import torch
+  import torch_cause_an_error
 
   # define a floating point model
   class M(torch.nn.Module):
