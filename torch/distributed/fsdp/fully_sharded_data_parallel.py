@@ -813,7 +813,6 @@ class FullyShardedDataParallel(nn.Module):
             self.world_size / self.gradient_predivide_factor
         )
 
-        self.numel_padded_per_param: List[int] = []
         self.cpu_offload = cpu_offload or CPUOffload()
         self.backward_prefetch = backward_prefetch
         self.forward_prefetch = forward_prefetch
@@ -1414,7 +1413,6 @@ class FullyShardedDataParallel(nn.Module):
         allocate less memory for optimizer state, avoiding redundancy across
         data parallel workers.
         """
-        self.numel_padded_per_param.clear()
         for handle in self._handles:
             p = handle.flat_param
             assert not p._is_sharded, "Param should have not been sharded yet."
@@ -1430,7 +1428,6 @@ class FullyShardedDataParallel(nn.Module):
             )
 
             if not p._is_sharded:  # type: ignore[attr-defined]
-                self.numel_padded_per_param.append(0)
                 continue
 
             # Save the original storage and free it later on.
@@ -1445,15 +1442,10 @@ class FullyShardedDataParallel(nn.Module):
             local_shard, numel_padded = FlatParamHandle._get_shard(p, self.rank, self.world_size)
             p.set_(local_shard)  # type: ignore[call-overload]
             handle.init_shard_metadata(local_shard.numel(), numel_padded, self.rank)
-            self.numel_padded_per_param.append(numel_padded)
 
             # Free storage that contains the original full data.
             if orig_storage.size() > 0:
                 orig_storage.resize_(0)  # type: ignore[attr-defined]
-
-        assert len(self.numel_padded_per_param) == len(
-            self.params
-        ), "numel_padded_per_param is not populated correctly."
 
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to wrapped module."""
