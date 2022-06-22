@@ -20756,17 +20756,11 @@ python_ref_db = [
         "_refs.clamp_min",
         torch_opinfo_name="clamp_min",
         supports_nvfuser=False,
-        # skips=(
-        #     DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        # ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_max",
         torch_opinfo_name="clamp_max",
         supports_nvfuser=False,
-        # skips=(
-        #     DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
-        # ),
     ),
     PythonRefInfo(
         "_refs.clamp",
