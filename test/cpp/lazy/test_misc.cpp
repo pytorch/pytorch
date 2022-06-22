@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 #include <string>
 
-#include <torch/csrc/lazy/core/hash.h>
 #include <c10/util/int128.h>
+#include <torch/csrc/lazy/core/hash.h>
 
 namespace torch {
 namespace lazy {
@@ -27,7 +27,7 @@ TEST(HashTest, Scalar) {
   // simulate some garbage in the unused bits of the
   // the tagged union that is c10::Scalar, which is bigger
   // than the size of the int64_t we're currently using it with
-  *((uint8_t*)&b)  = 1;
+  *((uint8_t*)&b) = 1;
   // actual 'value' of the Scalar as a 64 bit int shouldn't have changed
   EXPECT_EQ(a.toLong(), b.toLong());
   // and hash should ignore this garbage
@@ -70,7 +70,8 @@ TEST(HashTest, Sanity) {
   auto a = std::vector<int32_t>({0, 1, 1, 2, 3, 5, 8});
   auto b = std::vector<int32_t>({1, 1, 2, 3, 5, 8, 12});
   test_hash_repeatable_sensitive(a, b);
-  test_hash_repeatable_sensitive(c10::ArrayRef<int32_t>(a), c10::ArrayRef<int32_t>(b));
+  test_hash_repeatable_sensitive(
+      c10::ArrayRef<int32_t>(a), c10::ArrayRef<int32_t>(b));
 
   // vector<bool> is a special case bc it is implemented as vector<bit>
   auto bool_a = std::vector<bool>({true, false, false, true});
