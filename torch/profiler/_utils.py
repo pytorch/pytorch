@@ -5,10 +5,6 @@ from typing import Dict, List
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 from torch.autograd import _KinetoEvent, _ProfilerEvent
-import numpy as np
-import os, re
-
-GENERATE_PLOT = True
 
 
 @dataclass
@@ -140,7 +136,7 @@ class BasicEvaluation:
                 return event.start_us() * 1000
             if isinstance(event, _ProfilerEvent):
                 return event.start_time_ns
-            raise "Unknow event type!"
+            raise Exception("Unknown Event Type")
 
         queue_depth_list: List[Interval] = []
         all_events.sort(key=new_old_event_comparator)
@@ -153,7 +149,7 @@ class BasicEvaluation:
                 if event in kernel_mapping and kernel_mapping[
                         event] is not None:
                     spawned_kernel_index = kernel_mapping[event]
-            elif isinstance(event, _ProfilerEvent):
+            if isinstance(event, _ProfilerEvent):
                 start_time = event.start_time_ns
                 end_time = event.end_time_ns
 
