@@ -30,6 +30,7 @@ class APoTObserver(ObserverBase):
         super().__init__(dtype)
         self.b = b
         self.k = k
+
         self.min_val = torch.tensor([])
         self.max_val = torch.tensor([])
 
