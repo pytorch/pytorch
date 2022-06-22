@@ -201,21 +201,21 @@ jobs:
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
       build-generates-artifacts: false
 
-  pytorch-xla-linux-bionic-py3_7-clang8-build:
-    name: pytorch-xla-linux-bionic-py3.7-clang8
+  linux-bionic-py3_7-clang8-xla-build:
+    name: linux-bionic-py3_7-clang8-xla
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: pytorch-xla-linux-bionic-py3.7-clang8
+      build-environment: linux-bionic-py3_7-clang8-xla
       docker-image-name: xla_base
 
-  pytorch-xla-linux-bionic-py3_7-clang8-test:
+  linux-bionic-py3_7-clang8-xla-test:
     if: ${{ false }}
-    name: pytorch-xla-linux-bionic-py3.7-clang8
+    name: linux-bionic-py3_7-clang8-xla
     uses: ./.github/workflows/_linux-test.yml
-    needs: pytorch-xla-linux-bionic-py3_7-clang8-build
+    needs: linux-bionic-py3_7-clang8-xla-build
     with:
-      build-environment: pytorch-xla-linux-bionic-py3.7-clang8
-      docker-image: ${{ needs.pytorch-xla-linux-bionic-py3_7-clang8-build.outputs.docker-image }}
+      build-environment: linux-bionic-py3_7-clang8-xla
+      docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
