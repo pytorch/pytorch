@@ -16,7 +16,7 @@ namespace at {
 namespace native {
 namespace metal {
 
-API_AVAILABLE(ios(10.0), macos(10.13))
+API_AVAILABLE(ios(11.0), macos(10.13))
 Tensor addmm(
     const Tensor& bias,
     const Tensor& input,

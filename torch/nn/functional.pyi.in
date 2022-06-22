@@ -98,6 +98,9 @@ def dropout(input: Tensor, p: float = ..., training: bool = ..., inplace: bool =
 def alpha_dropout(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
 
 
+def dropout1d(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
+
+
 def dropout2d(input: Tensor, p: float = ..., training: bool = ..., inplace: bool = ...) -> Tensor: ...
 
 
@@ -141,7 +144,7 @@ def rrelu(input: Tensor, lower: float = ..., upper: float = ..., training: bool 
           inplace: bool = ...) -> Tensor: ...
 
 
-def gelu(input: Any): ...
+def gelu(input: Any, approximate: str = ...): ...
 
 
 def hardshrink(input: Tensor, lambd: float = ...) -> Tensor: ...
@@ -305,7 +308,8 @@ def upsample(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] 
 
 
 def interpolate(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] = ..., mode: str = ...,
-                align_corners: Optional[Any] = ..., recompute_scale_factor: Optional[Any] = ...): ...
+                align_corners: Optional[Any] = ..., recompute_scale_factor: Optional[Any] = ...,
+                antialias: bool = ...): ...
 
 
 def upsample_nearest(input: Any, size: Optional[Any] = ..., scale_factor: Optional[Any] = ...): ...
@@ -357,14 +361,14 @@ def multi_head_attention_forward(query: Tensor,
                                  value: Tensor,
                                  embed_dim_to_check: int,
                                  num_heads: int,
-                                 in_proj_weight: Tensor,
-                                 in_proj_bias: Tensor,
+                                 in_proj_weight: Optional[Tensor],
+                                 in_proj_bias: Optional[Tensor],
                                  bias_k: Optional[Tensor],
                                  bias_v: Optional[Tensor],
                                  add_zero_attn: bool,
                                  dropout_p: float,
                                  out_proj_weight: Tensor,
-                                 out_proj_bias: Tensor,
+                                 out_proj_bias: Optional[Tensor],
                                  training: bool = True,
                                  key_padding_mask: Optional[Tensor] = None,
                                  need_weights: bool = True,

@@ -50,6 +50,9 @@
 #   MKLDNN_CPU_RUNTIME
 #     MKL-DNN threading mode: TBB or OMP (default)
 #
+#   USE_STATIC_MKL
+#     Prefer to link with MKL statically - Unix only
+#
 #   USE_NNPACK=0
 #     disables NNPACK build
 #
@@ -307,6 +310,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 package_name = os.getenv('TORCH_PACKAGE_NAME', 'torch')
+package_type = os.getenv('PACKAGE_TYPE', 'wheel')
 version = get_torch_version()
 report("Building wheel {}-{}".format(package_name, version))
 
@@ -358,6 +362,33 @@ def check_submodules():
     check_for_files(os.path.join(third_party_path, 'onnx', 'third_party',
                                  'benchmark'), ['CMakeLists.txt'])
 
+
+# Windows has very bad support for symbolic links.
+# Instead of using symlinks, we're going to copy files over
+def mirror_files_into_torchgen():
+    # (new_path, orig_path)
+    # Directories are OK and are recursively mirrored.
+    paths = [
+        ('torchgen/packaged/ATen/native/native_functions.yaml', 'aten/src/ATen/native/native_functions.yaml'),
+        ('torchgen/packaged/ATen/native/tags.yaml', 'aten/src/ATen/native/tags.yaml'),
+        ('torchgen/packaged/ATen/templates', 'aten/src/ATen/templates'),
+    ]
+    for new_path, orig_path in paths:
+        # Create the dirs involved in new_path if they don't exist
+        if not os.path.exists(new_path):
+            os.makedirs(os.path.dirname(new_path), exist_ok=True)
+
+        # Copy the files from the orig location to the new location
+        if os.path.isfile(orig_path):
+            shutil.copyfile(orig_path, new_path)
+            continue
+        if os.path.isdir(orig_path):
+            if os.path.exists(new_path):
+                # copytree fails if the tree exists already, so remove it.
+                shutil.rmtree(new_path)
+            shutil.copytree(orig_path, new_path)
+            continue
+        raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
 
 # all the work we need to do _before_ setup runs
 def build_deps():
@@ -427,8 +458,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
     # Copy libiomp5.dylib inside the wheel package on OS X
     def _embed_libiomp(self):
-        if not IS_DARWIN:
-            return
+
         lib_dir = os.path.join(self.build_lib, 'torch', 'lib')
         libtorch_cpu_path = os.path.join(lib_dir, 'libtorch_cpu.dylib')
         if not os.path.exists(libtorch_cpu_path):
@@ -506,6 +536,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 report('  -- USE_MPI={}'.format(cmake_cache_vars['USE_OPENMPI']))
         else:
             report('-- Building without distributed package')
+        if cmake_cache_vars['STATIC_DISPATCH_BACKEND']:
+            report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
+        if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
+            report('-- Using lightweight dispatch')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS
@@ -516,7 +550,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
-        self._embed_libiomp()
+        if IS_DARWIN and package_type != 'conda':
+            self._embed_libiomp()
 
         # Copy the essential export library to compile C++ extensions.
         if IS_WINDOWS:
@@ -817,7 +852,16 @@ def configure_extension_build():
                   include_dirs=[],
                   library_dirs=library_dirs,
                   extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
+    C_flatbuffer = Extension("torch._C_flatbuffer",
+                             libraries=main_libraries,
+                             sources=["torch/csrc/stub_with_flatbuffer.c"],
+                             language='c',
+                             extra_compile_args=main_compile_args + extra_compile_args,
+                             include_dirs=[],
+                             library_dirs=library_dirs,
+                             extra_link_args=extra_link_args + main_link_args + make_relative_rpath_args('lib'))
     extensions.append(C)
+    extensions.append(C_flatbuffer)
 
     if not IS_WINDOWS:
         DL = Extension("torch._dl",
@@ -895,6 +939,7 @@ if __name__ == '__main__':
         print(e)
         sys.exit(1)
 
+    mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
 
@@ -925,6 +970,7 @@ if __name__ == '__main__':
                 'bin/*',
                 'test/*',
                 '_C/*.pyi',
+                '_C_flatbuffer/*.pyi',
                 'cuda/*.pyi',
                 'optim/*.pyi',
                 'autograd/*.pyi',
@@ -932,6 +978,7 @@ if __name__ == '__main__':
                 'nn/*.pyi',
                 'nn/modules/*.pyi',
                 'nn/parallel/*.pyi',
+                'utils/data/*.pyi',
                 'lib/*.so*',
                 'lib/*.dylib*',
                 'lib/*.dll',
@@ -981,6 +1028,7 @@ if __name__ == '__main__':
                 'include/c10/cuda/impl/*.h',
                 'include/c10/hip/*.h',
                 'include/c10/hip/impl/*.h',
+                'include/c10d/*.h',
                 'include/c10d/*.hpp',
                 'include/caffe2/**/*.h',
                 'include/torch/*.h',
@@ -1010,7 +1058,8 @@ if __name__ == '__main__':
                 'include/torch/csrc/autograd/utils/*.h',
                 'include/torch/csrc/cuda/*.h',
                 'include/torch/csrc/deploy/*.h',
-                'include/torch/csrc/deploy/interpreter/interpreter_impl.h',
+                'include/torch/csrc/deploy/interpreter/*.h',
+                'include/torch/csrc/deploy/interpreter/*.hpp',
                 'include/torch/csrc/distributed/c10d/exception.h',
                 'include/torch/csrc/jit/*.h',
                 'include/torch/csrc/jit/backends/*.h',
@@ -1024,14 +1073,20 @@ if __name__ == '__main__':
                 'include/torch/csrc/jit/api/*.h',
                 'include/torch/csrc/jit/serialization/*.h',
                 'include/torch/csrc/jit/python/*.h',
+                'include/torch/csrc/jit/mobile/*.h',
                 'include/torch/csrc/jit/testing/*.h',
                 'include/torch/csrc/jit/tensorexpr/*.h',
                 'include/torch/csrc/jit/tensorexpr/operators/*.h',
+                'include/torch/csrc/jit/codegen/cuda/*.h',
+                'include/torch/csrc/jit/codegen/cuda/ops/*.h',
+                'include/torch/csrc/jit/codegen/cuda/scheduler/*.h',
                 'include/torch/csrc/onnx/*.h',
                 'include/torch/csrc/profiler/*.h',
                 'include/torch/csrc/utils/*.h',
                 'include/torch/csrc/tensor/*.h',
+                'include/torch/csrc/lazy/backend/*.h',
                 'include/torch/csrc/lazy/core/*.h',
+                'include/torch/csrc/lazy/core/ops/*.h',
                 'include/pybind11/*.h',
                 'include/pybind11/detail/*.h',
                 'include/TH/*.h*',
@@ -1057,6 +1112,15 @@ if __name__ == '__main__':
                 'utils/model_dump/skeleton.html',
                 'utils/model_dump/code.js',
                 'utils/model_dump/*.mjs',
+            ],
+            'torchgen': [
+                # Recursive glob doesn't work in setup.py,
+                # https://github.com/pypa/setuptools/issues/1806
+                # To make this robust we should replace it with some code that
+                # returns a list of everything under packaged/
+                'packaged/ATen/*',
+                'packaged/ATen/native/*',
+                'packaged/ATen/templates/*',
             ],
             'caffe2': [
                 'python/serialized_test/data/operator_test/*.zip',

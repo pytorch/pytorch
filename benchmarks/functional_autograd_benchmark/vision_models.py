@@ -2,13 +2,22 @@ import torch
 from torch import Tensor
 import torchvision_models as models
 
-from utils import extract_weights, load_weights, GetterReturnType
+from utils import check_for_functorch, extract_weights, load_weights, GetterReturnType
 
 from typing import cast
+
+has_functorch = check_for_functorch()
+
 
 def get_resnet18(device: torch.device) -> GetterReturnType:
     N = 32
     model = models.resnet18(pretrained=False)
+
+    if has_functorch:
+        from functorch.experimental import replace_all_batch_norm_modules_
+
+        replace_all_batch_norm_modules_(model)
+
     criterion = torch.nn.CrossEntropyLoss()
     model.to(device)
     params, names = extract_weights(model)
@@ -29,6 +38,14 @@ def get_fcn_resnet(device: torch.device) -> GetterReturnType:
     N = 8
     criterion = torch.nn.MSELoss()
     model = models.fcn_resnet50(pretrained=False, pretrained_backbone=False)
+
+    if has_functorch:
+        from functorch.experimental import replace_all_batch_norm_modules_
+
+        replace_all_batch_norm_modules_(model)
+        # disable dropout for consistency checking
+        model.eval()
+
     model.to(device)
     params, names = extract_weights(model)
 
@@ -56,6 +73,12 @@ def get_detr(device: torch.device) -> GetterReturnType:
 
     model = models.DETR(num_classes=num_classes, hidden_dim=hidden_dim, nheads=nheads,
                         num_encoder_layers=num_encoder_layers, num_decoder_layers=num_decoder_layers)
+
+    if has_functorch:
+        from functorch.experimental import replace_all_batch_norm_modules_
+
+        replace_all_batch_norm_modules_(model)
+
     losses = ['labels', 'boxes', 'cardinality']
     eos_coef = 0.1
     bbox_loss_coef = 5
@@ -74,9 +97,9 @@ def get_detr(device: torch.device) -> GetterReturnType:
     for idx in range(N):
         targets = {}
         n_targets: int = int(torch.randint(5, 10, size=tuple()).item())
-        label = torch.randint(5, 10, size=(n_targets,))
+        label = torch.randint(5, 10, size=(n_targets,), device=device)
         targets["labels"] = label
-        boxes = torch.randint(100, 800, size=(n_targets, 4))
+        boxes = torch.randint(100, 800, size=(n_targets, 4), device=device)
         for t in range(n_targets):
             if boxes[t, 0] > boxes[t, 2]:
                 boxes[t, 0], boxes[t, 2] = boxes[t, 2], boxes[t, 0]

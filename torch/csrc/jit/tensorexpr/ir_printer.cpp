@@ -402,7 +402,7 @@ void IRPrinter::visit(ReduceOpPtr v) {
     if (!first) {
       os() << ", ";
     }
-    os() << d->name_hint();
+    os() << *d;
     first = false;
   }
   os() << "})";
@@ -483,6 +483,19 @@ void IRPrinter::visit(FreePtr v) {
   os() << "Free(" << *v->buffer_var() << ");";
 }
 
+void IRPrinter::visit(FreeExtPtr v) {
+  os() << "FreeExt(bufs={";
+  int i = 0;
+  for (const auto& buf : v->bufs()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf;
+  }
+
+  os() << "});";
+}
+
 void IRPrinter::visit(PlacementAllocatePtr v) {
   os() << "Alias(" << *v->buf()->base_handle() << ","
        << *v->buf_to_reuse()->base_handle() << ");";
@@ -544,6 +557,37 @@ void IRPrinter::visit(ExternalCallPtr v) {
   os() << "}, args={";
   i = 0;
   for (ExprPtr arg : v->args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *arg;
+  }
+  os() << "})";
+}
+
+void IRPrinter::visit(ExternalCallWithAllocPtr v) {
+  int i = 0;
+  for (const auto& buf_out_arg : v->buf_out_args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf_out_arg;
+  }
+
+  os() << " := " << v->func_name() << "(";
+
+  os() << "buf_args={";
+  i = 0;
+  for (const auto& buf_arg : v->buf_args()) {
+    if (i++ > 0) {
+      os() << ", ";
+    }
+    os() << *buf_arg;
+  }
+
+  os() << "}, args={";
+  i = 0;
+  for (const auto& arg : v->args()) {
     if (i++ > 0) {
       os() << ", ";
     }

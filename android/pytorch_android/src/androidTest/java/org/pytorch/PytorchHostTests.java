@@ -10,7 +10,11 @@ import java.util.Objects;
 public class PytorchHostTests extends PytorchTestBase {
 
   @Override
-  protected String assetFilePath(String assetName) throws IOException {
+  protected Module loadModel(String path) throws IOException {
+    return Module.load(assetFilePath(path));
+  }
+
+  private String assetFilePath(String assetName) throws IOException {
     Path tempFile = Files.createTempFile("test", ".pt");
     try (InputStream resource =
         Objects.requireNonNull(getClass().getClassLoader().getResourceAsStream("test.pt"))) {

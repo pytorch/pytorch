@@ -159,7 +159,14 @@ void recordCustomClassesFromOpSchemas(
     if (type_name.find("__torch__") != std::string::npos) {
       // The name of a customClassType here is its fully qualified name, but
       // in registration only the class name is used so only record that
-      loaded_classes.insert(type_name.substr(type_name.find_last_of('.') + 1));
+      auto class_name = type_name.substr(type_name.find_last_of('.') + 1);
+      // Function schemas can include other type indicators such as [] so we
+      // need to trim to just alphanumeric + '_' characters as well
+      class_name = class_name.substr(
+          0,
+          class_name.find_first_not_of(
+              "aAbBcCdDeEfFgGhHiIjJkKlLmMnNoOpPqQrRsStTuUvVwWxXyYzZ_1234567890"));
+      loaded_classes.insert(class_name);
     }
   };
 
@@ -281,19 +288,31 @@ TracerResult trace_run(const std::string& input_module_path) {
   at::globalContext().setQEngine(at::QEngine::FBGEMM);
   run_model(input_module_path, root_ops, enabled_backends, called_kernel_tags);
 
-  traced_operators = op_tracer.getCalledOperators();
+  op_tracer.getCalledOperators().withLock(
+      [&](std::set<std::string>& called_operators) {
+        traced_operators = called_operators;
+      });
+
   recordCustomClassesFromOpSchemas(root_ops, traced_operators, loaded_classes);
-  called_kernel_tags.insert(
-      kdtype_tracer.getCalledKernelTags().begin(),
-      kdtype_tracer.getCalledKernelTags().end());
+
+  kdtype_tracer.getCalledKernelTags().withLock(
+      [&](KernelDTypeTracer::kernel_tags_type& kernel_tags) {
+        called_kernel_tags.insert(kernel_tags.begin(), kernel_tags.end());
+      });
+
   traced_operators.insert(
       always_included_traced_ops.begin(), always_included_traced_ops.end());
-  loaded_classes.insert(
-      custom_class_tracer.getLoadedClasses().begin(),
-      custom_class_tracer.getLoadedClasses().end());
-  build_features.insert(
-      build_feature_tracer.getBuildFeatures().begin(),
-      build_feature_tracer.getBuildFeatures().end());
+
+  custom_class_tracer.getLoadedClasses().withLock(
+      [&](CustomClassTracer::custom_classes_type& custom_classes) {
+        loaded_classes.insert(custom_classes.begin(), custom_classes.end());
+      });
+
+  build_feature_tracer.getBuildFeatures().withLock(
+      [&](BuildFeatureTracer::build_feature_type& bf) {
+        build_features.insert(bf.begin(), bf.end());
+      });
+
   TracerResult tracer_result = {
       root_ops,
       traced_operators,

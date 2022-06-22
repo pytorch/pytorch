@@ -1,14 +1,19 @@
 import torch
-from torch.fx.graph import Node
-from .pattern_utils import (
-    register_fusion_pattern,
-)
+from torch.fx.graph import Node, Graph
 from ..utils import _parent_name
-from .quantization_types import QuantizerCls, NodePattern, Pattern
+from torch.ao.quantization.quantization_types import NodePattern, Pattern
 from ..fuser_method_mappings import get_fuser_method_new
 from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Union, List
+from .custom_config import FuseCustomConfig
 from .match_utils import MatchAllNode
+
+
+__all__ = [
+    "DefaultFuseHandler",
+    "FuseHandler",
+]
+
 
 # ----------------------------
 # Fusion Pattern Registrations
@@ -18,102 +23,89 @@ from .match_utils import MatchAllNode
 class FuseHandler(ABC):
     """ Base handler class for the fusion patterns
     """
-    def __init__(self, quantizer: QuantizerCls, node: Node):
+    def __init__(self, node: Node):
         pass
 
     @abstractmethod
     def fuse(self,
-             quantizer: QuantizerCls,
              load_arg: Callable,
+             named_modules: Dict[str, torch.nn.Module],
+             fused_graph: Graph,
              root_node: Node,
+             extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
-             fuse_custom_config_dict: Dict[str, Any],
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
+             fuse_custom_config: FuseCustomConfig,
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             is_qat: bool) -> Node:
         pass
 
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Conv3d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Conv3d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.Linear))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.Linear))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm2d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm2d))
-@register_fusion_pattern((torch.nn.functional.relu, torch.nn.BatchNorm3d))
-@register_fusion_pattern((torch.nn.ReLU, torch.nn.BatchNorm3d))
-@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Conv1d))
-@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.Conv2d))
-@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.Conv3d))
-@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.Linear))
-@register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
-@register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
-@register_fusion_pattern((torch.nn.ReLU, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
-@register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm1d, torch.nn.Conv1d)))
-@register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm2d, torch.nn.Conv2d)))
-@register_fusion_pattern((torch.nn.functional.relu, (torch.nn.BatchNorm3d, torch.nn.Conv3d)))
-@register_fusion_pattern((torch.nn.BatchNorm1d, torch.nn.ConvTranspose1d))
-@register_fusion_pattern((torch.nn.BatchNorm2d, torch.nn.ConvTranspose2d))
-@register_fusion_pattern((torch.nn.BatchNorm3d, torch.nn.ConvTranspose3d))
+# TODO: move this to backend_config.fuse_handler
 class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,
-            quantizer: QuantizerCls,
             node: Node):
-        super().__init__(quantizer, node)
+        super().__init__(node)
 
     def fuse(self,
-             quantizer: QuantizerCls,
              load_arg: Callable,
+             named_modules: Dict[str, torch.nn.Module],
+             fused_graph: Graph,
              root_node: Node,
+             extra_inputs: List[Any],
              matched_node_pattern: NodePattern,
-             fuse_custom_config_dict: Dict[str, Any],
-             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]]) -> Node:
-        additional_fuser_method_mapping = fuse_custom_config_dict.get("additional_fuser_method_mapping", {})
+             fuse_custom_config: FuseCustomConfig,
+             fuser_method_mapping: Optional[Dict[Pattern, Union[torch.nn.Sequential, Callable]]],
+             is_qat: bool) -> Node:
         assert root_node.op == "call_module", "Expecting module node to be a call_module Node"
-        root_module = quantizer.modules[root_node.target]
-        assert len(additional_fuser_method_mapping) == 0, "Fusion implementation is "
-        "undergoing changes, additoinal_fuser_method_mapping is not supported currently."
-        def get_modules(pattern, modules):
+        root_module = named_modules[str(root_node.target)]
+
+        def get_modules(pattern):
             """ Given a node pattern, extract the corresponding modules
             e.g. input: (relu_node, (bn_node, conv_node))
                  output: (relu_module, (bn_module, conv_module))
             """
             if isinstance(pattern, (tuple, list)):
                 n, *args = pattern
-                get_modules(n, modules)
-                arg_modules: List[torch.nn.Module] = []
+                modules: List[torch.nn.Module] = []
+                modules.append(get_modules(n))
                 for a in args:
-                    get_modules(a, arg_modules)
-                arg_modules = tuple(arg_modules) if len(arg_modules) > 1 else arg_modules[0]  # type: ignore[assignment]
-                modules.append(arg_modules)
+                    modules.append(get_modules(a))
+                return tuple(modules)
             else:
                 n = pattern
                 if n.op == "call_module":
-                    modules.append(quantizer.modules[n.target])
+                    return named_modules[n.target]
                 elif n.op == "call_function" and n.target == torch.nn.functional.relu:
                     relu = torch.nn.ReLU()
                     relu.training = root_module.training
-                    modules.append(relu)
+                    return relu
+                elif n.op == "call_function" or n.op == "call_method":
+                    return n.target
                 else:
-                    modules.append(MatchAllNode)
-            return tuple(modules)
+                    return MatchAllNode
 
         # since relu can be used multiple times, we'll need to create a relu module for each match
-        matched_modules = get_modules(matched_node_pattern, [])
+        matched_modules = get_modules(matched_node_pattern)
 
         def get_matched_types(m):
             if isinstance(m, tuple):
                 return tuple(map(get_matched_types, m))
-            return type(m)
+            if isinstance(m, torch.nn.Module):
+                return type(m)
+            return m
 
         matched_module_types = get_matched_types(matched_modules)
         module_parent_name, module_name = _parent_name(root_node.target)
         fuser_method = get_fuser_method_new(matched_module_types, fuser_method_mapping)
         # TODO: change the signature for fuser_method to take matched module patterns
         # as input
-        fused_module = fuser_method(*matched_modules)
-        # TODO: maybe add a pass to cleanup bn modules?
-        setattr(quantizer.modules[module_parent_name], module_name, fused_module)
-        return quantizer.fused_graph.node_copy(root_node, load_arg)
+        fused_module = fuser_method(is_qat, *matched_modules)
+        setattr(named_modules[module_parent_name], module_name, fused_module)
+        extra_args = []
+        for input in extra_inputs:
+            extra_args.append(load_arg(input))
+        node = fused_graph.node_copy(root_node, load_arg)
+        args = list(node.args)
+        args.extend(extra_args)
+        node.args = tuple(args)
+        return node

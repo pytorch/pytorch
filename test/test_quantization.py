@@ -31,10 +31,12 @@ from quantization.core.test_workflow_module import TestFakeQuantize  # noqa: F40
 from quantization.core.test_workflow_module import TestObserver  # noqa: F401
 from quantization.core.test_quantized_module import TestStaticQuantizedModule  # noqa: F401
 from quantization.core.test_quantized_module import TestDynamicQuantizedModule  # noqa: F401
+from quantization.core.test_quantized_module import TestReferenceQuantizedModule  # noqa: F401
 from quantization.core.test_workflow_module import TestRecordHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestHistogramObserver  # noqa: F401
 from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
+from quantization.core.test_utils import TestUtils  # noqa: F401
 
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
@@ -77,6 +79,14 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcherModels  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIs  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
+except ImportError:
+    pass
+
+# Test the model report module
+try:
+    from quantization.fx.test_model_report_fx import TestFxModelReportDetector  # noqa: F401
+    from quantization.fx.test_model_report_fx import TestFxModelReportObserver      # noqa: F401
+    from quantization.fx.test_model_report_fx import TestFxModelReportDetectDynamicStatic  # noqa: F401
 except ImportError:
     pass
 

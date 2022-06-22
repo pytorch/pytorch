@@ -3,6 +3,8 @@
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_expr_evaluator.h>
 #include <torch/csrc/jit/codegen/cuda/kernel_ir.h>
+#include <torch/csrc/jit/codegen/cuda/kernel_ir_dispatch.h>
+#include <torch/csrc/jit/codegen/cuda/scheduler/mma_utils.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
 #include <torch/csrc/jit/codegen/cuda/utils.h>
 
@@ -19,7 +21,100 @@ namespace codegen {
 
 namespace {
 
-class CudaKernelGenerator : private kir::IrVisitor {
+std::string ptrType(DataType dt) {
+  std::stringstream ss;
+  ss << dt << "*";
+  return ss.str();
+}
+
+//! Utility class to build an argument list
+class ArgumentBuilder {
+ public:
+  //! Build an argument list where each argument is separated with a comma
+  ArgumentBuilder() = default;
+
+  //! Build an argument list where each argument has its own line
+  ArgumentBuilder(int indent_level, const char* tab) {
+    std::stringstream ss;
+    for (const auto i : c10::irange(indent_level)) {
+      (void)i; // Suppress unused variable warning
+      ss << tab;
+    }
+    sep_ = ",\n" + ss.str();
+  }
+
+  //! Add a new argument
+  template <typename T>
+  ArgumentBuilder& arg(const T& x) {
+    addSeparator();
+    return append(x);
+  }
+
+  //! Append to the last argument
+  template <typename T>
+  ArgumentBuilder& append(const T& arg) {
+    ss_ << arg;
+    return *this;
+  }
+
+  //! Get a string of the argument list
+  std::string str() const {
+    return ss_.str();
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const ArgumentBuilder& ab) {
+    return os << ab.str();
+  }
+
+ private:
+  void addSeparator() {
+    if (ss_.tellp() != 0) {
+      ss_ << sep_;
+    }
+  }
+
+ private:
+  std::string sep_ = ", ";
+  std::stringstream ss_;
+};
+
+//! Append to the last argument
+template <>
+ArgumentBuilder& ArgumentBuilder::append<bool>(const bool& arg) {
+  ss_ << (arg ? "true" : "false");
+  return *this;
+}
+
+//! Returns "template_name<template_arg>"
+template <typename TemplateNameT, typename TemplateArgT>
+std::string genTemplate(
+    const TemplateNameT& template_name,
+    const TemplateArgT& template_arg) {
+  std::stringstream ss;
+  ss << template_name << "<" << template_arg << ">";
+  return ss.str();
+}
+
+//! Returns "func_name(func_arg)"
+template <typename FuncNameT, typename FuncArgT>
+std::string genCall(const FuncNameT& func_name, const FuncArgT& func_arg) {
+  std::stringstream ss;
+  ss << func_name << "(" << func_arg << ")";
+  return ss.str();
+}
+
+//! Returns "func_name<template_arg>(func_arg)"
+template <typename FuncNameT, typename TemplateArgT, typename FuncArgT>
+std::string genCall(
+    const FuncNameT& func_name,
+    const TemplateArgT& template_arg,
+    const FuncArgT& func_arg) {
+  std::stringstream ss;
+  ss << func_name << "<" << template_arg << ">(" << func_arg << ")";
+  return ss.str();
+}
+
+class CudaKernelGenerator : private OptOutConstDispatch {
   static constexpr const char* kTab = "  ";
 
  public:
@@ -45,49 +140,68 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     code_ << "__global__ void " << kernel_name << "(";
 
-    std::vector<kir::Val*> params;
+    std::unordered_set<Val*> unique_args;
+
+    std::vector<Val*> params;
 
     // Inputs & Outputs
     for (auto val : kernel_->inputs()) {
       params.push_back(val);
     }
     for (auto val : kernel_->outputs()) {
+      TORCH_INTERNAL_ASSERT(
+          !val->isScalar(), "No scalar output is allowed: ", val->toString());
       params.push_back(val);
     }
 
     // Generate parameter declarations
-    for (kir::Val* val : params) {
-      if (const auto tv = dynamic_cast<kir::TensorView*>(val)) {
-        code_ << "Tensor<" << val->dtype() << ", "
-              << TensorDomain::noReductions(
-                     tv->fuserTv()->getMaybeRFactorDomain())
-                     .size()
-              << "> " << varName(tv);
+    unsigned int duplicate_counter = 0;
+    for (auto i : c10::irange(params.size())) {
+      std::stringstream var_name_ss;
+      if (params[i]->isA<TensorView>()) {
+        var_name_ss << varName(params[i]->as<TensorView>());
       } else {
-        TORCH_INTERNAL_ASSERT(val->isScalar()); // NOLINT (LLVM bug 48525)
-        TORCH_INTERNAL_ASSERT(val->definition() == nullptr);
-        code_ << val->dtype() << " " << gen(val);
+        var_name_ss << gen(params[i]);
       }
 
-      if (val != params.back()) {
+      // If value is duplicate in arguments change the name to avoid name
+      // conflicts in args.
+      if (!unique_args.emplace(params[i]).second) {
+        var_name_ss << "_duplicate_" << duplicate_counter++;
+      }
+
+      if (const auto tv = dynamic_cast<TensorView*>(params[i])) {
+        if (tv->isCpuScalar()) {
+          code_ << " CpuScalarTensor<" << params[i]->dtype() << "> "
+                << var_name_ss.str();
+        } else {
+          code_
+              << "Tensor<" << params[i]->dtype() << ", "
+              << TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size()
+              << "> " << var_name_ss.str();
+        }
+      } else {
+        TORCH_INTERNAL_ASSERT(params[i]->isScalar()); // NOLINT (LLVM bug 48525)
+        TORCH_INTERNAL_ASSERT(params[i]->definition() == nullptr);
+        code_ << params[i]->dtype() << " " << var_name_ss.str();
+      }
+
+      if (i + 1 != params.size()) {
         code_ << ", ";
       }
     }
 
     // Global buffers
     for (auto allocate : kernel_summary.global_allocations) {
-      TORCH_INTERNAL_ASSERT(allocate->buffer()->isA<kir::TensorView>());
-      const auto tv = allocate->buffer()->as<kir::TensorView>();
+      TORCH_INTERNAL_ASSERT(allocate->buffer()->isA<TensorView>());
+      const auto tv = allocate->buffer()->as<TensorView>();
       const auto& maybe_rfactor_domain = tv->domain()->hasRFactor()
-          ? tv->domain()->rfactorDomain()
-          : tv->domain()->rootDomain();
+          ? tv->domain()->getRFactorDomain()
+          : tv->domain()->getRootDomain();
       const auto nDims = std::count_if(
           maybe_rfactor_domain.begin(),
           maybe_rfactor_domain.end(),
-          [](const kir::IterDomain* id) {
-            return !id->isReduction() &&
-                id->iterType() != IterType::BroadcastWithoutStride;
-          });
+          [](const IterDomain* id) { return !id->isReduction(); });
       code_ << ", Tensor<" << tv->dtype() << ", " << nDims << "> "
             << varName(tv);
     }
@@ -129,7 +243,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     if (has_dynamic_smem || has_reductions || has_parallel_welford) {
       indent() << "alignas("
 #ifndef __HIP_PLATFORM_HCC__
-               << dataTypeSize(kernel_summary.largest_smem_data_type)
+               << 16 // always align to 16B for any shared mem allocation
 #else
                << 8 // for HIP, we want 8-aligned even for smaller datatypes
 #endif
@@ -177,7 +291,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   void genBody() {
     for (auto expr : kernel_->topLevelExprs()) {
-      expr->accept(this);
+      OptOutConstDispatch::handle(expr);
     }
   }
 
@@ -204,139 +318,218 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return code_;
   }
 
-  std::string gen(const kir::Node* node) {
+  std::string gen(const Statement* stmt) {
     std::stringstream tmp_code;
     std::swap(tmp_code, code_);
-    auto replacement = replacement_map_.find(node);
-    if (replacement != replacement_map_.end()) {
-      node = replacement->second;
-    }
-    node->accept(this);
+    OptOutConstDispatch::handle(stmt);
     std::swap(tmp_code, code_);
     return tmp_code.str();
   }
 
-  // TODO(kir): consider automatic var naming
-  std::string varName(const kir::Val* val) {
-    std::string prefix = "";
-    if (val->isA<kir::TensorView>()) {
-      prefix = "T";
+  std::string varName(const Val* val) {
+    std::stringstream name;
+    if (val->isA<TensorView>()) {
+      name << "T";
     } else {
-      prefix = typePrefix(val->dtype());
+      name << typePrefix(val->dtype());
     }
-
-    std::stringstream value_name;
-    if (val->name() != kInvalidStmName) {
-      value_name << prefix << val->name();
-    } else {
-      value_name << "k" << prefix << val->id();
-    }
-    return value_name.str();
+    name << val->name();
+    return name.str();
   }
 
-  std::string genInline(const kir::Node* node) {
+  std::string genInline(const Statement* stmt) {
     const bool saved_inline = print_inline_;
     print_inline_ = true;
-    auto result = gen(node);
+    auto result = gen(stmt);
     print_inline_ = saved_inline;
     // NOLINTNEXTLINE(performance-no-automatic-move)
     return result;
   }
 
-  void visit(const kir::Predicate* node) final {
-    TORCH_INTERNAL_ASSERT(node->hasValue());
-    code_ << gen(node->value());
+  void handle(const kir::Predicate* pred) final {
+    TORCH_INTERNAL_ASSERT(pred->hasValue());
+    code_ << gen(pred->value());
   }
 
-  void visit(const kir::Bool* node) final {
-    const auto def = node->definition();
-    if (print_inline_ && def != nullptr) {
+  void handle(const Bool* pred) final {
+    const auto def = pred->definition();
+    const bool has_alloc = alloc_map_.find(pred) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
       code_ << "(" << gen(def) << ")";
-    } else if (node->isConst()) {
-      code_ << (*node->value() ? "true" : "false");
+    } else if (pred->isConst()) {
+      code_ << (*pred->value() ? "true" : "false");
     } else {
-      code_ << varName(node);
+      code_ << varName(pred);
     }
   }
 
-  void visit(const kir::Double* node) final {
-    const auto def = node->definition();
-    if (print_inline_ && def != nullptr) {
+  void handle(const Double* d) final {
+    const auto def = d->definition();
+    const bool has_alloc = alloc_map_.find(d) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
       code_ << "(" << gen(def) << ")";
-    } else if (node->isConst()) {
-      const int digits = std::numeric_limits<Double::ScalarType>::max_digits10;
-      code_ << std::setprecision(digits) << *node->value();
+    } else if (d->isConst()) {
+      auto val = *d->value();
+      // note: default inf/nan doesn't work and should be replaced with macros
+      // `NAN`, `POS_INFINITY` and `NEG_INFINITY` instead.
+      if (std::isinf(val)) {
+        if (val > 0) {
+          code_ << "POS_INFINITY";
+        } else {
+          code_ << "NEG_INFINITY";
+        }
+      } else if (std::isnan(val)) {
+        code_ << "NAN";
+      } else {
+        const int digits =
+            std::numeric_limits<Double::ScalarType>::max_digits10;
+        code_ << std::setprecision(digits) << val;
+      }
     } else {
-      code_ << varName(node);
+      code_ << varName(d);
     }
   }
 
-  void visit(const kir::Int* node) final {
-    const auto def = node->definition();
-    if (print_inline_ && def != nullptr) {
-      code_ << "(" << gen(def) << ")";
-    } else if (node->isConst()) {
-      code_ << *node->value();
+  void handle(const Int* i) final {
+    const auto def = i->definition();
+    const bool has_alloc = alloc_map_.find(i) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
+      code_ << "(" << genInline(def) << ")";
+    } else if (i->isConst()) {
+      code_ << *i->value();
     } else {
-      code_ << varName(node);
+      code_ << varName(i);
     }
   }
 
-  void visit(const kir::NamedScalar* node) final {
+  void handle(const ComplexDouble* c) final {
+    const auto def = c->definition();
+    const bool has_alloc = alloc_map_.find(c) != alloc_map_.end();
+    if (def != nullptr && !has_alloc) {
+      code_ << "(" << gen(def) << ")";
+    } else if (c->isConst()) {
+      const int digits = std::numeric_limits<double>::max_digits10;
+      code_ << "std::complex<double>" << std::setprecision(digits)
+            << *c->value();
+    } else {
+      code_ << varName(c);
+    }
+  }
+
+  void handle(const NamedScalar* ns) final {
     // dim3 components are unsigned int. Cast to signed integer to
     // support negative indexing
-    if (node->getParallelIndex().has_value() ||
-        node->getParallelDim().has_value()) {
-      code_ << "((nvfuser_index_t)" << node->name() << ")";
+    if (ns->getParallelIndex().has_value() ||
+        ns->getParallelDim().has_value()) {
+      code_ << "((nvfuser_index_t)" << ns->name() << ")";
     } else {
-      code_ << node->name();
+      code_ << ns->name();
     }
   }
 
-  void visit(const kir::TensorIndex* node) final {
-    code_ << varName(node->view()) << "[";
-
+  void handle(const kir::TensorIndex* ti) final {
     bool first = true;
-    for (auto* ind : node->indices()) {
+    std::stringstream index;
+    for (auto* ind : ti->indices()) {
       if (!ind->isZeroInt()) {
         if (!first) {
-          code_ << " + ";
+          index << " + ";
         }
-        code_ << genInline(ind);
+        index << genInline(ind);
         first = false;
       }
     }
 
     if (first) {
-      code_ << "0";
+      index << "0";
     }
-
-    code_ << "]";
+    bool is_volatile = ti->view()->getMemoryType() == MemoryType::Global &&
+        kernel_->summary().sync_map.needsRawSync(ti->view()).hasBID();
+    if (is_volatile) {
+      code_ << "*(volatile " << ti->getDataType().value() << "*)&";
+    }
+    code_ << varName(ti->view()) << "[" << index.str() << "]";
   }
 
-  void visit(const kir::IterDomain* node) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+  void handle(const ViewAsScalar* sv) final {
+    indent() << gen(sv->output(0)) << " = " << gen(sv->input(0)) << "["
+             << gen(sv->index()) << "];\n";
   }
 
-  void visit(const kir::TensorDomain* node) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+  void handle(const IterDomain*) final {
+    TORCH_INTERNAL_ASSERT(false, "Unreachable");
   }
 
-  void visit(const kir::TensorView* tv) final {
-    TORCH_INTERNAL_ASSERT(!"Unreachable");
+  void handle(const TensorDomain*) final {
+    TORCH_INTERNAL_ASSERT(false, "Unreachable");
   }
 
-  void visit(const kir::UnaryOp* node) final {
+  void handle(const TensorView*) final {
+    TORCH_INTERNAL_ASSERT(false, "Unreachable");
+  }
+
+  //! Utility for generating vectorized pointer access in ldsm and
+  //!  cpasync.
+  //! TODO: this access pattern as is could be merged with exisiting
+  //!  vectorization handling logic but this path will be updated in
+  //!  follow ups to optimize the generated assembly so keeping them
+  //!  separate path for now.
+  std::string genVectorPointer(Val* val, DataType dtype, int vec_size) {
+    std::stringstream ss;
+
+    ss << "reinterpret_cast<Array<" << dtype << "," << vec_size << ","
+       << vec_size << ">*>(&" << gen(val) << ")";
+
+    return ss.str();
+  }
+
+  // Utility function to emit a cp.async intrinsic
+  void genCpAsync(const LoadStoreOp* ldst, int vec_size) {
+    auto dtype = ldst->in()->getDataType().value();
+
+    indent() << "Ampere::cpAsync("
+             << genVectorPointer(ldst->out(), dtype, vec_size) << ","
+             << genVectorPointer(ldst->in(), dtype, vec_size) << ");\n";
+  }
+
+  void genLdMatrix(const LoadStoreOp* ldst, int vector_word_size) {
+    auto dtype = ldst->in()->getDataType().value();
+    indent() << "Turing::ldMatrix";
+    if (ldst->opType() == LoadStoreOpType::LdMatrixTranspose) {
+      code_ << "T";
+    }
+    code_ << " (";
+    code_ << "*" << genVectorPointer(ldst->out(), dtype, vector_word_size)
+          << ","
+          << "&" << gen(ldst->in()) << ");\n";
+  }
+
+  void handle(const UnaryOp* uop) final {
     bool is_vector_op = false;
     size_t vector_word_size = 1;
 
-    if (vectorize_scope_ && node->out()->isA<kir::TensorIndex>()) {
-      auto ti = node->out()->as<kir::TensorIndex>();
+    if (uop->out()->isA<kir::TensorIndex>()) {
+      auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
+      if (std::any_of(
+              out_tv->domain()->domain().begin(),
+              out_tv->domain()->domain().end(),
+              [&](IterDomain* id) { return id->isMma(); })) {
+        auto mma = dynamic_cast<MmaOp*>(
+            uop->out()->as<kir::TensorIndex>()->view()->definition());
+        TORCH_INTERNAL_ASSERT(
+            mma != nullptr, "CodeGen: mma op not in mma loop");
+        genMmaInitialization(mma, uop);
+        return;
+      }
+    }
+
+    if (vectorize_scope_ && uop->out()->isA<kir::TensorIndex>()) {
+      auto ti = uop->out()->as<kir::TensorIndex>();
 
       bool vectorize_op = false;
       bool misaligned_op = false;
 
-      for (auto id : ti->view()->fuserTv()->domain()->domain()) {
+      for (auto id : ti->view()->domain()->domain()) {
         if (!isParallelTypeVectorize(id->getParallelType())) {
           continue;
         }
@@ -358,84 +551,135 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
       if (vectorize_op) {
         TORCH_INTERNAL_ASSERT(
-            node->operation() == UnaryOpType::Set,
+            uop->getUnaryOpType() == UnaryOpType::Set,
             "Cannot vectorize operations that are not sets. ",
-            "Use cache_before and cache_after to store/load with vectorized reads into buffers.");
+            "Use cacheBefore and cacheAfter to store/load with vectorized reads into buffers.");
         is_vector_op = true;
       }
 
       if (misaligned_op) {
-        is_vector_op = (node->operation() == UnaryOpType::Set);
+        is_vector_op = (uop->getUnaryOpType() == UnaryOpType::Set);
       }
 
-      if (is_vector_op && !node->in()->isScalar()) {
+      if (is_vector_op && !uop->in()->isScalar()) {
         TORCH_INTERNAL_ASSERT(
-            node->out()->dtype() == node->in()->dtype(),
+            uop->out()->dtype() == uop->in()->dtype(),
             "Vectorized store/load requires input and output datatypes match.");
       }
-    }
 
-    if (is_vector_op) {
-      if (node->in()->isScalar()) {
-        indent() << "reinterpret_cast<"
-                 << "Array<" << node->out()->dtype() << ", " << vector_word_size
-                 << ">*>"
-                 << "(&" << gen(node->out()) << ")->set(" << gen(node->in())
-                 << ");\n";
-      } else {
-        indent() << "*reinterpret_cast<"
-                 << "Array<" << node->out()->dtype() << ", " << vector_word_size
-                 << ">*>"
-                 << "(&" << gen(node->out()) << ")"
-                 << " = *reinterpret_cast<"
-                 << "Array<" << node->in()->dtype() << ", " << vector_word_size
-                 << ">*>"
-                 << "(&" << gen(node->in()) << ");\n";
+      if (is_vector_op) {
+        auto out_tv = uop->out()->as<kir::TensorIndex>()->view();
+        if (uop->in()->isScalar()) {
+          // Note:
+          //  Double buffered local tensors need indexed initialization,
+          //   so will need to use `arraySet` option.
+          if (out_tv->getMemoryType() == MemoryType::Local &&
+              !out_tv->isDoubleBuffered()) {
+            // Vectorized initialization
+            indent() << varName(out_tv) << ".set(" << gen(uop->in()) << ");\n";
+          } else {
+            // Note: currently arraySet option is not vectorized, so it will
+            //  rely on auto vectorization pass of cuda compiler.
+            indent() << "arraySet<" << out_tv->getDataType().value() << ", "
+                     << vector_word_size << ">(&" << gen(uop->out()) << ", "
+                     << "(" << out_tv->getDataType().value() << ")"
+                     << gen(uop->in()) << ");\n";
+          }
+        } else {
+          // Vectorized load
+          TORCH_INTERNAL_ASSERT(
+              uop->in()->isA<kir::TensorIndex>(),
+              "Invalid input to unary op with tensor output, found: ",
+              uop->in()->toString());
+
+          auto in_tv = uop->in()->as<kir::TensorIndex>()->view();
+          bool localToGlobal = out_tv->getMemoryType() == MemoryType::Global &&
+              in_tv->getMemoryType() == MemoryType::Local;
+
+          bool globalToLocal = out_tv->getMemoryType() == MemoryType::Local &&
+              in_tv->getMemoryType() == MemoryType::Global;
+
+          bool globalToGlobal = out_tv->getMemoryType() == MemoryType::Global &&
+              in_tv->getMemoryType() == MemoryType::Global;
+
+          bool is_volatile_to = out_tv->getMemoryType() == MemoryType::Global &&
+              kernel_->summary().sync_map.needsRawSync(out_tv).hasBID();
+
+          bool is_volatile_from =
+              in_tv->getMemoryType() == MemoryType::Global &&
+              kernel_->summary().sync_map.needsRawSync(in_tv).hasBID();
+
+          if (localToGlobal) {
+            indent() << "loadLocalToGlobal<" << uop->out()->dtype() << ", "
+                     << vector_word_size << ", "
+                     << (is_volatile_to ? "true" : "false") << ">(";
+            code_ << " &" << gen(uop->out()) << ", &" << gen(uop->in())
+                  << ");\n";
+          } else if (globalToLocal) {
+            indent() << "loadGlobalToLocal<" << uop->out()->dtype() << ", "
+                     << vector_word_size << ", "
+                     << (is_volatile_from ? "true" : "false") << ">(&"
+                     << gen(uop->out()) << ", ";
+            code_ << " &" << gen(uop->in()) << ");\n";
+          } else if (globalToGlobal) {
+            indent() << "loadGlobalToGlobal<" << uop->out()->dtype() << ", "
+                     << vector_word_size << ", "
+                     << (is_volatile_to ? "true" : "false") << ", "
+                     << (is_volatile_from ? "true" : "false") << ">(";
+            code_ << " &" << gen(uop->out()) << ", ";
+            code_ << " &" << gen(uop->in()) << ");\n";
+          } else {
+            indent() << "loadGeneric<" << uop->out()->dtype() << ", "
+                     << vector_word_size << ">(";
+            code_ << " &" << gen(uop->out()) << ", ";
+            code_ << " &" << gen(uop->in()) << ");\n";
+          }
+        }
+        return;
       }
-      return;
     }
 
-    if (node->out()->isA<kir::NamedScalar>()) {
-      const auto op_type = node->operation();
+    if (uop->out()->isA<NamedScalar>()) {
+      const auto op_type = uop->getUnaryOpType();
       if (auto op = inline_op_str(op_type)) {
-        indent() << gen(node->out()) << " = " << *op << genInline(node->in())
+        indent() << gen(uop->out()) << " = " << *op << genInline(uop->in())
                  << ";\n";
       }
       return;
     }
 
     if (!print_inline_) {
-      indent() << gen(node->out());
-      if (!node->out()->isScalar() && !node->in()->isScalar()) {
+      indent() << gen(uop->out());
+      if (!uop->out()->isScalar() && !uop->in()->isScalar()) {
         code_ << "\n";
         indent() << kTab;
       }
       code_ << " = ";
     }
 
-    const auto op_type = node->operation();
+    const auto op_type = uop->getUnaryOpType();
     if (auto op = inline_op_str(op_type)) {
       if (alsoBooleanOperator(op_type) &&
-          node->out()->dtype() == DataType::Bool) {
-        code_ << stringifyBooleanOp(op_type) << gen(node->in());
+          uop->out()->dtype() == DataType::Bool) {
+        code_ << stringifyBooleanOp(op_type) << gen(uop->in());
       } else {
-        code_ << *op << gen(node->in());
+        code_ << *op << gen(uop->in());
       }
     } else {
       if (op_type == UnaryOpType::Cast) {
         const auto cast_str =
-            cast_func_str({node->in()->dtype(), node->out()->dtype()});
+            cast_func_str({uop->in()->dtype(), uop->out()->dtype()});
         TORCH_INTERNAL_ASSERT(
             cast_str.has_value(),
             "Invalid cast. Input type: ",
-            node->in()->dtype(),
+            uop->in()->dtype(),
             ", output type: ",
-            node->out()->dtype());
+            uop->out()->dtype());
         code_ << cast_str.value();
       } else {
         code_ << op_type;
         if (needFloatSuffix(op_type) &&
-            node->out()->dtype() == DataType::Float) {
+            uop->out()->dtype() == DataType::Float) {
           code_ << "f";
         }
       }
@@ -444,7 +688,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
       if (op_type == UnaryOpType::RandLike) {
         code_ << "rnd";
       } else {
-        code_ << gen(node->in());
+        code_ << gen(uop->in());
       }
       code_ << ")";
     }
@@ -456,25 +700,28 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   std::string genBinaryOp(
       BinaryOpType op_type,
-      kir::Val* out,
+      DataType data_type,
       const std::string& lhs,
       const std::string& rhs) {
     std::stringstream expr;
     if (auto op = inline_op_str(op_type)) {
       expr << lhs << " ";
-      if (alsoBooleanOperator(op_type) && out->dtype() == DataType::Bool) {
+      if (alsoBooleanOperator(op_type) && data_type == DataType::Bool) {
         expr << stringifyBooleanOp(op_type);
       } else {
         expr << *op;
       }
       expr << " " << rhs;
     } else {
-      if (integer_op_str(op_type) && isIntegralType(out->dtype())) {
+      if (integer_op_str(op_type) && isIntegralType(data_type)) {
         auto int_op = integer_op_str(op_type);
         expr << *int_op;
+      } else if (bool_op_str(op_type) && isBooleanType(data_type)) {
+        auto bool_op = bool_op_str(op_type);
+        expr << *bool_op;
       } else {
         expr << op_type;
-        if (needFloatSuffix(op_type) && out->dtype() == DataType::Float) {
+        if (needFloatSuffix(op_type) && data_type == DataType::Float) {
           expr << "f";
         }
       }
@@ -485,7 +732,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
   // If one argument is a tensorview and the other is a scalar, make sure we
   // cast the scalar to the tensorview type
-  std::string scalarCast(kir::Val* lhs, kir::Val* rhs) {
+  std::string scalarCast(Val* lhs, Val* rhs) {
     // If neither are scalars return
     if (!((lhs->isScalar() || rhs->isScalar()) &&
           (lhs->isA<kir::TensorIndex>() || rhs->isA<kir::TensorIndex>()))) {
@@ -520,18 +767,18 @@ class CudaKernelGenerator : private kir::IrVisitor {
   }
 
   // If possible, replace pow with mul. Return true when successful.
-  bool genPowerWithMul(const kir::BinaryOp* node) {
-    if (node->operation() != BinaryOpType::Pow) {
+  bool genPowerWithMul(const BinaryOp* bop) {
+    if (bop->getBinaryOpType() != BinaryOpType::Pow) {
       return false;
     }
 
-    auto rhs = node->rhs();
+    auto rhs = bop->rhs();
     c10::optional<double> exponent;
-    if (auto val_int = dynamic_cast<kir::Int*>(rhs)) {
+    if (auto val_int = dynamic_cast<Int*>(rhs)) {
       if (val_int->isConst()) {
         exponent = val_int->value().value();
       }
-    } else if (auto val_float = dynamic_cast<kir::Double*>(rhs)) {
+    } else if (auto val_float = dynamic_cast<Double*>(rhs)) {
       if (val_float->isConst()) {
         auto fp_exp = val_float->value().value();
         double int_exp = 0;
@@ -550,7 +797,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
       return false;
     }
 
-    auto lhs = gen(node->lhs());
+    auto lhs = gen(bop->lhs());
 
     if (print_inline_) {
       code_ << lhs << " * " << lhs;
@@ -558,8 +805,8 @@ class CudaKernelGenerator : private kir::IrVisitor {
         code_ << " * " << lhs;
       }
     } else {
-      indent() << gen(node->out());
-      if (node->out()->isScalar()) {
+      indent() << gen(bop->out());
+      if (bop->out()->isScalar()) {
         code_ << " = " << lhs << " * " << lhs;
         if (exponent.value() == 3) {
           code_ << " * " << lhs;
@@ -579,24 +826,27 @@ class CudaKernelGenerator : private kir::IrVisitor {
     return true;
   }
 
-  void visit(const kir::BinaryOp* node) final {
+  void handle(const BinaryOp* bop) final {
     // Try replacing pow with mul
-    if (genPowerWithMul(node)) {
+    if (genPowerWithMul(bop)) {
       return;
     }
 
-    const auto op_type = node->operation();
+    const auto op_type = bop->getBinaryOpType();
     if (print_inline_) {
       // Inline expression: `lhs op rhs`
       code_ << genBinaryOp(
-          op_type, node->out(), gen(node->lhs()), gen(node->rhs()));
+          op_type, bop->out()->dtype(), gen(bop->lhs()), gen(bop->rhs()));
     } else {
-      indent() << gen(node->out());
-      if (node->out()->isScalar()) {
+      indent() << gen(bop->out());
+      if (bop->out()->isScalar()) {
         // Single line: `out = lhs op rhs;`
         code_ << " = "
               << genBinaryOp(
-                     op_type, node->out(), gen(node->lhs()), gen(node->rhs()));
+                     op_type,
+                     bop->out()->dtype(),
+                     gen(bop->lhs()),
+                     gen(bop->rhs()));
       } else {
         // Split TensorView expressions across multiple lines:
         //
@@ -605,64 +855,68 @@ class CudaKernelGenerator : private kir::IrVisitor {
         //    op rhs;
         //
 
-        auto cast = scalarCast(node->lhs(), node->rhs());
+        auto cast = scalarCast(bop->lhs(), bop->rhs());
         if (auto op = inline_op_str(op_type)) {
           code_ << "\n";
-          indent() << kTab << "= " << (node->lhs()->isScalar() ? cast : "")
-                   << gen(node->lhs()) << "\n";
+          indent() << kTab << "= " << (bop->lhs()->isScalar() ? cast : "")
+                   << gen(bop->lhs()) << "\n";
           indent() << kTab;
           if (alsoBooleanOperator(op_type) &&
-              node->out()->dtype() == DataType::Bool) {
+              bop->out()->dtype() == DataType::Bool) {
             code_ << stringifyBooleanOp(op_type);
           } else {
             code_ << *op;
           }
-          code_ << " " << (node->rhs()->isScalar() ? cast : "")
-                << gen(node->rhs());
+          code_ << " " << (bop->rhs()->isScalar() ? cast : "")
+                << gen(bop->rhs());
         } else {
-          if (integer_op_str(op_type) && isIntegralType(node->out()->dtype())) {
+          if (integer_op_str(op_type) && isIntegralType(bop->out()->dtype())) {
             auto int_op = integer_op_str(op_type);
             code_ << " = " << *int_op << "(\n";
+          } else if (
+              bool_op_str(op_type) && isBooleanType(bop->out()->dtype())) {
+            auto bool_op = bool_op_str(op_type);
+            code_ << " = " << *bool_op << "(\n";
           } else {
             std::stringstream op_str;
             op_str << op_type;
             if (needFloatSuffix(op_type) &&
-                node->out()->dtype() == DataType::Float) {
+                bop->out()->dtype() == DataType::Float) {
               op_str << "f";
             }
             code_ << " = " << op_str.str() << "(\n";
           }
-          indent() << kTab << (node->lhs()->isScalar() ? cast : "")
-                   << gen(node->lhs()) << ",\n";
-          indent() << kTab << (node->rhs()->isScalar() ? cast : "")
-                   << gen(node->rhs()) << ")";
+          indent() << kTab << (bop->lhs()->isScalar() ? cast : "")
+                   << gen(bop->lhs()) << ",\n";
+          indent() << kTab << (bop->rhs()->isScalar() ? cast : "")
+                   << gen(bop->rhs()) << ")";
         }
       }
       code_ << ";\n";
     }
   }
 
-  void visit(const kir::TernaryOp* node) final {
+  void handle(const TernaryOp* top) final {
     if (!print_inline_) {
-      indent() << gen(node->out());
-      if (!node->out()->isScalar()) {
+      indent() << gen(top->out());
+      if (!top->out()->isScalar()) {
         code_ << "\n";
         indent() << kTab;
       }
       code_ << " = ";
     }
 
-    code_ << node->operation() << "(" << gen(node->in1()) << ", ";
+    code_ << top->getTernaryOpType() << "(" << gen(top->in1()) << ", ";
 
     // Make sure the two operands of where has the same
     // type. Note that compiling "where(0.0f, 0.0)" fails because of
     // the overloading ambiguity.
-    if (node->operation() == TernaryOpType::Where) {
-      auto cast = scalarCast(node->in2(), node->in3());
-      code_ << (node->in2()->isScalar() ? cast : "") << gen(node->in2()) << ", "
-            << (node->in3()->isScalar() ? cast : "") << gen(node->in3()) << ")";
+    if (top->getTernaryOpType() == TernaryOpType::Where) {
+      auto cast = scalarCast(top->in2(), top->in3());
+      code_ << (top->in2()->isScalar() ? cast : "") << gen(top->in2()) << ", "
+            << (top->in3()->isScalar() ? cast : "") << gen(top->in3()) << ")";
     } else {
-      code_ << gen(node->in2()) << ", " << gen(node->in3()) << ")";
+      code_ << gen(top->in2()) << ", " << gen(top->in3()) << ")";
     }
 
     if (!print_inline_) {
@@ -670,56 +924,142 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  std::string genReductionOp(BinaryOpType op_type, kir::Val* out) {
+  std::string genArchString(MmaOptions options) {
+    std::stringstream ss;
+    if (isVolta(options.macro)) {
+      ss << "Volta";
+    } else if (isTuring(options.macro)) {
+      ss << "Turing";
+    } else if (isAmpere(options.macro)) {
+      ss << "Ampere";
+    } else {
+      TORCH_INTERNAL_ASSERT(false, "mma macro unknown arch");
+    }
+    return ss.str();
+  }
+
+  std::string genMmaOp(const MmaOp* mma, bool init = false) {
+    std::stringstream ss;
+    auto options = mma->options();
+    ss << genArchString(options) << "::";
+    if (init) {
+      ss << "init";
+    }
+    ss << toString(options.macro);
+
+    if (isVolta(options.macro)) {
+      ss << toString(options.operand_layout);
+    } else if (isTuring(options.macro) || isAmpere(options.macro)) {
+      // mma's in turing and ampere TN only, transpose is handled either
+      //  via ldmatrix for fp16 or explicitly for other types.
+      ss << "TN";
+    }
+    // TODO: additional parameter could be removed by swizzling iterdomain
+    auto acc_stride = mma->accStride();
+    TORCH_INTERNAL_ASSERT(acc_stride > 0);
+    ss << "<" << acc_stride << ">";
+    return ss.str();
+  }
+
+  void genMmaOperands(const MmaOp* mma) {
+    std::stringstream ss;
+    auto options = mma->options();
+    auto in_a = mma->inA()->as<kir::TensorIndex>()->view();
+    auto dtype = in_a->getDataType().value();
+    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+             << getInputARegisterSize(options.macro) << ","
+             << getInputARegisterSize(options.macro) << ">*>(&"
+             << gen(mma->inA()) << "),\n";
+    indent() << kTab << "reinterpret_cast<Array<" << dtype << ","
+             << getInputBRegisterSize(options.macro) << ","
+             << getInputBRegisterSize(options.macro) << ">*>(&"
+             << gen(mma->inB()) << ")";
+  }
+
+  void genMmaInitialization(const MmaOp* mma, const UnaryOp* uop) {
+    auto options = mma->options();
+
+    indent() << genMmaOp(mma, true) << "(reinterpret_cast<Array<"
+             << mma->out()->getDataType().value() << ","
+             << getOutputRegisterSize(options.macro) << ","
+             << getOutputRegisterSize(options.macro) << ">*>"
+             << "(&" << gen(uop->out()) << "));\n";
+  }
+
+  void handle(const MmaOp* mma) final {
+    auto options = mma->options();
+    auto out = mma->out()->as<kir::TensorIndex>();
+    indent() << genMmaOp(mma) << "(\n";
+    indent() << kTab << "reinterpret_cast<Array<"
+             << out->view()->getDataType().value() << ","
+             << getOutputRegisterSize(options.macro) << ","
+             << getOutputRegisterSize(options.macro) << ">*>(&"
+             << gen(mma->out()) << "),\n";
+    genMmaOperands(mma);
+    code_ << ");\n";
+  }
+
+  std::string genReductionOp(BinaryOpType op_type, DataType data_type) {
     std::stringstream lambda;
-    DataType data_type = out->dtype();
     lambda << "[](" << data_type << " &a, " << data_type << " b) "
-           << "{ a = " << genBinaryOp(op_type, out, "a", "b") << "; }";
+           << "{ a = " << genBinaryOp(op_type, data_type, "a", "b") << "; }";
     return lambda.str();
   }
 
-  void visit(const kir::BroadcastOp* node) final {
-    TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
-    const auto tensor_index = node->out()->as<kir::TensorIndex>();
+  void handle(const BroadcastOp* stmt) final {
+    TORCH_INTERNAL_ASSERT(stmt->out()->isA<kir::TensorIndex>());
 
-    const ParallelTypeBitmap domains =
-        kernel_->predicateMap().getParallelBroadcastDomains(
-            tensor_index->view()->fuserTv());
+    const ParallelTypeBitmap parallel_types =
+        kernel_->summary().broadcast_parallel_types.at(stmt);
 
-    const bool thread_x = domains.get(ParallelType::TIDx);
-    const bool thread_y = domains.get(ParallelType::TIDy);
-    const bool thread_z = domains.get(ParallelType::TIDz);
-    const bool block_x = domains.get(ParallelType::BIDx);
-    const bool block_y = domains.get(ParallelType::BIDy);
-    const bool block_z = domains.get(ParallelType::BIDz);
-
-    const bool grid_broadcast_needed = block_x || block_y || block_z;
-    const bool block_broadcast_needed = thread_x || thread_y || thread_z;
+    if (parallel_types.none()) {
+      // Not parallelized
+      indent() << gen(stmt->out()) << "\n";
+      indent() << kTab << " = " << gen(stmt->in()) << ";\n";
+      return;
+    }
 
     TORCH_INTERNAL_ASSERT(
-        !grid_broadcast_needed,
-        "Parallel broadcast across blocks not supported");
+        !parallel_types.hasBID(),
+        "Parallel broadcast across blocks should have been translated to a GridBroadcast IR node");
 
-    if (block_broadcast_needed) {
-      const auto data_type = node->out()->dtype();
-      indent() << "broadcast::blockBroadcast<" << (thread_x ? "true" : "false")
-               << ", " << (thread_y ? "true" : "false") << ", "
-               << (thread_z ? "true" : "false") << ">(\n";
-      indent() << kTab << gen(node->out()) << ",\n";
-      indent() << kTab << gen(node->in()) << ",\n";
-      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
-      TORCH_INTERNAL_ASSERT(
-          node->predicate() != nullptr && node->predicate()->hasValue());
-      indent() << kTab << genInline(node->predicate()) << ");\n";
-    } else {
-      indent() << gen(node->out()) << "\n";
-      indent() << kTab << " = " << gen(node->in()) << ";\n";
+    std::stringstream flags_str;
+    for (const ParallelType pt : kParallelTypeTIDs) {
+      const bool parallel_bcast = parallel_types.get(pt);
+      if (pt != kParallelTypeTIDs[0]) {
+        flags_str << ", ";
+      }
+      flags_str << (parallel_bcast ? "true" : "false");
     }
+
+    const auto data_type = stmt->out()->dtype();
+    indent() << "broadcast::blockBroadcast<" << flags_str.str() << ">(\n";
+    indent() << kTab << gen(stmt->out()) << ",\n";
+    indent() << kTab << gen(stmt->in()) << ",\n";
+    indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
+    TORCH_INTERNAL_ASSERT(
+        stmt->predicate() != nullptr && stmt->predicate()->hasValue());
+    indent() << kTab << genInline(stmt->predicate()) << ");\n";
   }
 
-  void genWarpReductionOp(
-      const kir::ReductionOp* node,
-      const IterDomain* reduction_id) {
+  void genSerialReduction(
+      const kir::TensorIndex* output,
+      const Val* input,
+      BinaryOpType reduction_op_type) {
+    const auto gen_out = gen(output);
+    indent() << gen_out << " = "
+             << genBinaryOp(
+                    reduction_op_type, output->dtype(), gen_out, gen(input))
+             << ";\n";
+    return;
+  }
+
+  void genWarpReduction(
+      const kir::TensorIndex* output,
+      const kir::TensorIndex* input,
+      const Val* init,
+      BinaryOpType reduction_op_type,
+      kir::Predicate* read_pred) {
     bool is_single_warp =
         kernel_->getWarpPaddedParallelInfo().is_tidx_single_warp;
 
@@ -729,43 +1069,27 @@ class CudaKernelGenerator : private kir::IrVisitor {
     } else {
       code_ << "<false>(\n";
     }
-    indent() << kTab << gen(node->out()) << ",\n";
-    indent() << kTab << gen(node->in()) << ",\n";
-    indent() << kTab << genReductionOp(node->operation(), node->out()) << ",\n";
+    indent() << kTab << gen(output) << ",\n";
+    indent() << kTab << gen(input) << ",\n";
+    indent() << kTab << genReductionOp(reduction_op_type, output->dtype())
+             << ",\n";
     indent() << kTab << "threadIdx,\n";
     indent() << kTab << "blockDim,\n";
-    indent() << kTab << "static_cast<" << node->out()->dtype()
+    indent() << kTab << "static_cast<" << output->dtype()
              << "*>(shared_mem),\n";
-    TORCH_INTERNAL_ASSERT(
-        node->predicate() != nullptr && node->predicate()->hasValue());
-    indent() << kTab << genInline(node->predicate()) << ",\n";
-    indent() << kTab << node->out()->dtype() << "(" << genInline(node->init())
-             << "));\n";
+    TORCH_INTERNAL_ASSERT(read_pred != nullptr && read_pred->hasValue());
+    indent() << kTab << genInline(read_pred) << ",\n";
+    indent() << kTab << output->dtype() << "(" << genInline(init) << "));\n";
   }
 
-  void visit(const kir::ReductionOp* node) final {
-    TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
-
-    const auto out = node->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
-
-    const bool has_block_reduce = domain->hasBlockReduction();
-    const bool has_grid_reduce = domain->hasGridReduction();
-
-    if (!has_block_reduce && !has_grid_reduce) {
-      const auto gen_out = gen(out);
-      const auto op_type = node->operation();
-      indent() << gen_out << " = "
-               << genBinaryOp(op_type, out, gen_out, gen(node->in())) << ";\n";
-      return;
-    }
-
-    if (auto reduction_id = ir_utils::getMaybeWarpReductionDim(node)) {
-      genWarpReductionOp(node, reduction_id.value());
-      return;
-    }
-
-    const auto par_domains = ir_utils::getParallelDomains(node->out());
+  void genBlockReduction(
+      const kir::TensorIndex* output,
+      const kir::TensorIndex* input,
+      const Val* init,
+      BinaryOpType reduction_op_type,
+      kir::Predicate* read_pred,
+      kir::Predicate* write_pred) {
+    const auto par_domains = ir_utils::getParallelDomains(output);
     // Get parallel reduction domains
     const bool tidx =
         par_domains.find(ParallelType::TIDx) != par_domains.end() &&
@@ -777,59 +1101,126 @@ class CudaKernelGenerator : private kir::IrVisitor {
         par_domains.find(ParallelType::TIDz) != par_domains.end() &&
         par_domains.at(ParallelType::TIDz)->isReduction();
 
-    const auto data_type = node->out()->dtype();
-    const auto op_type = node->operation();
+    const auto data_type = output->dtype();
 
-    if (has_block_reduce) {
-      if (has_grid_reduce) {
-        indent() << data_type << " "
-                 << "block_result_" << block_reduce_name_ << "="
-                 << gen(node->init()) << ";\n";
-      }
-      indent() << "blockReduce<" << (tidx ? "true" : "false") << ", "
-               << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
-               << ">(\n";
-      if (has_grid_reduce) {
-        indent() << kTab << "block_result_" << block_reduce_name_ << ",\n";
-      } else {
-        indent() << kTab << gen(node->out()) << ",\n";
-      }
-      indent() << kTab << gen(node->in()) << ",\n";
-      indent() << kTab << genReductionOp(op_type, node->out()) << ",\n";
-      indent() << kTab << "threadIdx,\n";
-      indent() << kTab << "blockDim,\n";
-      indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
-      TORCH_INTERNAL_ASSERT(
-          node->predicate() != nullptr && node->predicate()->hasValue());
-      auto read_pred = genInline(node->predicate());
-      indent() << kTab << read_pred << ",\n";
-      // Pass the write predicate if available and different from the
-      // default predicate. The blockReduce runtime function uses the
-      // default predicate for both read and write when only the
-      // default one is given.
-      if (node->writePredicate() != nullptr) {
-        TORCH_INTERNAL_ASSERT(node->writePredicate()->hasValue());
-        auto write_pred = genInline(node->writePredicate());
-        indent() << kTab << write_pred << ",\n";
-      }
-      indent() << kTab << data_type << "(" << genInline(node->init())
-               << "));\n";
+    indent() << "blockReduce<" << (tidx ? "true" : "false") << ", "
+             << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
+             << ">(\n";
+    indent() << kTab << gen(output) << ",\n";
+    indent() << kTab << gen(input) << ",\n";
+    indent() << kTab << genReductionOp(reduction_op_type, output->dtype())
+             << ",\n";
+    indent() << kTab << "threadIdx,\n";
+    indent() << kTab << "blockDim,\n";
+    indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
+    TORCH_INTERNAL_ASSERT(read_pred != nullptr && read_pred->hasValue());
+    indent() << kTab << genInline(read_pred) << ",\n";
+    // Pass the write predicate if available and different from the
+    // default predicate. The blockReduce runtime function uses the
+    // default predicate for both read and write when only the
+    // default one is given.
+    if (write_pred != nullptr) {
+      TORCH_INTERNAL_ASSERT(write_pred->hasValue());
+      indent() << kTab << genInline(write_pred) << ",\n";
+    }
+    indent() << kTab << data_type << "(" << genInline(init) << "));\n";
+  }
+
+  void handle(const ReductionOp* rop) final {
+    TORCH_INTERNAL_ASSERT(rop->out()->isA<kir::TensorIndex>());
+
+    const auto output = rop->out()->as<kir::TensorIndex>();
+    const auto input = rop->in()->as<kir::TensorIndex>();
+    const auto domain = output->view()->domain();
+    const auto op_type = rop->getReductionOpType();
+
+    const bool has_block_reduce = domain->hasBlockReduction();
+    const bool has_grid_reduce = domain->hasGridReduction();
+
+    TORCH_INTERNAL_ASSERT(
+        !has_grid_reduce,
+        "ReductionOp does not support block parallelization. GridReductionOp must be used. ",
+        rop->toString());
+
+    if (!has_block_reduce) {
+      genSerialReduction(output, input, op_type);
+    } else if (
+        auto reduction_id = ir_utils::getMaybeWarpReductionDim(output, input)) {
+      genWarpReduction(output, input, rop->init(), op_type, rop->predicate());
+    } else {
+      genBlockReduction(
+          output,
+          input,
+          rop->init(),
+          op_type,
+          rop->predicate(),
+          rop->writePredicate());
     }
   }
 
-  void visit(const kir::WelfordOp* node) final {
-    TORCH_INTERNAL_ASSERT(node->out()->isA<kir::TensorIndex>());
+  void handle(const LoadStoreOp* ldst) {
+    // TODO:
+    //  Need to gradually merge the code path of this
+    //   with UnaryOp::Set for vectorization.
+    //  There is quite a bit of possible clean up.
+    bool vectorize_op = false;
+    size_t vector_word_size = 1;
+    auto ti = ldst->out()->as<kir::TensorIndex>();
 
-    const auto out = node->out()->as<kir::TensorIndex>();
+    // Check vectorization and set vector word size
+    for (auto id : ti->view()->domain()->domain()) {
+      if (!isParallelTypeVectorize(id->getParallelType())) {
+        continue;
+      }
+
+      ExpressionEvaluator expr_eval(id->fusion());
+      auto vector_size_optional = expr_eval.evaluate(id->extent());
+
+      TORCH_INTERNAL_ASSERT(
+          vector_size_optional.has_value(),
+          "Could not evaluate constant value bound to vectorized dim.");
+
+      TORCH_INTERNAL_ASSERT(
+          id->getParallelType() != ParallelType::MisalignedVectorize,
+          "LoadStoreOp: no support yet for mis-aligned vectorization");
+      vector_word_size = vector_size_optional.value();
+      vectorize_op = true;
+      break;
+    }
+
+    // Dispatch instruction generation:
+    switch (ldst->opType()) {
+      case LoadStoreOpType::LdMatrix:
+      case LoadStoreOpType::LdMatrixTranspose:
+        TORCH_INTERNAL_ASSERT(
+            vectorize_op, "LdMatrix: Vectorization required: ", ldst);
+        genLdMatrix(ldst, vector_word_size);
+        break;
+      case LoadStoreOpType::CpAsync:
+        genCpAsync(ldst, vector_word_size);
+        break;
+      default:
+        TORCH_INTERNAL_ASSERT(false, "LoadStoreOp: Unknown op type");
+    }
+  }
+
+  void handle(const WelfordOp* wop) final {
+    TORCH_INTERNAL_ASSERT(wop->out()->isA<kir::TensorIndex>());
+
+    const auto out = wop->out()->as<kir::TensorIndex>();
     const auto domain = out->view()->domain();
 
-    const auto out_var = node->outVar();
-    const auto out_avg = node->outAvg();
-    const auto out_N = node->outN();
+    const auto out_var = wop->outVar();
+    const auto out_avg = wop->outAvg();
+    const auto out_N = wop->outN();
 
-    const auto in_var = node->inVar();
-    const auto in_avg = node->inAvg();
-    const auto in_N = node->inN();
+    const auto in_var = wop->inVar();
+    const auto in_avg = wop->inAvg();
+    const auto in_N = wop->inN();
+
+    // inVar was allowed to be nullptr. Make sure it isn't.
+    TORCH_INTERNAL_ASSERT(
+        in_var != nullptr, "Welford var input nullptr not allowed");
 
     const bool has_block_reduce = domain->hasBlockReduction();
     const bool has_grid_reduce = domain->hasGridReduction();
@@ -838,21 +1229,17 @@ class CudaKernelGenerator : private kir::IrVisitor {
     if (!has_block_reduce && !has_grid_reduce) {
       indent() << "welfordCombine ("
                << "\n";
-      indent() << " " << gen(out_avg) << ",\n";
-      indent() << " " << gen(out_var) << ",\n";
-      indent() << " " << gen(out_N) << ",\n";
-      indent() << " " << gen(in_avg) << ",\n";
-      if (in_var) {
-        indent() << " " << gen(in_var) << ",\n";
-      } else {
-        indent() << " (" << in_avg->dtype() << ") 0"
-                 << ",\n";
-      }
-      indent() << " (" << out_N->dtype() << ")" << gen(in_N) << ");\n";
+      indent() << kTab << gen(out_avg) << ",\n";
+      indent() << kTab << gen(out_var) << ",\n";
+      indent() << kTab << gen(out_N) << ",\n";
+      indent() << kTab << gen(in_avg) << ",\n";
+      indent() << kTab << "(" << out_avg->dtype() << ")" << gen(in_var)
+               << ",\n";
+      indent() << kTab << "(" << out_N->dtype() << ")" << gen(in_N) << ");\n";
       return;
     }
 
-    const auto par_domains = ir_utils::getParallelDomains(node->out());
+    const auto par_domains = ir_utils::getParallelDomains(wop->out());
     // Get parallel reduction domains
     const bool tidx =
         par_domains.find(ParallelType::TIDx) != par_domains.end() &&
@@ -864,57 +1251,52 @@ class CudaKernelGenerator : private kir::IrVisitor {
         par_domains.find(ParallelType::TIDz) != par_domains.end() &&
         par_domains.at(ParallelType::TIDz)->isReduction();
 
-    const auto data_type = node->out()->dtype();
+    const auto data_type = wop->out()->dtype();
 
     if (has_block_reduce) {
       if (has_grid_reduce) {
         // allocate block result
         indent() << data_type << " "
                  << "block_result_avg_" << block_reduce_name_ << " = "
-                 << gen(node->initAvg()) << ";\n";
+                 << gen(wop->initAvg()) << ";\n";
         indent() << data_type << " "
                  << "block_result_var_" << block_reduce_name_ << " = "
-                 << gen(node->initVar()) << ";\n";
-        indent() << DataType::Int << " "
+                 << gen(wop->initVar()) << ";\n";
+        indent() << out_N->dtype() << " "
                  << "block_result_n_" << block_reduce_name_ << " = "
-                 << gen(node->initN()) << ";\n";
+                 << gen(wop->initN()) << ";\n";
       }
       indent() << "blockWelford<" << (tidx ? "true" : "false") << ", "
                << (tidy ? "true" : "false") << ", " << (tidz ? "true" : "false")
                << ">(\n";
       if (has_grid_reduce) {
-        indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n"
-                 << kTab << "block_result_var_" << block_reduce_name_ << ",\n"
-                 << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
+        indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n";
+        indent() << kTab << "block_result_var_" << block_reduce_name_ << ",\n";
+        indent() << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
       } else {
-        indent() << kTab << gen(node->outAvg()) << ",\n";
-        indent() << kTab << gen(node->outVar()) << ",\n";
-        indent() << kTab << gen(node->outN()) << ",\n";
+        indent() << kTab << gen(wop->outAvg()) << ",\n";
+        indent() << kTab << gen(wop->outVar()) << ",\n";
+        indent() << kTab << gen(wop->outN()) << ",\n";
       }
-      indent() << " " << gen(in_avg) << ",\n";
-      if (in_var) {
-        indent() << " " << gen(in_var) << ",\n";
-      } else {
-        indent() << " (" << in_avg->dtype() << ") 0"
-                 << ",\n";
-      }
-      indent() << out_N->dtype() << "(" << gen(in_N) << "),\n";
+      indent() << kTab << gen(in_avg) << ",\n";
+      indent() << kTab << out_avg->dtype() << "(" << gen(in_var) << "),\n";
+      indent() << kTab << out_N->dtype() << "(" << gen(in_N) << "),\n";
       indent() << kTab << "threadIdx,\n";
       indent() << kTab << "blockDim,\n";
       indent() << kTab << "reinterpret_cast<" << data_type
                << "*>(shared_mem_avg),\n";
       indent() << kTab << "reinterpret_cast<" << data_type
                << "*>(shared_mem_var),\n";
-      indent() << kTab << "reinterpret_cast<" << DataType::Int
+      indent() << kTab << "reinterpret_cast<" << out_N->dtype()
                << "*>(shared_mem_n),\n";
-      TORCH_INTERNAL_ASSERT(node->predicate() != nullptr);
+      TORCH_INTERNAL_ASSERT(wop->predicate() != nullptr);
       TORCH_INTERNAL_ASSERT(
-          node->predicate() != nullptr && node->predicate()->hasValue());
-      auto read_pred = genInline(node->predicate());
+          wop->predicate() != nullptr && wop->predicate()->hasValue());
+      auto read_pred = genInline(wop->predicate());
       indent() << kTab << read_pred << ",\n";
-      if (node->writePredicate() != nullptr) {
-        TORCH_INTERNAL_ASSERT(node->writePredicate()->hasValue());
-        auto write_pred = genInline(node->writePredicate());
+      if (wop->writePredicate() != nullptr) {
+        TORCH_INTERNAL_ASSERT(wop->writePredicate()->hasValue());
+        auto write_pred = genInline(wop->writePredicate());
         indent() << kTab << write_pred << ",\n";
       }
       indent() << kTab << data_type << "(0));\n";
@@ -926,8 +1308,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
   std::string generateGridReduceTemplateFlags(
       const REDUCTION_OP* rop,
       const ParallelTypeBitmap& thread_pred) {
+    TORCH_INTERNAL_ASSERT(
+        !rop->isAllreduce(),
+        "This is not for the allreduce reduction kernel\n");
+
     const auto par_domains = ir_utils::getParallelDomains(rop->outputs()[0]);
-    std::stringstream flags;
+    ArgumentBuilder flags;
     for (const ParallelType pt : kParallelTypeThreads) {
       const bool parallel_reduction =
           par_domains.find(pt) != par_domains.end() &&
@@ -946,94 +1332,348 @@ class CudaKernelGenerator : private kir::IrVisitor {
       } else {
         flag = !pred && !parallel_reduction;
       }
-      if (pt != kParallelTypeThreads[0]) {
-        flags << ", ";
-      }
-      flags << (flag ? "true" : "false");
+      flags.arg(flag);
     }
     return flags.str();
   }
 
-  void visit(const kir::GridReduction* node) final {
-    const auto rop = node->reduction_op();
-    TORCH_INTERNAL_ASSERT(rop->out()->isA<kir::TensorIndex>());
+  // TODO: This should replace generateGridReduceTemplateFlags once
+  // GridWelford is refactored as GridReduction.
+  template <typename REDUCTION_OP>
+  std::string generateGridReduceTemplateFlags2(
+      const REDUCTION_OP* rop,
+      const ParallelTypeBitmap& thread_pred) {
+    TORCH_INTERNAL_ASSERT(
+        !rop->isAllreduce(),
+        "This is not for the allreduce reduction kernel\n");
 
-    const auto out = rop->out()->as<kir::TensorIndex>();
+    const auto par_domains =
+        ir_utils::getParallelDomains(ir_utils::getTvOutput(rop));
+    ArgumentBuilder flags;
+    for (const ParallelType pt : kParallelTypeThreads) {
+      const bool parallel_reduction =
+          par_domains.find(pt) != par_domains.end() &&
+          par_domains.at(pt)->isReduction();
+      const bool pred = thread_pred.get(pt);
+      TORCH_INTERNAL_ASSERT(
+          !(parallel_reduction && pred), "Cannot reduce predicated axis: ", pt);
+      // Currently assumed that no dimensions parallelized with blocks
+      // are predicated. This assumption may be lifted, but
+      // gridReduction would need some changes.
+      if (isParallelTypeBlockDim(pt)) {
+        TORCH_INTERNAL_ASSERT(
+            !pred, "Predication on block dimensions not allowed: ", pt);
+      }
+      flags.arg(parallel_reduction);
+    }
+    return flags.str();
+  }
+
+  void addProfileArguments(ArgumentBuilder& func_args, const Expr* expr) {
+    if (isEnabled(EnableOption::KernelProfile) &&
+        kernel_->profile().isProfiled(expr)) {
+      const auto& buffer_indices =
+          kernel_->profile().getIndicesInProfileBuffer(expr);
+      auto buffer = kernel_->profile().getBuffer();
+      TORCH_INTERNAL_ASSERT(buffer != nullptr);
+      for (const auto& index : buffer_indices) {
+        func_args.arg(varName(buffer)).append("[").append(index).append("]");
+      }
+    }
+  }
+
+  void handle(const kir::GridReduction* grop) final {
+    TORCH_INTERNAL_ASSERT(grop->out()->isA<kir::TensorIndex>());
+
+    const auto out = grop->out()->as<kir::TensorIndex>();
     const auto domain = out->view()->domain();
     TORCH_INTERNAL_ASSERT(domain->hasGridReduction());
 
-    const auto data_type = rop->out()->dtype();
-    const auto op_type = rop->operation();
+    const auto data_type = grop->out()->dtype();
+    const auto op_type = grop->getReductionOpType();
 
     TORCH_INTERNAL_ASSERT(
-        node->reduction_buffer()->buffer()->isA<kir::TensorView>());
-    TORCH_INTERNAL_ASSERT(
-        node->sync_buffer()->buffer()->isA<kir::TensorView>());
+        grop->reduction_buffer()->buffer()->isA<TensorView>());
+    TORCH_INTERNAL_ASSERT(grop->sync_buffer()->buffer()->isA<TensorView>());
     const auto work_buffer =
-        node->reduction_buffer()->buffer()->as<kir::TensorView>();
-    const auto sync_buffer =
-        node->sync_buffer()->buffer()->as<kir::TensorView>();
+        grop->reduction_buffer()->buffer()->as<TensorView>();
+    const auto sync_buffer = grop->sync_buffer()->buffer()->as<TensorView>();
+
+    if (grop->isAllreduce()) {
+      generateGridAllreduce(grop);
+      return;
+    }
 
     const std::string flags_str =
-        generateGridReduceTemplateFlags(rop, node->threadPredicate());
+        generateGridReduceTemplateFlags2(grop, grop->threadPredicate());
 
     const bool persistent_sync =
         kernel_->summary().has_cooperative_grid_reduction;
 
     // Since block-level reduction is already done, those dimensions
-    // with tidx/y/z being true do not participate in the grid reduction.
-    indent() << "reduction::gridReduce<" << flags_str << ", "
-             << (persistent_sync ? "true" : "false") << ">(\n";
-    indent() << kTab << gen(rop->out()) << ",\n";
-    if (domain->hasBlockReduction()) {
-      indent() << kTab << "block_result_" << block_reduce_name_ << ",\n";
-      block_reduce_name_++;
-    } else {
-      indent() << kTab << gen(rop->in()) << ",\n";
-    }
-    indent() << kTab << genReductionOp(op_type, out) << ",\n";
-    indent() << kTab << "&" << varName(work_buffer) << "[0],\n";
-    indent() << kTab << varName(sync_buffer) << ",\n";
-    indent() << kTab << "static_cast<" << data_type << "*>(shared_mem),\n";
+    // with tidx/y/z being true do not participate in the grid
+    // reduction.
+    ArgumentBuilder template_args;
+    template_args.arg(flags_str).arg(persistent_sync);
+
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+    func_args.arg(gen(grop->out()));
+    func_args.arg(gen(grop->in()));
+    func_args.arg(genReductionOp(op_type, out->dtype()));
+    func_args.arg("&").append(varName(work_buffer)).append("[0]");
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg(genCall("static_cast", ptrType(data_type), "shared_mem"));
+    // read and write predicates
     TORCH_INTERNAL_ASSERT(
-        node->predicate() != nullptr && node->predicate()->hasValue());
-    auto read_pred = genInline(node->predicate());
-    indent() << kTab << read_pred << ",\n";
-    if (node->writePredicate() != nullptr) {
-      TORCH_INTERNAL_ASSERT(node->writePredicate()->hasValue());
-      auto write_pred = genInline(node->writePredicate());
-      indent() << kTab << write_pred << ",\n";
+        grop->predicate() != nullptr && grop->predicate()->hasValue());
+    const auto read_pred = genInline(grop->predicate());
+    func_args.arg(read_pred);
+    if (grop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(grop->writePredicate()->hasValue());
+      func_args.arg(genInline(grop->writePredicate()));
     } else {
-      indent() << kTab << read_pred << ",\n";
+      func_args.arg(read_pred);
     }
-    indent() << kTab << data_type << "("
-             << genInline(node->reduction_op()->init()) << "));\n";
+    // Init val
+    func_args.arg(genCall(data_type, genInline(grop->init())));
+    func_args.arg(genInline(grop->entrance_index()));
+    func_args.arg(genInline(grop->entrances()));
+
+    addProfileArguments(func_args, grop);
+
+    indent() << "reduction::gridReduce<" << template_args << ">(\n";
+    indent() << kTab << func_args << ");\n";
   }
 
-  void visit(const kir::GridBroadcast* node) final {
-    const auto bop = node->broadcast_op();
+  std::string genFusedReductionName(const TensorView* reduction_out) {
+    return varName(reduction_out) + "_reduction";
+  }
+
+  void generateGridAllreduce(const kir::GridReduction* grop) {
+    TORCH_INTERNAL_ASSERT(grop->isAllreduce());
+
+    const auto out = grop->out()->as<kir::TensorIndex>();
+
+    const auto data_type = grop->out()->dtype();
+    const auto op_type = grop->getReductionOpType();
+
+    const auto work_buffer =
+        grop->reduction_buffer()->buffer()->as<TensorView>();
+    const auto sync_buffer = grop->sync_buffer()->buffer()->as<TensorView>();
+
+    const auto reduction_name = genFusedReductionName(out->view());
+
+    // template <typename Func, typename... Types>
+    // __device__ __inline__ void reduce(
+    //   RefTuple<Types...> out,
+    //   const LocalTuple<Types...>& inp,
+    //   VolatilePtrTuple<Types...> global_work_buffer,
+    //   int64_t* global_sync_buffer, // Allocated as product of all
+    //                                // non-participating Grid dimension
+    //   PtrTuple<Types...> shared_buf,
+    //   bool read_pred, // Prevent reading from out of bounds memory
+    //   bool write_pred, // Prevent from writing out of bounds
+    //   const LocalTuple<Types...>& init_val,
+    //   Func reduction_op);
+
+    indent() << reduction_name << ".reduce(\n";
+
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+    // out
+    func_args.arg(genCall("RefTuple", data_type, gen(grop->out())));
+    // inp
+    func_args.arg(genCall("ConstRefTuple", data_type, gen(grop->in())));
+    // global_work_buffer
+    func_args.arg(genCall(
+        "VolatilePtrTuple", data_type, "&" + varName(work_buffer) + "[0]"));
+    // global_sync_buffer
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    // shared_buf
+    func_args.arg(genCall(
+        "PtrTuple",
+        data_type,
+        genCall("static_cast", ptrType(data_type), "shared_mem")));
+    // read and write predicates
+    TORCH_INTERNAL_ASSERT(
+        grop->predicate() != nullptr && grop->predicate()->hasValue());
+    const auto read_pred = genInline(grop->predicate());
+    auto write_pred = read_pred;
+    if (grop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(grop->writePredicate()->hasValue());
+      write_pred = genInline(grop->writePredicate());
+    }
+    func_args.arg(read_pred).arg(write_pred);
+    // init_val
+    func_args.arg(genCall("LocalTuple", data_type, genInline(grop->init())));
+    // reduction_op
+    func_args.arg(genReductionOp(op_type, out->dtype()));
+
+    addProfileArguments(func_args, grop);
+
+    indent() << kTab << func_args << ");\n";
+  }
+
+  void handle(const kir::GroupedGridReduction* grouped_grop) final {
+    const auto out = ir_utils::getTvOutput(grouped_grop);
+    const auto domain = out->domain();
+    TORCH_INTERNAL_ASSERT(domain->hasGridReduction());
+
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->sync_buffer()->buffer()->isA<TensorView>());
+    const auto sync_buffer =
+        grouped_grop->sync_buffer()->buffer()->as<TensorView>();
+
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->numReductions() == 2,
+        "Only grouping of 2 reductions is supported. ",
+        grouped_grop->toString());
+
+    if (grouped_grop->isAllreduce()) {
+      generateGridAllreduce(grouped_grop);
+      return;
+    }
+
+    const std::string flags_str = generateGridReduceTemplateFlags2(
+        grouped_grop, grouped_grop->threadPredicate());
+
+    const bool persistent_sync =
+        kernel_->summary().has_cooperative_grid_reduction;
+
+    // Since block-level reduction is already done, those dimensions
+    // with tidx/y/z being true do not participate in the grid
+    // reduction.
+    ArgumentBuilder template_args;
+    template_args.arg(flags_str).arg(persistent_sync);
+
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+
+    // Apped arguments for each reduction
+    for (const auto i : c10::irange(grouped_grop->numReductions())) {
+      TORCH_INTERNAL_ASSERT(
+          grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
+      const auto work_buffer =
+          grouped_grop->reduction_buffers().at(i)->buffer()->as<TensorView>();
+
+      func_args.arg(gen(grouped_grop->output(i)));
+      func_args.arg(gen(grouped_grop->input(i)));
+      func_args.arg(genCall(
+          grouped_grop->output(i)->dtype(),
+          genInline(grouped_grop->initVal(i))));
+      func_args.arg(genReductionOp(
+          grouped_grop->getReductionOpType(i),
+          grouped_grop->output(i)->dtype()));
+      func_args.arg("&").append(varName(work_buffer)).append("[0]");
+    }
+
+    // The rest of the arguments are common between the reductions
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    func_args.arg("shared_mem");
+    // read and write predicates
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->predicate() != nullptr &&
+        grouped_grop->predicate()->hasValue());
+    const auto read_pred = genInline(grouped_grop->predicate());
+    func_args.arg(read_pred);
+    if (grouped_grop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
+      func_args.arg(genInline(grouped_grop->writePredicate()));
+    } else {
+      func_args.arg(read_pred);
+    }
+
+    func_args.arg(genInline(grouped_grop->entrance_index()));
+    func_args.arg(genInline(grouped_grop->entrances()));
+
+    addProfileArguments(func_args, grouped_grop);
+
+    indent() << "reduction::gridReduceGroup<" << template_args << ">(\n";
+    indent() << kTab << func_args << ");\n";
+  }
+
+  void generateGridAllreduce(const kir::GroupedGridReduction* grouped_grop) {
+    TORCH_INTERNAL_ASSERT(grouped_grop->isAllreduce());
+
+    // First, build a list of function arguments
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+
+    for (const auto i : c10::irange(grouped_grop->numReductions())) {
+      const auto data_type = grouped_grop->outputs().at(i)->dtype();
+      TORCH_INTERNAL_ASSERT(
+          grouped_grop->reduction_buffers().at(i)->buffer()->isA<TensorView>());
+
+      // out
+      func_args.arg(
+          genCall("RefTuple", data_type, gen(grouped_grop->outputs().at(i))));
+
+      // inp
+      func_args.arg(genCall(
+          "ConstRefTuple", data_type, gen(grouped_grop->inputs().at(i))));
+
+      // global_work_buffer
+      const auto work_buffer =
+          grouped_grop->reduction_buffers().at(i)->buffer()->as<TensorView>();
+      func_args.arg(genCall(
+          "VolatilePtrTuple", data_type, "&" + varName(work_buffer) + "[0]"));
+
+      // init
+      func_args.arg(genCall(
+          "LocalTuple", data_type, genInline(grouped_grop->initVal(i))));
+
+      // reduction op
+      func_args.arg(genReductionOp(
+          grouped_grop->getReductionOpType(i),
+          grouped_grop->output(i)->dtype()));
+    }
+
+    // global_sync_buffer
+    const auto sync_buffer =
+        grouped_grop->sync_buffer()->buffer()->as<TensorView>();
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+
+    // shared_buf
+    func_args.arg("shared_mem");
+
+    // read and write predicates
+    TORCH_INTERNAL_ASSERT(
+        grouped_grop->predicate() != nullptr &&
+        grouped_grop->predicate()->hasValue());
+    const auto read_pred = genInline(grouped_grop->predicate());
+    func_args.arg(read_pred);
+    if (grouped_grop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(grouped_grop->writePredicate()->hasValue());
+      func_args.arg(genInline(grouped_grop->writePredicate()));
+    } else {
+      func_args.arg(read_pred);
+    }
+
+    addProfileArguments(func_args, grouped_grop);
+
+    indent() << genFusedReductionName(ir_utils::getTvOutput(grouped_grop))
+             << ".reduceGroup(\n";
+    indent() << kTab << func_args << ");\n";
+  }
+
+  void handle(const kir::GridBroadcast* grop) final {
+    const auto bop = grop->broadcast_op();
     TORCH_INTERNAL_ASSERT(bop->out()->isA<kir::TensorIndex>());
 
-    const auto out = bop->out()->as<kir::TensorIndex>();
-    const auto domain = out->view()->domain();
-    TORCH_INTERNAL_ASSERT(domain->hasGridBroadcast());
-
-    const auto data_type = bop->out()->dtype();
+    const ParallelTypeBitmap parallel_types =
+        kernel_->summary().broadcast_parallel_types.at(bop);
 
     TORCH_INTERNAL_ASSERT(
-        node->broadcast_buffer()->buffer()->isA<kir::TensorView>());
+        parallel_types.hasBID(),
+        "GridBroadcast needs to be used with a broadcast op that is parallelized with the BID parallel types");
+
     TORCH_INTERNAL_ASSERT(
-        node->sync_buffer()->buffer()->isA<kir::TensorView>());
+        grop->broadcast_buffer()->buffer()->isA<TensorView>());
+    TORCH_INTERNAL_ASSERT(grop->sync_buffer()->buffer()->isA<TensorView>());
     const auto work_buffer =
-        node->broadcast_buffer()->buffer()->as<kir::TensorView>();
-    const auto sync_buffer =
-        node->sync_buffer()->buffer()->as<kir::TensorView>();
+        grop->broadcast_buffer()->buffer()->as<TensorView>();
+    const auto sync_buffer = grop->sync_buffer()->buffer()->as<TensorView>();
 
-    const auto par_domains = ir_utils::getParallelDomains(out);
     std::stringstream flags_str;
     for (const ParallelType pt : kParallelTypeThreads) {
-      const bool parallel_bcast = par_domains.find(pt) != par_domains.end() &&
-          par_domains.at(pt)->isBroadcast();
+      const bool parallel_bcast = parallel_types.get(pt);
       if (pt != kParallelTypeThreads[0]) {
         flags_str << ", ";
       }
@@ -1041,7 +1681,7 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
 
     // Since block-level broadcast has not necessarily been performed before
-    // this function call, so grid broadcast may  be broadcasting across both
+    // this function call, so grid broadcast may be broadcasting across both
     // the grid and the block level.
     indent() << "grid_broadcast::broadcast<" << flags_str.str() << ">(\n";
     indent() << kTab << gen(bop->out()) << ",\n";
@@ -1049,12 +1689,12 @@ class CudaKernelGenerator : private kir::IrVisitor {
     indent() << kTab << "&" << varName(work_buffer) << "[0],\n";
     indent() << kTab << varName(sync_buffer) << ",\n";
     TORCH_INTERNAL_ASSERT(
-        node->predicate() != nullptr && node->predicate()->hasValue());
-    indent() << kTab << genInline(node->predicate()) << ");\n";
+        grop->predicate() != nullptr && grop->predicate()->hasValue());
+    indent() << kTab << genInline(grop->predicate()) << ");\n";
   }
 
-  void visit(const kir::GridWelford* node) final {
-    const auto wop = node->welford_op();
+  void handle(const kir::GridWelford* gwop) final {
+    const auto wop = gwop->welford_op();
     TORCH_INTERNAL_ASSERT(wop->outAvg()->isA<kir::TensorIndex>());
 
     const auto out = wop->out()->as<kir::TensorIndex>();
@@ -1063,41 +1703,43 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     const auto data_type = out->dtype();
 
-    TORCH_INTERNAL_ASSERT(node->var_buffer()->buffer()->isA<kir::TensorView>());
-    TORCH_INTERNAL_ASSERT(
-        node->sync_buffer()->buffer()->isA<kir::TensorView>());
+    TORCH_INTERNAL_ASSERT(gwop->var_buffer()->buffer()->isA<TensorView>());
+    TORCH_INTERNAL_ASSERT(gwop->sync_buffer()->buffer()->isA<TensorView>());
 
-    const auto avg_buffer = node->avg_buffer()->buffer()->as<kir::TensorView>();
-    const auto var_buffer = node->var_buffer()->buffer()->as<kir::TensorView>();
-    const auto n_buffer = node->N_buffer()->buffer()->as<kir::TensorView>();
-    const auto sync_buffer =
-        node->sync_buffer()->buffer()->as<kir::TensorView>();
+    const auto avg_buffer = gwop->avg_buffer()->buffer()->as<TensorView>();
+    const auto var_buffer = gwop->var_buffer()->buffer()->as<TensorView>();
+    const auto n_buffer = gwop->N_buffer()->buffer()->as<TensorView>();
+    const auto sync_buffer = gwop->sync_buffer()->buffer()->as<TensorView>();
+
+    if (wop->isAllreduce()) {
+      generateGridAllreduce(gwop);
+      return;
+    }
 
     const bool persistent_sync =
         kernel_->summary().has_cooperative_grid_reduction;
 
     const std::string flags_str =
-        generateGridReduceTemplateFlags(wop, node->threadPredicate());
+        generateGridReduceTemplateFlags(wop, gwop->threadPredicate());
 
     // Since block-level reduction is already done, those dimensions
     // with tidx/y/z being true do not participate in the grid reduction.
     indent() << "welford::gridWelford<" << flags_str << ", "
              << (persistent_sync ? "true" : "false") << ">(\n";
-    indent() << kTab << gen(wop->outAvg()) << ",\n"
-             << kTab << gen(wop->outVar()) << ",\n"
-             << kTab << gen(wop->outN()) << ",\n";
+    indent() << kTab << gen(wop->outAvg()) << ",\n";
+    indent() << kTab << gen(wop->outVar()) << ",\n";
+    indent() << kTab << gen(wop->outN()) << ",\n";
     if (domain->hasBlockReduction()) {
-      indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n"
-               << kTab << "block_result_var_" << block_reduce_name_ << ",\n"
-               << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
+      indent() << kTab << "block_result_avg_" << block_reduce_name_ << ",\n";
+      indent() << kTab << "block_result_var_" << block_reduce_name_ << ",\n";
+      indent() << kTab << "block_result_n_" << block_reduce_name_ << ",\n";
       block_reduce_name_++;
     } else {
       indent() << kTab << gen(wop->inAvg()) << ",\n";
-      if (wop->inVar() == nullptr) {
-        indent() << kTab << "(" << data_type << ") 0,\n";
-      } else {
-        indent() << kTab << gen(wop->inVar()) << ",\n";
-      }
+      TORCH_INTERNAL_ASSERT(
+          wop->inVar() != nullptr, "Welford var input nullptr not allowed");
+      indent() << kTab << "(" << wop->outVar()->dtype() << ")"
+               << gen(wop->inVar()) << ",\n";
       indent() << kTab << "(" << wop->outN()->dtype() << ")" << gen(wop->inN())
                << ",\n";
     }
@@ -1112,112 +1754,291 @@ class CudaKernelGenerator : private kir::IrVisitor {
     indent() << kTab << "reinterpret_cast<" << wop->outN()->dtype()
              << "*>(shared_mem_n),\n";
     TORCH_INTERNAL_ASSERT(
-        node->predicate() != nullptr && node->predicate()->hasValue());
-    auto read_pred = genInline(node->predicate());
+        gwop->predicate() != nullptr && gwop->predicate()->hasValue());
+    auto read_pred = genInline(gwop->predicate());
     indent() << kTab << read_pred << ",\n";
-    if (node->writePredicate() != nullptr) {
-      TORCH_INTERNAL_ASSERT(node->writePredicate()->hasValue());
-      auto write_pred = genInline(node->writePredicate());
+    if (gwop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(gwop->writePredicate()->hasValue());
+      auto write_pred = genInline(gwop->writePredicate());
       indent() << kTab << write_pred << ",\n";
     } else {
       indent() << kTab << read_pred << ",\n";
     }
     // TODO : init value support or remove.
-    indent() << kTab << data_type << "(0));\n";
+    indent() << kTab << data_type << "(0),\n";
+    indent() << kTab << genInline(gwop->entrance_index()) << ",\n";
+    indent() << kTab << genInline(gwop->entrances());
+    code_ << ");\n";
+  }
+
+  void generateGridAllreduce(const kir::GridWelford* gwop) {
+    const auto wop = gwop->welford_op();
+    TORCH_INTERNAL_ASSERT(wop->isAllreduce());
+
+    const auto out = wop->out()->as<kir::TensorIndex>();
+
+    const auto data_type = wop->outAvg()->dtype();
+    const auto index_type = wop->outN()->dtype();
+    TORCH_INTERNAL_ASSERT(wop->outAvg()->dtype() == wop->outVar()->dtype());
+
+    ArgumentBuilder data_type_args;
+    data_type_args.arg(data_type).arg(data_type).arg(index_type);
+
+    const auto sync_buffer = gwop->sync_buffer()->buffer()->as<TensorView>();
+
+    const auto reduction_name = genFusedReductionName(out->view());
+
+    // template <typename Func, typename... Types>
+    // __device__ __inline__ void reduce(
+    //   RefTuple<Types...> out,
+    //   const LocalTuple<Types...>& inp,
+    //   VolatilePtrTuple<Types...> global_work_buffer,
+    //   int64_t* global_sync_buffer, // Allocated as product of all
+    //                                // non-participating Grid dimension
+    //   PtrTuple<Types...> shared_buf,
+    //   bool read_pred, // Prevent reading from out of bounds memory
+    //   bool write_pred, // Prevent from writing out of bounds
+    //   const LocalTuple<Types...>& init_val,
+    //   Func reduction_op);
+
+    ArgumentBuilder out_args;
+    out_args.arg(gen(wop->outAvg()));
+    out_args.arg(gen(wop->outVar()));
+    out_args.arg(gen(wop->outN()));
+
+    ArgumentBuilder in_args;
+    in_args.arg(gen(wop->inAvg()));
+    if (wop->inVar() != nullptr) {
+      in_args.arg(gen(wop->inVar()));
+    } else {
+      in_args.arg("(").append(data_type).append(")0");
+    }
+    in_args.arg(gen(wop->inN()));
+
+    ArgumentBuilder init_args;
+    init_args.arg(gen(wop->initAvg()));
+    init_args.arg(gen(wop->initVar()));
+    init_args.arg(gen(wop->initN()));
+
+    ArgumentBuilder work_buffer_args;
+    work_buffer_args.arg("&")
+        .append(varName(gwop->avg_buffer()->buffer()->as<TensorView>()))
+        .append("[0]");
+    work_buffer_args.arg("&")
+        .append(varName(gwop->var_buffer()->buffer()->as<TensorView>()))
+        .append("[0]");
+    work_buffer_args.arg("&")
+        .append(varName(gwop->N_buffer()->buffer()->as<TensorView>()))
+        .append("[0]");
+
+    ArgumentBuilder smem_buffer_args;
+    smem_buffer_args.arg(
+        genCall("reinterpret_cast", ptrType(data_type), "shared_mem_avg"));
+    smem_buffer_args.arg(
+        genCall("reinterpret_cast", ptrType(data_type), "shared_mem_var"));
+    smem_buffer_args.arg(
+        genCall("reinterpret_cast", ptrType(index_type), "shared_mem_n"));
+
+    ArgumentBuilder func_args(block_nest_level_ + 1, kTab);
+    // out
+    func_args.arg(genCall("RefTuple", data_type_args, out_args));
+    // inp
+    func_args.arg(genCall("ConstRefTuple", data_type_args, in_args));
+    // global_work_buffer
+    func_args.arg(
+        genCall("VolatilePtrTuple", data_type_args, work_buffer_args));
+    // global_sync_buffer
+    func_args.arg("&").append(varName(sync_buffer)).append("[0]");
+    // shared_buf
+    func_args.arg(genCall("PtrTuple", data_type_args, smem_buffer_args));
+    // read and write predicates
+    TORCH_INTERNAL_ASSERT(
+        gwop->predicate() != nullptr && gwop->predicate()->hasValue());
+    const auto read_pred = genInline(gwop->predicate());
+    auto write_pred = read_pred;
+    if (gwop->writePredicate() != nullptr) {
+      TORCH_INTERNAL_ASSERT(gwop->writePredicate()->hasValue());
+      write_pred = genInline(gwop->writePredicate());
+    }
+    func_args.arg(read_pred).arg(write_pred);
+    // init_val
+    func_args.arg(genCall("LocalTuple", data_type_args, init_args));
+    // reduction_op
+    func_args.arg(genTemplate(
+        "welfordCombine", ArgumentBuilder().arg(data_type).arg(index_type)));
+
+    indent() << reduction_name << ".reduce(\n";
+    indent() << kTab << func_args << ");\n";
+  }
+
+  void handle(const kir::AllocateFusedReduction* alloc_fused_reduction) final {
+    // See the runtime file of the fused reduction
+    enum class ReductionParallelTypeState { Reduce, Iter, Pred, Inactive };
+
+    using ReductionParallelTypeStateArray =
+        ParallelTypeMap<ReductionParallelTypeState>;
+
+    ReductionParallelTypeStateArray states(
+        ReductionParallelTypeState::Inactive);
+
+    for (const ParallelType pt : kParallelTypeThreads) {
+      // It may be better to predicate grid reductions on dimensions they don't
+      // actively use, however since that should generally be discouraged (they
+      // should be part of the iter portion of the operation, or they should be
+      // predciated out) we're just going to assume they're part of the iter
+      // dimension. This would cause more communication than strictly necessary
+      // but should not be a common use case.
+      auto pt_dim = kernel_->summary().parallel_dimension_map_.get(pt);
+      if (pt_dim == nullptr || pt_dim->isOneInt()) {
+        continue;
+      }
+      // Initialize pt_dim if used to an iter dimension. It may change to a
+      // reduction or predicated dimension later.
+      states[pt] = ReductionParallelTypeState::Iter;
+    }
+
+    for (auto id : alloc_fused_reduction->out()->view()->domain()->domain()) {
+      auto pt = id->getParallelType();
+      if (isParallelTypeThread(pt)) {
+        auto state = id->isReduction() ? ReductionParallelTypeState::Reduce
+                                       : ReductionParallelTypeState::Iter;
+        states[pt] = state;
+      }
+    }
+
+    for (const auto predicated_pt : alloc_fused_reduction->threadPredicate()) {
+      auto& state = states[predicated_pt];
+      TORCH_INTERNAL_ASSERT(
+          state != ReductionParallelTypeState::Reduce,
+          "Invalid thread predication: ",
+          predicated_pt);
+      state = ReductionParallelTypeState::Pred;
+    }
+
+    ArgumentBuilder flags;
+    for (auto pt : kParallelTypeThreads) {
+      flags.arg(static_cast<int>(states[pt]));
+    }
+
+    // Persistent
+    flags.arg(true);
+
+    // Broadcast is fused
+    flags.arg(true);
+
+    const auto reduction_name =
+        genFusedReductionName(alloc_fused_reduction->out()->view());
+
+    indent() << genTemplate("fused_reduction::ParallelReduce", flags) << " "
+             << reduction_name << ";\n";
   }
 
   void handleScope(const kir::Scope& scope) {
     for (auto expr : scope.exprs()) {
-      expr->accept(this);
+      OptOutConstDispatch::handle(expr);
     }
   }
 
-  void visit(const kir::ForLoop* node) final {
-    // TODO(kir): handle this during lowering
-    if (node->iter_domain()->isBroadcast()) {
-      handleScope(node->body());
-      return;
-    } else if (node->vectorize()) {
-      vectorize_scope_ = node->vectorize();
-      handleScope(node->body());
+  void handleTrivialLoop(const kir::ForLoop* loop) {
+    if (loop->vectorize()) {
+      vectorize_scope_ = loop->vectorize();
+    }
+    handleScope(loop->body());
+    if (loop->vectorize()) {
       vectorize_scope_ = false;
-      return;
-    } else if (node->iter_domain()->isStride()) {
-      // A stride domain only executes the loop body with the loop
-      // index being zero.
-      indent() << "constexpr "
-               << "nvfuser_index_t"
-               << " " << gen(node->index()) << " = 0;\n";
-      handleScope(node->body());
+    }
+  }
+
+  void handle(const GroupedReductionOp* grouped_rop) final {
+    for (const auto i : c10::irange(grouped_rop->numReductions())) {
+      TORCH_INTERNAL_ASSERT(grouped_rop->output(i)->isA<kir::TensorIndex>());
+
+      const auto output = grouped_rop->output(i)->as<kir::TensorIndex>();
+      const auto input = grouped_rop->input(i)->as<kir::TensorIndex>();
+      const auto domain = output->view()->domain();
+      const auto op_type = grouped_rop->getReductionOpType(i);
+
+      const bool has_block_reduce = domain->hasBlockReduction();
+      const bool has_grid_reduce = domain->hasGridReduction();
+
+      TORCH_INTERNAL_ASSERT(
+          !has_grid_reduce,
+          "GroupedReductionOp does not support block parallelization. GroupedGridReductionOp must be used. ",
+          grouped_rop->toString());
+
+      if (!has_block_reduce) {
+        genSerialReduction(output, input, op_type);
+      } else if (
+          auto reduction_id =
+              ir_utils::getMaybeWarpReductionDim(output, input)) {
+        genWarpReduction(
+            output,
+            input,
+            grouped_rop->initVal(i),
+            op_type,
+            grouped_rop->predicate());
+      } else {
+        genBlockReduction(
+            output,
+            input,
+            grouped_rop->initVal(i),
+            op_type,
+            grouped_rop->predicate(),
+            grouped_rop->writePredicate());
+      }
+    }
+  }
+
+  void handle(const kir::ForLoop* loop) final {
+    if (loop->isTrivial()) {
+      handleTrivialLoop(loop);
       return;
     }
 
-    // By default, a parallelized loop would look like:
-    //
-    //   for (int x = threadIdx.x; x < stop; x += blockDim.x) {
-    //     do_some_comp(x);
-    //   }
-    //
-    // When stop is guaranteed to be smaller or equal to the number of
-    // threads, the for-loop is not necessary. In the above case, we
-    // would just generate the loop body without the for clause but
-    // references to the loop index replaced by the loop start value.
-    //
-    // When the loop end is the same as the IterDomain extent, the
-    // assumption can be safely made. This is more conservative than
-    // necessary since the loop stop value just needs to be <= the
-    // IterDomain extent. However, at this point, this conservative
-    // analysis seems sufficient.
-    if (node->stop() == node->iter_domain()->extent() &&
-        node->iter_domain()->isThread()) {
-      // Register a replacement of references to the loop index with
-      // the loop start value.
-      replacement_map_.insert({node->index(), node->start()});
-      handleScope(node->body());
-      replacement_map_.erase(node->index());
-      return;
-    }
-
-    if (node->start()->isZeroInt() && node->stop()->isOneInt()) {
-      indent() << "constexpr "
-               << "nvfuser_index_t"
-               << " " << gen(node->index()) << " = 0;\n";
-      handleScope(node->body());
-      return;
-    }
-
-    const auto gen_index = gen(node->index());
-    const auto gen_start = genInline(node->start());
-    const auto gen_stop = genInline(node->stop());
-    const auto gen_step = genInline(node->step());
+    const auto gen_index = gen(loop->index());
+    const auto gen_start = genInline(loop->start());
+    const auto gen_stop = genInline(loop->stop());
+    const auto gen_step = genInline(loop->step());
 
     std::stringstream step_code;
-    if (node->step()->isOneInt()) {
+    if (loop->step()->isOneInt()) {
       step_code << "++" << gen_index;
     } else {
       step_code << gen_index << " += " << gen_step;
     }
-    if (node->isUnrolled()) {
+    if (loop->isUnrolled()) {
       indent() << "#pragma unroll\n";
     } else {
       indent() << "#pragma unroll 1\n";
     }
-    indent() << "for(nvfuser_index_t " << gen_index << " = " << gen_start
-             << "; " << gen_index << " < " << gen_stop << "; "
-             << step_code.str() << ") ";
+
+    indent() << "for(nvfuser_index_t " << gen_index;
+    if (loop->iter_domain()->isParallelized()) {
+      code_ << " = " << gen_start << "; ";
+    } else {
+      // Do not start at  the start of the ID when not parallelized. Instead,
+      // start at 0. Predicates will protect buffers between 0 and ID->start(),
+      // however if we started at ID->start and extent == ID->start, we could
+      // have a "degenerate" loop (loop with no iterations). It may not be an
+      // issue to have a 0-sized loop, but all potential consequences haven't
+      // been covered. One example is WAR analysis which could incorrectly think
+      // a barrier inside a 0-sized loop actually provides protection.
+      code_ << " = 0; ";
+    }
+    code_ << gen_index << " < " << gen_stop << "; " << step_code.str() << ") ";
     startBlock(true);
-    handleScope(node->body());
+    handleScope(loop->body());
     endBlock();
   }
 
-  void visit(const kir::IfThenElse* node) final {
-    auto conditional = node->predicate()->value();
+  void handle(const kir::IfThenElse* ite) final {
+    auto conditional = ite->predicate()->value();
     if (conditional->isConst()) {
       // If the conditional is a constant, then the IfThenElse is not required
       if (conditional->value().value()) {
-        handleScope(node->thenBody());
+        handleScope(ite->thenBody());
       } else {
-        handleScope(node->elseBody());
+        handleScope(ite->elseBody());
       }
       return;
     }
@@ -1226,73 +2047,77 @@ class CudaKernelGenerator : private kir::IrVisitor {
 
     // "then" block
     startBlock(true);
-    handleScope(node->thenBody());
+    handleScope(ite->thenBody());
 
     // "else" block (optional)
-    if (node->hasElse()) {
+    if (ite->hasElse()) {
       endBlock(" else ");
       startBlock(true);
-      handleScope(node->elseBody());
+      handleScope(ite->elseBody());
     }
 
     endBlock();
   }
 
-  // TODO(kir): fold initialization into Allocate
-  void visit(const kir::Allocate* node) final {
-    const auto buffer_dtype = node->buffer()->dtype();
+  void handle(const kir::Allocate* alloc) final {
+    const auto buffer_dtype = alloc->buffer()->dtype();
 
-    if (!node->buffer()->isA<kir::TensorView>()) {
-      indent() << buffer_dtype << " " << gen(node->buffer()) << ";\n";
+    TORCH_INTERNAL_ASSERT(alloc->buffer() != nullptr);
+    alloc_map_.emplace(alloc->buffer(), alloc);
+
+    if (!alloc->buffer()->isA<TensorView>()) {
+      indent() << buffer_dtype << " " << gen(alloc->buffer()) << ";\n";
       return;
     }
 
-    const auto tv = node->buffer()->as<kir::TensorView>();
+    const auto tv = alloc->buffer()->as<TensorView>();
 
-    const auto size = node->size();
+    const auto size = alloc->size();
     TORCH_INTERNAL_ASSERT(size != nullptr);
 
-    if (node->alias() != nullptr) {
-      // Allocate alias another Allocate node
-      const auto alias_tv = node->alias()->buffer()->as<kir::TensorView>();
-      indent() << "// Alias Allocation - " << node->memoryType() << "\n";
-      indent() << buffer_dtype << "* " << varName(tv) << " = "
-               << varName(alias_tv) << ";\n";
+    if (alloc->alias() != nullptr) {
+      // Allocate alias another Allocate stmt
+      const auto alias_tv = alloc->alias()->buffer()->as<TensorView>();
+      indent() << "// Alias Allocation - " << alloc->memoryType() << "\n";
+      indent() << "auto& " << varName(tv) << " = " << varName(alias_tv)
+               << ";\n";
+
     } else {
       // Standard Memory Allocation
-      switch (tv->memoryType()) {
+      switch (tv->getMemoryType()) {
         case MemoryType::Global:
           indent() << "// Allocate global tensor " << varName(tv) << "\n";
           break;
         case MemoryType::Shared:
-          if (kir::ExpressionEvaluator::isConst(size)) {
-            // Static shared memory
-            indent() << "__shared__ " << buffer_dtype << " " << varName(tv)
-                     << "[" << genInline(size) << "];\n";
+          // Align Offset Position
+          indent() << "offset = alignBufferSize(offset, "
+                   // Always align to 128b / 16B
+                   << 16 << ");\n";
+          // Shared Memory Pointer
+          indent() << buffer_dtype << "* " << varName(tv)
+                   << " = reinterpret_cast<" << buffer_dtype << "*>"
+                   << "(array + offset);\n";
+          // Increment Offset Position
+          indent() << "offset += (" << genInline(size) << " * sizeof("
+                   << buffer_dtype << "));\n";
+          break;
+        case MemoryType::Local: {
+          auto va = kernel_->summary().vectorized_accesses;
+          if (va.find(tv) != va.end()) {
+            indent() << "Array<" << buffer_dtype << ", " << genInline(size)
+                     << ", " << va.at(tv) << "> " << varName(tv) << ";\n";
           } else {
-            // Align Offset Position
-            indent() << "offset = alignBufferSize(offset,"
-                     << dataTypeSize(buffer_dtype) << ");\n";
-            // Shared Memory Pointer
-            indent() << buffer_dtype << "* " << varName(tv)
-                     << " = reinterpret_cast<" << buffer_dtype << "*>"
-                     << "(array + offset);\n";
-            // Increment Offset Position
-            indent() << "offset += (" << genInline(size) << " * sizeof("
-                     << buffer_dtype << "));\n";
+            indent() << buffer_dtype << " " << varName(tv) << "["
+                     << genInline(size) << "];\n";
           }
-          break;
-        case MemoryType::Local:
-          indent() << buffer_dtype << " " << varName(tv) << "["
-                   << genInline(size) << "];\n";
-          break;
+        } break;
         default:
           TORCH_INTERNAL_ASSERT(false, "Unexpected memory type");
       }
     }
   }
 
-  void visit(const kir::Sync* node) final {
+  void handle(const kir::BlockSync* sync) final {
     // Use a custom synchronization method if enabled
     if (std::getenv("PYTORCH_NVFUSER_USE_BLOCK_SYNC_ATOMIC")) {
       indent() << "block_sync::sync();\n";
@@ -1301,11 +2126,47 @@ class CudaKernelGenerator : private kir::IrVisitor {
     }
   }
 
-  void visit(const kir::InitMagicZero* node) final {
+  void handle(const kir::CpAsyncWait* cpasync_wait) final {
+    indent() << "Ampere::cpAsyncBarrier();\n";
+  }
+
+  void handle(const kir::GridSync* sync) final {
+    // Use a custom synchronization method if enabled
+    bool bidx = sync->syncDims().get(ParallelType::BIDx);
+    bool bidy = sync->syncDims().get(ParallelType::BIDy);
+    bool bidz = sync->syncDims().get(ParallelType::BIDz);
+
+    ArgumentBuilder sync_call_template_parms;
+    sync_call_template_parms.arg(bidx).arg(bidy).arg(bidz).arg(true);
+
+    auto sync_idx = genCall(
+        "index_utils::maskedOffset",
+        ArgumentBuilder().arg(!bidx).arg(!bidy).arg(!bidz),
+        ArgumentBuilder().arg("blockIdx").arg("gridDim"));
+
+    auto sync_segment_size = genCall(
+        "index_utils::maskedSize",
+        ArgumentBuilder().arg(bidx).arg(bidy).arg(bidz),
+        ArgumentBuilder().arg("gridDim"));
+
+    ArgumentBuilder sync_call_args;
+    sync_call_args.arg(varName(sync->syncBuffer()))
+        .append("[")
+        .append(sync_idx)
+        .append("]");
+    sync_call_args.arg(sync_segment_size);
+
+    auto sync_call =
+        genCall("grid_sync::sync", sync_call_template_parms, sync_call_args);
+
+    indent() << sync_call << ";\n";
+  }
+
+  void handle(const kir::InitMagicZero*) final {
     indent() << "NVFUSER_DEFINE_MAGIC_ZERO\n";
   }
 
-  void visit(const kir::UpdateMagicZero* node) final {
+  void handle(const kir::UpdateMagicZero*) final {
     indent() << "NVFUSER_UPDATE_MAGIC_ZERO\n";
   }
 
@@ -1314,15 +2175,14 @@ class CudaKernelGenerator : private kir::IrVisitor {
   const kir::Kernel* kernel_;
   int block_nest_level_ = 0;
   int block_reduce_name_ = 0;
-
-  // TODO(kir): replace with explicit assignment statements
   bool print_inline_ = false;
 
   // Mark when we are inside of a vectorized for-loop
   bool vectorize_scope_ = false;
 
-  //! Holds active replacement mappings during codegen
-  std::unordered_map<const kir::Node*, const kir::Node*> replacement_map_;
+  //! Keep track of Allocate node for Val. Used to determine if Val
+  //! should be inlined.
+  std::unordered_map<const Val*, const kir::Allocate*> alloc_map_;
 };
 
 } // namespace

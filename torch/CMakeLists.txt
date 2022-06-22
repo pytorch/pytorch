@@ -14,7 +14,7 @@ if(NOT BUILD_PYTHON)
 endif()
 
 if(USE_TBB)
-include_directories(${TBB_INCLUDE_DIR})
+  include_directories(${TBB_INCLUDE_DIR})
 endif()
 
 set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -44,6 +44,9 @@ set(TORCH_PYTHON_SRCS
     )
 append_filelist("libtorch_python_core_sources" TORCH_PYTHON_SRCS)
 
+list(APPEND TORCH_PYTHON_SRCS
+    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp)
+
 # NB: This has to match the condition under which the JIT test directory
 #     is included (at the time of writing that's in caffe2/CMakeLists.txt).
 if(BUILD_TEST)
@@ -71,7 +74,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/gloo
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
-    ${pybind11_INCLUDE_DIRS}
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -81,6 +83,8 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
+    python::python
+    pybind::pybind11
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -150,8 +154,8 @@ if(USE_CUDNN OR USE_ROCM)
     endif()
 endif()
 
-if(USE_MLCOMPUTE)
-    list(APPEND TORCH_PYTHON_SRCS ${MLC_PYTHON_SRCS})
+if(USE_MPS)
+    list(APPEND TORCH_PYTHON_SRCS ${MPS_PYTHON_SRCS})
 endif()
 
 if(USE_VALGRIND AND NOT WIN32)
@@ -189,6 +193,7 @@ add_custom_target(torch_python_stubs DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi"
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
 )
 add_custom_command(
     OUTPUT
@@ -198,6 +203,7 @@ add_custom_command(
     COMMAND
     "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
+      --tags-path "aten/src/ATen/native/tags.yaml"
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
     DEPENDS
     "${TORCH_SRC_DIR}/_C/__init__.pyi.in"
@@ -205,7 +211,20 @@ add_custom_command(
     "${TORCH_SRC_DIR}/nn/functional.pyi.in"
     "${TOOLS_PATH}/pyi/gen_pyi.py"
     "${TORCH_ROOT}/aten/src/ATen/native/native_functions.yaml"
+    "${TORCH_ROOT}/aten/src/ATen/native/tags.yaml"
     "${TORCH_ROOT}/tools/autograd/deprecated.yaml"
+    WORKING_DIRECTORY
+    "${TORCH_ROOT}"
+)
+file(GLOB_RECURSE datapipe_files "${TORCH_SRC_DIR}/utils/data/datapipes/*.py")
+add_custom_command(
+    OUTPUT
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
+    COMMAND
+    "${PYTHON_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
+    DEPENDS
+    "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"
+    ${datapipe_files}
     WORKING_DIRECTORY
     "${TORCH_ROOT}"
 )
@@ -249,6 +268,7 @@ if(USE_DEPLOY)
   add_library(torch_python_obj OBJECT ${TORCH_PYTHON_SRCS})
   if(NOT MSVC)
     target_compile_options(torch_python_obj PRIVATE -Wno-unused-variable)
+    target_compile_options(torch_python_obj PRIVATE -Wno-unused-local-typedefs)
   endif()
   if(USE_DISTRIBUTED)
     # Set c10d-related compile definitions. For a "normal" build of
@@ -303,6 +323,10 @@ if(USE_DEPLOY)
   # missing dependency since torch_python_obj doesn't link onnx, the interpreter lib does.
   add_dependencies(torch_python_obj onnx)
 
+  target_include_directories(torch_python_obj SYSTEM PRIVATE
+      ${PYTHON_INCLUDE_DIRS}
+      ${pybind11_INCLUDE_DIRS})
+
   if(HAVE_SOVERSION)
     set_target_properties(torch_python_obj PROPERTIES
         VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -322,12 +346,6 @@ if(USE_DEPLOY)
 
 endif()
 
-
-# Avoid numpy for the DEPLOY build
-if(USE_NUMPY)
-    list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NUMPY)
-endif()
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/utils/throughput_benchmark.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
@@ -341,6 +359,12 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
+# Avoid numpy for the DEPLOY build
+if(USE_NUMPY)
+  target_link_libraries(torch_python PRIVATE numpy::numpy)
+  target_compile_definitions(torch_python PRIVATE USE_NUMPY)
+endif()
+
 if(HAVE_SOVERSION)
   set_target_properties(torch_python PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
@@ -356,6 +380,7 @@ endif()
 
 if(NOT MSVC)
   target_compile_options(torch_python PRIVATE -Wno-unused-variable)
+  target_compile_options(torch_python PRIVATE -Wno-unused-local-typedefs)
 endif()
 
 # Required workaround for generated sources
@@ -370,6 +395,9 @@ set_source_files_properties(
 # Disable certain warnings for GCC-9.X
 if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 9.0.0))
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/Module.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
+  set_source_files_properties(
+    ${TORCH_SRC_DIR}/csrc/init_flatbuffer_module.cpp
+    PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
   set_source_files_properties(${TORCH_SRC_DIR}/csrc/autograd/python_variable.cpp PROPERTIES COMPILE_FLAGS "-Wno-cast-function-type")
 endif()
 
@@ -387,7 +415,7 @@ endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
-target_link_libraries(torch_python torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
+target_link_libraries(torch_python PRIVATE torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 
@@ -397,6 +425,10 @@ target_compile_options(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_OPTIONS})
 
 target_include_directories(torch_python PUBLIC ${TORCH_PYTHON_INCLUDE_DIRECTORIES})
 
+if(BUILD_ONEDNN_GRAPH)
+  target_compile_definitions(torch_python PRIVATE "-DBUILD_ONEDNN_GRAPH")
+  target_compile_definitions(torch_cpu PRIVATE "-DBUILD_ONEDNN_GRAPH")
+endif()
 
 if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
@@ -438,5 +470,5 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
           ${TORCH_SRC_DIR}/csrc/jit/backends/nnapi/nnapi_backend_preprocess.cpp
           )
   # Pybind11 requires explicit linking of the torch_python library
-  target_link_libraries(nnapi_backend torch torch_python)
+  target_link_libraries(nnapi_backend PRIVATE torch torch_python pybind::pybind11)
 endif()

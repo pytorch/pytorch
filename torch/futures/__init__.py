@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import cast, Callable, Generic, List, Optional, Type, TypeVar, Union
 
 import torch
@@ -90,8 +92,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return super().value()
 
-    # Have to use string annotations because  PEP-0563 is not available in 3.6
-    def then(self, callback):  # type: (Callable[[Future[T]], S]) -> Future[S]
+    def then(self, callback: Callable[[Future[T]], S]) -> Future[S]:
         r"""
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to
@@ -154,8 +155,7 @@ class Future(torch._C.Future, Generic[T], metaclass=_PyFutureMeta):
         """
         return cast(Future[S], super().then(callback))
 
-    # Have to use string annotations because  PEP-0563 is not available in 3.6
-    def add_done_callback(self, callback):  # type: (Callable[[Future[T]], None]) -> None
+    def add_done_callback(self, callback: Callable[[Future[T]], None]) -> None:
         r"""
         Append the given callback function to this ``Future``, which will be run
         when the ``Future`` is completed.  Multiple callbacks can be added to

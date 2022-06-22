@@ -1,9 +1,8 @@
 #pragma once
 
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
-#include <ATen/native/quantized/cpu/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 
@@ -100,15 +99,15 @@ struct TORCH_API PackedLinearWeightFp16 : public LinearPackedParamsBase {
   c10::optional<at::Tensor> bias_;
 
   at::Tensor apply(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point) override {
+      at::Tensor /*input*/,
+      double /*output_scale*/,
+      int64_t /*output_zero_point*/) override {
     TORCH_INTERNAL_ASSERT(false);
   }
   at::Tensor apply_relu(
-      at::Tensor input,
-      double output_scale,
-      int64_t output_zero_point) override {
+      at::Tensor /*input*/,
+      double /*output_scale*/,
+      int64_t /*output_zero_point*/) override {
     TORCH_INTERNAL_ASSERT(false);
   }
 

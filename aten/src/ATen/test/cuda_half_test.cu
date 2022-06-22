@@ -76,6 +76,13 @@ __device__ void test(){
   assert(::abs(::isnan(Half(0.0)) - ::isnan(0.0f)) <= threshold);
   assert(::abs(::isinf(Half(0.0)) - ::isinf(0.0f)) <= threshold);
 #endif
+
+  // test complex<32>
+  Half real = 3.0f;
+  Half imag = -10.0f;
+  auto complex = c10::complex<Half>(real, imag);
+  assert(complex.real() == real);
+  assert(complex.imag() == imag);
 }
 
 __global__ void kernel(){

@@ -1,7 +1,8 @@
 #pragma once
 
-#include <ATen/core/jit_type.h>
+#include <ATen/ATen.h>
 #include <c10/util/Exception.h>
+#include <torch/csrc/jit/ir/ir.h>
 
 namespace torch {
 namespace jit {
@@ -9,6 +10,12 @@ namespace fuser {
 namespace cuda {
 
 void debugPrint(const c10::TensorTypePtr& type);
+
+bool is_zero_dim_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+bool is_zero_sized_tensor(const std::shared_ptr<c10::TensorType>& tensor_type);
+
+bool is_cpu_scalar(const at::Tensor& tensor);
+bool is_cpu_scalar(const c10::TensorType& tensor_type);
 
 //! Types of debug print-outs
 //!
@@ -18,12 +25,15 @@ enum class DebugDumpOption {
   FusionIr, //!< Dump the Fusion IR before lowering
   FusionIrMath, //!< Dump just the compute (math) part of the Fusion IR
   KernelIr, //!< Dump the compiler Kernel IR
+  ComputeAtMap, //!< Dump the computeAt map
   CudaKernel, //!< Dump the generated CUDA C++ kernel code
   CudaFull, //!< Dump the complete CUDA C++ code
   CudaToFile, //!< Dump CUDA Strings to File
   LaunchParam, //!< Dump the Launch parameters of kernel
   FusionSegments, //!< Dump Segmented Fusion Graph
-  PrintRuntimeArgs, //!< Print the runtime arguments when launching kernels
+  FusionSegmenterLog, //!< Dump Detailed Segmenter Logging
+  FusionArgs, //!< Print the runtime fusion arguments
+  KernelArgs, //!< Print the runtime kernel arguments when launching kernels
   EffectiveBandwidth, //! Measure kernel performance and print effective
                       //! bandwidth
   FusionSegmentsDrawing, //!< Dump Segmented Fusion Graph
@@ -31,17 +41,43 @@ enum class DebugDumpOption {
   BufferReuseInfo, //!< Dump the analysis details of local/shared buffer re-use
   SchedulerDebug, //! Dump scheduler heuristic parameters
   ParallelDimensions, //!< Dump known parallel dimensions
-  Halo //! Halo information of tensors
+  Halo, //! Halo information of tensors
+  PerfDebugVerbose //! When running kernels, print verbose information
+                   //! associated with what's running
 };
 
 TORCH_CUDA_CU_API bool isDebugDumpEnabled(DebugDumpOption option);
 
+//! Types of features to disable
+//!
+//! These can be set through the `PYTORCH_NVFUSER_DISABLE` environment variable
+//!
+enum class DisableOption {
+  ArchCheck, //! Disable hardware-specific checks to enable cross arch debug
+  Fallback, //! Disable fallback
+  Fma, //! Disable FMA instructions
+  IndexHoist, //! Disable index hoisting
+  Nvtx, //! Disable NVTX instrumentation
+  PredicateElimination, //! Disable predicate elimination
+  UnrollWithRng //! Disable unrolling for kernels with RNG in them
+};
+
+TORCH_CUDA_CU_API bool isDisabled(DisableOption option);
+
+//! Types of features to enable
+//!
+//! These can be set through the `PYTORCH_NVFUSER_ENABLE` environment variable
+//!
+enum class EnableOption {
+  Complex, //! Enable complex support on python
+  KernelProfile //! Enable intra-kernel performance profiling
+};
+
+TORCH_CUDA_CU_API bool isEnabled(EnableOption option);
+
 // Check if fallback path should be used which will dispatch to eagermode if any
 // errors are encountered. Helpful for debugging.
 bool useFallback();
-
-// Returns if unrolling should not be used for kernels with RNG in them.
-bool disableRNGUnrolling();
 
 //! Ceil integer division
 constexpr int64_t ceilDiv(int64_t a, int64_t b) {
@@ -115,6 +151,8 @@ constexpr unsigned int switch_pair(T t1, T t2) {
   constexpr unsigned int _WORD_SHIFT = 16;
   return ((unsigned int)t1 << _WORD_SHIFT) + (unsigned int)t2;
 }
+
+std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type);
 
 } // namespace cuda
 } // namespace fuser

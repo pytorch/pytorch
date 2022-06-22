@@ -1,10 +1,11 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 #pragma once
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 
 #include <ATen/MemoryOverlap.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIterator.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
@@ -22,7 +23,7 @@ struct InputMeta {
 // This kernel is used by two TensorList types:
 // 1. stack_serial_kernel uses at::ArrayRef<Tensor>
 // 2. Static runtime calls this kernel directly (csrc/jit/runtime/static/ops.cpp) with
-//    VarStackNodeWrapper.
+//    ProcessedNodeInputWrapper.
 // When making changes, make sure that they are compatible with both types!
 template <typename scalar_t, typename TensorListType>
 void stack_serial_kernel_impl(Tensor& result, TensorListType tensors, int64_t dim) {
@@ -111,7 +112,7 @@ bool can_use_native_serial_stack_impl(Tensor& result, TensorListType tensors, in
   // or there is only one thread. Note that we aren't checking result.numel() here because
   // it may not have been resized and we want to defer that cost till later.
   int64_t numel_in_stack = first_tensor.numel() * tensors.size();
-  return numel_in_stack < at::internal::GRAIN_SIZE && at::get_num_threads() == 1;
+  return numel_in_stack < at::internal::GRAIN_SIZE || at::get_num_threads() == 1;
 }
 
 template <typename TensorListType, bool should_skip_overlap_check>
@@ -123,8 +124,8 @@ struct CanUseNativeSerialStack<TensorListType, false> {
     // Inputs cannot alias the output tensor
     for (const auto i : c10::irange(tensors.size())) {
       auto lap = at::get_overlap_status(result, tensors[i]);
-      TORCH_CHECK(lap != at::MemOverlapStatus::PARTIAL &&
-          lap != at::MemOverlapStatus::FULL, 0,
+      TORCH_CHECK(lap != at::MemOverlapStatus::Partial &&
+          lap != at::MemOverlapStatus::Full, 0,
           "unsupported operation: the input tensors cannot refer to any of the "
           "output memory locations. Found overlap in input tensor ", i);
     }

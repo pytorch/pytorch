@@ -56,7 +56,7 @@ struct TORCH_API CharRange {
 struct TORCH_API StringProvider {
   virtual void operator()(CharRange&) = 0;
   virtual void reset() = 0;
-  virtual ~StringProvider() {}
+  virtual ~StringProvider() = default;
 };
 
 class TORCH_API BufferedTokenizer {
@@ -99,7 +99,7 @@ class TORCH_API BufferedTokenizer {
   StringProvider* provider_;
   Tokenizer tokenizer_;
   TokenizedString tokenized_;
-  int tokenIndex_;
+  unsigned tokenIndex_;
   int numPasses_;
   int pass_{0};
 };

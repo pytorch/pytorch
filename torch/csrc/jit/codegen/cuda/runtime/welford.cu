@@ -8,8 +8,8 @@ __inline__ __device__ void welfordCombine(
     T& a_avg,
     T& a_M2,
     TN& a_N,
-    const T& b_avg,
-    const T& b_M2,
+    const T b_avg,
+    const T b_M2,
     TN b_N) {
   if (b_N == 0) {
     return;
@@ -183,9 +183,9 @@ __device__ void gridWelfordLastBlock(
     T& out_avg,
     T& out_M2,
     TN& out_N,
-    const T* in_avg,
-    const T* in_M2,
-    const TN* in_N,
+    const volatile T* in_avg,
+    const volatile T* in_M2,
+    const volatile TN* in_N,
     const nvfuser_index_t
         grid_reduction_segment_size, // Number of reductions across
                                      // grid reduce dimensions
@@ -261,7 +261,7 @@ __device__ void gridWelfordLastBlock(
   }
 }
 
-//    Grid welford combine
+// Grid welford combine. See GridReduction for more information
 template <
     bool X_BLOCK,
     bool Y_BLOCK,
@@ -288,7 +288,13 @@ __device__ void gridWelford(
     TN* shared_buf_N,
     bool read_pred,
     bool write_pred,
-    T init_val) {
+    T init_val,
+    const nvfuser_index_t entrance_ind,
+    const nvfuser_index_t n_entrances) {
+  // entrance index only matters for non-persistent re-entrant grid reductions.
+  const nvfuser_index_t entrance_ind_ = PERSISTENT_REDUCTION ? 0 : entrance_ind;
+  const nvfuser_index_t n_entrances_ = PERSISTENT_REDUCTION ? 1 : n_entrances;
+
   // Number of values to reduce in the reduction segment
   const auto grid_reduction_segment_size =
       index_utils::maskedSize<X_BLOCK, Y_BLOCK, Z_BLOCK>(gridDim);
@@ -304,14 +310,19 @@ __device__ void gridWelford(
   const auto block_reduction_segment_size =
       index_utils::maskedSize<X_THREAD, Y_THREAD, Z_THREAD>(blockDim);
 
+  // Number of reductions in the grid
+  const nvfuser_index_t grid_segment_size = PERSISTENT_REDUCTION
+      ? 1
+      : index_utils::maskedSize<!X_BLOCK, !Y_BLOCK, !Z_BLOCK>(gridDim);
+
   // advance to the offset for this segment
   // index of reduction * size of the reduction * size of threads
-  work_buf_avg += idx_in_grid_segment * grid_reduction_segment_size *
-      block_reduction_segment_size;
-  work_buf_M2 += idx_in_grid_segment * grid_reduction_segment_size *
-      block_reduction_segment_size;
-  work_buf_N += idx_in_grid_segment * grid_reduction_segment_size *
-      block_reduction_segment_size;
+  work_buf_avg += (entrance_ind_ * grid_segment_size + idx_in_grid_segment) *
+      grid_reduction_segment_size * block_reduction_segment_size;
+  work_buf_M2 += (entrance_ind_ * grid_segment_size + idx_in_grid_segment) *
+      grid_reduction_segment_size * block_reduction_segment_size;
+  work_buf_N += (entrance_ind_ * grid_segment_size + idx_in_grid_segment) *
+      grid_reduction_segment_size * block_reduction_segment_size;
 
   if ((X_THREAD || threadIdx.x == 0) && (Y_THREAD || threadIdx.y == 0) &&
       (Z_THREAD || threadIdx.z == 0)) {
@@ -333,8 +344,15 @@ __device__ void gridWelford(
     }
   }
 
-  grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
-      sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
+  if (PERSISTENT_REDUCTION) {
+    grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+        sync_flags[idx_in_grid_segment], grid_reduction_segment_size);
+  } else {
+    // Use a different sync flag for each call
+    grid_sync::sync<X_BLOCK, Y_BLOCK, Z_BLOCK, PERSISTENT_REDUCTION>(
+        sync_flags[entrance_ind_ * grid_segment_size + idx_in_grid_segment],
+        grid_reduction_segment_size);
+  }
 
   bool last_block =
       index_utils::maskedIsLast<X_BLOCK, Y_BLOCK, Z_BLOCK>(blockIdx, gridDim);
@@ -345,9 +363,9 @@ __device__ void gridWelford(
         out_avg,
         out_M2,
         out_N,
-        (T*)work_buf_avg,
-        (T*)work_buf_M2,
-        (TN*)work_buf_N,
+        work_buf_avg,
+        work_buf_M2,
+        work_buf_N,
         grid_reduction_segment_size,
         block_reduction_segment_size,
         shared_buf_avg,
@@ -366,6 +384,3 @@ __device__ void gridWelford(
 }
 
 } // namespace welford
-
-#undef isize
-#undef ioffset

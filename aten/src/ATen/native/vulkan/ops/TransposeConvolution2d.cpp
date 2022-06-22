@@ -1,8 +1,11 @@
-#include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/utils/ParamUtils.h>
-#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/api/Utils.h>
+#include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
+#include <ATen/native/vulkan/ops/VulkanOpContext.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -51,7 +54,7 @@ vTensor pack_weights_2d_reverse(
   float* const dst_weight_ptr = v_weight_payload.get();
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (int64_t src_oc = 0; src_oc < src_filter[Layout::Filter::output]; ++src_oc) {
+  for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
     /* Source */
     const float* const src_weight_oc_ptr = src_weight_ptr + src_oc * src_block_sz;
 
@@ -61,10 +64,10 @@ vTensor pack_weights_2d_reverse(
 
     float* const dst_weight_c_ptr = dst_weight_ptr + dst_c * dst_kernel_sz;
 
-    for (int64_t src_ic = 0; src_ic < src_filter[Layout::Filter::input]; ++src_ic) {
-      for (int64_t src_ih = 0; src_ih < src_kh_sz; ++src_ih) {
+    for (const auto src_ic : c10::irange(src_filter[Layout::Filter::input])) {
+      for (const auto src_ih : c10::irange(src_kh_sz)) {
         const int64_t dst_h = reversed ? (src_kh_sz - 1 - src_ih) : src_ih;
-        for (int64_t src_iw = 0; src_iw < src_kw_sz; ++src_iw) {
+        for (const auto src_iw : c10::irange(src_kw_sz)) {
           const int64_t dst_w = reversed ? (src_kw_sz - 1 - src_iw) : src_iw;
           const int64_t dst_w_offset = dst_w * stack_depth;
           memcpy(
@@ -85,7 +88,7 @@ vTensor pack_weights(const Tensor& weight_arg) {
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const Tensor weight = at::permute(weight_arg, {1, 0, 2, 3}).contiguous();
 
@@ -104,7 +107,7 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
+  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const int64_t src_w = weight.size(Layout::TransposedFilter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
@@ -127,7 +130,7 @@ vTensor pack_biases(
     float* const dst_bias_ptr = v_bias_payload.get();
 
     memset(dst_bias_ptr, 0, v_bias.nbytes());
-    for (int64_t i = 0; i < src_w; ++i) {
+    for (const auto i : c10::irange(src_w)) {
       const int64_t c = i % 4;
       const int64_t x = i / 4;
       dst_bias_ptr[c * packed_w + x] = src_bias_ptr[i];
@@ -251,7 +254,7 @@ static inline std::vector<int64_t> get_conv_transpose_output_size(
   std::vector<int64_t> output_size(dim);
   output_size[0] = input_size[input_batch_size_dim];
   output_size[1] = weight_size[weight_input_channels_dim];
-  for (size_t d = 2; d < dim; ++d) {
+  for (const auto d : c10::irange(2, dim)) {
     output_size[d] = stride[d - 2] * (input_size[d] - 1) + weight_size[d] - 2 * padding[d - 2] + output_padding[d - 2];
   }
   return output_size;
@@ -259,43 +262,7 @@ static inline std::vector<int64_t> get_conv_transpose_output_size(
 
 } // namespace
 
-TransposeConv2dOpContext::TransposeConv2dOpContext(
-    const Tensor& weight,
-    const c10::optional<Tensor>& bias,
-    const IntArrayRef stride,
-    const IntArrayRef padding,
-    const IntArrayRef output_padding,
-    const IntArrayRef dilation,
-    const int64_t groups,
-    const c10::optional<Scalar>& output_min,
-    const c10::optional<Scalar>& output_max)
-  : packed_{
-      pack_weights(weight),
-      pack_biases(bias, weight),
-      pack_filter(weight, expand_param_if_needed(dilation, "dilation", 2)),
-      pack_params(expand_param_if_needed(stride, "stride", 2)),
-      pack_params(expand_param_if_needed(padding, "padding", 2)),
-      pack_params(expand_param_if_needed(output_padding, "output_padding", 2)),
-      pack_params(expand_param_if_needed(dilation, "dilation", 2)),
-      safe_downcast<int32_t>(groups),
-      output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity(),
-      output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity(),
-    },
-    unpacked_{
-      weight,
-      bias,
-      weight.sizes().vec(),
-      stride.vec(),
-      padding.vec(),
-      output_padding.vec(),
-      dilation.vec(),
-      groups,
-      output_min,
-      output_max,
-    } {
-}
-
-TransposeConv2dOpContext TransposeConv2dOpContext::create(
+VulkanOpContext conv2d_transpose_context_create(
     const Tensor& weight,
     const c10::optional<Tensor>& bias,
     const IntArrayRef stride_arg,
@@ -327,31 +294,57 @@ TransposeConv2dOpContext TransposeConv2dOpContext::create(
       "transposed, output_padding, output_min, output_max) parameters are either "
       "invalid individually or their combination is not supported by Vulkan impl.");
 
-  // Pass in the originals
-  return TransposeConv2dOpContext{
-    weight,
-    bias,
-    stride_arg,
-    padding_arg,
-    output_padding_arg,
-    dilation_arg,
-    groups,
-    output_min,
-    output_max,
-  };
+  c10::impl::GenericList packed_context{c10::AnyType::get()};
+  packed_context.reserve(10);
+  packed_context.emplace_back(convert(pack_weights(weight)));
+  packed_context.emplace_back(convert(pack_biases(bias, weight)));
+  packed_context.emplace_back(pack_filter(weight, dilation));
+  packed_context.emplace_back(pack_params(stride));
+  packed_context.emplace_back(pack_params(padding));
+  packed_context.emplace_back(pack_params(output_padding));
+  packed_context.emplace_back(pack_params(dilation));
+  packed_context.emplace_back(safe_downcast<int32_t>(groups));
+  packed_context.emplace_back(output_min ? output_min->template to<float>() : -std::numeric_limits<float>::infinity());
+  packed_context.emplace_back(output_max ? output_max->template to<float>() : +std::numeric_limits<float>::infinity());
+
+  c10::impl::GenericList unpacked_context{c10::AnyType::get()};
+  unpacked_context.reserve(10);
+  unpacked_context.emplace_back(weight);
+  unpacked_context.emplace_back(bias);
+  unpacked_context.emplace_back(weight.sizes().vec());
+  unpacked_context.emplace_back(stride_arg.vec());
+  unpacked_context.emplace_back(padding_arg.vec());
+  unpacked_context.emplace_back(output_padding_arg.vec());
+  unpacked_context.emplace_back(dilation_arg.vec());
+  unpacked_context.emplace_back(groups);
+  unpacked_context.emplace_back(output_min);
+  unpacked_context.emplace_back(output_max);
+
+  return VulkanOpContext::create(packed_context, unpacked_context);
 }
 
-void TransposeConv2dOpContext::conv2d_transpose_sliding_window(
+void conv2d_transpose_sliding_window(
     const api::Shader::Descriptor& shader,
     vTensor& v_output,
-    const vTensor& v_input) const {
-  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_.v_weight.has_image());
+    const vTensor& v_input,
+    const vTensor& packed_v_weight,
+    const vTensor& packed_v_bias,
+    const IntArrayRef packed_filter,
+    const IntArrayRef packed_stride,
+    const IntArrayRef packed_padding,
+    const IntArrayRef packed_dilation,
+    const float packed_output_min,
+    const float packed_output_max,
+    const IntArrayRef unpacked_filter) {
+  bool valid = C10_LIKELY(v_output.has_image() && v_input.has_image() && packed_v_weight.has_image());
   TORCH_CHECK(valid, "Not Implemented!")
 
   api::Context* const context = api::context();
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
+    api::OpProfiler profiler(command_buffer, context->querypool(), "prepacked::conv2d_transpose_clamp_run (conv2d_transpose_sliding_window)");
+
     const struct Block final {
       uvec3 extents;
       int32_t ic4;
@@ -364,32 +357,32 @@ void TransposeConv2dOpContext::conv2d_transpose_sliding_window(
       ivec4 src_filter;
     } block {
       v_output.extents(),
-      safe_downcast<int32_t>(packed_.filter[Layout::Filter::input]), /* this is aligned up */
+      safe_downcast<int32_t>(packed_filter[Layout::Filter::input]), /* this is aligned up */
       {
-        safe_downcast<int32_t>(packed_.filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(packed_.filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(packed_filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(packed_filter[Layout::Filter::height]),
         safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
         safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
       },
       {
-        safe_downcast<int32_t>(unpacked_.filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(unpacked_.filter[Layout::Filter::height]),
+        safe_downcast<int32_t>(unpacked_filter[Layout::Filter::width]),
+        safe_downcast<int32_t>(unpacked_filter[Layout::Filter::height]),
       },
       {
-        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.stride[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_stride[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_stride[Layout::Parameter::height]),
       },
       {
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.padding[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_padding[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_padding[Layout::Parameter::height]),
       },
       {
-        safe_downcast<int32_t>(packed_.dilation[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_.dilation[Layout::Parameter::height]),
+        safe_downcast<int32_t>(packed_dilation[Layout::Parameter::width]),
+        safe_downcast<int32_t>(packed_dilation[Layout::Parameter::height]),
       },
       {
-        packed_.output_min,
-        packed_.output_max,
+        packed_output_min,
+        packed_output_max,
       },
     };
 
@@ -420,12 +413,12 @@ void TransposeConv2dOpContext::conv2d_transpose_sliding_window(
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        packed_.v_weight.image(
+        packed_v_weight.image(
             command_buffer,
             vTensor::Stage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        packed_.v_bias.image(
+        packed_v_bias.image(
             command_buffer,
             vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
@@ -435,11 +428,26 @@ void TransposeConv2dOpContext::conv2d_transpose_sliding_window(
   command_pool.submit(context->gpu().queue, command_buffer);
 }
 
-Tensor TransposeConv2dOpContext::run(const Tensor& input_arg) const {
+Tensor conv2d_transpose_context_run(
+    const Tensor& input_arg,
+    const c10::impl::GenericList& packed_context,
+    const c10::impl::GenericList& unpacked_context) {
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
+
+  const vTensor& packed_v_weight = convert(packed_context.get(0).toTensor());
+  const vTensor& packed_v_bias = convert(packed_context.get(1).toTensor());
+
+  const auto packed_filter = packed_context.get(2).toIntVector();
+  const auto packed_stride = packed_context.get(3).toIntVector();
+  const auto packed_padding = packed_context.get(4).toIntVector();
+  const auto packed_output_padding = packed_context.get(5).toIntVector();
+  const auto packed_dilation = packed_context.get(6).toIntVector();
+  const float packed_output_min = packed_context.get(8).toDouble();
+  const float packed_output_max = packed_context.get(9).toDouble();
+  const auto unpacked_filter = unpacked_context.get(2).toIntVector();
 
   TORCH_CHECK(
       usable(input),
@@ -450,30 +458,123 @@ Tensor TransposeConv2dOpContext::run(const Tensor& input_arg) const {
     context,
     get_conv_transpose_output_size(
         v_input.sizes(),
-        unpacked_.filter,
-        packed_.padding,
-        packed_.output_padding,
-        packed_.stride,
-        packed_.dilation),
+        unpacked_filter,
+        packed_padding,
+        packed_output_padding,
+        packed_stride,
+        packed_dilation),
     input.options(),
   };
 
-  conv2d_transpose_sliding_window(VK_KERNEL(conv_transpose2d), v_output, v_input);
+  conv2d_transpose_sliding_window(
+    VK_KERNEL(conv_transpose2d),
+    v_output,
+    v_input,
+    packed_v_weight,
+    packed_v_bias,
+    packed_filter,
+    packed_stride,
+    packed_padding,
+    packed_dilation,
+    packed_output_min,
+    packed_output_max,
+    unpacked_filter);
 
   return convert(v_output);
 }
 
+c10::intrusive_ptr<VulkanOpContext> create_conv2d_transpose_clamp_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return c10::make_intrusive<VulkanOpContext>(
+      conv2d_transpose_context_create(
+          weight,
+          bias,
+          stride,
+          padding,
+          output_padding,
+          dilation,
+          groups,
+          output_min,
+          output_max));
+}
+
+Tensor run_conv2d_transpose_clamp_context(
+    const Tensor& input,
+    const c10::intrusive_ptr<VulkanOpContext>& vulkan_context) {
+  return conv2d_transpose_context_run(
+    input,
+    vulkan_context->get_packed(),
+    vulkan_context->get_unpacked());
+}
+
+/* Backwards compatibility */
+TransposeConv2dOpContext::TransposeConv2dOpContext(VulkanOpContext vulkan_context)
+  : vulkan_context_{std::move(vulkan_context)} {
+}
+
+TransposeConv2dOpContext TransposeConv2dOpContext::create(
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias,
+    const IntArrayRef stride_arg,
+    const IntArrayRef padding_arg,
+    const IntArrayRef output_padding_arg,
+    const IntArrayRef dilation_arg,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return TransposeConv2dOpContext {
+      conv2d_transpose_context_create(
+        weight,
+        bias,
+        stride_arg,
+        padding_arg,
+        output_padding_arg,
+        dilation_arg,
+        groups,
+        output_min,
+        output_max)
+  };
+}
+
+Tensor TransposeConv2dOpContext::run(const Tensor& input_arg) const {
+  return conv2d_transpose_context_run(
+    input_arg,
+    vulkan_context_.get_packed(),
+    vulkan_context_.get_unpacked());
+}
+
 TransposeConv2dOpContext::State TransposeConv2dOpContext::unpack() const {
+  const c10::impl::GenericList unpacked_ = std::get<1>(vulkan_context_.get_state());
+  const Tensor unpacked_weight = unpacked_.get(0).toTensor();
+  const c10::optional<Tensor> unpacked_bias
+   = unpacked_.get(1).isTensor() ? unpacked_.get(1).toTensor() : (c10::optional<Tensor>&) c10::nullopt;
+  const std::vector<int64_t> unpacked_stride = unpacked_.get(3).toIntVector();
+  const std::vector<int64_t> unpacked_padding = unpacked_.get(4).toIntVector();
+  const std::vector<int64_t> unpacked_output_padding = unpacked_.get(5).toIntVector();
+  const std::vector<int64_t> unpacked_dilation = unpacked_.get(6).toIntVector();
+  const int64_t unpacked_groups = unpacked_.get(7).toInt();
+  const c10::optional<Scalar> unpacked_output_min
+   = unpacked_.get(6).isScalar() ? unpacked_.get(8).toScalar() : (c10::optional<Scalar>) c10::nullopt;
+  const c10::optional<Scalar> unpacked_output_max
+   = unpacked_.get(6).isScalar() ? unpacked_.get(9).toScalar() : (c10::optional<Scalar>) c10::nullopt;
   return TransposeConv2dOpContext::State{
-    unpacked_.weight,
-    unpacked_.bias,
-    unpacked_.stride,
-    unpacked_.padding,
-    unpacked_.output_padding,
-    unpacked_.dilation,
-    unpacked_.groups,
-    unpacked_.output_min,
-    unpacked_.output_max,
+    unpacked_weight,
+    unpacked_bias,
+    unpacked_stride,
+    unpacked_padding,
+    unpacked_output_padding,
+    unpacked_dilation,
+    unpacked_groups,
+    unpacked_output_min,
+    unpacked_output_max,
   };
 }
 

@@ -1,14 +1,11 @@
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
-ARG CUDNN_VERSION
 ARG IMAGE_NAME
 
 FROM ${IMAGE_NAME}
 
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
-ARG CUDNN_VERSION
-
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -23,14 +20,16 @@ RUN bash ./install_user.sh && rm install_user.sh
 
 # Install katex
 ARG KATEX
-ADD ./common/install_katex.sh install_katex.sh
-RUN bash ./install_katex.sh && rm install_katex.sh
+ADD ./common/install_docs_reqs.sh install_docs_reqs.sh
+RUN bash ./install_docs_reqs.sh && rm install_docs_reqs.sh
 
 # Install conda and other packages (e.g., numpy, pytest)
 ENV PATH /opt/conda/bin:$PATH
 ARG ANACONDA_PYTHON_VERSION
+ADD requirements-ci.txt /opt/conda/requirements-ci.txt
 ADD ./common/install_conda.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
+RUN rm /opt/conda/requirements-ci.txt
 
 # Install gcc
 ARG GCC_VERSION
@@ -66,12 +65,7 @@ ENV INSTALLED_VISION ${VISION}
 ADD ./common/install_openssl.sh install_openssl.sh
 ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
-
-# (optional) Install TensorRT
-ARG TENSORRT_VERSION
-ADD ./common/install_tensorrt.sh install_tensorrt.sh
-RUN if [ -n "${TENSORRT_VERSION}" ]; then bash ./install_tensorrt.sh; fi
-RUN rm install_tensorrt.sh
+ENV OPENSSL_DIR /opt/openssl
 
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
@@ -107,12 +101,11 @@ ENV CUDA_PATH /usr/local/cuda
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
-# Hack for CUDA 11.5.0 image to install cudnn8 since cudnn8 is not included with CUDA 11.5 image
-# Also note cudnn 8.2.0.53 is labeled for cuda 11.3
-ARG INSTALL_CUDNN
-ADD ./common/install_cudnn8.sh install_cudnn8.sh
-RUN if [ -n "${INSTALL_CUDNN}" ]; then bash install_cudnn8.sh; fi
-RUN rm install_cudnn8.sh
+# Install CUDNN
+ARG CUDNN_VERSION
+ADD ./common/install_cudnn.sh install_cudnn.sh
+RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
+RUN rm install_cudnn.sh
 
 USER jenkins
 CMD ["bash"]

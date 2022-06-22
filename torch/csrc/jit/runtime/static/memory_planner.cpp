@@ -54,6 +54,18 @@ FastMap<const Value*, at::Tensor*> tensorValueToTensor(
   return tensor_value_to_tensor;
 }
 
+// Don't change the size if it is already aligned, otherwise increase the size
+// to make it aligned.
+size_t compute_aligned_tensor_size(size_t nbytes) {
+  // Note: everything below is size_t
+  return (nbytes + c10::gAlignment - 1) & (~(c10::gAlignment - 1));
+}
+
+at::DataPtr allocate_buffer(size_t size) {
+  at::Allocator* allocator = c10::GetCPUCachingAllocator();
+  return allocator->allocate(size);
+}
+
 } // namespace
 
 std::vector<StorageGroup> assignStorageToManagedTensors(
@@ -129,10 +141,10 @@ bool setIncludes(const FastSet<const Value*>& set, const Value* v) {
 }
 
 std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
-    StaticRuntime* runtime,
+    BlockRunner* block_runner,
     const FastSet<const Value*>& managed_output_tensor_values) {
   std::vector<std::pair<size_t, at::Tensor*>> managed_output_tensors;
-  for (auto& pnode : runtime->nodes()) {
+  for (auto& pnode : block_runner->nodes()) {
     for (const auto i : c10::irange(pnode.outputs().size())) {
       auto& ival = pnode.Output(i);
       const auto* val = pnode.node()->outputs()[i];
@@ -151,30 +163,35 @@ std::vector<std::pair<size_t, at::Tensor*>> assignStorageToOutputTensors(
 } // namespace
 
 MemoryPlanner::MemoryPlanner(
-    StaticRuntime* runtime,
-    const ValueGroup& value_group,
-    const FastSet<const Value*>& managed_tensor_values,
-    const FastSet<const Value*>& managed_output_tensor_values,
-    const FastSet<const Value*>& leaked_values,
-    const ManagedTensorRanges& ranges,
+    BlockRunner* block_runner,
+    const BlockInfo& block_info,
     bool enable_out_variant,
-    bool manage_output_tensors,
-    bool optimize_memory) {
+    bool manage_output_tensors) {
+  const auto& managed_tensor_values = block_info.managed_tensor_values();
+  const auto& managed_output_tensor_values =
+      block_info.managed_output_tensor_values();
+  const auto& leaked_values = block_info.leaked_values();
+
   // collect unmanaged output ivalues
   FastSet<IValue*> unmanaged_ivalues;
   FastSet<IValue*> unmanaged_borrowed_ivalues;
-  for (ProcessedNode& pnode : runtime->nodes()) {
+  for (ProcessedNode& pnode : block_runner->nodes()) {
     const auto borrows_outputs = borrowsOutputs(pnode.node()->kind());
     for (const auto i : c10::irange(pnode.outputs().size())) {
       const Value* out_v = pnode.node()->outputs()[i];
-      const bool in_managed_sets = setIncludes(managed_tensor_values, out_v) ||
+      const bool in_managed_tensors = setIncludes(managed_tensor_values, out_v);
+      const bool is_unmanaged_special_case = isUnmanagedSpecialCase(pnode, i);
+      if (in_managed_tensors && !is_unmanaged_special_case) {
+        ++num_managed_tensors_;
+      }
+      const bool in_managed_sets = in_managed_tensors ||
           // Manage output tensors might have been turned off, so we have to
           // check the flag here
           (manage_output_tensors &&
            setIncludes(managed_output_tensor_values, out_v)) ||
           setIncludes(leaked_values, out_v);
 
-      if (in_managed_sets && !isUnmanagedSpecialCase(pnode, i)) {
+      if (in_managed_sets && !is_unmanaged_special_case) {
         continue;
       }
       if (doesNotHeapAllocateWhenStoredInIValue(*out_v->type())) {
@@ -189,7 +206,7 @@ MemoryPlanner::MemoryPlanner(
       }
     }
   }
-  for (IValue* output : runtime->outputs()) {
+  for (IValue* output : block_runner->outputs()) {
     auto it = unmanaged_borrowed_ivalues.find(output);
     if (it != unmanaged_borrowed_ivalues.end()) {
       borrowed_ivalues_needing_incref_.push_back(output);
@@ -211,82 +228,18 @@ MemoryPlanner::MemoryPlanner(
       unmanaged_borrowed_ivalues.begin(),
       unmanaged_borrowed_ivalues.end());
 
-  if (enable_out_variant) {
-    const auto tensor_value_to_tensor =
-        tensorValueToTensor(runtime->nodes(), managed_tensor_values);
-    if (optimize_memory) {
-      managed_tensors_ = assignStorageToManagedTensors(
-          runtime->node_ptrs(), ranges, tensor_value_to_tensor);
-    } else {
-      for (auto& tensor : tensor_value_to_tensor) {
-        managed_tensors_.emplace_back(tensor.second);
-      }
-    }
-  }
-
   if (enable_out_variant && manage_output_tensors) {
-    managed_output_tensors_ =
-        assignStorageToOutputTensors(runtime, managed_output_tensor_values);
-  }
-
-  num_managed_tensors_ = 0;
-  for (const auto& ms : managed_tensors_) {
-    num_managed_tensors_ += ms.numManagedTensors();
+    managed_output_tensors_ = assignStorageToOutputTensors(
+        block_runner, managed_output_tensor_values);
   }
 }
 
-// Don't change the size if it is already aligned, otherwise increase the size
-// to make it aligned.
-size_t MemoryPlanner::compute_aligned_tensor_size(size_t nbytes) {
-  // Note: everything below is size_t
-  return (nbytes + c10::gAlignment - 1) & (~(c10::gAlignment - 1));
-}
-
-at::DataPtr MemoryPlanner::allocate_buffer(size_t size) {
-  at::Allocator* allocator = c10::GetCPUCachingAllocator();
-  return allocator->allocate(size);
-}
-
-void MemoryPlanner::allocateManagedTensors() {
-  if (managed_bytes_ == 0) {
-    return;
-  }
-  DCHECK(!managed_tensor_storage_impls_.empty());
-  buffer_ = allocate_buffer(managed_bytes_);
-
-  size_t offset = 0;
+uint8_t* MemoryPlanner::allocateBuffer(size_t num_bytes) {
+  buffer_ = allocate_buffer(num_bytes);
   uint8_t* start = static_cast<uint8_t*>(buffer_.get());
   buffer_start_ = start;
-  buffer_end_ = start + managed_bytes_;
-
-  reused_tensors_ = 0;
-  auto group_idx = 0;
-  for (auto& ms : managed_tensor_storage_impls_) {
-    auto tensor_size = ms.first;
-    if (tensor_size == 0) {
-      group_idx++;
-      continue;
-    }
-    at::StorageImpl* storageImpl = &ms.second;
-    DCHECK_LE(offset + tensor_size, managed_bytes_);
-    void* src = static_cast<void*>(start + offset);
-
-#ifndef NDEBUG
-    DCHECK_EQ(tensor_size, managed_tensors_[group_idx].maxTensorSize());
-    for (auto* tensor : managed_tensors_[group_idx].group()) {
-      DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
-    }
-#endif
-    DCHECK_NE(managed_tensors_[group_idx].numManagedTensors(), 0);
-    reused_tensors_ += managed_tensors_[group_idx].numManagedTensors() - 1;
-    storageImpl->set_data_ptr_noswap(
-        at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
-    storageImpl->set_nbytes(tensor_size);
-
-    offset += tensor_size;
-    group_idx++;
-  }
-  DCHECK_EQ(offset, managed_bytes_);
+  buffer_end_ = start + num_bytes;
+  return start;
 }
 
 void MemoryPlanner::allocateOutputTensors() {
@@ -339,6 +292,112 @@ void MemoryPlanner::allocate() {
 }
 
 void MemoryPlanner::deallocate() {
+  for (auto& iv : borrowed_ivalues_needing_incref_) {
+    auto old = std::move(*iv);
+    *iv = IValue(old);
+    c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(old);
+  }
+  // for unmanaged ivalues (either tensor or non-tensor), we reset the *iv so
+  // that the objects pointed to by *iv may be reclaimed by reference counting
+  for (auto& iv : unmanaged_ivalues_) {
+    *iv = IValue();
+  }
+  for (auto& iv : unmanaged_borrowed_ivalues_) {
+    c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(*iv);
+  }
+  // It's important to call this function after all other owning refs
+  // of the managed StorageImpls are cleaned up. It can reset the
+  // the StorageImpl's refcount to (# tensors in storage group),
+  // so destructing any owning refs afterwards will bring the refcount
+  // lower than expected and trigger the debug assertion in
+  // ~intrusive_ptr_target.
+  deallocateManagedTensors();
+  buffer_ = {};
+}
+
+void MemoryPlanner::deallocateOutputTensors() {
+  size_t output_buffer_bytes = 0;
+  for (auto& ms : managed_output_tensors_) {
+    auto* tensor = ms.second;
+    size_t current_size =
+        compute_aligned_tensor_size(tensor->storage().nbytes());
+    tensor->storage().unsafeGetStorageImpl()->reset();
+    if (current_size > ms.first) {
+      ms.first = current_size;
+    }
+    output_buffer_bytes += ms.first;
+  }
+  output_buffer_bytes_ = output_buffer_bytes;
+  output_buffer_ = {};
+}
+
+StandardMemoryPlanner::StandardMemoryPlanner(
+    BlockRunner* block_runner,
+    const BlockInfo& block_info,
+    bool enable_out_variant,
+    bool manage_output_tensors,
+    bool optimize_memory)
+    : MemoryPlanner(
+          block_runner,
+          block_info,
+          enable_out_variant,
+          manage_output_tensors) {
+  const auto& managed_tensor_values = block_info.managed_tensor_values();
+  if (enable_out_variant) {
+    const auto tensor_value_to_tensor =
+        tensorValueToTensor(block_runner->nodes(), managed_tensor_values);
+    if (optimize_memory) {
+      managed_tensors_ = assignStorageToManagedTensors(
+          block_info.node_ptrs(),
+          block_info.managed_tensor_ranges(),
+          tensor_value_to_tensor);
+    } else {
+      for (auto& tensor : tensor_value_to_tensor) {
+        managed_tensors_.emplace_back(tensor.second);
+      }
+    }
+  }
+}
+
+void StandardMemoryPlanner::allocateManagedTensors() {
+  if (managed_bytes_ == 0) {
+    return;
+  }
+  DCHECK(!managed_tensor_storage_impls_.empty());
+  size_t offset = 0;
+  auto* start = allocateBuffer(managed_bytes_);
+
+  reused_tensors_ = 0;
+  auto group_idx = 0;
+  for (auto& ms : managed_tensor_storage_impls_) {
+    auto tensor_size = ms.first;
+    if (tensor_size == 0) {
+      group_idx++;
+      continue;
+    }
+    at::StorageImpl* storageImpl = &ms.second;
+    DCHECK_LE(offset + tensor_size, managed_bytes_);
+    void* src = static_cast<void*>(start + offset);
+
+#ifndef NDEBUG
+    DCHECK_EQ(tensor_size, managed_tensors_[group_idx].maxTensorSize());
+    for (auto* tensor : managed_tensors_[group_idx].group()) {
+      DCHECK_EQ(storageImpl, tensor->storage().unsafeGetStorageImpl());
+    }
+#endif
+    DCHECK_NE(managed_tensors_[group_idx].numManagedTensors(), 0);
+    reused_tensors_ += managed_tensors_[group_idx].numManagedTensors() - 1;
+    storageImpl->set_data_ptr_noswap(
+        at::DataPtr(src, src, nullptr, c10::Device(c10::DeviceType::CPU)));
+    storageImpl->set_nbytes(tensor_size);
+
+    offset += tensor_size;
+    group_idx++;
+  }
+  DCHECK_EQ(offset, managed_bytes_);
+}
+
+void StandardMemoryPlanner::deallocateManagedTensors() {
   managed_bytes_ = 0;
   // free memory used by outputs of ops in out variants
   // but keep the TensorImpl and StorageImpl around.
@@ -354,7 +413,6 @@ void MemoryPlanner::deallocate() {
   for (auto& ms : managed_tensors_) {
     const auto& tensors = ms.group();
     size_t max = ms.maxTensorSize();
-    auto tensor_idx = 0;
     for (auto& tensor : tensors) {
       const auto& storage = tensor->storage();
       size_t current_size = compute_aligned_tensor_size(storage.nbytes());
@@ -416,37 +474,6 @@ void MemoryPlanner::deallocate() {
 
   DCHECK_EQ(managed_tensor_storage_impls_.size(), managed_tensors_.size());
   VLOG(1) << "managed_bytes: " << managed_bytes_;
-
-  for (auto& iv : borrowed_ivalues_needing_incref_) {
-    auto old = std::move(*iv);
-    *iv = IValue(old);
-    c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(old);
-  }
-  // for unmanaged ivalues (either tensor or non-tensor), we reset the *iv so
-  // that the objects pointed to by *iv may be reclaimed by reference counting
-  for (auto& iv : unmanaged_ivalues_) {
-    *iv = IValue();
-  }
-  for (auto& iv : unmanaged_borrowed_ivalues_) {
-    c10::MaybeOwnedTraits<c10::IValue>::destroyBorrow(*iv);
-  }
-  buffer_ = {};
-}
-
-void MemoryPlanner::deallocateOutputTensors() {
-  size_t output_buffer_bytes = 0;
-  for (auto& ms : managed_output_tensors_) {
-    auto* tensor = ms.second;
-    size_t current_size =
-        compute_aligned_tensor_size(tensor->storage().nbytes());
-    tensor->storage().unsafeGetStorageImpl()->reset();
-    if (current_size > ms.first) {
-      ms.first = current_size;
-    }
-    output_buffer_bytes += ms.first;
-  }
-  output_buffer_bytes_ = output_buffer_bytes;
-  output_buffer_ = {};
 }
 
 } // namespace jit

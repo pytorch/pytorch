@@ -62,7 +62,7 @@ void assert_ordering(
   ASSERT_EQ(expected.size(), actual.size())
       << "Got " << actual.size() << " elements (" << actual << ")"
       << " expected " << expected.size() << " elements (" << expected << ")";
-  for (int i = 0; i < expected.size(); i++) {
+  for (unsigned i = 0; i < expected.size(); i++) {
     ASSERT_EQ(expected[i], actual[i])
         << "Difference at index " << i << " in " << actual << " (expected "
         << actual << ")";

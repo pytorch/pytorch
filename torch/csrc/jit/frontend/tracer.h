@@ -40,6 +40,8 @@ using ::c10::ivalue::ConstantString;
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+TORCH_API std::atomic<bool>& getTracerStateWarnMode();
+
 struct TORCH_API TracingState
     : public std::enable_shared_from_this<TracingState> {
   TracingState();
@@ -48,7 +50,7 @@ struct TORCH_API TracingState
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   std::shared_ptr<Graph> graph;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  bool warn = true;
+  bool warn = getTracerStateWarnMode();
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
   bool strict = true;
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
@@ -235,6 +237,7 @@ TORCH_API void abandon();
 // NB: those serve both as an intermediate steps in addInputs below,
 // as well as the overloads that terminate template recursion
 TORCH_API void addInputs(Node* n, const char* name, int64_t value);
+TORCH_API void addInputs(Node* n, const char* name, c10::SymInt value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -260,10 +263,15 @@ TORCH_API void addInputs(
     const char* name,
     const c10::optional<at::Tensor>& value);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
+TORCH_API void addInputs(Node* n, const char* name, c10::SymIntArrayRef value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
     const c10::optional<ArrayRef<int64_t>>& value);
+TORCH_API void addInputs(
+    Node* n,
+    const char* name,
+    const at::OptionalIntArrayRef& opt_value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -384,6 +392,8 @@ TORCH_API void addOutput(
 TORCH_API autograd::Variable getSizeOf(
     const autograd::Variable& var,
     int64_t dim);
+
+TORCH_API autograd::Variable getNumelOf(const autograd::Variable& var);
 
 } // namespace tracer
 } // namespace jit

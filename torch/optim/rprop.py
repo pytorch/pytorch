@@ -1,6 +1,7 @@
 import torch
-from . import _functional as F
+from torch import Tensor
 from .optimizer import Optimizer
+from typing import List, Optional
 
 
 class Rprop(Optimizer):
@@ -25,6 +26,7 @@ class Rprop(Optimizer):
             &\hspace{10mm}  \textbf{else if}  \:  g^i_{prev} g^i_t < 0                           \\
             &\hspace{15mm}  \eta^i_t \leftarrow \mathrm{max}(\eta^i_{t-1} \eta_{-},
                 \Gamma_{min})                                                                    \\
+            &\hspace{15mm}  g^i_t \leftarrow 0                                                   \\
             &\hspace{10mm}  \textbf{else}  \:                                                    \\
             &\hspace{15mm}  \eta^i_t \leftarrow \eta^i_{t-1}                                     \\
             &\hspace{5mm}\theta_t \leftarrow \theta_{t-1}- \eta_t \mathrm{sign}(g_t)             \\
@@ -47,16 +49,24 @@ class Rprop(Optimizer):
             (default: (0.5, 1.2))
         step_sizes (Tuple[float, float], optional): a pair of minimal and
             maximal allowed step sizes (default: (1e-6, 50))
+        foreach (bool, optional): whether foreach implementation of optimizer
+            is used (default: None)
     """
 
-    def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50)):
+    def __init__(self, params, lr=1e-2, etas=(0.5, 1.2), step_sizes=(1e-6, 50),
+                 foreach: Optional[bool] = None):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 < etas[0] < 1.0 < etas[1]:
             raise ValueError("Invalid eta values: {}, {}".format(etas[0], etas[1]))
 
-        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes)
+        defaults = dict(lr=lr, etas=etas, step_sizes=step_sizes, foreach=foreach)
         super(Rprop, self).__init__(params, defaults)
+
+    def __setstate__(self, state):
+        super().__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('foreach', None)
 
     @torch.no_grad()
     def step(self, closure=None):
@@ -76,6 +86,9 @@ class Rprop(Optimizer):
             grads = []
             prevs = []
             step_sizes = []
+            etaminus, etaplus = group['etas']
+            step_size_min, step_size_max = group['step_sizes']
+            foreach = group['foreach']
 
             for p in group['params']:
                 if p.grad is None:
@@ -97,18 +110,128 @@ class Rprop(Optimizer):
                 prevs.append(state['prev'])
                 step_sizes.append(state['step_size'])
 
-                etaminus, etaplus = group['etas']
-                step_size_min, step_size_max = group['step_sizes']
-
                 state['step'] += 1
 
-            F.rprop(params,
-                    grads,
-                    prevs,
-                    step_sizes,
-                    step_size_min=step_size_min,
-                    step_size_max=step_size_max,
-                    etaminus=etaminus,
-                    etaplus=etaplus)
+            rprop(params,
+                  grads,
+                  prevs,
+                  step_sizes,
+                  step_size_min=step_size_min,
+                  step_size_max=step_size_max,
+                  etaminus=etaminus,
+                  etaplus=etaplus,
+                  foreach=foreach)
 
         return loss
+
+
+def rprop(params: List[Tensor],
+          grads: List[Tensor],
+          prevs: List[Tensor],
+          step_sizes: List[Tensor],
+          # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+          # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
+          foreach: bool = None,
+          *,
+          step_size_min: float,
+          step_size_max: float,
+          etaminus: float,
+          etaplus: float):
+    r"""Functional API that performs rprop algorithm computation.
+
+    See :class:`~torch.optim.Rprop` for details.
+    """
+
+    if foreach is None:
+        # Placeholder for more complex foreach logic to be added when value is not set
+        foreach = False
+
+    if foreach and torch.jit.is_scripting():
+        raise RuntimeError('torch.jit.script not supported with foreach optimizers')
+
+    if foreach and not torch.jit.is_scripting():
+        func = _multi_tensor_rprop
+    else:
+        func = _single_tensor_rprop
+
+    func(params,
+         grads,
+         prevs,
+         step_sizes,
+         step_size_min=step_size_min,
+         step_size_max=step_size_max,
+         etaminus=etaminus,
+         etaplus=etaplus)
+
+
+def _single_tensor_rprop(params: List[Tensor],
+                         grads: List[Tensor],
+                         prevs: List[Tensor],
+                         step_sizes: List[Tensor],
+                         *,
+                         step_size_min: float,
+                         step_size_max: float,
+                         etaminus: float,
+                         etaplus: float):
+
+    for i, param in enumerate(params):
+        grad = grads[i]
+        prev = prevs[i]
+        step_size = step_sizes[i]
+
+        sign = grad.mul(prev).sign()
+        sign[sign.gt(0)] = etaplus
+        sign[sign.lt(0)] = etaminus
+        sign[sign.eq(0)] = 1
+
+        # update stepsizes with step size updates
+        step_size.mul_(sign).clamp_(step_size_min, step_size_max)
+
+        # for dir<0, dfdx=0
+        # for dir>=0 dfdx=dfdx
+        grad = grad.clone(memory_format=torch.preserve_format)
+        grad[sign.eq(etaminus)] = 0
+
+        # update parameters
+        param.addcmul_(grad.sign(), step_size, value=-1)
+
+        prev.copy_(grad)
+
+
+def _multi_tensor_rprop(params: List[Tensor],
+                        grads: List[Tensor],
+                        prevs: List[Tensor],
+                        step_sizes: List[Tensor],
+                        *,
+                        step_size_min: float,
+                        step_size_max: float,
+                        etaminus: float,
+                        etaplus: float):
+
+    if len(params) == 0:
+        return
+
+    signs = torch._foreach_mul(grads, prevs)
+    signs = [s.sign() for s in signs]
+    for sign in signs:
+        sign[sign.gt(0)] = etaplus
+        sign[sign.lt(0)] = etaminus
+        sign[sign.eq(0)] = 1
+
+    # update stepsizes with step size updates
+    torch._foreach_mul_(step_sizes, signs)
+    for step_size in step_sizes:
+        step_size.clamp_(step_size_min, step_size_max)
+
+    # for dir<0, dfdx=0
+    # for dir>=0 dfdx=dfdx
+    for i in range(len(grads)):
+        grads[i] = grads[i].clone(memory_format=torch.preserve_format)
+        grads[i][signs[i].eq(etaminus)] = 0
+
+    # update parameters
+    grad_signs = [grad.sign() for grad in grads]
+    torch._foreach_addcmul_(params, grad_signs, step_sizes, value=-1)
+
+    for i in range(len(prevs)):
+        prevs[i].copy_(grads[i])

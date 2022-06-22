@@ -54,8 +54,12 @@
 
 using namespace torch::jit::tensorexpr;
 
+#ifdef TORCH_ENABLE_LLVM
+
 // Helper function to print a snippet from a big multi-line string
 static void printLinesToFrom(const std::string& input_str, int from, int to);
+
+#endif
 
 int main(int argc, char* argv[]) {
   std::cout << "*** Structure of tensor expressions and statements ***"
@@ -186,10 +190,10 @@ int main(int argc, char* argv[]) {
     // structure is simply a pair of a buffer that was created to represent the
     // result of the computation (BufPtr) and a statement representing the
     // computation itself (StmtPtr).
-    Tensor C = Compute(
-        "C",
-        {{64, "i"}, {32, "j"}},
-        [&](const VarHandle& i, const VarHandle& j) { return i * j; });
+    Tensor C =
+        Compute("C", {64, 32}, [&](const VarHandle& i, const VarHandle& j) {
+          return i * j;
+        });
     std::cout << "Stmt produced by 'Compute' API: " << std::endl
               << *C.stmt() << std::endl;
     // Prints:
@@ -209,7 +213,7 @@ int main(int argc, char* argv[]) {
         {},
         Sum(),
         [&](const VarHandle& i, const VarHandle& j) { return C.load(i, j); },
-        {{64, "i"}, {32, "j"}});
+        {64, 32});
     std::cout << "Stmt produced by 'Reduce' API: " << std::endl
               << *D.stmt() << std::endl;
   }
@@ -223,15 +227,13 @@ int main(int argc, char* argv[]) {
     // Let's look at a couple of transformations that are used in NNC. We will
     // begin with constructing a Block statement like we did before.
 
-    Tensor C = Compute(
-        "C",
-        {{64, "i"}, {32, "j"}},
-        [&](const VarHandle& i, const VarHandle& j) { return i * (j + 1); });
+    Tensor C =
+        Compute("C", {64, 32}, [&](const VarHandle& i, const VarHandle& j) {
+          return i * (j + 1);
+        });
     BufHandle c_buf(C.buf());
-    Tensor D = Compute(
-        "D",
-        {{64, "i"}, {32, "j"}},
-        [&](const VarHandle& i, const VarHandle& j) {
+    Tensor D =
+        Compute("D", {64, 32}, [&](const VarHandle& i, const VarHandle& j) {
           return c_buf.load(i, j) - i;
         });
     StmtPtr block = Block::make({C.stmt(), D.stmt()});
@@ -353,10 +355,8 @@ int main(int argc, char* argv[]) {
     // Let's start by constructing a simple computation for us to work with:
     BufHandle A("A", {64, 32}, kInt);
     BufHandle B("B", {64, 32}, kInt);
-    Tensor X = Compute(
-        "X",
-        {{64, "i"}, {32, "j"}},
-        [&](const VarHandle& i, const VarHandle& j) {
+    Tensor X =
+        Compute("X", {64, 32}, [&](const VarHandle& i, const VarHandle& j) {
           return A.load(i, j) + B.load(i, j);
         });
 

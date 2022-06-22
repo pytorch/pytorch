@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.testing._internal.common_utils import TestCase, run_tests
-
+from typing import List
 
 class StaticModule:
     def __init__(self, scripted):
@@ -108,6 +108,52 @@ def trivial_graph(a, b, c):
     s = torch.tensor([[3, 3], [3, 3]])
     return a + b * c + s
 
+def elementwise_square_addition(input1, input2):
+    return input1 * input1 + input2 * input2
+
+def fork_wait_graph1(input1, input2):
+    fut = torch.jit.fork(elementwise_square_addition, input1, input2)
+    return torch.jit.wait(fut)
+
+def fork_wait_graph2(input1, input2):
+    fut = torch.jit.fork(loop_graph, input1, input2, 5)
+    return torch.jit.wait(fut)
+
+"""
+   graph with multiple fork/wait operations
+   :param input: torch.tensor input to forked subgraph
+   :param iters: number of future/wait pairs to be created
+"""
+def fork_wait_graph3(input, iters: int):
+    futures : List[torch.jit.Future[torch.Tensor]] = []
+    for _ in range(iters):
+        futures.append(torch.jit.fork(torch.neg, input))
+    results = []
+    for future in futures:
+        results.append(torch.jit.wait(future))
+    return torch.sum(torch.stack(results))
+
+"""
+   graph with multi-level fork/wait operations
+   :param input: torch.tensor input to forked subgraph
+   :param num_forks: number of top level forks
+   :param num_child_forks: number of child forks per parent fork
+"""
+def fork_wait_graph4(input, num_forks: int, num_child_forks: int):
+    futures : List[torch.jit.Future[torch.Tensor]] = []
+    for _ in range(num_forks):
+        futures.append(torch.jit.fork(fork_wait_graph3, input, num_child_forks))
+    results = []
+    for future in futures:
+        results.append(torch.jit.wait(future))
+    return torch.sum(torch.stack(results))
+
+def add_tensor(input1, input2):
+    return input1 + input2
+
+def fork_wait_graph_exception(input1, input2):
+    fut = torch.jit.fork(add_tensor, input1, input2)
+    return torch.jit.wait(fut)
 
 def loop_graph(a, b, iters: int):
     c = a + b * 2
@@ -162,6 +208,88 @@ class TestModule(nn.Module):
 
 
 class TestStaticModule(TestCase):
+
+    """
+    Test Case: To test simple fork/wait operation in a graph
+    fork is called on simple addition operation on input tensors
+    """
+    def test_fork_wait_1(self):
+        inp1 = torch.ones(5, 5)
+        inp2 = torch.randn(5, 5)
+        torch_graph = torch.jit.script(fork_wait_graph1)
+        output_ref = torch_graph(inp1, inp2)
+        static_runtime_module = StaticModule(torch_graph)
+        output_test = static_runtime_module(inp1, inp2)
+        torch.testing.assert_close(output_test, output_ref)
+
+    """
+    Test Case: To test fork/wait operation in a graph on
+    a loop subgraph performing mix of operations
+    """
+    def test_fork_wait_2(self):
+        inp1 = torch.randn(5, 5)
+        inp2 = torch.randn(5, 5)
+        torch_graph = torch.jit.script(fork_wait_graph2)
+        output_ref = torch_graph(inp1, inp2)
+        static_runtime_module = StaticModule(torch_graph)
+        output_test = static_runtime_module(inp1, inp2)
+        torch.testing.assert_close(output_test, output_ref)
+
+    """
+    Test Case: To test fork/wait operation in a graph on
+    having multiple fork/wait operations
+    """
+    def test_fork_wait_3(self):
+        input = torch.ones(3, 3)
+        num_forks = 10
+        torch_graph = torch.jit.script(fork_wait_graph3)
+        output_ref = torch_graph(input, num_forks)
+        static_runtime_module = StaticModule(torch_graph)
+        output_test = static_runtime_module(input, num_forks)
+        torch.testing.assert_close(output_test, output_ref)
+    """
+    Test Case: To test fork/wait operation in a graph on
+    multiple nested fork/wait operations
+    """
+    def test_fork_wait_4(self):
+        input = torch.ones(3, 3)
+        num_forks = 10
+        num_child_forks = 10
+        torch_graph = torch.jit.script(fork_wait_graph4)
+        static_runtime_module = StaticModule(torch_graph)
+        output_ref = torch_graph(input, num_forks, num_child_forks)
+        output_test = static_runtime_module(input, num_forks, num_child_forks)
+        torch.testing.assert_close(output_test, output_ref)
+
+    """
+    Test Case: To test exception handling in fork/wait
+    operation. Add.Tensor op is called for tensors with
+    non-matching dims on the forked subgraph and the
+    exception raised by subgraph is set on future returned
+    by prim::fork to parent graph. Returned exception is
+    checked for substring expected_error_msg as declared below
+    """
+    def test_fork_wait_exception(self):
+        # incompatible tensors for add due to shape mismatch
+        input1 = torch.randn(4, 7)
+        input2 = torch.randn(4, 5)
+        torch_graph = torch.jit.script(fork_wait_graph_exception)
+        try:
+            static_runtime_module = StaticModule(torch_graph)
+            output_test = static_runtime_module(input1, input2)
+        except Exception as error:
+            expected_error_msg = (
+                "The size of tensor a (7) must match the size "
+                "of tensor b (5) at non-singleton dimension 1"
+            )
+            # test fails if error does not contain expected substr
+            if str(error).find(expected_error_msg) == -1:
+                raise RuntimeError(
+                    "Tried execution of add.Tensors with incompatible shape. "
+                    "Exception raised by forked runtime execution does "
+                    f"not contain expected substring: \"{expected_error_msg}\""
+                ) from error
+
     def test_multihead_attention_layer(self):
         HID_DIM = 256
         QUERY_LEN = 8
@@ -358,6 +486,27 @@ class TestStaticModule(TestCase):
         for i in o_ref.keys():
             torch.testing.assert_close(o_ref[i], o_test[i])
 
+    def test_create_object(self):
+        class Foo:  # noqa: B903
+            def __init__(self, x: torch.Tensor) -> None:
+                self.x = x
+
+        class Mod(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, y: torch.Tensor) -> torch.Tensor:
+                foo = Foo(y)
+                return y * foo.x
+
+        mod = torch.jit.script(Mod()).eval()
+        y = torch.randn((1, ))
+        expected = mod(y)
+
+        static_mod = StaticModule(torch.jit.freeze(mod))
+        actual = static_mod(y)
+
+        self.assertEqual(expected, actual)
 
 if __name__ == "__main__":
     run_tests()

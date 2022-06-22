@@ -28,17 +28,19 @@ configure_file(
 file(GLOB C10_SRCS
         *.cpp
         core/*.cpp
-        core/boxing/*.cpp
-        core/boxing/impl/*.cpp
-        core/dispatch/*.cpp
-        core/op_registration/*.cpp
         core/impl/*.cpp
         mobile/*.cpp
         macros/*.cpp
         util/*.cpp
         )
-file(GLOB_RECURSE C10_ALL_TEST_FILES test/*.cpp)
-file(GLOB_RECURSE C10_HEADERS *.h)
+file(GLOB C10_HEADERS
+        *.h
+        core/*.h
+        core/impl/*.h
+        mobile/*.h
+        macros/*.h
+        util/*.h
+        )
 add_library(c10 ${C10_SRCS} ${C10_HEADERS})
 if(HAVE_SOVERSION)
   set_target_properties(c10 PROPERTIES
@@ -49,6 +51,9 @@ target_compile_options(c10 PRIVATE "-DC10_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
 if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10 PRIVATE "-fvisibility=hidden")
+endif()
+if(HAS_WERROR_SIGN_COMPARE AND WERROR)
+  target_compile_options(c10 PRIVATE "-Werror=sign-compare")
 endif()
 
 # ---[ Dependency of c10

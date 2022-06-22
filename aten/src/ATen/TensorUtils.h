@@ -19,11 +19,15 @@ struct TORCH_API TensorArg {
   const char* name;
   int pos; // 1-indexed
   TensorArg(const Tensor& tensor, const char* name, int pos)
-    : tensor(tensor), name(name), pos(pos) {}
+      : tensor(tensor), name(name), pos(pos) {}
   // Try to mitigate any possibility of dangling reference to temporaries.
   TensorArg(Tensor&& tensor, const char* name, int pos) = delete;
-  const Tensor* operator->() const { return &tensor; }
-  const Tensor& operator*() const { return tensor; }
+  const Tensor* operator->() const {
+    return &tensor;
+  }
+  const Tensor& operator*() const {
+    return tensor;
+  }
 };
 
 struct TORCH_API TensorGeometryArg {
@@ -31,11 +35,15 @@ struct TORCH_API TensorGeometryArg {
   const char* name;
   int pos; // 1-indexed
   /* implicit */ TensorGeometryArg(TensorArg arg)
-    : tensor(TensorGeometry{arg.tensor}), name(arg.name), pos(arg.pos) {}
+      : tensor(TensorGeometry{arg.tensor}), name(arg.name), pos(arg.pos) {}
   TensorGeometryArg(TensorGeometry tensor, const char* name, int pos)
-    : tensor(tensor), name(name), pos(pos) {}
-  const TensorGeometry* operator->() const { return &tensor; }
-  const TensorGeometry& operator*() const { return tensor; }
+      : tensor(tensor), name(name), pos(pos) {}
+  const TensorGeometry* operator->() const {
+    return &tensor;
+  }
+  const TensorGeometry& operator*() const {
+    return tensor;
+  }
 };
 
 // A string describing which function did checks on its input
@@ -60,10 +68,7 @@ TORCH_API void checkDim(
     const char* name,
     int pos, // 1-indexed
     int64_t dim);
-TORCH_API void checkDim(
-    CheckedFrom c,
-    const TensorGeometryArg& t,
-    int64_t dim);
+TORCH_API void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim);
 // NB: this is an inclusive-exclusive range
 TORCH_API void checkDimRange(
     CheckedFrom c,
@@ -94,10 +99,7 @@ TORCH_API void checkSameNumel(
     const TensorGeometryArg& t1,
     const TensorGeometryArg& t2);
 TORCH_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
-TORCH_API void checkScalarType(
-    CheckedFrom c,
-    const TensorArg& t,
-    ScalarType s);
+TORCH_API void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
 TORCH_API void checkScalarTypes(
     CheckedFrom c,
     const TensorArg& t,
@@ -132,18 +134,14 @@ TORCH_API void checkDeviceType(
 
 TORCH_API void checkLayout(CheckedFrom c, const Tensor& t, Layout layout);
 
-TORCH_API void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout);
+TORCH_API void checkLayout(
+    CheckedFrom c,
+    at::ArrayRef<Tensor> tensors,
+    at::Layout layout);
 
 // Methods for getting data_ptr if tensor is defined
 TORCH_API void* maybe_data_ptr(const Tensor& tensor);
 TORCH_API void* maybe_data_ptr(const TensorArg& tensor);
-
-// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
-// Although we cache is_contiguous in tensor now, this is till useful because it
-// allows checking if a particular geometry is contiguous without explicitly
-// constructing a tensor, e.g., when you want to choose a kernel strategy based
-// on whether a subgeometry is contiguous.
-TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
 TORCH_API void check_dim_size(
     const Tensor& tensor,

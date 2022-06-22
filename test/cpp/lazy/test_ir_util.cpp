@@ -3,6 +3,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
 #include <torch/csrc/lazy/core/ir_util.h>
 
@@ -11,8 +12,7 @@ namespace lazy {
 
 class IrUtilNode : public Node {
  public:
-  explicit IrUtilNode()
-      : Node(OpKind(), /* num_outputs */ 1, /* hash_seed */ Hash(0)) {}
+  explicit IrUtilNode() : Node(OpKind(), /* num_outputs */ 1), hash_(Hash(0)) {}
   ~IrUtilNode() override = default;
 
   void AddOperand(Value v) {
@@ -23,17 +23,15 @@ class IrUtilNode : public Node {
     operands_.push_back(std::move(v.node));
   }
 
-  const std::vector<Output>& operands() const override {
-    return operands_as_outputs_;
+  hash_t hash() const override {
+    return hash_;
   }
-
-  const Output& operand(size_t i) const override {
-    return operands_as_outputs_.at(i);
+  hash_t shapeHash() const override {
+    return hash_;
   }
 
  private:
-  std::vector<NodePtr> operands_;
-  std::vector<Output> operands_as_outputs_;
+  hash_t hash_;
 };
 
 /*  a

@@ -4,6 +4,8 @@
 
 - [Contributing to PyTorch](#contributing-to-pytorch)
 - [Developing PyTorch](#developing-pytorch)
+  - [Prerequisites](#prerequisites)
+  - [Instructions](#instructions)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
@@ -11,7 +13,7 @@
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
   - [Local linting](#local-linting)
-  - [Running `mypy`](#running-mypy)
+    - [Running `mypy`](#running-mypy)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Writing documentation](#writing-documentation)
@@ -49,6 +51,7 @@
 - [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
+- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
 
@@ -80,6 +83,12 @@ https://github.com/pytorch/pytorch#from-source
 
 To develop PyTorch on your machine, here are some tips:
 
+### Prerequisites
+* CMake. You can install it via `pip install cmake`
+* Python >= 3.7 (3.7.6+ recommended)
+
+### Instructions
+
 1. Uninstall all existing PyTorch installs. You may need to run `pip
 uninstall torch` multiple times. You'll know `torch` is fully
 uninstalled when you see `WARNING: Skipping torch as it is not
@@ -99,7 +108,7 @@ git clone https://github.com/pytorch/pytorch
 cd pytorch
 ```
 
-2.1. If you already have PyTorch from source, update it:
+If you already have PyTorch from source, update it:
 
 ```bash
 git pull --rebase
@@ -109,9 +118,9 @@ git submodule update --init --recursive --jobs 0
 
 If you want to have no-op incremental rebuilds (which are fast), see the section below titled "Make no-op build fast."
 
-3. Install PyTorch in `develop` mode:
+3. Follow  the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source), except when it's time to install PyTorch instead of invoking `setup.py install` you'll want to call `setup.py develop` instead:
 
-The change you have to make is to replace
+Specifically, the change you have to make is to replace
 
 ```bash
 python setup.py install
@@ -124,17 +133,13 @@ python setup.py develop
 ```
 
 This mode will symlink the Python files from the current local source
-tree into the Python install.  Hence, if you modify a Python file, you
-do not need to reinstall PyTorch again and again.  This is especially
+tree into the Python install.  This way when you modify a Python file, you
+won't need to reinstall PyTorch again and again.  This is especially
 useful if you are only changing Python files.
 
 For example:
 - Install local PyTorch in `develop` mode
 - modify your Python file `torch/__init__.py` (for example)
-- test functionality
-- modify your Python file `torch/__init__.py`
-- test functionality
-- modify your Python file `torch/__init__.py`
 - test functionality
 
 You do not need to repeatedly install after modifying Python files (`.py`). However, you would need to reinstall
@@ -146,10 +151,6 @@ torch as it is not installed`; next run `python setup.py clean`. After
 that, you can install in `develop` mode again.
 
 ### Tips and Debugging
-
-* A prerequisite to installing PyTorch is CMake. We recommend installing it with [Homebrew](https://brew.sh/)
-with `brew install cmake` if you are developing on MacOS or Linux system.
-* Our `setup.py` requires Python >= 3.7
 * If a commit is simple and doesn't affect any code (keep in mind that some docstrings contain code
   that is used in tests), you can add `[skip ci]` (case sensitive) somewhere in your commit message to
   [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
@@ -175,14 +176,14 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
   ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
   ```
 * If you run into issue running `git submodule update --init --recursive --jobs 0`. Please try the following:
-  - If you encountered error such as
+  - If you encounter an error such as
     ```
     error: Submodule 'third_party/pybind11' could not be updated
     ```
     check whether your Git local or global config file contains any `submodule.*` settings. If yes, remove them and try again.
     (please reference [this doc](https://git-scm.com/docs/git-config#Documentation/git-config.txt-submoduleltnamegturl) for more info).
 
-  - If you encountered error such as
+  - If you encounter an error such as
     ```
     fatal: unable to access 'https://github.com/pybind11/pybind11.git': could not load PEM client certificate ...
     ```
@@ -192,12 +193,13 @@ with `brew install cmake` if you are developing on MacOS or Linux system.
     openssl x509 -noout -in <cert_file> -dates
     ```
 
-  - If you encountered error that some third_party modules are not checkout correctly, such as
+  - If you encounter an error that some third_party modules are not checked out correctly, such as
     ```
     Could not find .../pytorch/third_party/pybind11/CMakeLists.txt
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 * If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
+* For help with any part of the contributing process, please don’t hesitate to utilize our Zoom office hours! See details [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 ## Nightly Checkout & Pull
 
@@ -310,6 +312,12 @@ into the repo directory.
 
 ### Python Unit Testing
 
+**Prerequisites**:
+The following packages should be installed with either `conda` or `pip`:
+- `expecttest` and `hypothesis` - required to run tests
+- `mypy` - recommended for linting
+- `pytest` - recommended to run tests more selectively
+
 All PyTorch test suites are located in the `test` folder and start with
 `test_`. Run the entire test
 suite with
@@ -342,9 +350,7 @@ in `test/test_jit.py`. Your command would be:
 python test/test_jit.py TestJit.test_Sequential
 ```
 
-The `expecttest` and `hypothesis` libraries must be installed to run the tests. `mypy` is
-an optional dependency, and `pytest` may help run tests more selectively.
-All these packages can be installed with `conda` or `pip`.
+**Weird note:** In our CI (Continuous Integration) jobs, we actually run the tests from the `test` folder and **not** the root of the repo, since there are various dependencies we set up for CI that expects the tests to be run from the test folder. As such, there may be some inconsistencies between local testing and CI testing--if you observe an inconsistency, please [file an issue](https://github.com/pytorch/pytorch/issues/new/choose).
 
 ### Better local unit tests with `pytest`
 
@@ -365,54 +371,24 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Local linting
 
-You can run the same linting steps that are used in CI locally via `make`:
-
-```bash
-# Lint all files
-make lint -j 6  # run lint (using 6 parallel jobs)
-
-# Lint only the files you have changed
-make quicklint -j 6
-```
-
-These jobs may require extra dependencies that aren't dependencies of PyTorch
-itself, so you can install them via this command, which you should only have to
-run once:
+Install all prerequisites by running
 
 ```bash
 make setup_lint
 ```
 
-To run a specific linting step, use one of these targets or see the
-[`Makefile`](Makefile) for a complete list of options.
+You can now run the same linting steps that are used in CI locally via `make`:
 
 ```bash
-# Check for tabs, trailing newlines, etc.
-make quick_checks
-
-make flake8
-
-make mypy
-
-make cmakelint
-
-make clang-tidy
+make lint
 ```
 
-To run a lint only on changes, add the `CHANGED_ONLY` option:
+Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
 
-```bash
-make <name of lint> CHANGED_ONLY=--changed-only
-```
-
-### Running `mypy`
+#### Running `mypy`
 
 `mypy` is an optional static type checker for Python. We have multiple `mypy`
-configs for the PyTorch codebase, so you can run them all using this command:
-
-```bash
-make mypy
-```
+configs for the PyTorch codebase that are automatically validated against whenever the linter is run.
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
@@ -462,9 +438,9 @@ of very low signal to reviewers.
 
 So you want to write some documentation and don't know where to start?
 PyTorch has two main types of documentation:
-- user-facing documentation.
+- **User facing documentation**:
 These are the docs that you see over at [our docs website](https://pytorch.org/docs).
-- developer facing documentation.
+- **Developer facing documentation**:
 Developer facing documentation is spread around our READMEs in our codebase and in
 the [PyTorch Developer Wiki](https://pytorch.org/wiki).
 If you're interested in adding new developer docs, please read this [page on the wiki](https://github.com/pytorch/pytorch/wiki/Where-or-how-should-I-add-documentation%3F) on our best practices for where to put it.
@@ -472,8 +448,7 @@ If you're interested in adding new developer docs, please read this [page on the
 The rest of this section is about user-facing documentation.
 
 PyTorch uses [Google style](http://sphinxcontrib-napoleon.readthedocs.io/en/latest/example_google.html)
-for formatting docstrings. Length of line inside docstrings block must be limited to 80 characters to
-fit into Jupyter documentation popups.
+for formatting docstrings. Each line inside a docstrings block must be limited to 80 characters so that it fits into Jupyter documentation popups.
 
 ### Building documentation
 
@@ -516,7 +491,7 @@ missing file warnings but will still complete. For example, to work on `jit.rst`
 
 ```bash
 cd docs/source
-ls | grep rst | grep -v index | grep -v jit | xargs rm
+find . -type f | grep rst | grep -v index | grep -v jit | xargs rm
 
 # Make your changes, build the docs, etc.
 
@@ -739,7 +714,7 @@ same. Using ccache in a situation like this is a real time-saver.
 Before building pytorch, install ccache from your package manager of choice:
 
 ```bash
-conda install ccache -f conda-forge
+conda install ccache -c conda-forge
 sudo apt install ccache
 sudo yum install ccache
 brew install ccache
@@ -1102,8 +1077,7 @@ This internally invokes our driver script and closely mimics how clang-tidy is r
 
 ## Pre-commit tidy/linting hook
 
-We use clang-tidy and flake8 (installed with flake8-bugbear,
-flake8-comprehensions, flake8-pyi, and others) to perform additional
+We use clang-tidy to perform additional
 formatting and semantic checking of code. We provide a pre-commit git hook for
 performing these checks, before a commit is created:
 
@@ -1111,18 +1085,18 @@ performing these checks, before a commit is created:
   ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
   ```
 
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
-
-If you haven't set up the pre-commit hook and have already committed files and
+If you have already committed files and
 CI reports `flake8` errors, you can run the check locally in your PR branch with:
 
   ```bash
   flake8 $(git diff --name-only $(git merge-base --fork-point master))
   ```
 
-fix the code so that no errors are reported when you re-run the above check again,
+You'll need to install an appropriately configured flake8; see
+[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
+for documentation on how to do this.
+
+Fix the code so that no errors are reported when you re-run the above check again,
 and then commit the fix.
 
 ## Building PyTorch with ASAN
@@ -1249,39 +1223,17 @@ Once you submit a PR or push a new commit to a branch that is in
 an active PR, CI jobs will be run automatically. Some of these may
 fail and you will need to find out why, by looking at the logs.
 
-Fairly often, a CI failure might be unrelated to your changes. In this case, you
+Fairly often, a CI failure might be unrelated to your changes. You can
+confirm by going to our [HUD](hud.pytorch.org) and seeing if the CI job
+is failing upstream already. In this case, you
 can usually ignore the failure. See [the following
 subsection](#which-commit-is-used-in-ci) for more details.
 
 Some failures might be related to specific hardware or environment
-configurations. In this case, if the job is run by CircleCI, you can
-ssh into the job's session to perform manual debugging using the
-following steps:
+configurations. In this case, if you're a Meta employee, you can ssh into
+the job's session to perform manual debugging following the instructions in
+our [CI wiki](https://github.com/pytorch/pytorch/wiki/Debugging-using-with-ssh-for-Github-Actions).
 
-1. In the CircleCI page for the failed job, make sure you are logged in
-   and then click the `Rerun` actions dropdown button on the top right.
-   Click `Rerun Job with SSH`.
-
-2. When the job reruns, a new step will be added in the `STEPS` tab
-   labelled `Set up SSH`. Inside that tab will be an ssh command that
-   you can execute in a shell.
-
-3. Once you are connected through ssh, you may need to enter a docker
-   container. Run `docker ps` to check if there are any docker
-   containers running. Note that your CI job might be in the process
-   of initiating a docker container, which means it will not show up
-   yet. It is best to wait until the CI job reaches a step where it is
-   building pytorch or running pytorch tests. If the job does have a
-   docker container, run `docker exec -it IMAGE_ID /bin/bash` to
-   connect to it.
-
-4. Now you can find the pytorch working directory, which could be
-   `~/workspace` or `~/project`, and run commands locally to debug
-   the failure.
-
-For certain Windows failures, it may be useful to have a full [Remote
-Desktop](https://docs.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/remote-desktop-clients) connection. See detailed instructions [here](https://github.com/pytorch/pytorch/wiki/Debugging-Windows-with-Remote-Desktop-or-CDB-(CLI-windbg)-on-CircleCI)
-for how to set that up after rerunning the job.
 
 ### Which commit is used in CI?
 
@@ -1335,3 +1287,6 @@ your PR branch. If you happen to have write access to this repo, you can choose
 to use `ghstack` to eliminate this nondeterminism for GitHub Actions jobs on
 your PRs, but it will still be present for the select CircleCI jobs listed
 above.
+
+## Dev Infra Office Hours
+[Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.

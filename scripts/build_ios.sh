@@ -7,55 +7,6 @@
 # using ios-cmake. This is very similar to the android-cmake - see
 # build_android.sh for more details.
 
-# For CI purposes
-populate_ci_build_options() {
-  # For use within CI, should be a no-op for everyone else
-
-  # BUILD_ENVIRONMENT's should look somewhat like pytorch_ios_12_5_1_arm64_coreml
-  BUILD_ENVIRONMENT=${BUILD_ENVIRONMENT:-}
-
-  case ${BUILD_ENVIRONMENT} in
-    *x86_64*)
-      export IOS_ARCH="x86_64"
-      export IOS_PLATFORM="SIMULATOR"
-      ;;
-    *arm64*)
-      export IOS_ARCH="arm64"
-      export IOS_PLATFORM="OS"
-      ;;
-  esac
-
-  # Most builds use the lite interpreter, if certain builds shouldn't
-  # build the lite interpreter this env variable should get over-written
-  # in the following case statement
-  export BUILD_LITE_INTERPRETER="1"
-
-  case ${BUILD_ENVIRONMENT} in
-    *metal*)
-      export USE_PYTORCH_METAL=1
-      ;;
-    *full_jit*)
-      export BUILD_LITE_INTERPRETER="0"
-      ;;
-    *custom*)
-      PROJ_ROOT=$(git rev-parse --show-toplevel)
-      export SELECTED_OP_LIST="${PROJ_ROOT}/ios/TestApp/custom_build/mobilenetv2.yaml"
-      ;;
-    *coreml*)
-      export USE_COREML_DELEGATE="1"
-      ;;
-  esac
-  if [[ -n ${BUILD_ENVIRONMENT} ]]; then
-    echo "IOS_ARCH: ${IOS_ARCH}"
-    echo "IOS_PLATFORM: ${IOS_PLATFORM}"
-    echo "BUILD_LITE_INTERPRETER": "${BUILD_LITE_INTERPRETER}"
-    echo "USE_PYTORCH_METAL": "${USE_METAL:-}"
-    echo "USE_COREML_DELEGATE": "${USE_COREML_DELEGATE:-}"
-  fi
-}
-
-populate_ci_build_options
-
 CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
 CMAKE_ARGS=()
@@ -136,6 +87,12 @@ if [ "${TRACING_BASED}" == 1 ]; then
   CMAKE_ARGS+=("-DTRACING_BASED=ON")
 else
   CMAKE_ARGS+=("-DTRACING_BASED=OFF")
+fi
+if [ "${USE_LIGHTWEIGHT_DISPATCH}" == 1 ]; then
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=ON")
+  CMAKE_ARGS+=("-DSTATIC_DISPATCH_BACKEND=CPU")
+else
+  CMAKE_ARGS+=("-DUSE_LIGHTWEIGHT_DISPATCH=OFF")
 fi
 
 CMAKE_ARGS+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")

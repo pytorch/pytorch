@@ -3,22 +3,20 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from typing import Iterable, List, Tuple, Union
+from typing import Dict, Iterable, List, Tuple, Union, Optional
 
-try:
-    import dill
+from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
-    # XXX: By default, dill writes the Pickler dispatch table to inject its
-    # own logic there. This globally affects the behavior of the standard library
-    # pickler for any user who transitively depends on this module!
-    # Undo this extension to avoid altering the behavior of the pickler globally.
-    dill.extend(use_dill=False)
-    DILL_AVAILABLE = True
-except ImportError:
-    DILL_AVAILABLE = False
+__all__ = [
+    "StreamWrapper",
+    "get_file_binaries_from_pathnames",
+    "get_file_pathnames_from_root",
+    "match_masks",
+    "validate_pathname_binary_tuple",
+]
 
 
-def check_lambda_fn(fn):
+def _check_lambda_fn(fn):
     # Partial object has no attribute '__name__', but can be pickled
     if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
         warnings.warn(
@@ -45,24 +43,40 @@ def get_file_pathnames_from_root(
         root: str,
         masks: Union[str, List[str]],
         recursive: bool = False,
-        abspath: bool = False) -> Iterable[str]:
+        abspath: bool = False,
+        non_deterministic: bool = False) -> Iterable[str]:
 
     # print out an error message and raise the error out
     def onerror(err : OSError):
         warnings.warn(err.filename + " : " + err.strerror)
         raise err
 
-    for path, dirs, files in os.walk(root, onerror=onerror):
+    if os.path.isfile(root):
+        path = root
         if abspath:
             path = os.path.abspath(path)
-        for f in files:
-            if match_masks(f, masks):
-                yield os.path.join(path, f)
-        if not recursive:
-            break
+        fname = os.path.basename(path)
+        if match_masks(fname, masks):
+            yield path
+    else:
+        for path, dirs, files in os.walk(root, onerror=onerror):
+            if abspath:
+                path = os.path.abspath(path)
+            if not non_deterministic:
+                files.sort()
+            for f in files:
+                if match_masks(f, masks):
+                    yield os.path.join(path, f)
+            if not recursive:
+                break
+            if not non_deterministic:
+                # Note that this is in-place modifying the internal list from `os.walk`
+                # This only works because `os.walk` doesn't shallow copy before turn
+                # https://github.com/python/cpython/blob/f4c03484da59049eb62a9bf7777b963e2267d187/Lib/os.py#L407
+                dirs.sort()
 
 
-def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
+def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str, encoding: Optional[str] = None):
     if not isinstance(pathnames, Iterable):
         pathnames = [pathnames, ]
 
@@ -73,7 +87,7 @@ def get_file_binaries_from_pathnames(pathnames: Iterable, mode: str):
         if not isinstance(pathname, str):
             raise TypeError("Expected string type for pathname, but got {}"
                             .format(type(pathname)))
-        yield pathname, StreamWrapper(open(pathname, mode))
+        yield pathname, StreamWrapper(open(pathname, mode, encoding=encoding))
 
 
 def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
@@ -90,12 +104,73 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
         )
 
 
-def deprecation_warning(name, new_name: str = ""):
-    new_name_statement = ""
-    if new_name:
-        new_name_statement = f" Please use {new_name} instead."
-    warnings.warn(f"{name} and its functional API are deprecated and will be removed from the package `torch`." +
-                  new_name_statement, DeprecationWarning)
+# Deprecated function names and its corresponding DataPipe type and kwargs for the `_deprecation_warning` function
+_iter_deprecated_functional_names: Dict[str, Dict] = {"open_file_by_fsspec":
+                                                      {"old_class_name": "FSSpecFileOpener",
+                                                       "deprecation_version": "0.4.0",
+                                                       "removal_version": "0.6.0",
+                                                       "old_functional_name": "open_file_by_fsspec",
+                                                       "new_functional_name": "open_files_by_fsspec",
+                                                       "deprecate_functional_name_only": True},
+                                                      "open_file_by_iopath":
+                                                      {"old_class_name": "IoPathFileOpener",
+                                                       "deprecation_version": "0.4.0",
+                                                       "removal_version": "0.6.0",
+                                                       "old_functional_name": "open_file_by_iopath",
+                                                       "new_functional_name": "open_files_by_iopath",
+                                                       "deprecate_functional_name_only": True}}
+
+_map_deprecated_functional_names: Dict[str, Dict] = {}
+
+
+def _deprecation_warning(
+    old_class_name: str,
+    *,
+    deprecation_version: str,
+    removal_version: str,
+    old_functional_name: str = "",
+    old_argument_name: str = "",
+    new_class_name: str = "",
+    new_functional_name: str = "",
+    new_argument_name: str = "",
+    deprecate_functional_name_only: bool = False,
+) -> None:
+    if new_functional_name and not old_functional_name:
+        raise ValueError("Old functional API needs to be specified for the deprecation warning.")
+    if new_argument_name and not old_argument_name:
+        raise ValueError("Old argument name needs to be specified for the deprecation warning.")
+
+    if old_functional_name and old_argument_name:
+        raise ValueError("Deprecating warning for functional API and argument should be separated.")
+
+    msg = f"`{old_class_name}()`"
+    if deprecate_functional_name_only and old_functional_name:
+        msg = f"{msg}'s functional API `.{old_functional_name}()` is"
+    elif old_functional_name:
+        msg = f"{msg} and its functional API `.{old_functional_name}()` are"
+    elif old_argument_name:
+        msg = f"The argument `{old_argument_name}` of {msg} is"
+    else:
+        msg = f"{msg} is"
+    msg = (
+        f"{msg} deprecated since {deprecation_version} and will be removed in {removal_version}."
+        f"\nSee https://github.com/pytorch/data/issues/163 for details."
+    )
+
+    if new_class_name or new_functional_name:
+        msg = f"{msg}\nPlease use"
+        if new_class_name:
+            msg = f"{msg} `{new_class_name}()`"
+        if new_class_name and new_functional_name:
+            msg = f"{msg} or"
+        if new_functional_name:
+            msg = f"{msg} `.{new_functional_name}()`"
+        msg = f"{msg} instead."
+
+    if new_argument_name:
+        msg = f"{msg}\nPlease use `{old_class_name}({new_argument_name}=)` instead."
+
+    warnings.warn(msg, FutureWarning)
 
 
 class StreamWrapper:

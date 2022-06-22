@@ -4,7 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/Dispatch.h>
-#include <ATen/native/quantized/affine_quantizer.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/TensorFactories.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
@@ -126,7 +126,9 @@ inline Tensor new_qtensor(
   auto dtype = options.dtype();
   TORCH_CHECK(
       isQIntType(typeMetaToScalarType(dtype)),
-      "ScalarType is not supported in new_qtensor.");
+      "ScalarType ",
+      typeMetaToScalarType(dtype),
+      " is not supported in new_qtensor.");
   auto scalar_type = typeMetaToScalarType(dtype);
   int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
@@ -355,7 +357,7 @@ Tensor from_blob_quantized_per_tensor_affine(
     // NOLINTNEXTLINE
     strides[i] = 1;
     while (--i >= 0) {
-      strides[i] = sizes[i] * strides[i + 1];
+      strides[i] = sizes[i + 1] * strides[i + 1];
     }
   }
   return from_blob_quantized_per_tensor_affine(
@@ -413,6 +415,25 @@ Tensor from_blob_quantized_per_channel_affine(
   get_qtensorimpl(qtensor)->set_sizes_contiguous(sizes);
 
   return qtensor;
+}
+
+Tensor UnknownQuantizer::quantize(const Tensor& tensor) {
+  TORCH_INTERNAL_ASSERT(false, "cannot call quantize on UnknownQuantizer");
+}
+Tensor UnknownQuantizer::dequantize(const Tensor& qtensor) {
+  TORCH_INTERNAL_ASSERT(false, "cannot call dequantize on UnknownQuantizer");
+}
+Tensor& UnknownQuantizer::dequantize_out(Tensor& rtensor, const Tensor& qtensor) {
+  TORCH_INTERNAL_ASSERT(false, "cannot call dequantize_out on UnknownQuantizer");
+}
+QScheme UnknownQuantizer::qscheme() const {
+  TORCH_INTERNAL_ASSERT(false, "cannot call qscheme on UnknownQuantizer");
+}
+bool UnknownQuantizer::equalTo(QuantizerPtr other) const{
+  TORCH_INTERNAL_ASSERT(false, "cannot call equalTo on UnknownQuantizer");
+}
+QuantizerPtr make_unknown_quantizer(ScalarType scalar_type) {
+  return c10::make_intrusive<UnknownQuantizer>(scalar_type);
 }
 
 } // namespace at

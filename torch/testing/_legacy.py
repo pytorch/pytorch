@@ -96,6 +96,9 @@ _complex_types = _dispatch_dtypes((torch.cfloat, torch.cdouble))
 def complex_types():
     return _complex_types
 
+def complex_types_and(*dtypes):
+    return _complex_types + _validate_dtypes(*dtypes)
+
 _all_types_and_complex = _all_types + _complex_types
 def all_types_and_complex():
     return _all_types_and_complex
@@ -109,17 +112,21 @@ def all_types_and_half():
 
 # The functions below are used for convenience in our test suite and thus have no corresponding C++ dispatch macro
 
+# See AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS.
 def get_all_dtypes(include_half=True,
                    include_bfloat16=True,
                    include_bool=True,
                    include_complex=True,
-                   include_complex32=False
+                   include_complex32=False,
+                   include_qint=False,
                    ) -> List[torch.dtype]:
     dtypes = get_all_int_dtypes() + get_all_fp_dtypes(include_half=include_half, include_bfloat16=include_bfloat16)
     if include_bool:
         dtypes.append(torch.bool)
     if include_complex:
         dtypes += get_all_complex_dtypes(include_complex32)
+    if include_qint:
+        dtypes += get_all_qint_dtypes()
     return dtypes
 
 def get_all_math_dtypes(device) -> List[torch.dtype]:
@@ -141,6 +148,10 @@ def get_all_fp_dtypes(include_half=True, include_bfloat16=True) -> List[torch.dt
     if include_bfloat16:
         dtypes.append(torch.bfloat16)
     return dtypes
+
+
+def get_all_qint_dtypes() -> List[torch.dtype]:
+    return [torch.qint8, torch.quint8, torch.qint32, torch.quint4x2, torch.quint2x4]
 
 
 def get_all_device_types() -> List[str]:

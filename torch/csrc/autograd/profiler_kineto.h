@@ -4,35 +4,19 @@
 #include <vector>
 
 #include <torch/csrc/profiler/api.h>
+#include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/util.h>
 
 namespace torch {
 namespace autograd {
 namespace profiler {
-
-// NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
-struct KinetoObserverContext : public at::ObserverContext {
-  int64_t startUs;
-  int64_t endUS;
-  uint64_t correlationId;
-  uint64_t startThreadId;
-  uint64_t endThreadId;
-  c10::optional<std::vector<std::vector<int64_t>>> shapes;
-  c10::optional<std::vector<std::string>> dtypes;
-  int64_t sequenceNr;
-  uint64_t fwdThreadId;
-  uint8_t recFunScope;
-  c10::optional<std::vector<std::string>> stack;
-  c10::optional<std::vector<std::string>> module_hierarchy;
-  // Extra arguments for computing op flops
-  c10::optional<std::unordered_map<std::string, c10::IValue>> extraArgs;
-  torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
-  torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
-  int64_t debug_handle;
-};
+using experimental_event_t = std::shared_ptr<torch::profiler::impl::Result>;
 
 struct TORCH_API KinetoEvent {
+  explicit KinetoEvent(bool is_python_function = false)
+      : is_python_function_{is_python_function} {}
+
   uint64_t startThreadId() const {
     return start_thread_id_;
   }
@@ -143,7 +127,8 @@ struct TORCH_API KinetoEvent {
     return *module_hierarchy_;
   }
 
-  KinetoEvent& moduleHierarchy(const std::vector<std::string>& module_hierarchy) {
+  KinetoEvent& moduleHierarchy(
+      const std::vector<std::string>& module_hierarchy) {
     module_hierarchy_ = module_hierarchy;
     return *this;
   }
@@ -224,7 +209,7 @@ struct TORCH_API KinetoEvent {
     return correlation_id_;
   }
 
-  KinetoEvent& correlationId(uint64_t correlation_id)  {
+  KinetoEvent& correlationId(uint64_t correlation_id) {
     correlation_id_ = correlation_id;
     return *this;
   }
@@ -254,6 +239,10 @@ struct TORCH_API KinetoEvent {
   KinetoEvent& backend(const std::string& backend) {
     backend_ = backend;
     return *this;
+  }
+
+  bool isPythonFunction() const {
+    return is_python_function_;
   }
 
   int64_t cudaElapsedUs() const;
@@ -286,6 +275,7 @@ struct TORCH_API KinetoEvent {
 
   torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
   torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
+  bool is_python_function_;
 };
 
 // Consolidating events returned directly from Kineto
@@ -296,7 +286,8 @@ struct TORCH_API ProfilerResult {
   ProfilerResult(
       uint64_t start_time,
       std::vector<KinetoEvent> events,
-      torch::profiler::impl::kineto::ActivityTraceWrapper trace);
+      torch::profiler::impl::kineto::ActivityTraceWrapper trace,
+      std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
 
   uint64_t trace_start_us() const {
@@ -307,12 +298,17 @@ struct TORCH_API ProfilerResult {
     return events_;
   }
 
+  const std::vector<experimental_event_t>& event_tree() const {
+    return event_tree_;
+  }
+
   void save(const std::string& path);
 
  private:
   uint64_t trace_start_us_ = 0;
   std::vector<KinetoEvent> events_;
   torch::profiler::impl::kineto::ActivityTraceWrapper trace_;
+  std::vector<experimental_event_t> event_tree_;
 };
 
 /*
@@ -357,18 +353,24 @@ TORCH_API void enableProfiler(
  * Additionally, it takes a functor that does in-place post processing of
  * events, e.g. populate stack trace or module hierarchy information lazily
  * using debug_handle.
- * Example usage is with lite interpreter that has recording scope of LITE_INTERPRETER.
- * In this case lite interpreter runtime, records debug handles in RecordFunction, along
- * with other information. Debug handles are eventually passed down to KinetoEvent and
- * recorded as part of the event. KinetoEdgeCPUProfiler,
- * in torch/csrc/jit/mobile/profiler_edge.cpp, enables profiler using post-processing
- * callback, via enableProfilerWithEventPostProcess, that takes these debug handles
- * and generates stack trace and module hierarchy information, once profiling is done.
+ * Example usage is with lite interpreter that has recording scope of
+ * LITE_INTERPRETER. In this case lite interpreter runtime, records debug
+ * handles in RecordFunction, along with other information. Debug handles are
+ * eventually passed down to KinetoEvent and recorded as part of the event.
+ * KinetoEdgeCPUProfiler, in torch/csrc/jit/mobile/profiler_edge.cpp, enables
+ * profiler using post-processing callback, via
+ * enableProfilerWithEventPostProcess, that takes these debug handles and
+ * generates stack trace and module hierarchy information, once profiling is
+ * done.
  */
+using post_process_t = std::function<void(
+    /*debug_handle */ int64_t,
+    /*jit_stack    */ std::vector<std::string>&,
+    /*jit_modules  */ std::vector<std::string>&)>;
 TORCH_API void enableProfilerWithEventPostProcess(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities,
-    std::function<void(std::vector<KinetoEvent>&)>&& cb,
+    post_process_t&& cb,
     const std::unordered_set<at::RecordScope>& scopes = {});
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
@@ -377,52 +379,6 @@ TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
 
-namespace python_tracer {
-
-/*
-Libtorch does not depend on Python (e.g. cannot #include <Python.h>); however
-when we call the profiler from libtorch_python we need the profiler to be able
-to ingest the data that we collect from the Python tracer. (`PyEval_SetProfile`)
-
-In order to solve this dependency issue we define a set of methods which do not
-contain any Python symbols, but can contain the information that Kineto needs
-such as times and names. The python tracer then implements these functions and
-wraps their registration in an init function which is called from
-`torch/csrc/autograd/init.cpp`. This pattern of registration for faux python
-dependencies in libtorch is common in the PyTorch codebase.
-*/
-enum CallType { kPyCall = 0, kPyModuleCall, kCCall };
-
-struct TORCH_API PyTraceEvent {
-  int64_t startTime_;
-  int64_t endTime_;
-  std::string name_;
-
-  uint64_t thread_id_;
-  PyTraceEvent* parent_;
-  CallType call_type_;
-  size_t module_id_;  // Only set call_type_ == kPyModuleCall
-
-  // Index in the list of raw call and return events. This allows one to
-  // convert a vector of PyTraceEvents back into the constituent call and
-  // return events, even when events share the same timestamp.
-  size_t call_idx_;
-  size_t return_idx_;
-};
-
-enum Command { kStartOne = 0, kStartAll, kStop, kClear };
-using CallFn = void (*)(Command);
-using TraceEventsFn = std::vector<std::unique_ptr<PyTraceEvent>> (*)();
-
-TORCH_API void registerFunctions(
-  CallFn call,
-  TraceEventsFn get_events
-);
-
-// Because we are interleaving events, the Python tracer should use the same
-// timer as the profiler.
-TORCH_API int64_t now();
-}  // namespace python_tracer
-
 } // namespace profiler
-}} // namespace torch::autograd
+} // namespace autograd
+} // namespace torch

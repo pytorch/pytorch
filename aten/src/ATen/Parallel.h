@@ -39,9 +39,8 @@ inline TORCH_API void lazy_init_num_threads() {
 TORCH_API void set_thread_num(int);
 
 class TORCH_API ThreadIdGuard {
-public:
-  ThreadIdGuard(int new_id):
-    old_id_(at::get_thread_num()) {
+ public:
+  ThreadIdGuard(int new_id) : old_id_(at::get_thread_num()) {
     set_thread_num(new_id);
   }
 
@@ -49,11 +48,11 @@ public:
     set_thread_num(old_id_);
   }
 
-private:
+ private:
   int old_id_;
 };
 
-}  // namespace internal
+} // namespace internal
 
 /*
 parallel_for
@@ -150,11 +149,11 @@ TORCH_API int intraop_default_num_threads();
 } // namespace at
 
 #if AT_PARALLEL_OPENMP
-#include <ATen/ParallelOpenMP.h>
+#include <ATen/ParallelOpenMP.h> // IWYU pragma: keep
 #elif AT_PARALLEL_NATIVE
-#include <ATen/ParallelNative.h>
+#include <ATen/ParallelNative.h> // IWYU pragma: keep
 #elif AT_PARALLEL_NATIVE_TBB
-#include <ATen/ParallelNativeTBB.h>
+#include <ATen/ParallelNativeTBB.h> // IWYU pragma: keep
 #endif
 
-#include <ATen/Parallel-inl.h>
+#include <ATen/Parallel-inl.h> // IWYU pragma: keep
