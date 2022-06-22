@@ -7045,7 +7045,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         def sub_test(pivot):
             for k, n in zip([2, 3, 5], [3, 5, 7]):
                 b, A, LU_data, LU_pivots = self.lu_solve_test_helper((n, n), (n, k), pivot, device, dtype)
-                x = torch.lu_solve(b, LU_data, LU_pivots)
+                x = torch.linalg.lu_solve(LU_data, LU_pivots, b)
                 self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
         sub_test(True)
@@ -7063,9 +7063,9 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
                 b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, pivot, device, dtype)
                 x_exp_list = []
                 for i in range(b_dims[0]):
-                    x_exp_list.append(torch.lu_solve(b[i], LU_data[i], LU_pivots[i]))
+                    x_exp_list.append(torch.linalg.lu_solve(LU_data[i], LU_pivots[i], b[i]))
                 x_exp = torch.stack(x_exp_list)  # Stacked output
-                x_act = torch.lu_solve(b, LU_data, LU_pivots)  # Actual output
+                x_act = torch.linalg.lu_solve(LU_data, LU_pivots, b)  # Actual output
                 self.assertEqual(x_exp, x_act)  # Equality check
                 Ax = np.matmul(A.cpu(), x_act.cpu())
                 self.assertEqual(b, Ax)
@@ -7091,7 +7091,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_lu_solve_batched_many_batches(self, device, dtype):
         def run_test(A_dims, b_dims):
             b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, True, device, dtype)
-            x = torch.lu_solve(b, LU_data, LU_pivots)
+            x = torch.linalg.lu_solve(LU_data, LU_pivots, b)
             Ax = torch.matmul(A, x)
             self.assertEqual(Ax, b.expand_as(Ax))
 
@@ -7112,7 +7112,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             b = make_tensor(b_dims, dtype=dtype, device=device)
             x_exp = np.linalg.solve(A.cpu(), b.cpu())
             LU_data, LU_pivots = torch.linalg.lu_factor(A)
-            x = torch.lu_solve(b, LU_data, LU_pivots)
+            x = torch.linalg.lu_solve(LU_data, LU_pivots, b)
             self.assertEqual(x, x_exp)
 
         # test against numpy.linalg.solve
@@ -7128,7 +7128,7 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
     def test_lu_solve_large_matrices(self, device, dtype):
         def run_test(A_dims, b_dims):
             b, A, LU_data, LU_pivots = self.lu_solve_test_helper(A_dims, b_dims, True, device, dtype)
-            x = torch.lu_solve(b, LU_data, LU_pivots)
+            x = torch.linalg.lu_solve(LU_data, LU_pivots, b)
             Ax = torch.matmul(A, x)
             self.assertEqual(Ax, b.expand_as(Ax))
 
