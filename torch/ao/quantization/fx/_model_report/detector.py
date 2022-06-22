@@ -1,4 +1,4 @@
-from typing import Any, Dict, Set, Tuple
+from typing import Any, Dict, Set, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
-from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.qconfig import QConfig
 
 # Adding base class for detectors
@@ -26,7 +25,7 @@ class DetectorBase(ABC):
         super().__init__()
 
     @abstractmethod
-    def determine_observer_insert_points(self, model) -> Dict:
+    def determine_observer_insert_points(self, model) -> Union[None, Tuple[Set[str], Any]]:
         r"""
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -88,13 +87,11 @@ class PerChannelDetector(DetectorBase):
         r""" returns the string name of this detector"""
         return "per_channel_detector"
 
-    def determine_observer_insert_points(self, model: nn.Module) -> Dict:
+    def determine_observer_insert_points(self, model):
         r"""
-        There is no observers inserted for the PerChannelDetector.
-
-        Returns an empty dictionary since no observers are added or needed
+        There is no observers inserted for the PerChannelDetector
         """
-        return {}
+        raise NotImplementedError("No observers are inserted in the PerChannelDetector.")
 
 
     def _detect_per_channel_helper(self, model: nn.Module, per_channel_info: Dict):
@@ -247,77 +244,9 @@ class DynamicStaticDetector(DetectorBase):
         self.tolerance = tolerance
         self.useful_observer_fqns: Set[str] = set([])
 
-    def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
-        r"""
-        Determines where observers need to be inserted for the Dynamic vs Static detector.
-        For this detector, we want to place observers on either side of linear layers in the model.
+    def determine_observer_insert_points(self, model) -> Tuple[Set[str], Any]:
 
-        Currently inserts observers for:
-            linear layers
-
-        Args:
-            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
-
-        Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
-            key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
-            key "insert_observer" -> the observer we wish to insert (ObserverBase)
-            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
-            key "observer_args" -> The arguments that are meant to be passed into the observer
-        """
-
-        # observer for this detector is ModelReportObserver
-        obs_ctr = ModelReportObserver
-
-        # return dict
-        obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
-
-        for fqn, module in prepared_fx_model.named_modules():
-            # check to see if module is of a supported type
-            is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
-
-            if is_supported_type:
-                # if it's a supported type, we want to get node and add observer insert locations
-                targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
-
-                # add entry for pre-observer
-                pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
-
-                obs_fqn_to_info[pre_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr,
-                    "insert_post": False,
-                    "observer_args": targeted_node.args
-                }
-
-                # add entry for post-observer
-                post_obs_fqn = fqn + "." + self.DEFAULT_POST_OBSERVER_NAME
-
-                obs_fqn_to_info[post_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr,
-                    "insert_post": True,
-                    "observer_args": (targeted_node,)
-                }
-
-        return obs_fqn_to_info
-
-
-    def _get_targeting_node(self, prepared_fx_model: GraphModule, target_fqn: str) -> torch.fx.node.Node:
-        r"""
-        Takes in a GraphModule and the target_fqn and finds the node object that targets this fqn
-
-        Args:
-            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
-            target_fqn (str): The fqn of the layer we are trying to target
-
-        Returns the node object we are trying to add observers around
-        """
-        for node in prepared_fx_model.graph.nodes:
-            # if the node's target is our target, return it
-            if node.target == target_fqn:
-                return node
-
-        raise ValueError("passed in target_fqn not found in graph's targets.")
+        raise NotImplementedError("Will be implemented in a future commit")
 
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
