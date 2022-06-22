@@ -130,7 +130,7 @@ void launch_glu_backward_kernel(const TensorIteratorBase& iter,
 // -----------------------------------
 
 void launch_log_sigmoid_forward_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(),
                                  "log_sigmoid_forward_cuda", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
 
@@ -149,7 +149,7 @@ void launch_log_sigmoid_forward_kernel(TensorIteratorBase& iter) {
 // -----------------------------------
 
 void log_sigmoid_backward_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.common_dtype(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(),
                                  "log_sigmoid_backward_cuda", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
     gpu_kernel(iter,
