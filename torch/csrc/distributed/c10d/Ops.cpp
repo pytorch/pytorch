@@ -33,8 +33,8 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce_(
 
 c10::intrusive_ptr<ProcessGroup::Work> allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
   return process_group->allgather(
       const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
@@ -114,11 +114,11 @@ c10::intrusive_ptr<ProcessGroup::Work> allgather(
                        .findSchemaOrThrow("c10d::allgather_", "")
                        .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            const std::vector<std::vector<at::Tensor>>&,
-                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            const std::vector<at::Tensor>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t)>();
   return op.call(
-      output_tensors, process_group, input_tensors, opts.timeout.count());
+      output_tensors, input_tensors, process_group, opts.timeout.count());
 }
 
 } // namespace ops

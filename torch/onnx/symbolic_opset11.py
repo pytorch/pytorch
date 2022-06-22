@@ -1,3 +1,5 @@
+"""This file exports ONNX ops for opset 11."""
+
 import sys
 import warnings
 
@@ -10,8 +12,6 @@ from torch.onnx._globals import GLOBALS
 
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in symbolic_helper.py
-
-# This file exports ONNX ops for opset 11
 
 
 @symbolic_helper.parse_args("v", "f", "f")
@@ -1062,12 +1062,15 @@ def linalg_vector_norm(g, self, ord, dim, keepdim, dtype):
             self = symbolic_helper._reshape_helper(
                 g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
             )
-            keepdim = None
+            keepdim = 0
+
         cond_op = g.op(
             "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
         )
         cond_op = g.op(
-            "Cast", cond_op, to_i=symbolic_helper.cast_pytorch_to_onnx["Long"]
+            "Cast",
+            cond_op,
+            to_i=symbolic_helper.cast_pytorch_to_onnx[self.type().scalarType()],
         )
         return symbolic_helper._reducesum_helper(
             g, cond_op, axes_i=dim, keepdims_i=keepdim
@@ -1089,7 +1092,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
