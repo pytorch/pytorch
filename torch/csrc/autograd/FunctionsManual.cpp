@@ -1999,6 +1999,57 @@ Tensor binary_cross_entropy_double_backward_target(
   return res;
 }
 
+Tensor binary_cross_entropy_with_logits_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight,
+    const c10::optional<Tensor>& pos_weight,
+    int64_t reduction) {
+  // Trivial case
+  if (grad._is_zerotensor()) {
+    return at::_efficientzerotensor(input.sizes(), input.options());
+  }
+
+  // -w * [ pos * y * (1 -sigmoid(x)) - (1 - y) sigmoid(x)] * grad
+
+  // If there are subclassed tensors use the out of place version
+  Tensor grad_input;
+  if (isDefined(pos_weight)) {
+    // pos_weight might need to be broadcasted, thus mul(target) is not inplace.
+    auto t = pos_weight->mul(target);
+    grad_input = at::areAnyTensorSubclassLike({input, target}) ||
+            at::GradMode::is_enabled()
+        ? t.add(1).sub(target).mul(input.sigmoid()).sub(t)
+        : t.add(1).sub_(target).mul_(input.sigmoid()).sub_(t);
+  } else {
+    grad_input = at::areAnyTensorSubclassLike({input, target}) ||
+            at::GradMode::is_enabled()
+        ? input.sigmoid().sub(target)
+        : input.sigmoid().sub_(target);
+  }
+
+  if (at::isTensorSubclassLike(grad) || at::GradMode::is_enabled()) {
+    grad_input = grad_input.mul(grad);
+  } else {
+    grad_input.mul_(grad);
+  }
+
+  if (isDefined(weight)) {
+    if (at::isTensorSubclassLike(*weight) || at::GradMode::is_enabled()) {
+      grad_input = grad_input.mul(*weight);
+    } else {
+      grad_input.mul_(*weight);
+    }
+  }
+
+  if (reduction == at::Reduction::Mean) {
+    grad_input.div_(input.numel());
+  }
+
+  return grad_input;
+}
+
 Tensor binary_cross_entropy_with_logits_target_backward(
     const Tensor& grad_output,
     const Tensor& self,
@@ -2006,28 +2057,30 @@ Tensor binary_cross_entropy_with_logits_target_backward(
     const c10::optional<Tensor>& weight,
     const c10::optional<Tensor>& pos_weight,
     int64_t reduction) {
+  if (grad_output._is_zerotensor()) {
+    return at::_efficientzerotensor(target.sizes(), target.options());
+  }
+
   Tensor grad_target;
   if (isDefined(pos_weight)) {
-    if (!areAnyTensorSubclassLike({*pos_weight, grad_output})) {
-      grad_target = (1. - self.sigmoid())
-                        .log_()
-                        .sub_(pos_weight->mul(self.sigmoid().log_()))
-                        .mul_(grad_output);
-    } else {
-      grad_target = (1. - self.sigmoid())
-                        .log_()
-                        .sub(pos_weight->mul(self.sigmoid().log_()))
+    if (areAnyTensorSubclassLike({*pos_weight, grad_output})) {
+      grad_target = at::log_sigmoid(-self)
+                        .sub(at::log_sigmoid(self).mul(*pos_weight))
                         .mul(grad_output);
+    } else {
+      grad_target = at::log_sigmoid(-self)
+                        .sub_(at::log_sigmoid(self).mul_(*pos_weight))
+                        .mul_(grad_output);
     }
   } else {
-    grad_target = self.mul(-grad_output);
+    grad_target = -self * grad_output;
   }
 
   if (isDefined(weight)) {
-    if (!isTensorSubclassLike(*weight)) {
-      grad_target.mul_(*weight);
-    } else {
+    if (at::isTensorSubclassLike(*weight)) {
       grad_target = grad_target.mul(*weight);
+    } else {
+      grad_target.mul_(*weight);
     }
   }
 
