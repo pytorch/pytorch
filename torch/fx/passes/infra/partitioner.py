@@ -7,15 +7,15 @@ from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node, _get_qualified_name
 from torch.fx.passes.operator_support import OperatorSupportBase
 
-from itertools import groupby
 from collections import defaultdict
 import logging
+import itertools
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 class Partition:
-    def __init__(self, id: int = None, nodes: Iterable[Node] = set()):
+    def __init__(self, id: int = None, nodes: Iterable[Node] = {}):
         self.id = id
         self.nodes: Set[Node] = set(nodes)
 
@@ -100,8 +100,11 @@ class CapabilityBasedPartitioner:
         # assumptions: nodes in candidate list is sorted in topological order
         assignment: Dict[Node, int] = {}   # maping from node to partition_id
         partitions_by_id: Dict[int, Partition] = {}  # mapping from partition_id to partition
+        new_partition_id = itertools.count()
 
-        def assign(node: Node, id: Optional[int]):
+        def assign(node: Node, id: Optional[int] = None):
+            # If id is None, remove the node from original assigment
+
             # node has been assigned before, clean up and re-assign
             if node in assignment:
                 original_id = assignment[node]
@@ -117,56 +120,59 @@ class CapabilityBasedPartitioner:
                 else:
                     partitions_by_id[id].add_node(node)
 
-        def all_equal(iterable):
-            g = groupby(iterable)
-            return next(g, True) and not next(g, False)
-
         logging.debug("Proposing partitions...")
+
         # visit candidates in reversed topological order
         for node in reversed(candidates):
-            user_partitions: Set[Partition] = set()
+            # use Dict as an ordered set to ensure deterministic partitioning result, don't care value
+            user_partitions: Dict[Partition, None] = {}
             for user_node in node.users:
                 if user_node in assignment:
                     id = assignment[user_node]
-                    user_partitions.add(partitions_by_id[id])
+                    user_partitions[partitions_by_id[id]] = None
                 else:
-                    user_partitions.add(Partition(nodes=[user_node]))
+                    user_partitions[Partition(nodes=[user_node])] = None
 
             # Filter out all the partitions that has dependency on other users
             # TODO: find a better way to do this, rather than pair-wise comparision
-            user_partitions_list = list(user_partitions)
+            user_partitions_list = list(user_partitions.keys())
             for i in range(len(user_partitions_list)):
                 for j in range(i + 1, len(user_partitions_list)):
                     pi = user_partitions_list[i]
                     pj = user_partitions_list[j]
                     dependency = self.__partition_depends_on(pi, pj)
                     if dependency == 1 and pj in user_partitions:
-                        user_partitions.remove(pj)
+                        del user_partitions[pj]
                     elif dependency == -1 and pi in user_partitions:
-                        user_partitions.remove(pi)
+                        del user_partitions[pi]
 
             # We use the following rules for partition assignment:
             # 1. If none of the candidates has been assigned to a partition, create a new partition
-            # 2. If all of the candidate has been assigned to the same partition, assign to the same partition
-            # 3. If candidates has been assigned to more then one paritions, assign to the largest partition (by node count)
-            # 4. If none of rule above can break the tie, randomly assign to one of the largest partition among candidates
+            # 2. If there is one partition candidate, assign to the partition
+            # 3. If there are more than one partition candidates, assign current node to the first partition and
+            #    merge the other partitions with first partition, since user_partitions doesn't have depedency between
+            #    each other.
+
             assigned_candidate_partition_ids = [partition.id for partition in user_partitions if partition.id is not None]
 
             if len(assigned_candidate_partition_ids) == 0:
                 # create a new partition
-                id = len(partitions_by_id)
+                assign(node, next(new_partition_id))
+            elif len(assigned_candidate_partition_ids) == 1:
+                id = assigned_candidate_partition_ids[0]
                 assign(node, id)
-
-            elif all_equal(assigned_candidate_partition_ids):
+            else:
+                # users are assigned to more than one partition, since user_partitions doesn't have
+                # dependency on each other, they can be fused into a single partition
                 id = assigned_candidate_partition_ids[0]
                 assign(node, id)
 
-            else:
-                partitions_size_by_id = [[partitions_by_id[id].size(), id] for id in assigned_candidate_partition_ids]
-                partitions_size_by_id = sorted(partitions_size_by_id, reverse=True)
-
-                id = partitions_size_by_id[0][1]
-                assign(node, id)
+                reassignment: Dict[Node, int] = {}
+                for other_id in assigned_candidate_partition_ids[1:]:
+                    for other_node in partitions_by_id[other_id].nodes:
+                        reassignment[other_node] = id
+                for other_node in reassignment:
+                    assign(other_node, id)
 
         # post processing to re-assign "getitem" nodes into upstream partition
         logger.debug("Reassigning getitem nodes to its producer node's partition...")
@@ -191,12 +197,13 @@ class CapabilityBasedPartitioner:
         # filter out single node partitions
         if not self.allows_single_node_partition:
             logger.debug("Filtering out single node partitions...")
+            non_compute_ops = {"torch.ops.aten.view", "_operator.getitem"}
             partitions_to_remove: List[int] = []
             for id, partition in partitions_by_id.items():
                 compute_node_count = 0
                 for node in partition.nodes:
                     if node.op == "call_function" and \
-                       _get_qualified_name(node.target) not in {"torch.ops.aten.view", "_operator.getitem"}:  # type: ignore[arg-type]
+                       _get_qualified_name(node.target) not in non_compute_ops:  # type: ignore[arg-type]
                         compute_node_count += 1
                 if compute_node_count <= 1:
                     partitions_to_remove.append(id)

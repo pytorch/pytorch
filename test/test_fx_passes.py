@@ -42,6 +42,7 @@ class TestModule(torch.nn.Module):
         return add_4, add_6, relu
 
 class TestPartitionFunctions:
+    @staticmethod
     def forward1(a, b, c):
         add = a + b
         add_1 = add + b
@@ -54,6 +55,7 @@ class TestPartitionFunctions:
         add_6 = add_5 + add_4
         return add_4, add_6
 
+    @staticmethod
     def forward2(a, b, _):
         add = a + b
         add_1 = add + b
@@ -62,18 +64,21 @@ class TestPartitionFunctions:
         add_4 = add_1 + add_3
         return add_4, add_1
 
+    @staticmethod
     def forward3(a, b, c):
         add = a + b
         add_1 = a + c
         add_2 = b + c
         return add, add_1, add_2
 
+    @staticmethod
     def forward4(a, b, c):
         add = a + b
         add_1 = a + c
         add_2 = b + c
         return torch.where(add > 0, add_1, add_2)
 
+    @staticmethod
     def forward5(a, b, c):
         # add should be fused right branch, as left branch is not supported
         add = a + 1
@@ -83,6 +88,7 @@ class TestPartitionFunctions:
         add_1 = add + 2
         return relu, add_1
 
+    @staticmethod
     def forward6(a, b, c):
         # add should have its own partition, as neither branchs are supported
         add = a + 1
@@ -92,8 +98,9 @@ class TestPartitionFunctions:
         relu_1 = add.relu()
         return relu, relu_1
 
+    @staticmethod
     def forward7(a, b, c):
-        # both branches are supported, but add should be merged with right branch, as right branch is larger
+        # both branches are supported, all adds should be fused together
         add = a + 1
         # left branch
         add_1 = add + 2
@@ -102,6 +109,7 @@ class TestPartitionFunctions:
         add_3 = add_2 + 1
         return add_3, add_1
 
+    @staticmethod
     def forward8(a, b, c):
         # both branches are in the same partition, add should join the same partition
         add = a + 1
@@ -114,6 +122,7 @@ class TestPartitionFunctions:
 
         return add_3
 
+    @staticmethod
     def forward9(a, b, c):
         add = a + 1
         # branch 1
@@ -125,6 +134,7 @@ class TestPartitionFunctions:
         out = torch.stack([add_1, add_2, add_3])
         return out
 
+    @staticmethod
     def forward10(a, b, c):
         add = a + 1
         # branch 1
@@ -136,6 +146,7 @@ class TestPartitionFunctions:
         out = torch.stack([add_1, add_2, add_3])
         return out
 
+    @staticmethod
     def forward11(a, b, c):
         add = a + 1
         # branch 1
@@ -161,12 +172,12 @@ class TestFXGraphPasses(JitTestCase):
         # 2 branches cases
         (TestPartitionFunctions.forward5, [["add_1", "add"]]),
         (TestPartitionFunctions.forward6, [["add"]]),
-        (TestPartitionFunctions.forward7, [["add_3", "add_2", "add"], ["add_1"]]),
+        (TestPartitionFunctions.forward7, [["add_3", "add_2", "add", "add_1"]]),
         (TestPartitionFunctions.forward8, [["add_3", "add_2", "add", "add_1"]]),
 
         # 3 branch cases
-        (TestPartitionFunctions.forward9, [['add_3'], ['add_2'], ['add_1', 'add']]),
-        (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add'], ['add_1']]),
+        (TestPartitionFunctions.forward9, [['add_3', 'add_2', 'add_1', 'add']]),
+        (TestPartitionFunctions.forward10, [['add_3', 'add_2', 'add', 'add_1']]),
         (TestPartitionFunctions.forward11, [['add_1'], ['add']]),
     ])
     def test_partitioner(self, fn, expected_partition):
