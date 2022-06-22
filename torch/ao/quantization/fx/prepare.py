@@ -156,7 +156,7 @@ def _cleanup_args(model: GraphModule) -> GraphModule:
     for n in model.graph.nodes:
         # remove inplace arg from relu
         if n.op == "call_function" and n.target in (torch.nn.functional.relu, torch.relu):
-            # ignroe the inplace op since that will interfere with node
+            # ignore the inplace op since that will interfere with node
             # matching
             n.args = (n.args[0],)
             n.kwargs = {}

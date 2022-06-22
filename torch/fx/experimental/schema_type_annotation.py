@@ -8,6 +8,11 @@ from torch.fx.operator_schemas import _torchscript_type_to_python_type
 
 from torch.fx import Transformer
 
+__all__ = [
+    "AnnotateTypesWithSchema",
+]
+
+
 class AnnotateTypesWithSchema(Transformer):
     """
     Use Python function signatures to annotate types for `Nodes` within an FX graph.
@@ -109,7 +114,3 @@ class AnnotateTypesWithSchema(Transformer):
             return None
 
         return sig.return_annotation if sig.return_annotation is not inspect.Signature.empty else None
-
-__all__ = [
-    "AnnotateTypesWithSchema",
-]

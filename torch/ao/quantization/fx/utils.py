@@ -48,6 +48,7 @@ __all__ = [
     "quantize_node",
     "return_arg_list",
     "WEIGHT_INDEX_DICT",
+    "get_all_args_as_positional_args",
 ]
 
 
@@ -634,30 +635,3 @@ def get_all_args_as_positional_args(node: Node) -> List[Argument]:
     all_args = list(node.args)
     all_args.extend(list(node.kwargs.values()))
     return all_args
-
-__all__ = [
-    "graph_pretty_str",
-    "get_per_tensor_qparams",
-    "get_quantize_node_info",
-    "quantize_node",
-    "get_custom_module_class_keys",
-    "get_linear_prepack_op_for_dtype",
-    "get_qconv_prepack_op",
-    "get_qconv_op",
-    "get_new_attr_name_with_prefix",
-    "collect_producer_nodes",
-    "graph_module_from_producer_nodes",
-    "assert_and_get_unique_device",
-    "create_getattr_from_value",
-    "create_qparam_nodes",
-    "all_node_args_have_no_tensors",
-    "all_node_args_except_first",
-    "return_arg_list",
-    "get_non_observable_arg_indexes_and_types",
-    "node_return_type_is_int",
-    "is_get_tensor_info_node",
-    "maybe_get_next_module",
-    "create_node_from_old_node_preserve_meta",
-    "get_all_args_as_positional_args",
-    "NodeInfo",
-]

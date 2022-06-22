@@ -36,11 +36,11 @@ QOP_TO_ARG_INDEXES_TO_SKIP = {
     torch._ops.ops.quantized.instance_norm: [1, 2, 5, 6],
 }
 
-# a map from quantized operator to the start index of the quantization parameter
+# a map from quantized operator to the insert index of the quantization parameter
 # arguments like scale and zero_point
-# if the quantized operator is not in the least, we will append quantization parameter
+# if the quantized operator is not in the list, we will append quantization parameter
 # arguments in the end of the argument list
-QOP_TO_QPARAMS_START_INDEX = {
+QOP_TO_QPARAMS_INSERT_INDEX = {
     torch._ops.ops.quantized.elu: 1,
     torch._ops.ops.quantized.dropout: 1,
 }
@@ -927,9 +927,9 @@ def special_pattern_replacement(model: QuantizedGraphModule):
                 arg_indexes_to_skip = QOP_TO_ARG_INDEXES_TO_SKIP[qop]
                 new_args = [arg for index, arg in enumerate(args) if index not in arg_indexes_to_skip]
 
-            if qop in QOP_TO_QPARAMS_START_INDEX:
-                qparam_start_index = QOP_TO_QPARAMS_START_INDEX[qop]
-                new_args = new_args[:qparam_start_index] + qparams + new_args[qparam_start_index:]
+            if qop in QOP_TO_QPARAMS_INSERT_INDEX:
+                qparam_insert_index = QOP_TO_QPARAMS_INSERT_INDEX[qop]
+                new_args = new_args[:qparam_insert_index] + qparams + new_args[qparam_insert_index:]
             else:
                 new_args.extend(qparams)
 
