@@ -24,6 +24,7 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       push(value.toTensor());
     } else if (value.isScalar()) {
       tags_.emplace_back(Tag::Scalar);
+      scalars_.emplace_back(value.toScalar());
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
       // TODO: Skip TensorList for now.
@@ -41,19 +42,20 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     tags_.emplace_back(Tag::Tensor);
     const auto& sizes = t.sizes();
     const auto dim = sizes.size();
+    const auto strides = t.strides();
     TORCH_CHECK(
         dim <= std::numeric_limits<uint32_t>::max(),
         "Cannot profile Tensors of size > uint32 max. Got dim: ",
         dim);
 
     tensor_metadata_.emplace_back(
-        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
-        /*dtype_=*/t.scalar_type(),
-        /*dim_=*/(uint32_t)dim);
-
-    for (const auto i : sizes) {
-      tensor_sizes_.emplace_back(i);
-    }
+      /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+      /*dtype_=*/t.scalar_type(),
+      /*dim_=*/(uint32_t)dim,
+      /*layout_=*/t.layout()
+    );
+    tensor_sizes_.emplace_list(sizes);
+    tensor_strides_.emplace_list(strides);
   } else {
     tags_.emplace_back(Tag::UndefinedTensor);
   }
@@ -64,19 +66,26 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
-          tensor_size_it = tensor_sizes_.begin()]() mutable {
+          tensor_size_it = tensor_sizes_.begin(),
+          scalars_it = scalars_.begin(),
+          tensor_strides_it = tensor_strides_.begin()]
+          () mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
       out.shapes_.emplace_back();
+      out.strides_.emplace_back();
       switch (*tag_it) {
-        case Tag::Tensor: {
-          const auto& md = *tensor_metadata_it++;
-          for (const auto _ : c10::irange(md.dim_)) {
-            (void)_; // Suppress unused variable warning
-            out.shapes_.back().push_back(*tensor_size_it++);
-          }
-          out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+        case Tag::Tensor:
+          {
+            out.scalars_.emplace_back();
+            const auto& md = *tensor_metadata_it++;
+            for (const auto _ : c10::irange(md.dim_)) {
+              (void)_; // Suppress unused variable warning
+              out.shapes_.back().push_back(*tensor_size_it++);
+              out.strides_.back().push_back(*tensor_strides_it++);
+            }
+            out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
 
         case Tag::TensorListBegin:
@@ -84,20 +93,24 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             // TODO: Skip TensorLists for now.
           }
           out.dtypes_.emplace_back("TensorList");
+          out.scalars_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
+          out.scalars_.emplace_back(*scalars_it++);
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
+          out.scalars_.emplace_back();
           out.dtypes_.emplace_back();
           break;
 
         case Tag::TERMINATOR:
           // This marks the end of this op.
           out.shapes_.pop_back();
+          out.strides_.pop_back();
           terminate = true;
           break;
 
@@ -114,6 +127,8 @@ void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
   tensor_sizes_.clear();
+  tensor_strides_.clear();
+  scalars_.clear();
 }
 
 namespace {

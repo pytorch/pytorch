@@ -10,6 +10,7 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ArrayRef.h>
 
 namespace torch {
 namespace profiler {
@@ -64,6 +65,14 @@ class AppendOnlyList {
     maybe_grow();
     *next_ = {std::forward<Args>(args)...};
     return next_++;
+  }
+
+  T* emplace_list(c10::ArrayRef<T> arg_list){
+    // TODO: Optimize this frther at a future date
+    for (const auto &i : arg_list){
+      emplace_back(i);
+    }
+    return next_;
   }
 
   void clear() {

@@ -46,6 +46,8 @@ struct TorchOpBasicFields {
 
 struct Inputs {
   std::vector<std::vector<int64_t>> shapes_;
+  std::vector<std::vector<int64_t>> strides_;
+  std::vector<c10::Scalar> scalars_;
   std::vector<std::string> dtypes_;
 };
 
@@ -266,6 +268,7 @@ class InputOutputEncoder final {
     void* ptr_;
     c10::ScalarType dtype_;
     uint32_t dim_;
+    c10::Layout layout_;
   };
 
   void push(const at::Tensor& t);
@@ -274,6 +277,8 @@ class InputOutputEncoder final {
   AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
       tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_;
+  AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_strides_;
+  AppendOnlyList<c10::Scalar, IO_ENCODER_DEFAULT_BLOCK_SIZE> scalars_;
 };
 
 class RecordQueue;

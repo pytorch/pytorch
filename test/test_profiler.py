@@ -1159,7 +1159,7 @@ class TestTorchTidyProfiler(TestCase):
             node.children[0].children[0].extra_fields,
             torch._C._autograd._ExtraFields_Allocation)
 
-    def test_tensor_sizes(self):
+    def test_tensor_sizes_strides(self):
         x = torch.ones(10, 10)
         y = torch.ones(1, 10)
 

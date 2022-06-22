@@ -261,6 +261,8 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
 
     py::class_<Inputs>(m, "_Inputs")
         .def_readonly("shapes", &Inputs::shapes_)
+        .def_readonly("strides", &Inputs::strides_)
+        .def_readonly("scalars", &Inputs::scalars_)
         .def_readonly("dtypes", &Inputs::dtypes_);
 
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");
