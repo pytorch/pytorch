@@ -44,7 +44,6 @@ jobs:
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: ${{ inputs.build-environment }}-build
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
       IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET }}
       IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID }}

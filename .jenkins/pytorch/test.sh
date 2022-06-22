@@ -575,12 +575,12 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchdynamo
   build_xla
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
+elif [[ $TEST_CONFIG == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *distributed* ]]; then
   install_torchdynamo
   test_distributed
   # Only run RPC C++ tests on the first shard
