@@ -6,10 +6,10 @@ inputs:
   docker-image-name:
     description: The name of a docker image, like `pytorch-linux-xenial-py3.7-gcc7`
     required: true
-  xla:
+  force-docker-tag:
     description: |
-      Whether or not to use a pre-build XLA docker image.
-      Note that this is a string, either "true" or "false" due to GHA limitations.
+      If set, force the CI to use this docker tag instead of calculating it
+      based on the state of the repo.
     required: false
   always-rebuild:
     description: If set to any value, always build a fresh docker image.
@@ -33,15 +33,14 @@ runs:
       shell: bash
       id: calculate-tag
       env:
-        IS_XLA: ${{ inputs.xla == 'true' && 'true' || '' }}
-        XLA_IMAGE_TAG: v0.2
+        FORCE_DOCKER_TAG: ${{ inputs.force-docker-tag }}
         DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}
       run: |
-        if [ -n "${IS_XLA}" ]; then
-          echo "XLA workflow uses pre-built test image at ${XLA_IMAGE_TAG}"
+        if [[ -n "${FORCE_DOCKER_TAG}" ]]; then
+          echo "Using requested docker tag "
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
           echo "::set-output name=docker-tag::${DOCKER_TAG}"
-          echo "::set-output name=docker-image::${DOCKER_IMAGE_BASE}:${XLA_IMAGE_TAG}"
+          echo "::set-output name=docker-image::${DOCKER_IMAGE_BASE}:${FORCE_DOCKER_TAG}"
         else
           DOCKER_TAG=$(git rev-parse HEAD:.circleci/docker)
           echo "::set-output name=docker-tag::${DOCKER_TAG}"
