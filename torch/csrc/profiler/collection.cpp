@@ -16,9 +16,6 @@ namespace profiler {
 namespace impl {
 
 void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
-  #ifndef NDEBUG
-  size_t tags_start_size = tags_.size();
-  #endif
   for (const auto& value : values) {
     if (value.isTensor()) {
       push(value.toTensor());
@@ -34,7 +31,6 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       tags_.emplace_back(Tag::Other);
     }
   }
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(tags_.size() - tags_start_size == values.size());
   tags_.emplace_back(Tag::TERMINATOR);
 }
 
