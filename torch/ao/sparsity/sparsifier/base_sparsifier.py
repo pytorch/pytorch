@@ -50,9 +50,7 @@ class BaseSparsifier(abc.ABC):
     """
     def __init__(self, defaults: Optional[Dict[str, Any]] = None):
         super().__init__()
-        if defaults is None:
-            defaults = dict()
-        self.defaults: Dict[str, Any] = defaults
+        self.defaults: Dict[str, Any] = defaults or dict()
 
         self.state: Dict[str, Dict] = defaultdict(dict)
         self.groups: List[Dict[str, Any]] = []
