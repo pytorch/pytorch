@@ -10,6 +10,7 @@ from torch._C import _disabled_torch_function_impl
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
 import torch.fx as fx
+from torch.utils._mode_utils import no_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager
 
@@ -20,14 +21,6 @@ aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
-
-@contextmanager
-def no_dispatch():
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
 
 
 @contextmanager
@@ -101,6 +94,8 @@ class ProxyTensor(torch.Tensor):
     def __new__(cls, elem, proxy, *, requires_grad=None):
         # Hack to deal with super().__new__ not working for sparse tensors
         if elem.is_sparse or requires_grad is not None:
+            if requires_grad is None:
+                requires_grad = False
             r = torch.Tensor._make_subclass(cls, elem, requires_grad)
         else:
             r = super().__new__(cls, elem)  # type: ignore[call-arg]
@@ -184,7 +179,9 @@ def wrap_key(f, inps):
         for idx, arg in enumerate(flat_args):
             if isinstance(flat_inps[idx], torch.Tensor):
                 with no_dispatch():
-                    flat_args[idx] = ProxyTensor(flat_inps[idx], arg, requires_grad=flat_inps[idx].is_leaf)
+                    flat_args[idx] = ProxyTensor(flat_inps[idx], arg, requires_grad=(
+                        flat_inps[idx].is_leaf and flat_inps[idx].requires_grad
+                    ))
             else:
                 flat_args[idx] = flat_inps[idx]
 
@@ -205,7 +202,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
-        if any(tuple(isinstance(arg, ProxyTensor) for arg in args)):
+        if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
         else:
             proxy_out = self.tracer.create_proxy('call_function', func, args, kwargs,
@@ -217,7 +214,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             return wrap_output(real_out, proxy_out)
 
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=False):
+def make_fx(f, decomposition_table=None, trace_factory_functions=True):
     if decomposition_table is None:
         decomposition_table = {}
 

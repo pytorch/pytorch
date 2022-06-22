@@ -1408,7 +1408,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m,
             qconfig_dict,
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
         mp2 = copy.deepcopy(mp1)
         unmatchable_types_map = get_unmatchable_types_map()
         unmatchable_types_map['mods_unmatchable'].add(M1)
@@ -1455,7 +1455,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             m,
             qconfig_dict,
             example_inputs=example_inputs,
-            prepare_custom_config_dict=prepare_custom_config_dict)
+            prepare_custom_config=prepare_custom_config_dict)
         mp(*example_inputs)
         mq = convert_fx(copy.deepcopy(mp))
 
@@ -2033,6 +2033,34 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         self._test_match_shadow_activations(
             m, (torch.randn(1, 1, 4, 4),),
             results_len=0)
+
+    def test_linear_kwargs_shadow(self):
+
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.w1 = nn.Parameter(torch.empty(4, 4))
+                self.b1 = nn.Parameter(torch.zeros(4))
+                torch.nn.init.kaiming_uniform_(self.w1, a=math.sqrt(5))
+
+            def forward(self, x):
+                x = F.linear(input=x, weight=self.w1, bias=self.b1)
+                return x
+
+        # note: FX graph mode quantization does not have good support
+        # for kwargs-only right now, so we pass in two unquantized
+        # models
+        m = M().eval()
+        mt = torch.fx.symbolic_trace(m)
+        mt_copy = copy.deepcopy(mt)
+
+        mt_shadows_mt_copy = add_shadow_loggers(
+            'a', mt, 'b', mt_copy, OutputLogger)
+
+        mt_shadows_mt_copy(torch.randn(4, 4))
+        act_compare_dict = extract_shadow_logger_info(
+            mt_shadows_mt_copy, OutputLogger, 'b')
+        self.assertTrue(len(act_compare_dict) == 1)
 
 
 class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):

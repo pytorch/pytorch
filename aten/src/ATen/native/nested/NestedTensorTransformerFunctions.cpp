@@ -85,6 +85,45 @@ Tensor NestedTensor_add_NestedTensor_in_place(
   return self;
 }
 
+void NestedTensor_softmax_dropout(const Tensor& query, Tensor& attn_scores) {
+  const auto* query_nt = get_nested_tensor_impl_or_null(query);
+  TORCH_INTERNAL_ASSERT(query_nt != nullptr);
+  TORCH_INTERNAL_ASSERT(nested_tensor_impl_is_contiguous(query_nt));
+
+  const Tensor& sizes = query_nt->get_nested_size_tensor();
+  const auto num_tensors = sizes.sizes()[0];
+  const auto max_seq_len = attn_scores.sizes()[2];
+
+  for (int64_t i = 0; i < num_tensors; i++) {
+    auto seq_len = sizes.index({i, 0}).item<int64_t>();
+    auto subseq = attn_scores.index(
+        {i,
+         indexing::Slice(),
+         indexing::Slice(0, seq_len),
+         indexing::Slice(0, seq_len)});
+    auto subscores = at::softmax(subseq, subseq.dim() - 1);
+    attn_scores.index_put_(
+        {i,
+         indexing::Slice(),
+         indexing::Slice(0, seq_len),
+         indexing::Slice(0, seq_len)},
+        subscores);
+    attn_scores.index_put_(
+        {i,
+         indexing::Slice(),
+         indexing::Slice(0, seq_len),
+         indexing::Slice(seq_len, max_seq_len)},
+        0);
+    attn_scores.index_put_(
+        {i,
+         indexing::Slice(),
+         indexing::Slice(seq_len, max_seq_len),
+         indexing::Slice(0, max_seq_len)},
+        0);
+  }
+}
+
+
 Tensor NestedTensor_batch_offsets_from_size_tensor(
     const Tensor& sizes,
     int64_t extra_elements) {
@@ -104,7 +143,7 @@ Tensor NestedTensor_batch_offsets_from_size_tensor(
   return offsets;
 }
 
-Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim) {
+Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length) {
   auto* nt_impl = get_nested_tensor_impl(nt);
   TORCH_CHECK(
       !mask_dim || *mask_dim < nt.dim(),
@@ -123,7 +162,7 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim) {
   const auto& sizes = nt_impl->get_nested_size_tensor();
   // Shape: # of tensors in our NestedTensor by max size along first dim
   // TODO: calculate this without allocating a std::vector.
-  const auto result_size_1 = NestedTensor_get_max_size(*nt_impl)[0];
+  const auto result_size_1 = mask_dim_length ? *mask_dim_length : NestedTensor_get_max_size(*nt_impl)[0];
   auto result = at::ones({sizes.sizes()[0], result_size_1}, at::kBool);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
   auto* result_data = result.data_ptr<bool>();
@@ -137,6 +176,5 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim) {
   }
   return result;
 }
-
 } // namespace native
 } // namespace at
