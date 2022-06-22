@@ -2,6 +2,8 @@
 # Owner(s): ["oncall: jit"]
 
 from torch._C import _disabled_torch_function_impl
+import torch.fx
+import torch.nn.functional as F
 from torch.testing._internal.common_utils import run_tests, TestCase
 import unittest
 import torch
@@ -290,12 +292,17 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.sym_size(1)), str(x.sym_size(0)))
         self.assertTrue(str(expand_x.sym_size(1)), str(result.sym_size(0)))
 
-    @skipIfNoSympy
-    def test_meta_symint(self):
-        shape_env = ShapeEnv()
-        a0 = shape_env.create_symint("a0", 2)
-        r = torch.empty(a0, device='meta')
-        self.assertIsInstance(r.sym_size(0), CPP_SYMINT_CLASS)
+    def test_fx_trace_intlist(self):
+        class CustomModule(torch.nn.Module):
+            def forward(self, x):
+                bs, c, h, w = x.shape
+                return F.pad(x, (0, w % 2, 0, h % 2, 0, 0))
+
+        m = CustomModule()
+        x = torch.rand(1, 3, 4, 4)
+        # should not TypeError: pad(): argument 'pad' (position 2) must be
+        # tuple of ints, not tuple
+        torch.fx.symbolic_trace(m)
 
 
 if __name__ == '__main__':
