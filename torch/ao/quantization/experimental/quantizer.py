@@ -13,7 +13,6 @@ class APoTQuantizer():
     signed: bool
     quantization_levels: torch.Tensor
     level_indices: torch.Tensor
-    data: torch.Tensor
 
     def __init__(
         self,
@@ -49,8 +48,6 @@ class APoTQuantizer():
         result = torch.tensor([])
         # map float_to_apot over tensor2quantize elements
         result = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
-
-        self.data = result
 
         return result
 

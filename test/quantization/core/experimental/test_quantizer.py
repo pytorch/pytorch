@@ -5,8 +5,6 @@ from torch import quantize_per_tensor
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 import unittest
 import random
-quantize_APoT = APoTQuantizer.quantize_APoT
-dequantize = APoTQuantizer.dequantize
 
 class TestQuantizer(unittest.TestCase):
     r""" Tests quantize_APoT result on random 1-dim tensor
@@ -18,7 +16,7 @@ class TestQuantizer(unittest.TestCase):
         * k: 1
     """
     def test_quantize_APoT_rand_k1(self):
-        # generate random size of tensor2dequantize between 1 -> 20
+        # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
 
         # generate tensor with random fp values between 0 -> 1000
@@ -71,9 +69,6 @@ class TestQuantizer(unittest.TestCase):
         # e.g.
         # 0.0215 in tensor2quantize nearest 0.0208 in quantization_levels -> 3 in level_indices
         expected_qtensor = torch.tensor([3, 8, 13, 12], dtype=torch.uint8)
-
-        print(qtensor_data)
-        print(expected_qtensor)
 
         self.assertTrue(torch.equal(qtensor_data, expected_qtensor))
 
