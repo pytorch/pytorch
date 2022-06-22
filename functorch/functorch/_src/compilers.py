@@ -7,6 +7,7 @@ from typing import Callable, Iterable, Optional, Tuple, Union
 from .aot_autograd import aot_function, aot_module
 from .decompositions import get_decompositions
 from .partitioners import draw_graph, min_cut_rematerialization_partition
+from .compile_utils import strip_overloads
 import time
 
 
@@ -18,19 +19,6 @@ def _canonicalize(fx_g):
             node.target = torch.ops.aten.to
     fx_g.recompile()
     return fx_g
-
-
-def strip_overloads(gm):
-    """
-    Modifies the target of graph nodes in :attr:`gm` to strip overloads.
-
-    Args:
-        gm(fx.GraphModule): The input Fx graph module to be modified
-    """
-    for node in gm.graph.nodes:
-        if isinstance(node.target, torch._ops.OpOverload):
-            node.target = node.target.overloadpacket
-    gm.recompile()
 
 
 def ts_compile(fx_g: fx.GraphModule, _) -> Callable:
@@ -245,6 +233,7 @@ def nop(fx_g: fx.GraphModule, _) -> Callable:
 
 
 def simple_ts_compile(fx_g, _):
+    strip_overloads(fx_g)
     f = torch.jit.script(fx_g)
     f = torch.jit.freeze(f.eval())
     return f

@@ -496,7 +496,7 @@ class TestPartitioning(TestCase):
         def f(x):
             return torch.mm(x, torch.ones(x.shape)).tanh().tanh()
         fw_graph, bw_graph = get_fw_bw_graph(f, [torch.randn(5, 5, requires_grad=True)])
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 2))
+        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
 
         ins, outs = get_ins_outs(fw_graph)
         self.assertEqual(outs[1].target, torch.ops.aten.mm)

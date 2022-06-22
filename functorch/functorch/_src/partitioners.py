@@ -7,7 +7,7 @@ import copy
 import os
 from torch.fx.passes import graph_drawer
 from typing import Tuple
-from .cse import fx_graph_cse
+from .compile_utils import fx_graph_cse, strip_overloads
 
 
 class InvalidNodeBase(object):
@@ -228,6 +228,7 @@ def min_cut_rematerialization_partition(
         raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
 
     #  add the CSE pass
+    strip_overloads(joint_module)
     fx_g = joint_module.graph
     cse_graph = fx_graph_cse(fx_g)
     joint_module.graph = cse_graph
