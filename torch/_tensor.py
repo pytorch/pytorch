@@ -88,7 +88,7 @@ class Tensor(torch._C._TensorBase):
         if not self.is_leaf:
             raise RuntimeError("Only Tensors created explicitly by the user "
                                "(graph leaves) support the deepcopy protocol at the moment")
-        if id(self) in memo:
+        if id(self) in memo: #and self.shape == memo[id(self)].shape:
             return memo[id(self)]
         with torch.no_grad():
             # TODO: skipping storage copy is wrong for meta, as meta

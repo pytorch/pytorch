@@ -47,17 +47,15 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
         t._is_param = True
         return t
 
-    # Note: the 3 methods below only apply to standard Tensor. Parameters of custom tensor types
+    # Note: the 4 methods below only apply to standard Tensor parameters. Parameters of custom tensor types
     # are still considered that custom tensor type and these methods will not be called for them.
     def __deepcopy__(self, memo):
         if id(self) in memo:
             return memo[id(self)]
         else:
-            # Redispatch to Tensor.__deepcopy__() with self reinterpreted as a Tensor
-            # to get proper view handling.
-            # https://github.com/pytorch/pytorch/issues/79788
-            result = torch.Tensor._make_subclass(torch.Tensor, self, self.requires_grad)
-            result = type(self)(result.__deepcopy__(memo), self.requires_grad)
+            # Redispatch to Tensor.__deepcopy__() to get proper view handling.
+            # See https://github.com/pytorch/pytorch/issues/79788
+            result = type(self)(super().__deepcopy__(memo), self.requires_grad)
             memo[id(self)] = result
             return result
 
@@ -70,6 +68,9 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             torch._utils._rebuild_parameter,
             (self.data, self.requires_grad, OrderedDict())
         )
+
+    def new_empty(self, shape):
+        return type(self)(super().new_empty(shape))
 
     __torch_function__ = _disabled_torch_function_impl
 
