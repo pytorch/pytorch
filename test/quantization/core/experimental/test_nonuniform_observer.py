@@ -137,11 +137,11 @@ class TestNonUniformObserver(unittest.TestCase):
     def test_forward(self):
         obs = APoTObserver(b=4, k=2)
 
-        X = torch.tensor([0.0, -100.23, 3.42, 8.93, 9.21, 87.92])
-
-        qparams = obs.calculate_qparams(False)
+        X = torch.tensor([0.0, -100.23, -37.18, 3.42, 8.93, 9.21, 87.92])
 
         X = obs.forward(X)
+
+        qparams = obs.calculate_qparams(True)
 
         self.assertEqual(obs.alpha, torch.tensor([100.23]))
 

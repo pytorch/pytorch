@@ -30,6 +30,8 @@ class APoTObserver(ObserverBase):
         super().__init__(dtype)
         self.b = b
         self.k = k
+        self.min_val = torch.tensor([])
+        self.max_val = torch.tensor([])
 
     # alpha is an optional arg to override alpha from
     # observer's internal state
@@ -124,9 +126,9 @@ class APoTObserver(ObserverBase):
             return x_orig
         x = x_orig.detach()  # avoid keeping autograd tape
         min_val, max_val = torch.aminmax(x)
-        if self.min_val:
+        if self.min_val.numel():
             min_val = torch.min(min_val, self.min_val)
-        if self.max_val:
+        if self.max_val.numel():
             max_val = torch.max(max_val, self.max_val)
         self.min_val = min_val
         self.max_val = max_val
