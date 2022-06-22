@@ -13,7 +13,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union, List
 
 import numpy as np
 
@@ -114,18 +114,24 @@ def _ort_session(
 
 
 def _compare_ort_pytorch_outputs(
-    ort_outs, pt_outs, rtol, atol, check_shape, check_dtype
+    ort_outs: List[np.ndarray],
+    pt_outs: List[torch.Tensor],
+    rtol: float,
+    atol: float,
+    check_shape: bool,
+    check_dtype: bool,
 ):
     pt_outs, _ = torch.jit._flatten(pt_outs)
     pt_outs = _unpack_to_numpy(pt_outs)
 
     assert len(ort_outs) == len(
         pt_outs
-    ), f"number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs)})"
+    ), f"Number of outputs differ ONNX runtime: ({len(ort_outs)}) PyTorch: ({len(pt_outs)})"
 
     for ort_out, pt_out in zip(ort_outs, pt_outs):
+        # TODO: Remove `check_shape` option once every shape inconsistent issue is addressed.
         if not check_shape:
-            # allows output shapes differ but are broadcastable.
+            # Allow different but broadcastable output shapes.
             ort_out, pt_out = np.broadcast_arrays(ort_out, pt_out)
         torch.testing.assert_close(
             ort_out,
