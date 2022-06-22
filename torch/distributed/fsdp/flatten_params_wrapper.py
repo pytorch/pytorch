@@ -25,6 +25,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from torch.distributed.utils import _replace_by_prefix
+from torch.distributed._shard.sharded_tensor import ShardedTensor
 
 
 ParamOffset = Tuple[int, int]
@@ -137,6 +138,14 @@ class FlatParameter(nn.Parameter):
             cls, data, requires_grad=requires_grad
         )  # type: ignore[call-arg]
 
+    def _rebuild_sharded_tensor(self, p, sharding_info):
+        return ShardedTensor._init_from_local_tensor(
+            p,
+            sharding_info[1],
+            sharding_info[2],
+            process_group=sharding_info[3],
+        )
+
     def __init__(self, params: Sequence[nn.Parameter], requires_grad: bool = True):
         self._is_sharded = False
         self._param_numels = [p.numel() for p in params]
@@ -156,6 +165,12 @@ class FlatParameter(nn.Parameter):
 
         self._param_infos: List[ParamInfo] = []
         self._shared_param_infos: List[SharedParamInfo] = []
+        self._param_sharding_infos = []
+        for p in params:
+            if hasattr(p, "_is_sharded_local"):
+                self._param_sharding_infos.append((True, p._sharding_spec, p._st_size, p._pg))
+            else:
+                self._param_sharding_infos.append(None)
 
         # The element offsets (begin/end pair) in the flat parameter of each
         # individual parameter.
@@ -217,8 +232,8 @@ class FlatParameter(nn.Parameter):
                 f"Incorrect numel of supplied data: got {data.numel()} but expected {self.full_numel}"
             )
         return (
-            t.view(s)
-            for (t, s) in zip(data.split(self._param_numels), self._param_shapes)
+            t.view(s) if not info else self._rebuild_sharded_tensor(t.view(s), info)
+            for (t, s, info) in zip(data.split(self._param_numels), self._param_shapes, self._param_sharding_infos)
         )
 
     @property
@@ -313,6 +328,8 @@ class FlattenParamsWrapper(nn.Module):
         self.param_set = set()
         for m in self.modules():
             for n, p in m.named_parameters(recurse=False):
+                if isinstance(p, ShardedTensor):
+                    p = p.local_tensor()
                 if p in unique_param_list:
                     self.param_set.add((m, n))
 
@@ -352,6 +369,13 @@ class FlattenParamsWrapper(nn.Module):
         params = []
         for module_name, m in self.named_modules():
             for n, p in m.named_parameters(recurse=False):
+                if p is not None and isinstance(p, ShardedTensor):
+                    st = p
+                    p = p.local_tensor()
+                    p._is_sharded_local = True
+                    p._sharding_spec = st.sharding_spec()
+                    p._pg = st._process_group
+                    p._st_size = st.size()
                 if p is not None and (m, n) in self.param_set:
                     if p in shared_param_memo:
                         mname, shared_m, shared_n = shared_param_memo[p]

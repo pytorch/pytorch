@@ -29,6 +29,13 @@ def tensor_deepcopy(types, args=(), kwargs=None, pg=None):
         init_rrefs=self_st._init_rrefs
     )
 
+@_sharded_op_impl(torch.Tensor.device.__get__)
+def st_device(types, args=(), kwargs=None, pg=None):
+    return args[0].local_tensor().device
+
+@_sharded_op_impl(torch.Tensor.is_meta.__get__)
+def st_device(types, args=(), kwargs=None, pg=None):
+    return args[0].local_tensor().is_meta
 
 # Tensor properties access
 _register_default_op(torch.Tensor.shape.__get__, _sharded_op_impl)  # type: ignore[attr-defined]
