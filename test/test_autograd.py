@@ -836,6 +836,18 @@ class TestAutograd(TestCase):
         out.backward()
         self.assertEqual(input * 18, input.grad)
 
+    def test_retain_grad_inplace_over_view(self):
+        base = torch.tensor([1.], requires_grad=True).clone()
+        view = base[:]
+        view2 = base[:]
+        view.retain_grad()
+        view2.retain_grad()
+        view.mul_(2)
+        (view + view2).sum().backward()
+
+        self.assertEqual(view.grad, view2.grad)
+        self.assertEqual(view.grad, torch.tensor([1.]))
+
     def test_retain_grad_cycle(self):
         x = torch.ones(5, 5, requires_grad=True)
 

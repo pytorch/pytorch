@@ -154,6 +154,25 @@ AutogradMeta* materialize_autograd_meta(const at::TensorBase& self) {
   return get_autograd_meta(self);
 }
 
+void update_retains_grad(
+    const at::TensorBase& self,
+    const std::shared_ptr<torch::autograd::Node>& fn) {
+  if (!self.retains_grad()) {
+    return;
+  }
+  auto idx = impl::get_autograd_meta(self)->retains_grad_;
+  auto old_list = materialize_autograd_meta(self)->cpp_hooks_list_;
+  auto retains_grad_hook = (*old_list)[idx];
+  auto new_list = std::make_shared<hooks_list>();
+  new_list->push_back(retains_grad_hook);
+  (*old_list)[idx] = nullptr;
+  materialize_autograd_meta(self)->cpp_hooks_list_ = new_list;
+
+  std::unique_ptr<FunctionPreHook> hook_ptr(
+      new CppFunctionPreHook(new_list, self.output_nr()));
+  fn->add_pre_hook(std::move(hook_ptr));
+}
+
 void rebase_history(const Variable& self, Edge gradient_edge) {
   TORCH_INTERNAL_ASSERT(gradient_edge.function != nullptr);
   auto diff_view_meta = get_view_autograd_meta(self);
@@ -181,6 +200,8 @@ void rebase_history(const Variable& self, Edge gradient_edge) {
   }
 
   set_gradient_edge(self, std::move(gradient_edge));
+  // Pass both self and its grad_fn to avoid calling into grad_fn reentrantly
+  torch::autograd::impl::update_retains_grad(self, self.grad_fn());
 }
 
 void create_cpp_hook(const at::TensorBase& self) {
@@ -495,7 +516,7 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
   if (self.is_leaf()) { // no-op for leaves
     return;
   }
-  if (impl::get_autograd_meta(self)->retains_grad_) {
+  if (impl::get_autograd_meta(self)->retains_grad_ != -1) {
     return;
   }
   c10::weak_intrusive_ptr<c10::TensorImpl> weak_self(self.getIntrusivePtr());
@@ -517,13 +538,14 @@ void VariableHooks::retain_grad(const at::TensorBase& self) const {
     }
   };
 
-  at::OptionalTensorRef(self)->register_hook(retain_grad_hook);
-  impl::get_autograd_meta(self)->retains_grad_ = true;
+  auto idx = at::OptionalTensorRef(self)->register_hook(retain_grad_hook);
+  impl::get_autograd_meta(self)->retains_grad_ = idx;
+
 }
 
 bool VariableHooks::retains_grad(const at::TensorBase& self) const {
   if (impl::get_autograd_meta(self)) {
-    return impl::get_autograd_meta(self)->retains_grad_;
+    return impl::get_autograd_meta(self)->retains_grad_  != -1;
   } else {
     return false;
   }
@@ -661,6 +683,8 @@ const std::shared_ptr<torch::autograd::Node>& VariableHooks::grad_fn(
         diff_view_meta->grad_fn_ = std::move(fn);
       }
       diff_view_meta->set_attr_version(current_version);
+
+      torch::autograd::impl::update_retains_grad(self, diff_view_meta->grad_fn_);
     }
     return diff_view_meta->grad_fn_;
   }
