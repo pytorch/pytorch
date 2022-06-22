@@ -877,7 +877,8 @@ inline Tensor& chebyshev_polynomial_w_out(
 
 /// Exponential integral E1.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.exponential_integral_e1.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.exponential_integral_e1.
 inline Tensor exponential_integral_e1(const Tensor& x) {
   return torch::special_exponential_integral_e1(x);
 }
@@ -888,7 +889,8 @@ inline Tensor& exponential_integral_e1_out(Tensor& y, const Tensor& x) {
 
 /// Exponential integral Ei.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.exponential_integral_ei.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.exponential_integral_ei.
 inline Tensor exponential_integral_ei(const Tensor& x) {
   return torch::special_exponential_integral_ei(x);
 }
