@@ -630,14 +630,6 @@ class TestCase:
         self.class_name = str(dom.attributes["classname"].value)
         self.name = str(dom.attributes["name"].value)
         self.time = float(dom.attributes["time"].value)
-        # The following attribute is currently ONLY used in process_intentional_test_runs for validation
-        # reasons. The test filename that populates TestFile is calculated and passed down through the test report path.
-        # The reason we don't just use this attribute is because it doesn't exist for cpp tests, e.g., in test_libtorch
-        self.file = (
-            str(dom.attributes["file"].value)
-            if dom.hasAttribute("file")
-            else "N/A - probably a cpp test"
-        )
         error_elements = dom.getElementsByTagName("error")
         # DISCLAIMER: unexpected successes and expected failures are currently not reported in assemble_s3_object
         self.expected_failure = False
@@ -668,7 +660,7 @@ class TestCase:
 
     def __str__(self) -> str:
         return (
-            f"[TestCase name: {self.name} | class_name: {self.class_name} | file: {self.file} | time: {self.time} | "
+            f"[TestCase name: {self.name} | class_name: {self.class_name} | time: {self.time} | "
             f"expected_failure: {self.expected_failure} | skipped: {self.skipped} | errored: {self.errored} | "
             f"unexpected_success: {self.unexpected_success} | failed: {self.failed}]\n"
         )
@@ -728,18 +720,13 @@ MULTITESTS = [
 ]
 
 
-DuplicatedDict = Dict[str, Dict[str, List[TestCase]]]
-
-
 class TestFile:
     def __init__(self, name: str) -> None:
         self.name = name
         self.total_time = 0.0
         self.test_suites: Dict[str, TestSuite] = dict()
 
-    def append(
-        self, test_case: TestCase, test_type: str, duplicated_tests_dict: DuplicatedDict
-    ) -> None:
+    def append(self, test_case: TestCase) -> None:
         suite_name = test_case.class_name
         if suite_name not in self.test_suites:
             self.test_suites[suite_name] = TestSuite(suite_name)
@@ -747,15 +734,6 @@ class TestFile:
             if self.name in MULTITESTS:
                 self.test_suites[suite_name].update(test_case)
                 self.total_time += test_case.time
-
-            # Gather up duplicated test cases to parse for flaky reruns
-            if suite_name not in duplicated_tests_dict:
-                duplicated_tests_dict[suite_name] = dict()
-            if test_case.name not in duplicated_tests_dict[suite_name]:
-                duplicated_tests_dict[suite_name][test_case.name] = [
-                    self.test_suites[suite_name].test_cases[test_case.name]
-                ]
-            duplicated_tests_dict[suite_name][test_case.name].append(test_case)
         else:
             self.test_suites[suite_name].append(test_case)
             self.total_time += test_case.time
@@ -785,120 +763,17 @@ def get_recursive_files(folder: str, extension: str) -> Iterable[str]:
                 yield os.path.join(root, fname)
 
 
-def parse_reports(folder: str) -> Tuple[Dict[str, TestFile], Dict[str, DuplicatedDict]]:
+def parse_reports(folder: str) -> Dict[str, TestFile]:
     tests_by_file = dict()
-    duplicated_tests_by_file: Dict[str, DuplicatedDict] = dict()
     for report in get_recursive_files(folder, ".xml"):
         report_path = Path(report)
         # basename of the directory of test-report is the test filename
         test_filename = re.sub(r"\.", "/", report_path.parent.name)
-        # test type is the parent directory (only applies to dist-*)
-        # See: CUSTOM_HANDLERS in test/run_test.py
-        test_type = report_path.parent.parent.name
-        if test_filename not in duplicated_tests_by_file:
-            duplicated_tests_by_file[test_filename] = dict()
         if test_filename not in tests_by_file:
             tests_by_file[test_filename] = TestFile(test_filename)
         for test_case in parse_report(report):
-            tests_by_file[test_filename].append(
-                test_case, test_type, duplicated_tests_by_file[test_filename]
-            )
-    return tests_by_file, duplicated_tests_by_file
-
-
-def process_intentional_test_runs(runs: List[TestCase]) -> Tuple[int, int]:
-    num_fail = 0
-    num_expected_fail = 0
-    num_pass = 0
-    num_unexpected_success = 0
-    num_errored = 0
-    num_skipped = 0
-    for test_run in runs:
-        if test_run.failed:
-            num_fail += 1
-        elif test_run.expected_failure:
-            num_expected_fail += 1
-        elif test_run.unexpected_success:
-            num_unexpected_success += 1
-        elif test_run.errored:
-            num_errored += 1
-        elif test_run.skipped:
-            num_skipped += 1
-        else:
-            num_pass += 1
-
-    # Do not run duplication checks for test files that spawn duplicate tests intentionally
-    # and are not necessarily flaky test reruns.
-    if not any(x in test_run.file for x in MULTITESTS):
-        err_msg = f"Warning: unintentional test case duplicates found for {test_run.name} in suite {test_run.class_name}."
-        report_only = os.getenv("PYTORCH_OVERRIDE_FLAKY_SIGNAL") != "1"
-        if (
-            report_only
-            and num_fail + num_errored + num_unexpected_success < 1
-            or not report_only
-            and num_expected_fail < 1
-        ):
-            raise RuntimeWarning(
-                f"{err_msg} Intentional reruns are only triggered when the first run fails or errors, but"
-                " we found no failures nor errors."
-            )
-        if num_unexpected_success + num_expected_fail < 1:
-            raise RuntimeWarning(
-                f"{err_msg} Intentional reruns should raise at least one unexpected success or expected "
-                "failure, but none have been found."
-            )
-        if report_only and num_pass != num_unexpected_success:
-            raise RuntimeWarning(
-                f"{err_msg} Every success in an intentional rerun is shadowed by one unexpected success."
-                f"However, successes = {num_pass} and unexpected successes = {num_unexpected_success}"
-            )
-        if not report_only and num_pass > 1:
-            raise RuntimeWarning(
-                f"{err_msg} There should be at most 1 successful run in an intentional rerun that stops"
-                f" at first success. The number of successful runs = {num_pass}"
-            )
-        if num_skipped > 1:
-            raise RuntimeWarning(
-                f"{err_msg} No more than 1 skip should occur in intentional reruns, but skips = {num_skipped}"
-            )
-    return (
-        max(num_unexpected_success, num_pass),
-        num_fail + num_expected_fail + num_errored,
-    )
-
-
-def write_flaky_test_stats_to_rockset(
-    duplicated_tests_by_file: Dict[str, DuplicatedDict]
-) -> Any:
-    flaky_tests = []
-    workflow_id = os.environ.get(
-        "GITHUB_RUN_ID", os.environ.get("CIRCLE_WORKFLOW_ID", None)
-    )
-    for file_name, suite_to_dict in duplicated_tests_by_file.items():
-        for suite_name, testcase_to_runs in suite_to_dict.items():
-            for testcase_name, list_of_runs in testcase_to_runs.items():
-                num_green, num_red = process_intentional_test_runs(list_of_runs)
-                if (
-                    num_green > 0 and num_red > 0
-                ):  # Flaky tests show different results in consecutive reruns
-                    flaky_tests.append(
-                        {
-                            "name": testcase_name,
-                            "suite": suite_name,
-                            "file": file_name,
-                            "num_green": num_green,
-                            "num_red": num_red,
-                        }
-                    )
-    if len(flaky_tests) > 0:
-        import uuid
-
-        for flaky_test in flaky_tests:
-            flaky_test["job_id"] = os.environ["GHA_WORKFLOW_JOB_ID"]
-            flaky_test["workflow_id"] = workflow_id
-            key = f"flaky_tests/{workflow_id}/{uuid.uuid4()}.json"
-            obj = get_S3_object_from_bucket("ossci-raw-job-status", key)
-            obj.put(Body=json.dumps(flaky_test), ContentType="application/json")
+            tests_by_file[test_filename].append(test_case)
+    return tests_by_file
 
 
 def build_info() -> ReportMetaMeta:
@@ -1158,8 +1033,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    reports_by_file, duplicated_tests_by_file = parse_reports(args.folder)
-    write_flaky_test_stats_to_rockset(duplicated_tests_by_file)
+    reports_by_file = parse_reports(args.folder)
 
     if reports_has_no_tests(reports_by_file):
         print(f"No tests in reports found in {args.folder}")
