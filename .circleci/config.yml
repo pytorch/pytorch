@@ -174,46 +174,6 @@ commands:
               echo "This is not a pull request, skipping..."
             fi
 
-  upload_binary_size_for_android_build:
-    description: "Upload binary size data for Android build"
-    parameters:
-      build_type:
-        type: string
-        default: ""
-      artifacts:
-        type: string
-        default: ""
-    steps:
-      - run:
-          name: "Binary Size - Install Dependencies"
-          no_output_timeout: "5m"
-          command: |
-            retry () {
-              $* || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
-            }
-            retry pip3 install requests
-      - run:
-          name: "Binary Size - Untar Artifacts"
-          no_output_timeout: "5m"
-          command: |
-            # The artifact file is created inside docker container, which contains the result binaries.
-            # Now unpackage it into the project folder. The subsequent script will scan project folder
-            # to locate result binaries and report their sizes.
-            # If artifact file is not provided it assumes that the project folder has been mounted in
-            # the docker during build and already contains the result binaries, so this step can be skipped.
-            export ARTIFACTS="<< parameters.artifacts >>"
-            if [ -n "${ARTIFACTS}" ]; then
-              tar xf "${ARTIFACTS}" -C ~/project
-            fi
-      - run:
-          name: "Binary Size - Upload << parameters.build_type >>"
-          no_output_timeout: "5m"
-          command: |
-            cd ~/project
-            export ANDROID_BUILD_TYPE="<< parameters.build_type >>"
-            export COMMIT_TIME=$(git log --max-count=1 --format=%ct || echo 0)
-            python3 -m tools.stats.upload_binary_size_to_scuba android
-
 ##############################################################################
 # Binary build (nightlies nightly build) defaults
 # The binary builds use the docker executor b/c at time of writing the machine
@@ -552,7 +512,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export CROSS_COMPILE_ARM64=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
@@ -590,7 +549,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Install sccache
@@ -627,7 +585,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             chmod a+x .jenkins/pytorch/macos-test.sh
@@ -640,7 +597,6 @@ jobs:
             source /Users/distiller/workspace/miniconda3/bin/activate
             python3 -m pip install boto3==1.19.12
 
-            export IN_CI=1
             export JOB_BASE_NAME=$CIRCLE_JOB
 
             # Using the same IAM user to write stats to our OSS bucket
@@ -666,7 +622,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             export BUILD_LITE_INTERPRETER=1
             export JOB_BASE_NAME=$CIRCLE_JOB
             chmod a+x ${HOME}/project/.jenkins/pytorch/macos-lite-interpreter-build-test.sh
@@ -756,9 +711,6 @@ jobs:
           output_image=$docker_image_libtorch_android_x86_32-gradle
           docker commit "$id_x86_32" ${output_image}
           time docker push ${output_image}
-    - upload_binary_size_for_android_build:
-        build_type: prebuilt
-        artifacts: /home/circleci/workspace/build_android_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -834,9 +786,6 @@ jobs:
           output_image=${docker_image_libtorch_android_x86_32}-gradle
           docker commit "$id" ${output_image}
           time docker push ${output_image}
-    - upload_binary_size_for_android_build:
-        build_type: prebuilt-single
-        artifacts: /home/circleci/workspace/build_android_x86_32_artifacts/artifacts.tgz
     - store_artifacts:
         path: ~/workspace/build_android_x86_32_artifacts/artifacts.tgz
         destination: artifacts.tgz
@@ -876,7 +825,6 @@ jobs:
           no_output_timeout: "1h"
           command: |
             set -e
-            export IN_CI=1
             WORKSPACE=/Users/distiller/workspace
             PROJ_ROOT=/Users/distiller/project
             export TCLLIBPATH="/usr/local/lib"

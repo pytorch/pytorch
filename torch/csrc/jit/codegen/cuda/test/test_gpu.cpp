@@ -5158,19 +5158,9 @@ TEST_F(NVFuserTest, FusionSimpleBCast3_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
 
-  // Set up your input tensor views
-  std::vector<IterDomain*> dom;
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0), IrBuilder::create<Int>()));
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0),
-      IrBuilder::create<Int>(1),
-      ParallelType::Serial,
-      IterType::BroadcastWithStride));
-
+  // Set up input tensor views
   // tv0[I1, B{1}]
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(dom), DataType::Float);
+  TensorView* tv0 = makeConcreteTensor({-1, 1});
   fusion.addInput(tv0);
 
   // tv1[I0, I1, I2]
@@ -5213,16 +5203,7 @@ TEST_F(NVFuserTest, FusionSimpleBCast4_CUDA) {
   FusionGuard fg(&fusion);
 
   // Set up your input tensor views
-  std::vector<IterDomain*> dom;
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0),
-      IrBuilder::create<Int>(1),
-      ParallelType::Serial,
-      IterType::BroadcastWithStride));
-  dom.push_back(IrBuilder::create<IterDomain>(
-      IrBuilder::create<Int>(0), IrBuilder::create<Int>()));
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(dom), DataType::Float);
+  TensorView* tv0 = makeConcreteTensor({1, -1});
 
   TensorView* tv1 = makeSymbolicTensor(3);
   fusion.addInput(tv0);
@@ -5270,23 +5251,8 @@ TEST_F(NVFuserTest, FusionSimpleBCast5_CUDA) {
   FusionGuard fg(&fusion);
 
   constexpr int m = 2, k = 3, n = 4;
-
-  auto zero = IrBuilder::create<Int>(0);
-  auto M = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(m));
-  auto K = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(k));
-  auto N = IrBuilder::create<IterDomain>(zero, IrBuilder::create<Int>(n));
-
-  // Set up your input tensor views
-  TensorView* tv0 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(
-          std::vector<IterDomain*>({M, K}), std::vector<bool>({true, true})),
-      DataType::Float);
-  // Note: IterDomain must not be reused, so K needs to be cloned.
-  TensorView* tv1 = IrBuilder::create<TensorView>(
-      IrBuilder::create<TensorDomain>(
-          std::vector<IterDomain*>({K->cloneWithoutRFactor(), N}),
-          std::vector<bool>({true, true})),
-      DataType::Float);
+  auto tv0 = makeConcreteTensor({m, k});
+  auto tv1 = makeConcreteTensor({k, n});
 
   fusion.addInput(tv0);
   fusion.addInput(tv1);
@@ -13051,7 +13017,7 @@ TEST_F(NVFuserTest, FusionTranspose1_CUDA) {
   constexpr int N = 20;
 
   auto tv0 = makeSymbolicTensor(2);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
 
@@ -13081,7 +13047,7 @@ TEST_F(NVFuserTest, FusionTranspose2_CUDA) {
   constexpr int N = 20;
 
   auto tv0 = makeSymbolicTensor(2);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addInput(tv0);
   fusion.addOutput(tv1);
 
@@ -13117,8 +13083,8 @@ TEST_F(NVFuserTest, FusionSimpleGemmTransposed_CUDA) {
   fusion.addInput(tv0);
   fusion.addInput(tv1);
 
-  TensorView* tv0_t = transpose(tv0, {{0, 1}});
-  TensorView* tv1_t = transpose(tv1, {{0, 1}});
+  TensorView* tv0_t = transpose(tv0);
+  TensorView* tv1_t = transpose(tv1);
 
   TensorView* tv2 = broadcast(tv0_t, {false, false, true});
   // tv2[I0, I1, B] = tv0[I0, I1]
@@ -13204,7 +13170,7 @@ TEST_F(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
   TensorView* input_tv0 = makeSymbolicTensor(3);
   fusion.addInput(input_tv0);
 
-  TensorView* input_t = transpose(input_tv0, {{1, 2}});
+  TensorView* input_t = transpose(input_tv0, 1, 2);
 
   TensorView* exp_tv1 = unaryOp(UnaryOpType::Exp, input_t);
   TensorView* sum_exp_tv2 = sum(exp_tv1, {-1});
@@ -13212,7 +13178,7 @@ TEST_F(NVFuserTest, FusionSoftmax3DTransposed_CUDA) {
 
   // Replicate exp_tv4 as exp_tv4_copy because exp_tv4 is going to be
   // computed at sum_exp_rf_tv8.
-  TensorView* input_t_copy = transpose(input_tv0, {{1, 2}});
+  TensorView* input_t_copy = transpose(input_tv0, 1, 2);
   TensorView* exp_tv1_copy = unaryOp(UnaryOpType::Exp, input_t_copy);
 
   TensorView* output_tv4 = div(exp_tv1_copy, bcast_sum_tv3);
@@ -13269,7 +13235,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed1_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
 
   TensorView* tv1 = mul(tv0, IrBuilder::create<Double>(0.5));
   TensorView* tv2 = mul(tv1, IrBuilder::create<Double>(-1.0));
@@ -13351,7 +13317,7 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed2_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
 
   TensorView* tv1 = mul(tv0, IrBuilder::create<Double>(-1.0));
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(3.0));
@@ -13413,12 +13379,12 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed3_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(4);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv0 = permute(tv0, {3, 0, 1, 2});
 
   TensorView* tv1 = makeSymbolicTensor(4);
   fusion.addInput(tv1);
 
-  tv1 = transpose(tv1, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv1 = permute(tv1, {3, 0, 1, 2});
 
   TensorView* tv2 = mul(tv1, IrBuilder::create<Double>(.979361));
   TensorView* tv3 = mul(tv2, tv0);
@@ -13476,22 +13442,22 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed4_CUDA) {
   TensorView* tv0 = makeSymbolicTensor(4);
   fusion.addInput(tv0);
 
-  tv0 = transpose(tv0, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv0 = permute(tv0, {3, 0, 1, 2});
 
   TensorView* tv1 = makeSymbolicTensor(4);
   fusion.addInput(tv1);
 
-  tv1 = transpose(tv1, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv1 = permute(tv1, {3, 0, 1, 2});
 
   TensorView* tv2 = makeSymbolicTensor(4);
   fusion.addInput(tv2);
 
-  tv2 = transpose(tv2, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv2 = permute(tv2, {3, 0, 1, 2});
 
   TensorView* tv3 = makeSymbolicTensor(4);
   fusion.addInput(tv3);
 
-  tv3 = transpose(tv3, {{0, 1}, {1, 2}, {2, 3}, {3, 0}});
+  tv3 = permute(tv3, {3, 0, 1, 2});
 
   TensorView* tv4 = sub(tv2, tv3);
   TensorView* tv5 = add(tv1, tv4);
@@ -13556,10 +13522,10 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed5_CUDA) {
   // Set up your input tensor views
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
-  tv1 = transpose(tv1, {{0, 1}});
+  tv1 = transpose(tv1);
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(2.0));
   TensorView* tv3 = mul(tv1, tv2);
   fusion.addOutput(tv3);
@@ -13595,10 +13561,10 @@ TEST_F(NVFuserTest, FusionAdvancedComputeAtTransposed6_CUDA) {
 
   TensorView* tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  tv0 = transpose(tv0, {{0, 1}});
+  tv0 = transpose(tv0);
   TensorView* tv1 = makeSymbolicTensor(2);
   fusion.addInput(tv1);
-  tv1 = transpose(tv1, {{0, 1}});
+  tv1 = transpose(tv1);
   TensorView* tv2 = add(tv0, IrBuilder::create<Double>(2.0));
   TensorView* tv3 = mul(tv1, tv2);
   fusion.addOutput(tv3);
@@ -13989,7 +13955,7 @@ TEST_F(NVFuserTest, FusionTransposeWithSwizzle_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addOutput(tv1);
 
   // tv0: [I0, I1]
@@ -14051,7 +14017,7 @@ TEST_F(NVFuserTest, FusionTransposeWithSwizzle1DThreadBlock_CUDA) {
 
   auto tv0 = makeSymbolicTensor(2);
   fusion.addInput(tv0);
-  auto tv1 = transpose(tv0, {{0, 1}});
+  auto tv1 = transpose(tv0);
   fusion.addOutput(tv1);
 
   // tv0: [I0, I1]
@@ -16442,9 +16408,7 @@ TEST_F(NVFuserTest, FusionWelfordOtherPersistence_CUDA) {
 
   for (auto inner_size : {4096, 8192, 32768}) {
     auto runtime = run_test(inner_size);
-    TORCH_CHECK(
-        !runtime->isSegmented() ||
-        runtime->fusionSegments()->groups().size() == 1);
+    TORCH_CHECK(!runtime->isSegmented());
   }
 }
 
@@ -19824,6 +19788,40 @@ TEST_F(NVFuserTest, FusionRfactorPredication2_CUDA) {
       &fusion, cg_outputs, {at_t0, at_t3}, {at_t2, at_t4}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionRfactorIndirectRoot_CUDA) {
+  // https://github.com/csarofeen/pytorch/issues/1692
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(3);
+  fusion.addInput(tv0);
+
+  auto tv1 = sum(tv0, {1, 2});
+  fusion.addOutput(tv1);
+
+  tv1->split(2, 4);
+  tv1->split(1, 3);
+  tv1->merge(2, 3);
+  auto rf = tv1->rFactor({-1});
+
+  tv1->split(0, 256);
+  tv1->axis(0)->parallelize(ParallelType::BIDx);
+  tv1->axis(1)->parallelize(ParallelType::TIDx);
+  rf->computeAt(tv1, -1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::manual_seed(0);
+
+  auto at_in = at::randn({6, 6, 6}, options);
+  auto at_out = at_in.sum({1, 2});
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {at_in});
+  auto cg_outputs = fe.runFusion({at_in});
+
+  testValidate(&fusion, cg_outputs, {at_in}, {at_out}, __LINE__, __FILE__);
+}
+
 TEST_F(NVFuserTest, FusionNonDivisibleSplit1_CUDA) {
   Fusion fusion;
   FusionGuard fg(&fusion);
@@ -20974,6 +20972,70 @@ TEST_F(NVFuserTest, FusionBroadcastConcretization4_CUDA) {
   fusion.printKernel();
 }
 #endif
+
+TEST_F(NVFuserTest, FusionBroadcastConcretization5_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(1);
+  fusion.addInput(tv1);
+  auto tv2 = makeSymbolicTensor(1);
+  fusion.addInput(tv2);
+  auto tv3 = makeSymbolicTensor(1);
+  fusion.addInput(tv3);
+
+  // Assert tv2 and tv3 have the same shape
+  auto tv4 = add(tv2, tv3);
+  fusion.addOutput(tv4);
+
+  // Concretize a broadcast domain to multiple non-concrete domains
+  // through a multi-output expression. It should be considered to be
+  // non-uniquely concretized.
+  auto tv5 = broadcast(tv0, {false, true});
+  // Reduce only the non-broadcast domain.
+  auto tvs = Welford(tv5, {0});
+  auto tv9 = add(tvs.avg, tv1);
+  auto tv10 = add(tvs.var_sum, tv2);
+  fusion.addOutput(tv9);
+  fusion.addOutput(tv10);
+
+  // Same pattern as the above, but concretize the broadcast domain
+  // with tv2 and tv3, which have the exactly same shape, so the
+  // broadcast should be considered uniquely concretized.
+  auto tv11 = broadcast(tv0, {false, true});
+  // Reduce only the non-broadcast domain.
+  auto tvs2 = Welford(tv11, {0});
+  auto tv15 = add(tvs2.avg, tv2);
+  auto tv16 = add(tvs2.var_sum, tv3);
+  fusion.addOutput(tv15);
+  fusion.addOutput(tv16);
+
+  // Reduce only the broadcast domain. Since it's reduced, it should
+  // not be considered to be concretized.
+  auto tv17 = broadcast(tv0, {false, true});
+  auto tvs3 = Welford(tv17, {1});
+  fusion.addOutput(tvs3.avg);
+
+  ConcretizedBroadcastDomains bcast_concretization_info;
+  bcast_concretization_info.build(&fusion);
+
+  TORCH_CHECK(
+      bcast_concretization_info.maybeNonUniquelyConcretized(tv5->axis(1)),
+      "Failed to detect non-unique concretization of ",
+      tv5->toString());
+
+  TORCH_CHECK(
+      bcast_concretization_info.isUniquelyConcretized(tv11->axis(1)),
+      "Failed to detect unique concretization of ",
+      tv11->toString());
+
+  TORCH_CHECK(
+      !bcast_concretization_info.isConcretized(tv17->axis(1)),
+      "Failed to detect non-concretization of ",
+      tv17->toString());
+}
 
 TEST_F(NVFuserTest, FusionIssue1430_CUDA) {
   // Derived from an expression sorting issue when using loop map, now expr
@@ -22330,7 +22392,9 @@ TEST_F(NVFuserTest, FusionRAWSyncInsertionPlace4_CUDA) {
       // Record number of unary ops that modifies shared memory.
       if (uop->out()->isA<kir::TensorIndex>() &&
           uop->out()->as<kir::TensorIndex>()->view()->getMemoryType() ==
-              MemoryType::Shared) {
+              MemoryType::Shared &&
+          // Filter out initialization expressions
+          uop->in()->isA<kir::TensorIndex>()) {
         number_of_writes_++;
       }
     }
@@ -22432,6 +22496,257 @@ TEST_F(NVFuserTest, FusionSerialSmemWriteParallelRead2_CUDA) {
   auto ref = t0 + t1 + t2;
 
   testValidate(&fusion, cg_outputs, {t0, t1, t2}, {ref}, __LINE__, __FILE__);
+}
+
+// Simple test of async copy primitive
+TEST_F(NVFuserTest, FusionSimpleCpAsync_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  int m = 33, n = 31;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+  TensorView* tv1 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+
+  fusion.addOutput(tv2);
+
+  auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  tv0_shared->setMemoryType(MemoryType::Shared);
+
+  tv0->computeAt(tv2, 1);
+  tv0_shared->axis(1)->parallelize(ParallelType::TIDx);
+  tv2->axis(1)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+  at::Tensor t1 = at::randn({m, n}, options);
+
+  FusionExecutor fe;
+
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    ASSERT_ANY_THROW(fe.compileFusion(&fusion, {t0, t1}));
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+  }
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Simple test of async copy primitive: double buffered
+//   Double buffer case 1, both block sync and async wait
+//  are needed.
+TEST_F(NVFuserTest, FusionDoubleBufferCpAsync1_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Using vectorization so need to keep n multiple of 4.
+  int m = 33, n = 48;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+  TensorView* tv1 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+
+  fusion.addOutput(tv2);
+
+  auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  tv0_shared->setMemoryType(MemoryType::Shared);
+  tv0->computeAt(tv2, 1);
+
+  // Asynchronously load a tile in one schedule
+  tv0_shared->split(1, 4);
+  tv0_shared->axis(-1)->parallelize(ParallelType::Vectorize);
+  tv0_shared->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Consume the loaded tile in another schedule,
+  //   triggering the need for a sync.
+  tv2->split(1, 12);
+  tv2->axis(-1)->parallelize(ParallelType::TIDx);
+
+  // Double buffer the shared mem tensor.
+  tv0_shared->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+  at::Tensor t1 = at::randn({m, n}, options);
+
+  FusionExecutor fe;
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    ASSERT_ANY_THROW(fe.compileFusion(&fusion, {t0, t1}));
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+  }
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Simple test of async copy primitive: double buffered
+//   Double buffer case 2, only async wait is needed
+TEST_F(NVFuserTest, FusionDoubleBufferCpAsync2_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Using vectorization so need to keep n multiple of 4.
+  int m = 33, n = 48;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+  TensorView* tv1 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+
+  fusion.addOutput(tv2);
+
+  auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  tv0_shared->setMemoryType(MemoryType::Shared);
+  tv0->computeAt(tv2, 1);
+
+  // Asynchronously load a tile in one schedule
+  tv0_shared->split(1, 4);
+  tv0_shared->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Consume the loaded tile in another schedule,
+  //   triggering the need for a sync.
+  tv2->split(1, 4);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Double buffer the shared mem tensor.
+  tv0_shared->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+  at::Tensor t1 = at::randn({m, n}, options);
+
+  FusionExecutor fe;
+  // requires ampere+ GPU
+  if (!deviceMajorMinorCheck(8)) {
+    ASSERT_ANY_THROW(fe.compileFusion(&fusion, {t0, t1}));
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+  }
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Simple test for double buffer in shared mem,
+//  where we should not insert redundant syncs when
+//  they are not needed.
+TEST_F(NVFuserTest, FusionDoubleBufferNoSync_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Using vectorization so need to keep n multiple of 4.
+  int m = 33, n = 48;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+  TensorView* tv1 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  TensorView* tv2 = add(tv0, tv1);
+
+  fusion.addOutput(tv2);
+
+  auto tv0_shared = tv0->cacheAfter();
+  tv0_shared->setMemoryType(MemoryType::Shared);
+  tv0->computeAt(tv2, 1);
+
+  // Asynchronously load a tile in one schedule
+  tv0_shared->split(1, 4);
+  tv0_shared->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Consume the loaded tile in another schedule,
+  //   triggering the need for a sync.
+  tv2->split(1, 4);
+  tv2->axis(-2)->parallelize(ParallelType::TIDx);
+
+  // Double buffer the shared mem tensor.
+  tv0_shared->doubleBuffer();
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+  at::Tensor t1 = at::randn({m, n}, options);
+
+  GpuLower gpulw(&fusion);
+  auto flattened_exprs =
+      ir_utils::flattenScopedExprs(gpulw.kernel()->topLevelExprs());
+  bool sync_inserted = std::any_of(
+      flattened_exprs.begin(), flattened_exprs.end(), [](Expr* expr) {
+        return expr->isA<kir::BlockSync>();
+      });
+  TORCH_INTERNAL_ASSERT(!sync_inserted, "Un-expected block sync inserted");
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0, t1});
+  auto cg_outputs = fe.runFusion({t0, t1});
+
+  auto ref = t0 + t1;
+
+  testValidate(&fusion, cg_outputs, {t0, t1}, {ref}, __LINE__, __FILE__);
+}
+
+// Test predicate inversion for cp.async
+TEST_F(NVFuserTest, FusionCpAsyncPredicate_CUDA) {
+  // requires ampere+ GPU
+
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Using vectorization so need to keep n multiple of 4.
+  int m = 33, n = 48;
+
+  TensorView* tv0 = makeConcreteTensor({m, n});
+
+  fusion.addInput(tv0);
+  auto tv1 = sum(tv0, {1});
+  fusion.addOutput(tv1);
+
+  auto tv0_shared = tv0->cacheAfter(LoadStoreOpType::CpAsync);
+  auto tv0_reg = tv0_shared->cacheAfter();
+  tv0_shared->setMemoryType(MemoryType::Shared);
+  tv0->computeAt(tv1, 1);
+
+  tv0_shared->split(-1, 32);
+  tv0_shared->split(-1, 4);
+  tv0_shared->axis(-1)->parallelize(ParallelType::Vectorize);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({m, n}, options);
+
+  FusionExecutor fe;
+  if (!deviceMajorMinorCheck(8)) {
+    ASSERT_ANY_THROW(fe.compileFusion(&fusion, {t0}));
+    GTEST_SKIP() << "skipping tests on pre-AMPERE GPUs";
+  }
+
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  auto ref = t0.sum({1});
+
+  testValidate(&fusion, cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
 // Test predicate removal on reg-to-reg expressions
@@ -22562,7 +22877,7 @@ TEST_F(NVFuserTest, FusionExactRootDomainMap_CUDA) {
   fusion.addInput(tv1);
 
   auto tv2 = broadcast(tv0, {false, true});
-  auto tv3 = transpose(tv2, {{0, 1}});
+  auto tv3 = transpose(tv2);
   auto tv4 = add(tv2, tv1);
   auto tv5 = add(tv2, tv3);
   auto tv6 = add(tv3, tv1);
@@ -22707,6 +23022,41 @@ TEST_F(NVFuserMultithreadedTest, MultipleFunctions_CUDA) {
   }
 }
 
+// Repro of issue #1655
+TEST_F(NVFuserTest, FusionIncompleteConcreteID_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion.addInput(tv0);
+  auto tv1 = makeSymbolicTensor(2);
+  fusion.addInput(tv1);
+  auto tv2 = makeSymbolicTensor(2);
+  fusion.addInput(tv2);
+
+  auto tv3 = broadcast(tv0, {true, true, false});
+  auto tv4 = broadcast(tv1, {false, true, false});
+  auto tv5 = broadcast(tv2, {true, false, false});
+
+  auto tv6 = add(tv3, tv4);
+  auto tv7 = add(tv3, tv5);
+
+  fusion.addOutput(tv6);
+  fusion.addOutput(tv7);
+
+  tv6->merge(0);
+  tv6->merge(0);
+
+  TransformPropagator::from(tv6);
+
+  tv0->computeAt(tv6, -1, ComputeAtMode::MostInlined);
+  tv1->computeAt(tv6, -1, ComputeAtMode::MostInlined);
+  tv2->computeAt(tv7, -1, ComputeAtMode::MostInlined);
+
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
+  ASSERT_ANY_THROW(fusion.printKernel());
+}
+
 TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
   std::unique_ptr<Fusion> fusion_ptr = std::make_unique<Fusion>();
   Fusion& fusion = *fusion_ptr.get();
@@ -22832,27 +23182,14 @@ TEST_F(NVFuserTest, FusionRedundantPredSync_CUDA) {
   tv3->axis(0)->parallelize(ParallelType::TIDy);
   tv3->axis(1)->parallelize(ParallelType::TIDx);
 
-  // Utility class to make sure one block sync
-  //  is inserted by RAW pass.
-  class SyncChecker : public kir::IrVisitor {
-   public:
-    using kir::IrVisitor::handle;
-    bool result() {
-      return sync_seen_;
-    }
-
-   private:
-    void handle(kir::BlockSync*) final {
-      sync_seen_ = true;
-    }
-
-   private:
-    bool sync_seen_ = false;
-  } checker;
-
   GpuLower gpulw(&fusion);
-  checker.handle(gpulw.kernel()->topLevelExprs());
-  TORCH_INTERNAL_ASSERT(checker.result(), "Expected block sync not inserted");
+  auto flattened_exprs =
+      ir_utils::flattenScopedExprs(gpulw.kernel()->topLevelExprs());
+  bool sync_inserted = std::any_of(
+      flattened_exprs.begin(), flattened_exprs.end(), [](Expr* expr) {
+        return expr->isA<kir::BlockSync>();
+      });
+  TORCH_INTERNAL_ASSERT(sync_inserted, "Expected block sync not inserted");
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
 
@@ -23021,6 +23358,220 @@ TEST_F(NVFuserTest, FusionRepro1713_CUDA) {
       {t4, t6},
       __LINE__,
       __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpand_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto w = 2, x = 3, y = 4, z = 5;
+
+  // Test
+  // a simple expand
+  // Expand that's propagated
+  // expand_as
+  // symbolic expand
+
+  // x
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {false, true});
+  auto tv2 = expand(tv1, {tv0->axis(0)->extent(), IrBuilder::create<Int>(y)});
+
+  // x
+  auto tv3 = makeSymbolicTensor(1);
+  fusion->addInput(tv3);
+  auto tv4 = broadcast(tv3, {false, true});
+  auto tv5 = add(tv4, tv2);
+  // [x, e_y]
+
+  // [x, y, z]
+  auto tv6 = makeSymbolicTensor(3);
+  fusion->addInput(tv6);
+
+  // Disjoint set op will cause a segmentation for just this op.
+  auto tmp_7 = set(tv6);
+  fusion->addOutput(tmp_7);
+
+  auto tv7 = broadcast(tv5, {false, false, true});
+
+  auto tv8 = expand_as(tv7, tv6);
+  // [x, e_y, e_z]
+
+  auto w_symbolic = IrBuilder::create<Int>();
+  fusion->addInput(w_symbolic);
+
+  auto tv9 = broadcast(tv8, {true, false, false, false});
+  //[1, x, e_y, e_z]
+
+  auto tv10 = expand(
+      tv9,
+      {w_symbolic,
+       tv9->axis(1)->extent(),
+       tv9->axis(2)->expandedExtent(),
+       tv9->axis(3)->expandedExtent()});
+
+  fusion->addOutput(tv10);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({x}, options);
+  at::Tensor t3 = at::randn({x}, options);
+  at::Tensor t6 = at::randn({x, y, z}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0, t3, t6, w});
+  auto cg_out = cg_outputs[1];
+
+  TORCH_INTERNAL_ASSERT(cg_out.size(0) == w);
+  TORCH_INTERNAL_ASSERT(cg_out.size(1) == x);
+  TORCH_INTERNAL_ASSERT(cg_out.size(2) == y);
+  TORCH_INTERNAL_ASSERT(cg_out.size(3) == z);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(0) == 0);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(1) == 1);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(2) == 0);
+  TORCH_INTERNAL_ASSERT(cg_out.stride(3) == 0);
+
+  auto t10 = t0.unsqueeze(-1)
+                 .expand({x, y})
+                 .add(t3.unsqueeze(-1))
+                 .unsqueeze(-1)
+                 .expand_as(t6)
+                 .unsqueeze(0)
+                 .expand({w, x, y, z});
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      {t0, t3, t6, w},
+      {t6, t10},
+      __LINE__,
+      __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionExpandIssue1751_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto x = 3, y = 4, z = 5;
+
+  // y, z
+  auto tv0 = makeSymbolicTensor(2);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false, false});
+
+  // Two ways to propagate extents as is: use -1 or explicitly pass
+  // the extent vals.
+
+  auto tv2 = expand(
+      tv1,
+      {IrBuilder::create<Int>(x),
+       IrBuilder::create<Int>(-1),
+       IrBuilder::create<Int>(-1)});
+
+  auto tv3 = expand(
+      tv1,
+      {IrBuilder::create<Int>(x),
+       tv0->axis(0)->extent(),
+       tv0->axis(1)->extent()});
+
+  fusion->addOutput(tv2);
+  fusion->addOutput(tv3);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({y, z}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  for (const auto& cg_out : cg_outputs) {
+    TORCH_INTERNAL_ASSERT(cg_out.size(0) == x);
+    TORCH_INTERNAL_ASSERT(cg_out.size(1) == y);
+    TORCH_INTERNAL_ASSERT(cg_out.size(2) == z);
+  }
+
+  auto t2 = t0.expand({x, y, z});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {t2, t2}, __LINE__, __FILE__);
+}
+
+// TODO: Make sure the kernel uses the expanded concrete size instead
+// of the symbolic size
+TEST_F(NVFuserTest, FusionExpandToConcrete_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto x = 3, y = 4;
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+
+  auto tv1 = broadcast(tv0, {true, false});
+
+  auto tv2 =
+      expand(tv1, {IrBuilder::create<Int>(x), IrBuilder::create<Int>(y)});
+
+  fusion->addOutput(tv2);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({y}, options);
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+
+  auto cg_outputs = executor_cache.runFusionWithInputs({t0});
+
+  for (const auto& cg_out : cg_outputs) {
+    TORCH_INTERNAL_ASSERT(cg_out.size(0) == x);
+    TORCH_INTERNAL_ASSERT(cg_out.size(1) == y);
+  }
+
+  auto t2 = t0.expand({x, y});
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0}, {t2}, __LINE__, __FILE__);
+}
+
+TEST_F(NVFuserTest, FusionReproNoncontigBroadcast_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto options = at::TensorOptions().dtype(at::kHalf).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn({4, 32, 16, 112, 112}, options).transpose(-1, -2);
+  at::Tensor t1 = at::randn({32, 1, 112, 1}, options).transpose(-1, -2);
+
+  auto tv0 = TensorViewBuilder()
+                 .ndims(5)
+                 .contiguity({true, true, false, false, false}) // ttfff
+                 .shape({-1, -1, -1, -1, -1})
+                 .dtype(DataType::Half)
+                 .build();
+  auto tv1 = TensorViewBuilder()
+                 .ndims(4)
+                 .contiguity({true, false, false, true}) // tfft
+                 .shape({-1, 1, 1, -1})
+                 .dtype(DataType::Half)
+                 .build();
+
+  fusion->addInput(tv0);
+  fusion->addInput(tv1);
+
+  auto tv2 = add(tv0, tv1);
+
+  fusion->addOutput(tv2);
+
+  std::vector<IValue> aten_inputs({t0, t1});
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto t2 = t0 + t1;
+
+  testValidate(
+      executor_cache.fusion(), cg_outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
 }
 
 } // namespace jit
