@@ -20428,8 +20428,6 @@ python_ref_db = [
         supports_one_python_scalar=True,
         supports_nvfuser=False,
         skips=(
-            # RuntimeError: Tracing expected 3 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
@@ -20457,10 +20455,6 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
-        skips=(
-            # TypeError: _traced() got an unexpected keyword argument 'rounding_mode'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.div",
@@ -20470,10 +20464,6 @@ python_ref_db = [
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
         supports_nvfuser=False,
-        skips=(
-            # TypeError: _traced() got an unexpected keyword argument 'rounding_mode'
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.eq",
