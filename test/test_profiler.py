@@ -7,6 +7,7 @@ import os
 import re
 import tempfile
 import unittest
+import time
 
 import torch
 import torch.nn as nn
@@ -210,13 +211,14 @@ class TestExecutionGraph(TestCase):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
             rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
-            x = torch.randn(10, 10)
+            x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
-            y = torch.randn(10, 10)
+            y = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 y = y.cuda()
             z = x + y + x * y + x * y
+            z.backward(z)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
@@ -1116,8 +1118,8 @@ class TestProfiler(TestCase):
             y = torch.ones(1)
             loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
             loss.backward()
-        metrics = dict()
-        _utils.compute_self_time(prof.profiler, metrics)
+        basic_eval = _utils.BasicEvaluation(prof.profiler)
+        metrics = basic_eval.metrics
         self.assertTrue(len(metrics) > 0)
         for event_key, event_metrics in metrics.items():
             self.assertEqual(
@@ -1126,6 +1128,23 @@ class TestProfiler(TestCase):
                     child.duration_time_ns
                     for child in event_key.event.children
                 ]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_utils_compute_queue_depth(self):
+        x = torch.ones((4096, 4096), device="cuda")
+        with profile() as prof:
+            # First half we want it to be compute bound
+            for _ in range(5):
+                y = torch.mm(x, x)
+            # Second half we want it to be overhead bound
+            # So we are synchronize and sleeping
+            torch.cuda.synchronize()
+            for _ in range(3):
+                y[0] += 1
+                time.sleep(0.1)
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        for entry in basic_evaluation.compute_queue_depth():
+            self.assertTrue(entry.queue_depth >= 0)
 
 
     def test_extra_fields(self):
