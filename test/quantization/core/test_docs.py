@@ -14,8 +14,8 @@ import re
 class TestQuantizationDocs(QuantizationTestCase):
     r"""
     The tests in this section import code from the quantization docs and check that
-    they actually run. In cases where objects are undefined in the code snippet, they
-    must be provided in the test. The imports seem to behave a bit inconsistently,
+    they actually run without errors. In cases where objects are undefined in the code snippet,
+    they must be provided in the test. The imports seem to behave a bit inconsistently,
     they can be imported either in the test file or passed as a global input
     """
 
