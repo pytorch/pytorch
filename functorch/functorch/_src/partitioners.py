@@ -227,9 +227,12 @@ def min_cut_rematerialization_partition(
     except ImportError:
         raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
 
-    #  add the CSE pass
     strip_overloads(joint_module)
+    joint_module.graph.eliminate_dead_code()
+    joint_module.recompile()
     fx_g = joint_module.graph
+
+    #  add the CSE pass
     cse_graph = fx_graph_cse(fx_g)
     joint_module.graph = cse_graph
     full_bw_graph = joint_module.graph
@@ -373,8 +376,6 @@ def min_cut_rematerialization_partition(
     # To make this stuff deterministic
     node_idx = {node: idx for idx, node in enumerate(joint_module.graph.nodes)}
     saved_values = sorted((name_to_node[node] for node in cut_nodes), key=lambda x: node_idx[x])
-    saved_values = [name_to_node[node] for node in cut_nodes]
-
     return _extract_fwd_bwd_modules(joint_module, saved_values)
 
 
