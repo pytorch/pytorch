@@ -137,6 +137,7 @@ class TestProxyTensor(TestCase):
 
 make_fx_failures = {
     xfail('allclose'),
+    xfail('equal'),
     xfail('linalg.eigvals'),
     xfail('nn.functional.max_pool1d', device_type='cpu'),
     # empty
@@ -149,8 +150,6 @@ make_fx_failures = {
     skip('nn.functional.max_unpool2d', '', device_type='cpu'),
     skip('nn.functional.max_unpool3d', '', device_type='cpu'),
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
-    xfail('histogram'),
-    xfail('scatter'),
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),

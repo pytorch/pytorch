@@ -318,32 +318,6 @@ def to_real_dtype(dtype: torch.dtype):
 # perform the pointwise portion in opmath, but don't maintain it between the
 # pointwise portion and the reduction
 
-@register_decomposition(aten.l1_loss)
-def l1_loss(
-    self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
-) -> Tensor:
-    loss = (self - target).abs()
-    # PyTorch semantics result in the output of l1_loss having the corresponding
-    # real dtype to self.  This may not happen without explicit casting if say
-    # self: complex64 and target: float64, which results in loss: float64
-    float_type = to_real_dtype(self.dtype)
-    return apply_loss_reduction(loss, reduction).to(float_type)
-
-
-@register_decomposition(aten.l1_loss_backward)
-@pw_cast_for_opmath
-def l1_loss_backward(
-    grad_output: Tensor,
-    self: Tensor,
-    target: Tensor,
-    reduction: int = Reduction.MEAN.value,
-):
-    sign = torch.sign(self - target)
-
-    norm = sign / self.numel() if reduction == Reduction.MEAN.value else sign
-    return grad_output * norm
-
-
 @register_decomposition(aten.mse_loss)
 @pw_cast_for_opmath
 def mse_loss(
@@ -763,7 +737,7 @@ def embedding_dense_backward(
     numel = indices.numel()
     grad = grad_output.view(numel, grad_output.size(-1))
     grad_weight = grad_output.new_zeros((num_weights, grad_output.shape[-1]))
-    indices_rank1 = indices.view(numel)
+    indices_rank1 = indices.reshape(numel)
     if scale_grad_by_freq:
         counts = indices.new_zeros((num_weights,))
         ones = indices.new_ones((numel,))
@@ -1031,11 +1005,6 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
-@register_decomposition(aten.logical_not)
-def logical_not(self: Tensor) -> Tensor:
-    return ~self.to(dtype=torch.bool)
-
-
 @register_decomposition(aten.xlogy.Tensor)
 @pw_cast_for_int_to_real
 def xlogy(self: Tensor, other: Tensor) -> Tensor:
@@ -1098,8 +1067,8 @@ def std_decomposition(
 # Questionable decompositions
 # This is only valid if we're running the graph without autograd, such as if the backward pass has been traced.
 # Note that this decomposition causes issues with in-place ops
-@register_decomposition(aten.detach, disable_meta=True)
-def detach_decomposition(x):
+@register_decomposition([aten.detach, aten.lift, aten.alias], disable_meta=True)
+def nop_decomposition(x):
     return x
 
 
@@ -1192,11 +1161,6 @@ def logsumexp(self: Tensor, dim: List[int], keepdim: bool = False) -> Tensor:
     return result.log().add(maxes_squeezed)
 
 
-@register_decomposition(aten.trace.default)
-def trace(self: Tensor) -> Tensor:
-    return torch.sum(torch.diag(self))
-
-
 # nb: Should use acc_t, not op_math
 @register_decomposition(aten.log_sigmoid_forward)
 @out_wrapper_multi('output', 'buffer')
@@ -1240,3 +1204,21 @@ def norm(self: Tensor, p: float = 2, dim: List[int] = None, keepdim: bool = Fals
         self = self.abs()
 
     return fast_pow(fast_pow(self, p).sum(dim, keepdim=keepdim), 1.0 / p)
+
+
+@register_decomposition(torch.ops.aten.kl_div_backward)
+@pw_cast_for_opmath
+def kl_div_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    target: Tensor,
+    reduction: int = Reduction.MEAN.value,
+    log_target: bool = False
+) -> Tensor:
+    if not log_target:
+        grad_input = torch.where(target > 0, -target * grad_output, 0)
+    else:
+        grad_input = -target.exp() * grad_output
+    if reduction == Reduction.MEAN.value:
+        return grad_input / self.numel()
+    return grad_input
