@@ -73,7 +73,8 @@ class SchemaCheckMode(TorchDispatchMode):
         out = func(*args, **kwargs)
 
         # Construct an aliasing map between op arguments for verifying aliasing pairs
-        # between op arguments and op outputs
+        # between op arguments and op outputs. This is used to allow cases where two aliasing arguments
+        # cause a non-mutable/non-aliasing argument to mutate or alias.
         arg_alias_pairs_map = {arg.name : [arg] for arg in func._schema.arguments}
         for i_arg, j_arg in combinations(func._schema.arguments, 2):
             i_values = tree_map(
