@@ -4349,7 +4349,7 @@ TEST(StaticRuntime, autogen_take_along_dim) {
   )IR";
 
   auto self0 = at::rand({6, 6, 6});
-  auto indices0 = at::argsort(self0, 1);
+  auto indices0 = at::argsort(self0, 1, true);
   auto dim0 = 1;
   std::vector<IValue> args{self0, indices0, dim0};
   testStaticRuntime(
@@ -4361,7 +4361,7 @@ TEST(StaticRuntime, autogen_take_along_dim) {
       /*check_resize=*/true);
 
   auto self1 = at::rand({22, 22, 22});
-  auto indices1 = at::argsort(self1, 1);
+  auto indices1 = at::argsort(self1, 1, true);
   auto dim1 = 1;
   std::vector<IValue> args2{self1, indices1, dim1};
   testStaticRuntime(

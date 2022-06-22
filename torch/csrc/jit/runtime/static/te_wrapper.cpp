@@ -4,6 +4,7 @@
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/runtime/static/impl.h>
+#include <torch/csrc/jit/tensorexpr/expr.h>
 #include <torch/csrc/jit/tensorexpr/operators/misc.h>
 #include <torch/csrc/jit/tensorexpr/operators/operators.h>
 
@@ -112,6 +113,46 @@ void updateNNCCache(NodeKind kind, std::shared_ptr<TEWrapper> code) {
 }
 
 } // namespace
+
+std::shared_ptr<TEWrapper> createDiv() {
+  auto wrap = lookupNNCCache(aten::div);
+  if (wrap) {
+    return wrap;
+  }
+  wrap = std::make_shared<TEWrapper>();
+
+  auto dim = VarHandle("dim", kInt);
+  auto mode = VarHandle("mode", kInt);
+  BufHandle A("A", {dim}, kFloat);
+  BufHandle B("B", {dim}, kFloat);
+
+  using axis = const VarHandle&;
+  Tensor C = Compute("C", {dim}, [&](axis x) {
+    auto true_div_result = A.load(x) / B.load(x);
+
+    auto mode_default = IntImm::make(0);
+    auto mode_trunc = IntImm::make(1);
+    auto mode_floor = IntImm::make(2);
+
+    // this is a glorified ternary choice operator train
+    return CompareSelect::make(
+        mode,
+        mode_default,
+        true_div_result,
+        CompareSelect::make(
+            mode,
+            mode_trunc,
+            trunc(true_div_result),
+            floor(true_div_result),
+            kEQ),
+        kEQ);
+  });
+
+  wrap = wrapTECompute(wrap, C, {A, B, mode, dim});
+
+  updateNNCCache(aten::div, wrap);
+  return wrap;
+}
 
 std::shared_ptr<TEWrapper> createLogit() {
   auto wrap = lookupNNCCache(aten::logit);
