@@ -6,7 +6,7 @@ import unittest
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 
 from torch.testing._internal.common_device_type import ops
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -114,7 +114,8 @@ class TestProxyTensor(TestCase):
         def f(x):
             return x + torch.randn(x.shape)
 
-        traced = make_fx(f, trace_factory_functions=True)(torch.randn(3))
+        # default behavior should trace factory functions
+        traced = make_fx(f)(torch.randn(3))
         self.assertTrue(
             any(
                 isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
@@ -122,11 +123,11 @@ class TestProxyTensor(TestCase):
             )
         )
 
-    def test_mode_tracing_factory_function_default_behavior(self):
+    def test_mode_tracing_factory_function_no_factory_function(self):
         def f(x):
             return x + torch.randn(x.shape)
 
-        traced = make_fx(f)(torch.randn(3))  # default behavior should not trace factory functions
+        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))  # default behavior should not trace factory functions
         self.assertFalse(
             any(
                 isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
@@ -136,28 +137,19 @@ class TestProxyTensor(TestCase):
 
 make_fx_failures = {
     xfail('allclose'),
-    xfail('nn.functional.dropout'),
+    xfail('equal'),
     xfail('linalg.eigvals'),
-    xfail('nn.functional.max_pool1d', device_type='cpu'),  # precision problems?
-    xfail('randn_like'),  # randomness
-    xfail('rand_like'),  # randomness
-    xfail('randint_like'),  # randomness
-    skip('new_empty'),  # nondeterministic
-    skip('empty_like'),  # nondeterministic
-    skip('linalg.lstsq', 'grad_oriented'),  # flaky
-    xfail('normal', '', device_type='cpu'),
-    xfail('normal', 'number_mean', device_type='cpu'),
-    xfail('multinomial', device_type='cpu'),
-    xfail('nn.functional.feature_alpha_dropout', 'with_train', device_type='cpu'),
-    xfail('bernoulli', device_type='cpu'),
-    xfail('nn.functional.dropout2d', device_type='cpu'),
-    skip('nn.functional.max_unpool1d', '', device_type='cpu'),  # flaky
-    skip('nn.functional.max_unpool2d', '', device_type='cpu'),  # flaky
-    skip('nn.functional.max_unpool3d', '', device_type='cpu'),  # flaky
-    skip('empty'),  # nondeterministic
+    xfail('nn.functional.max_pool1d', device_type='cpu'),
+    # empty
+    skip('new_empty'),
+    skip('empty_like'),
+    skip('empty'),
+    # flaky
+    skip('linalg.lstsq', 'grad_oriented'),
+    skip('nn.functional.max_unpool1d', '', device_type='cpu'),
+    skip('nn.functional.max_unpool2d', '', device_type='cpu'),
+    skip('nn.functional.max_unpool3d', '', device_type='cpu'),
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
-    xfail('histogram'),
-    xfail('scatter'),
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
@@ -165,8 +157,33 @@ make_fx_failures = {
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('quantile'),
     xfail('tensor_split'),
+    xfail('corrcoef'),
+    # Masked failures (creating a scalar tensor just to call `.item` on it)
+    xfail('_masked.amax'),
+    xfail('_masked.amax'),
+    xfail('_masked.amin'),
+    xfail('_masked.argmax'),
+    xfail('_masked.argmin'),
+    xfail('_masked.cumprod'),
+    xfail('_masked.cumsum'),
+    xfail('_masked.log_softmax'),
+    xfail('_masked.logaddexp'),
+    xfail('_masked.logsumexp'),
+    xfail('_masked.mean'),
+    xfail('_masked.median'),
+    xfail('_masked.norm'),
+    xfail('_masked.prod'),
+    xfail('_masked.softmax'),
+    xfail('_masked.softmin'),
+    xfail('_masked.std'),
+    xfail('_masked.sum'),
+    xfail('_masked.var'),
+
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
+
+    # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
+    xfail('nn.functional.ctc_loss'),
 }
 
 
@@ -184,7 +201,7 @@ class TestProxyTensorOpInfo(TestCase):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
 
-            new_f = make_fx(f)(args, kwargs)
+            new_f = make_fx(f, trace_factory_functions=True)(args, kwargs)
             for arg in args:
                 if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
                     arg.uniform_(0, 1)
@@ -192,7 +209,7 @@ class TestProxyTensorOpInfo(TestCase):
                 old_out = f(args, kwargs)
             except Exception:
                 continue
-            new_out = new_f(args, kwargs)
+            new_out = wrapper_set_seed(new_f, args, kwargs)
             self.assertEqual(new_out, old_out)
 
 

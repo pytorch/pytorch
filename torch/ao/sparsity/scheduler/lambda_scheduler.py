@@ -2,6 +2,8 @@ import warnings
 
 from .base_scheduler import BaseScheduler
 
+__all__ = ["LambdaSL"]
+
 class LambdaSL(BaseScheduler):
     """Sets the sparsity level of each parameter group to the final sl
     times a given function. When last_epoch=-1, sets initial sl as zero.
@@ -28,11 +30,11 @@ class LambdaSL(BaseScheduler):
         self.sparsifier = sparsifier
 
         if not isinstance(sl_lambda, list) and not isinstance(sl_lambda, tuple):
-            self.sl_lambdas = [sl_lambda] * len(sparsifier.module_groups)
+            self.sl_lambdas = [sl_lambda] * len(sparsifier.groups)
         else:
-            if len(sl_lambda) != len(sparsifier.module_groups):
+            if len(sl_lambda) != len(sparsifier.groups):
                 raise ValueError("Expected {} lr_lambdas, but got {}".format(
-                    len(sparsifier.module_groups), len(sl_lambda)))
+                    len(sparsifier.groups), len(sl_lambda)))
             self.sl_lambdas = list(sl_lambda)
         super(LambdaSL, self).__init__(sparsifier, last_epoch, verbose)
 
