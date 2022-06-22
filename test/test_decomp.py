@@ -450,6 +450,9 @@ class TestDecomp(TestCase):
         func = op.get_op()
         for sample_input in samples:
             if requires_grad:
+                if None in sample_input.args:
+                    continue
+
                 fn, primals = normalize_op_input_output(func, sample_input)
                 primals = tree_map(
                     lambda x: x if isinstance(x, torch.Tensor) else x, primals

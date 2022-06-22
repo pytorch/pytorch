@@ -119,10 +119,30 @@ def fork_wait_graph2(input1, input2):
     fut = torch.jit.fork(loop_graph, input1, input2, 5)
     return torch.jit.wait(fut)
 
-def fork_wait_graph3(input):
+"""
+   graph with multiple fork/wait operations
+   :param input: torch.tensor input to forked subgraph
+   :param iters: number of future/wait pairs to be created
+"""
+def fork_wait_graph3(input, iters: int):
     futures : List[torch.jit.Future[torch.Tensor]] = []
-    for _ in range(100):
+    for _ in range(iters):
         futures.append(torch.jit.fork(torch.neg, input))
+    results = []
+    for future in futures:
+        results.append(torch.jit.wait(future))
+    return torch.sum(torch.stack(results))
+
+"""
+   graph with multi-level fork/wait operations
+   :param input: torch.tensor input to forked subgraph
+   :param num_forks: number of top level forks
+   :param num_child_forks: number of child forks per parent fork
+"""
+def fork_wait_graph4(input, num_forks: int, num_child_forks: int):
+    futures : List[torch.jit.Future[torch.Tensor]] = []
+    for _ in range(num_forks):
+        futures.append(torch.jit.fork(fork_wait_graph3, input, num_child_forks))
     results = []
     for future in futures:
         results.append(torch.jit.wait(future))
@@ -221,10 +241,24 @@ class TestStaticModule(TestCase):
     """
     def test_fork_wait_3(self):
         input = torch.ones(3, 3)
+        num_forks = 10
         torch_graph = torch.jit.script(fork_wait_graph3)
-        output_ref = torch_graph(input)
+        output_ref = torch_graph(input, num_forks)
         static_runtime_module = StaticModule(torch_graph)
-        output_test = static_runtime_module(input)
+        output_test = static_runtime_module(input, num_forks)
+        torch.testing.assert_close(output_test, output_ref)
+    """
+    Test Case: To test fork/wait operation in a graph on
+    multiple nested fork/wait operations
+    """
+    def test_fork_wait_4(self):
+        input = torch.ones(3, 3)
+        num_forks = 10
+        num_child_forks = 10
+        torch_graph = torch.jit.script(fork_wait_graph4)
+        static_runtime_module = StaticModule(torch_graph)
+        output_ref = torch_graph(input, num_forks, num_child_forks)
+        output_test = static_runtime_module(input, num_forks, num_child_forks)
         torch.testing.assert_close(output_test, output_ref)
 
     """
