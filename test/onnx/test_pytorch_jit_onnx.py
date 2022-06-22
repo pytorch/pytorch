@@ -50,6 +50,8 @@ class _TestJITIRToONNX:
 
     opset_version = -1  # Sub-classes must override
     ort_providers = ["CPUExecutionProvider"]
+    check_shape = True
+    check_dtype = True
 
     def run_test(self, graph_ir, example_inputs):
         graph = parse_ir(graph_ir)
@@ -64,7 +66,12 @@ class _TestJITIRToONNX:
         ort_outs = verification._run_ort(ort_sess, example_inputs)
 
         verification._compare_ort_pytorch_outputs(
-            ort_outs, jit_outs, rtol=1e-3, atol=1e-7
+            ort_outs,
+            jit_outs,
+            rtol=1e-3,
+            atol=1e-7,
+            check_shape=self.check_shape,
+            check_dtype=self.check_dtype,
         )
 
     def test_example_ir(self):
