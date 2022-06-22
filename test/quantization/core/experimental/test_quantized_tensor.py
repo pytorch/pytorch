@@ -16,6 +16,7 @@ class TestQuantizedTensor(unittest.TestCase):
 
         # generate tensor with random fp values between 0 -> 1000
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
+        orig_tensor2quantize = torch.clone(tensor2quantize)
 
         quantizer = APoTQuantizer(4, 2, torch.max(tensor2quantize), False)
 
@@ -24,7 +25,7 @@ class TestQuantizedTensor(unittest.TestCase):
 
         tensor_apot = TensorAPoT(quantizer)
 
-        qtensor_int_rep = tensor_apot.int_repr()
+        qtensor_int_rep = tensor_apot.int_repr(orig_tensor2quantize)
 
         self.assertTrue(torch.equal(qtensor, qtensor_int_rep))
 

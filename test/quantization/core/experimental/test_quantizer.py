@@ -5,8 +5,6 @@ from torch import quantize_per_tensor
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 import unittest
 import random
-quantize_APoT = APoTQuantizer.quantize_APoT
-dequantize = APoTQuantizer.dequantize
 
 class TestQuantizer(unittest.TestCase):
     r""" Tests quantize_APoT result on random 1-dim tensor
@@ -18,7 +16,7 @@ class TestQuantizer(unittest.TestCase):
         * k: 1
     """
     def test_quantize_APoT_rand_k1(self):
-        # generate random size of tensor2dequantize between 1 -> 20
+        # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
 
         # generate tensor with random fp values between 0 -> 1000
@@ -83,18 +81,18 @@ class TestQuantizer(unittest.TestCase):
         * k: 2
     """
     def test_dequantize_quantize_rand_b4(self):
-        # generate random size of tensor2dequantize between 1->20
+        # generate random size of float2apot between 1->20
         size = random.randint(1, 20)
 
         # initialize quantize APoT tensor to dequantize:
         # generate tensor with random values between 0 -> 2**4 = 16
         # because there are 2**b = 2**4 quantization levels total
-        tensor2dequantize = 16 * torch.rand(size)
+        float2apot = 16 * torch.rand(size)
         quantizer = APoTQuantizer(4, 2, 1.0, False)
-        quantizer.data = tensor2dequantize.int()
-        orig_input = torch.clone(quantizer.data)
+        float2apot = float2apot.int()
+        orig_input = torch.clone(float2apot)
 
-        dequantized_result = quantizer.dequantize()
+        dequantized_result = quantizer.dequantize(float2apot)
 
         quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
@@ -111,18 +109,18 @@ class TestQuantizer(unittest.TestCase):
         * k: 2
     """
     def test_dequantize_quantize_rand_b6(self):
-        # generate random size of tensor2dequantize
+        # generate random size of float2apot
         size = random.randint(1, 20)
 
         # initialize quantize APoT tensor to dequantize:
         # generate tensor with random values between 0 -> 2**6 = 64
         # because there are 2**b = 2**6 quantization levels total
-        tensor2dequantize = 64 * torch.rand(size)
+        float2apot = 64 * torch.rand(size)
         quantizer = APoTQuantizer(6, 2, 1.0, False)
-        quantizer.data = tensor2dequantize.int()
-        orig_input = torch.clone(quantizer.data)
+        float2apot = float2apot.int()
+        orig_input = torch.clone(float2apot)
 
-        dequantized_result = quantizer.dequantize()
+        dequantized_result = quantizer.dequantize(float2apot)
 
         quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
