@@ -848,6 +848,8 @@ class _NnapiSerializer(object):
             self.add_conv2d(node),
         "aten::log_softmax": lambda self, node:
             self.add_log_softmax(node),
+        "aten::pixel_shuffle": lambda self, node:
+            self.add_pixel_shuffle(node),
         "quantized::linear": lambda self, node:
             self.add_qlinear(node),
         "quantized::conv2d": lambda self, node:
@@ -1867,6 +1869,31 @@ class _NnapiSerializer(object):
         outputs = [None] * 1
         outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
         self.add_operation(NNAPI_OperationCode.LOG_SOFTMAX, inputs, outputs)
+
+    def add_pixel_shuffle(self, node):
+        assert node.inputsSize() == 2
+        assert node.outputsSize() == 1
+
+        (
+            jit_input,
+            jit_upscale_factor,
+        ) = node.inputs()
+        input_id, input_oper = self.get_tensor_operand_by_jitval_fixed_size(jit_input)
+        _, upscale_factor = self.get_constant_value(jit_upscale_factor, "IntType")
+
+        out_shape = input_oper.shape
+        b = int(out_shape[1] / (upscale_factor * upscale_factor))
+        c = int(out_shape[2] * upscale_factor)
+        d = int(out_shape[3] * upscale_factor)
+        out_shape = (out_shape[0], b, c, d)
+
+        inputs = [None] * 2
+        inputs[0] = input_id
+        inputs[1] = self.add_immediate_int_scalar(upscale_factor)
+
+        outputs = [None] * 1
+        outputs[0] = self.add_tensor_operand(node.outputsAt(0), input_oper._replace(shape=out_shape))
+        self.add_operation(NNAPI_OperationCode.DEPTH_TO_SPACE, inputs, outputs)
 
 
     def add_qconv2d(self, node, fuse_code, transpose=False):
