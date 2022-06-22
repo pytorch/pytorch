@@ -20430,7 +20430,7 @@ python_ref_db = [
         skips=(
             # NotImplementedError: argument of type: <class 'complex'>
             DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_executor',
                 dtypes=(torch.complex32, torch.complex64, torch.complex128,)
             ),
             # Reference result was farther (0.7433461727239705) from the precise
