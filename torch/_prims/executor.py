@@ -13,7 +13,7 @@ if torch.cuda.is_available():
     from torch._C._nvfuser import Fusion, FusionDefinition  # type: ignore[import]
 
 
-def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
+def execute(gm: GraphModule, *args, executor: str = "aten"):
     """
     Prototype ATen executor.
 
@@ -45,7 +45,7 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
                     args = tuple(map(_to_nvfuser_constant, args))
                     target = target.impl_nvfuser
                     args = (fd,) + args
-                    return target(*args)
+                    return target(*args, **kwargs)
 
             def to_nv(arg):
                 if isinstance(arg, torch.Tensor):
@@ -60,8 +60,7 @@ def execute(gm: GraphModule, *args, executor: str = "aten", **kwargs):
             # Transforms graph to call nvfuser lowerings
             # Note, this doesn't handle nested structures in the args, TODO: add tree_flatten
             nv_args = tree_map(to_nv, args)
-            nv_kwargs = tree_map(to_nv, kwargs)
-            out = FusionInterpreter(gm).run(*nv_args, **nv_kwargs)
+            out = FusionInterpreter(gm).run(*nv_args)
             flat_out, unflatten_spec = tree_flatten(out)
             for o in flat_out:
                 fd.add_output(o)
