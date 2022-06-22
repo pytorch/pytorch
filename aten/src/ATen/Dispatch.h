@@ -90,10 +90,10 @@ TORCH_API void record_kernel_function_dtype(std::string name);
 #define C10_UNUSED_DISPATCH_CUDA_WORKAROUND C10_UNUSED
 #endif // defined(__CUDACC__) && defined(CUDA_VERSION) && CUDA_VERSION <= 10010
 
-#define AT_DISPATCH_CASE_QINT(enum_type, ...)                                \
+#define AT_DISPATCH_CASE_QINT(enum_type, scalar_type, ...)                   \
   case enum_type: {                                                          \
     AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                             \
-    using scalar_t = c10::impl::ScalarTypeToCPPTypeT<enum_type>;             \
+    using scalar_t = scalar_type;                                            \
     using underlying_t = typename scalar_t::underlying;                      \
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type; \
     const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =        \
@@ -103,10 +103,10 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   }
 
 #define AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                  \
-    enum_type, bitwidth, qmin, qmax, ...)                                    \
+    enum_type, scalar_type, bitwidth, qmin, qmax, ...)                       \
   case enum_type: {                                                          \
     AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                             \
-    using scalar_t = c10::impl::ScalarTypeToCPPTypeT<enum_type>;             \
+    using scalar_t = scalar_type;                                            \
     using underlying_t C10_UNUSED_DISPATCH_CUDA_WORKAROUND =                 \
         typename scalar_t::underlying;                                       \
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type; \
@@ -359,30 +359,37 @@ inline void deprecated_AT_DISPATCH_ALL_TYPES_AND_HALF_AND_COMPLEX() {}
 #define AT_DISPATCH_ALL_TYPES(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_ALL_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_QINT_TYPES(...)          \
-  AT_DISPATCH_CASE_QINT(at::kQInt8, __VA_ARGS__)  \
-  AT_DISPATCH_CASE_QINT(at::kQUInt8, __VA_ARGS__) \
-  AT_DISPATCH_CASE_QINT(at::kQInt32, __VA_ARGS__)
+#define AT_DISPATCH_CASE_QINT_TYPES(...)                      \
+  AT_DISPATCH_CASE_QINT(at::kQInt8, at::qint8, __VA_ARGS__)   \
+  AT_DISPATCH_CASE_QINT(at::kQUInt8, at::quint8, __VA_ARGS__) \
+  AT_DISPATCH_CASE_QINT(at::kQInt32, at::qint32, __VA_ARGS__)
 
 #define AT_DISPATCH_QINT_TYPES(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_QINT_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_QINT_BYTE_TYPES(...)    \
-  AT_DISPATCH_CASE_QINT(at::kQInt8, __VA_ARGS__) \
-  AT_DISPATCH_CASE_QINT(at::kQUInt8, __VA_ARGS__)
+#define AT_DISPATCH_CASE_QINT_BYTE_TYPES(...)               \
+  AT_DISPATCH_CASE_QINT(at::kQInt8, at::qint8, __VA_ARGS__) \
+  AT_DISPATCH_CASE_QINT(at::kQUInt8, at::quint8, __VA_ARGS__)
 
 #define AT_DISPATCH_QINT_BYTE_TYPES(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(TYPE, NAME, AT_DISPATCH_CASE_QINT_BYTE_TYPES(__VA_ARGS__))
 
-#define AT_DISPATCH_CASE_QINT_AND_SUB_BYTE_TYPES(...)                      \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                      \
-      at::kQInt8, CHAR_BIT, SCHAR_MIN, SCHAR_MAX, __VA_ARGS__)             \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                      \
-      at::kQUInt8, CHAR_BIT, 0, UCHAR_MAX, __VA_ARGS__)                    \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                      \
-      at::kQInt32, CHAR_BIT * sizeof(int), INT_MIN, INT_MAX, __VA_ARGS__)  \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(at::kQUInt4x2, 4, 0, 15, __VA_ARGS__) \
-  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(at::kQUInt2x4, 2, 0, 3, __VA_ARGS__)
+#define AT_DISPATCH_CASE_QINT_AND_SUB_BYTE_TYPES(...)                     \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                     \
+      at::kQInt8, at::qint8, CHAR_BIT, SCHAR_MIN, SCHAR_MAX, __VA_ARGS__) \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                     \
+      at::kQUInt8, at::quint8, CHAR_BIT, 0, UCHAR_MAX, __VA_ARGS__)       \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                     \
+      at::kQInt32,                                                        \
+      at::qint32,                                                         \
+      CHAR_BIT * sizeof(int),                                             \
+      INT_MIN,                                                            \
+      INT_MAX,                                                            \
+      __VA_ARGS__)                                                        \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                     \
+      at::kQUInt4x2, at::quint4x2, 4, 0, 15, __VA_ARGS__)                 \
+  AT_QINT_SUB_BYTE_PRIVATE_CASE_TYPE(                                     \
+      at::kQUInt2x4, at::quint2x4, 2, 0, 3, __VA_ARGS__)
 
 #define AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(TYPE, NAME, ...) \
   AT_DISPATCH_SWITCH(                                        \
