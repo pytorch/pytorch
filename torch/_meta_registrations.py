@@ -612,16 +612,6 @@ def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     )
 
 
-@torch.library.impl(meta_lib, "nan_to_num")
-def meta_nan_to_num(self, nan=None, posinf=None, neginf=None):
-    return self.new_empty(self.shape)
-
-
-@torch.library.impl(meta_lib, "remainder.Scalar_Tensor")
-def meta_remainder_scalar(scalar, other):
-    return other % scalar
-
-
 @torch.library.impl(meta_lib, "logical_not_")
 def meta_logical_not_(self):
     return self
