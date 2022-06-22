@@ -1,8 +1,9 @@
-from typing import Dict, Set, Tuple
+from typing import Any, Dict, Set, Tuple
 
 import torch
 from torch.ao.quantization.fx._model_report.detector import DetectorBase
 from torch.ao.quantization.fx.graph_module import GraphModule
+from torch.ao.quantization.observer import ObserverBase
 
 class ModelReport:
     r"""
@@ -42,6 +43,9 @@ class ModelReport:
         for desired_report in self._desired_reports:
             self._report_name_to_observer_fqns[desired_report] = set([])
 
+        # flags to ensure that we can only prepare once
+        self._prepared_flag = False
+
     def get_desired_reports_names(self) -> Set[str]:
         """ Returns a copy of the desired reports for viewing """
         return self._desired_reports.copy()
@@ -66,7 +70,67 @@ class ModelReport:
 
         Returns the same GraphModule with the observers inserted
         """
-        pass
+
+        # if already prepared once, cannot prepare again
+        if self._prepared_flag:
+            raise ValueError("Already ran preparing detailed callibration. Run the report generation next after callibration.")
+
+        # loop through each detector, find where placements should be, and keep track
+        insert_observers_fqns: Dict[str, Any] = {}
+
+        for detector in self._desired_report_detectors:
+            # determine observer points for each detector
+            obs_fqn_to_info = detector.determine_observer_insert_points(prepared_fx_model)
+            # map each insert point to the observer to use
+            insert_observers_fqns.update(obs_fqn_to_info)
+            # update the set of observers this report cares about
+            self._report_name_to_observer_fqns[detector.get_detector_name()] = set(obs_fqn_to_info.keys())
+
+        # now insert all the observers at their desired locations
+        for observer_fqn in insert_observers_fqns:
+            target_node = insert_observers_fqns[observer_fqn]["target_node"]
+            insert_obs = insert_observers_fqns[observer_fqn]["insert_observer"]
+            insert_post = insert_observers_fqns[observer_fqn]["insert_post"]
+            observer_args = insert_observers_fqns[observer_fqn]["observer_args"]
+            self._insert_observer_around_module(
+                prepared_fx_model, observer_fqn, target_node, insert_obs, observer_args, insert_post
+            )
+
+        self._prepared_flag = True
+
+        return prepared_fx_model
+
+    def _insert_observer_around_module(
+        self,
+        prepared_fx_model: GraphModule,
+        obs_fqn: str,
+        target_node: torch.fx.node.Node,
+        obs_to_insert: ObserverBase,
+        observer_args: Tuple,
+        insert_post: bool
+    ):
+        r"""
+        Helper function that inserts the observer into both the graph structure and the module of the model
+
+        Args
+            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
+            node_fqn (str): The fully qualified name of the observer we want to insert
+            target_node (torch.fx.node.Node): The node in prepared_fx_module we are inserting observers around
+            obs_to_insert (ObserverBase): The observer we are inserting around target_node
+            observer_args (Tuple): The arguments we want to pass into the observer
+            insert_post (bool): whether this is meant to be a post observer for this node
+        """
+        # if we are inserting post, then our target node is the next node
+        if insert_post:
+            target_node = target_node.next
+
+        with prepared_fx_model.graph.inserting_before(target_node):
+            obs_to_insert = obs_to_insert()
+            prepared_fx_model.add_submodule(obs_fqn, obs_to_insert)
+            prepared_fx_model.graph.create_node(op="call_module", target=obs_fqn, args=observer_args)
+
+        # recompile model after inserts are made
+        prepared_fx_model.recompile()
 
     def _get_node_from_fqn(self, fx_model: GraphModule, node_fqn: str) -> torch.fx.node.Node:
         r"""
