@@ -1131,7 +1131,7 @@ class TestProfiler(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_utils_compute_queue_depth(self):
-        x = torch.ones((4096, 4096), device="cuda")
+        x = torch.ones((8096, 8096), device="cuda")
         with profile() as prof:
             # First half we want it to be compute bound
             for _ in range(5):
@@ -1143,8 +1143,23 @@ class TestProfiler(TestCase):
                 y[0] += 1
                 time.sleep(0.1)
         basic_evaluation = _utils.BasicEvaluation(prof.profiler)
-        for entry in basic_evaluation.compute_queue_depth():
-            self.assertTrue(entry.queue_depth >= 0)
+        # We can assume golden because mm is compute intensive,
+        # so kernel will queued up.
+        # But later tensor indexing is overhead bound, and there
+        # is sleep to make sure kernel finished before next dispatch.
+        golden_queue_depth_list = [1, 2, 3, 4, 5, 1, 1, 1]
+        for entry, golden in zip(basic_evaluation.compute_queue_depth(),
+                                 golden_queue_depth_list):
+            self.assertTrue(entry.queue_depth == golden)
+
+    def test_utils_compute_queue_depth_when_no_cuda_events(self):
+        # For traces with only cpu events, we expect empty queue depth list
+        x = torch.ones((1024, 1024))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        self.assertFalse(basic_evaluation.compute_queue_depth())
 
 
     def test_extra_fields(self):
