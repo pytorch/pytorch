@@ -714,32 +714,32 @@ class TestNestedTensorAutograd(TestCase):
 
     def test_nested_tensor_linear(self):
 
-        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float32)
-        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float32)
-        c = torch.randn(3, 2, requires_grad=True, dtype=torch.float32)
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(3, 2, requires_grad=True, dtype=torch.float64)
 
-        weight = torch.randn(2, 2, requires_grad=True, dtype=torch.float32)
-        bias = torch.randn(2, requires_grad=True, dtype=torch.float32)
+        weight = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        bias = torch.randn(2, requires_grad=True, dtype=torch.float64)
 
         def grad_test_func(a, b, c, weight, bias=None):
-            c = torch.nested_tensor([a, b, c])
+            nt = torch.nested_tensor([a, b, c])
             # This implicitly tests to_padded_tensor grads
-            c = torch.functional.F.linear(c, weight, bias)
-            return c.to_padded_tensor(0)
+            d = torch.functional.F.linear(nt, weight, bias)
+            return d.to_padded_tensor(0)
         data = (a, b, c, weight, bias)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data, atol=1e-01, rtol=1e-01)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
         # Test linear with no bias added
         data = (a, b, c, weight)
-        assert torch.autograd.gradcheck(grad_test_func, inputs=data, atol=1e-01, rtol=1e-01)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
     def test_nested_tensor_linear_backward(self):
-        a = torch.randn(1, 2, requires_grad=False, dtype=torch.float32)
-        b = torch.randn(2, 2, requires_grad=False, dtype=torch.float32)
-        c = torch.randn(3, 2, requires_grad=False, dtype=torch.float32)
+        a = torch.randn(1, 2, requires_grad=False)
+        b = torch.randn(2, 2, requires_grad=False)
+        c = torch.randn(3, 2, requires_grad=False)
 
-        weight = torch.randn(2, 2, requires_grad=True, dtype=torch.float32)
-        bias = torch.randn(2, requires_grad=True, dtype=torch.float32)
+        weight = torch.randn(2, 2, requires_grad=True)
+        bias = torch.randn(2, requires_grad=True)
         nt = torch.nested_tensor([a, b, c])
 
         out = torch.functional.F.linear(nt, weight, bias)
