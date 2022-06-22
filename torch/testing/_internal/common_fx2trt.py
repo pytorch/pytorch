@@ -166,7 +166,7 @@ class TRTTestCase(TestCase):
 
 
 class VanillaTestCase(TRTTestCase):
-    def run_test(self, mod, inputs, expected_ops, rtol=1e-05, atol=1e-06):
+    def run_test(self, mod, inputs, expected_ops, rtol=1e-03, atol=1e-03):
         mod = torch.fx.symbolic_trace(mod)
         shape_prop.ShapeProp(mod).propagate(*inputs)
         mod = NormalizeArgs(mod).transform()
