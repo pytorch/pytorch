@@ -46,9 +46,9 @@ class EventKey:
         overlap_time = 0
         intervals = sorted(intervals, key=lambda x: x.start)
         for i, interval in enumerate(intervals):
-            if i + 1 < len(intervals) and interval.end > intervals[i +
-                                                                   1].start:
-                interval.end = intervals[i + 1].start
+            if i + 1 < len(intervals):
+                assert interval.end <= intervals[
+                    i + 1].start, "Intervals must be disjoint"
             overlap_start = max(self.event.start_time_ns, interval.start)
             overlap_end = min(self.event.end_time_ns, interval.end)
 
@@ -66,6 +66,7 @@ class BasicEvaluation:
         self.event_keys = sorted((e for e in self.metrics.keys()),
                                  key=lambda x: x.event.start_time_ns)
         self.events = [e.event for e in self.event_keys]
+        self.cuda_events: List[_KinetoEvent] = []
         self.queue_depth_list = self.compute_queue_depth()
 
     def compute_self_time(self):
@@ -116,6 +117,9 @@ class BasicEvaluation:
             (e for e in cuda_event_list if is_cuda_kernel(e)),
             key=lambda x: x.start_us())
 
+        self.cuda_events = sorted(cuda_launch_events + cuda_kernel_events,
+                                  key=lambda x: x.start_us())
+
         kernel_mapping: Dict[_KinetoEvent, int] = {}
         last_mapped_kernel = 0
         for cuda_launch_event in cuda_launch_events:
@@ -149,7 +153,7 @@ class BasicEvaluation:
                 if event in kernel_mapping and kernel_mapping[
                         event] is not None:
                     spawned_kernel_index = kernel_mapping[event]
-            if isinstance(event, _ProfilerEvent):
+            elif isinstance(event, _ProfilerEvent):
                 start_time = event.start_time_ns
                 end_time = event.end_time_ns
 

@@ -1131,6 +1131,16 @@ class TestProfiler(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_utils_compute_queue_depth(self):
+
+        def format_queue_depth(queue_depth_list, mode, events):
+            res = ""
+            for data, event in zip(queue_depth_list, events):
+                if event.name() == "cudaLaunchKernel":
+                    res += f"{data.queue_depth} [{event.name()}]\n"
+                else:
+                    res += f"{data.queue_depth} [{mode}]\n"
+            return res
+
         x = torch.ones((8096, 8096), device="cuda")
         with profile() as prof:
             # First half we want it to be compute bound
@@ -1147,21 +1157,56 @@ class TestProfiler(TestCase):
         # so kernel will queued up.
         # But later tensor indexing is overhead bound, and there
         # is sleep to make sure kernel finished before next dispatch.
-        golden_queue_depth_list = [
-            1, 0, 1, 2, 3, 4, 3, 2, 1, 0, 1, 0, 1, 0, 1, 0
-        ]
-        for entry, golden in zip(basic_evaluation.compute_queue_depth(),
-                                 golden_queue_depth_list):
-            self.assertTrue(entry.queue_depth == golden)
-        golden_queue_depth_metrics_list = [
-            0, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
-        ]
+        self.assertExpectedInline(
+            format_queue_depth(basic_evaluation.queue_depth_list, "GPU",
+                               basic_evaluation.cuda_events), """\
+1 [cudaLaunchKernel]
+0 [GPU]
+1 [cudaLaunchKernel]
+2 [cudaLaunchKernel]
+3 [cudaLaunchKernel]
+4 [cudaLaunchKernel]
+3 [GPU]
+2 [GPU]
+1 [GPU]
+0 [GPU]
+1 [cudaLaunchKernel]
+0 [GPU]
+1 [cudaLaunchKernel]
+0 [GPU]
+1 [cudaLaunchKernel]
+0 [GPU]
+""")
 
-        for entry, golden in zip([
+        self.assertExpectedInline(
+            format_queue_depth([
                 basic_evaluation.metrics[k]
                 for k in basic_evaluation.event_keys
-        ], golden_queue_depth_metrics_list):
-            self.assertTrue(entry.queue_depth == golden)
+            ], "CPU", basic_evaluation.events), """\
+0 [CPU]
+0 [CPU]
+1 [CPU]
+2 [CPU]
+3 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+""")
 
     def test_utils_compute_queue_depth_when_no_cuda_events(self):
         # For traces with only cpu events, we expect empty queue depth list
@@ -1171,7 +1216,6 @@ class TestProfiler(TestCase):
                 x = x @ x
         basic_evaluation = _utils.BasicEvaluation(prof.profiler)
         self.assertFalse(basic_evaluation.compute_queue_depth())
-
 
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
