@@ -51,7 +51,7 @@ class TestCommunicationHooks(FSDPTest):
             sharding_strategy=sharding_strategy
         ).to(self.rank)
 
-         # Check that default hook is set to `all_reduce`
+        # Check that default hook is set to `all_reduce`
         for entry in FSDP.fsdp_modules(net_default_hook):
             self.assertEqual(entry.communication_hook.__qualname__, allreduce_hook.allreduce_hook.__qualname__)
 
