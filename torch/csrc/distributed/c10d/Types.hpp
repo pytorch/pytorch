@@ -34,8 +34,8 @@ struct AllreduceCoalescedOptions : AllreduceOptions {};
 
 struct ReduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
-  int rootRank = 0;
-  int rootTensor = 0;
+  int64_t rootRank = 0;
+  int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
