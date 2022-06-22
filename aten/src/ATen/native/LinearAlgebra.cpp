@@ -2649,36 +2649,35 @@ Tensor frobenius_norm(const Tensor& self) {
 }
 
 Tensor frobenius_norm(const Tensor& self, IntArrayRef dim, bool keepdim) {
-  // NOTE: As frobenius_norm_out is currently implemented, it will always produce a
-  //    strided tensor result, even if the input is sparse.
-  auto options = self.options().layout(c10::Layout::Strided).dtype(toRealValueType(self.scalar_type()));
-  Tensor result = at::empty({0}, options);
-  return at::native::frobenius_norm_out(self, dim, keepdim, result);
+  TORCH_CHECK(
+      dim.size() <= 2,
+      "Expected at most 2 dimensions, but got ",
+      dim.size(),
+      " dimensions instead.");
+  Tensor result;
+  if (dim.size() == 1 || dim.size() == 0) {
+    result = at::norm(self, 2, dim, keepdim);
+  } else {
+    auto dim_ = dim.vec();
+    maybe_wrap_dims(dim_, self.dim());
+    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
+    if (self.is_complex()) {
+      result = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
+    } else {
+      result = at::sqrt(at::sum((self * self), dim_, keepdim));
+    }
+  }
+  TORCH_INTERNAL_ASSERT(result.scalar_type() == toRealValueType(self.scalar_type()));
+  TORCH_INTERNAL_ASSERT(result.layout() == c10::Layout::Strided);
+  return result;
 }
 
 Tensor &frobenius_norm_out(const Tensor& self,
     IntArrayRef dim,
     bool keepdim,
     Tensor& result) {
-  TORCH_CHECK(
-      dim.size() <= 2,
-      "Expected at most 2 dimensions, but got ",
-      dim.size(),
-      " dimensions instead.");
-  Tensor result_;
-  if (dim.size() == 1 || dim.size() == 0) {
-    result_ = at::norm(self, 2, dim, keepdim);
-  } else {
-    auto dim_ = dim.vec();
-    maybe_wrap_dims(dim_, self.dim());
-    TORCH_CHECK(dim_[0] != dim_[1], "Expected dims to be different, got ", dim, " instead");
-    if (self.is_complex()){
-      result_ = at::sqrt(at::sum(at::real(self.conj() * self), dim_, keepdim));
-    } else {
-      result_ = at::sqrt(at::sum((self * self), dim_, keepdim));
-    }
-  }
-  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out above.
+  auto result_ = at::native::frobenius_norm(self, dim, keepdim);
+  // NOTE: It would be better to avoid resize and copy by using norm_out and sqrt_out in frobenius_norm.
   //    However, norm_out and sqrt_out do not support automatic differentiation.
   //    More details here: https://github.com/pytorch/pytorch/pull/44095#discussion_r486673947
   at::native::resize_output(result, result_.sizes());
