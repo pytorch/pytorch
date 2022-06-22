@@ -61,7 +61,7 @@ int main(int argc, char *argv[])
     // Add a new file to the archive. Note this is an IN-PLACE operation, so if it fails your archive is probably hosed (its central directory may not be complete) but it should be recoverable using zip -F or -FF. So use caution with this guy.
     // A more robust way to add a file to an archive would be to read it into memory, perform the operation, then write a new archive out to a temp file and then delete/rename the files.
     // Or, write a new archive to disk to a temp file, then delete/rename the files. For this test this API is fine.
-    status = mz_zip_add_mem_to_archive_file_in_place(s_Test_archive_filename, archive_filename, data, 2, s_pComment, (uint16)strlen(s_pComment), MZ_BEST_COMPRESSION);
+    status = mz_zip_add_mem_to_archive_file_in_place(s_Test_archive_filename, archive_filename, data, strlen(data) + 1, s_pComment, (uint16)strlen(s_pComment), MZ_BEST_COMPRESSION);
     if (!status)
     {
       printf("mz_zip_add_mem_to_archive_file_in_place failed!\n");

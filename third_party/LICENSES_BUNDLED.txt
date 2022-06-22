@@ -244,10 +244,10 @@ License: BSD-3-Clause
 Files: third_party/breakpad/src/third_party/lss
   For details, see third_party/breakpad/src/third_party/lss/LICENSE
 
-Name: miniz-2.0.8
+Name: miniz-2.1.0
 License: MIT
-Files: third_party/miniz-2.0.8
-  For details, see third_party/miniz-2.0.8/LICENSE
+Files: third_party/miniz-2.1.0
+  For details, see third_party/miniz-2.1.0/LICENSE
 
 Name: mkl-dnn
 License: Apache-2.0
