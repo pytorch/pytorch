@@ -1,4 +1,5 @@
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs:type_defs.bzl", "is_list", "is_string")
 load(":build_variables.bzl", "aten_native_source_list")
@@ -20,6 +21,7 @@ PT_BACKEND_HEADERS = [
     "CPU",
     "CUDA",
     "CompositeExplicitAutograd",
+    "CompositeExplicitAutogradNonFunctional",
     "CompositeImplicitAutograd",
     "Meta",
 ]
@@ -219,6 +221,20 @@ TEMPLATE_SOURCE_LIST = [
     "torch/csrc/jit/runtime/register_special_ops.cpp",
 ] + aten_native_source_list
 
+# the basic xplat library for OSS build
+def pt_xplat_cxx_library(extra_flags = {}, **kwargs):
+    fb_xplat_cxx_library(
+        compiler_flags = get_pt_compiler_flags() + extra_flags.get("compiler_flags", []),
+        exported_preprocessor_flags = get_pt_preprocessor_flags() + extra_flags.get("exported_preprocessor_flags", []),
+        **kwargs
+    )
+
+def get_aten_default_args():
+    return dict(
+        compiler_flags = get_aten_compiler_flags(),
+        exported_preprocessor_flags = get_aten_preprocessor_flags(),
+    )
+
 # For selective build, we can lump the CPU and CPU kernel sources altogether
 # because there is only ever one vectorization variant that is compiled
 def aten_ufunc_generated_all_cpu_sources(gencode_pattern = "{}"):
@@ -333,6 +349,7 @@ def get_aten_generated_files(enabled_backends):
         "RegisterBackendSelect.cpp",
         "RegisterCompositeImplicitAutograd.cpp",
         "RegisterCompositeExplicitAutograd.cpp",
+        "RegisterCompositeExplicitAutogradNonFunctional.cpp",
         "CompositeViewCopyKernels.cpp",
         "RegisterSchema.cpp",
         "Declarations.yaml",
@@ -353,6 +370,8 @@ def get_aten_generated_files(enabled_backends):
         "CompositeImplicitAutogradFunctions_inl.h",
         "CompositeExplicitAutogradFunctions.h",
         "CompositeExplicitAutogradFunctions_inl.h",
+        "CompositeExplicitAutogradNonFunctionalFunctions.h",
+        "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
         "core/ATenOpList.cpp",
         "core/TensorBody.h",
         "core/TensorMethods.cpp",
@@ -523,7 +542,7 @@ def get_aten_derived_type_src_rules(aten_rule_name, enabled_backends):
 def get_aten_selective_cpp_rules(aten_rule_name, enabled_backends):
     return [
         ":{}[{}]".format(aten_rule_name, f)
-        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
+        for f in ["RegisterCompositeImplicitAutograd.cpp", "RegisterCompositeExplicitAutograd.cpp", "RegisterCompositeExplicitAutogradNonFunctional.cpp", "RegisterSchema.cpp", "RegisterBackendSelect.cpp", "CompositeViewCopyKernels.cpp"]
     ] + get_aten_derived_type_src_rules(aten_rule_name, enabled_backends)
 
 def get_aten_derived_type_srcs(enabled_backends):
