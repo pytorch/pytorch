@@ -302,6 +302,7 @@ class TestPythonDispatch(TestCase):
 $0 = input('x')
 $1 = torch._ops.aten.mul.Tensor($0, $0)
 $2 = input('grad_y')
+True = torch._ops.aten.is_same_size.default($1, $2)
 $3 = torch._ops.aten.mul.Tensor($2, $0)
 $4 = torch._ops.aten.mul.Tensor($2, $0)
 $5 = torch._ops.aten.add.Tensor($4, $3)''')
@@ -552,6 +553,7 @@ $0 = input('x')
 $1 = input('x.grad')
 $2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3 = input('grad_output')
+True = torch._ops.aten.is_same_size.default($2, $3)
 $4 = torch._ops.aten.mul.Tensor($3, 2)
 $5 = torch._ops.aten.mul.Tensor($4, $0)
 $6 = torch._ops.aten.add_.Tensor($1, $5)''')
@@ -1041,7 +1043,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 with A("layer2"):
                     torch.empty([])
 
-    def test_ctor_in_with_modes(self):
+    def test_make_subclass_with_modes(self):
         class ModeTensor(torch.Tensor):
             def __new__(cls, elem, mode):
                 r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
@@ -1049,8 +1051,62 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 r.mode = mode
                 return r
 
-            def __torch_dispatch(self, func, types, args=(), kwargs=None):
-                with self.mode:
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
+                    return func(*args, **kwargs)
+
+        class Mode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    if isinstance(e, ModeTensor):
+                        return e.elem
+                    else:
+                        return e
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor):
+                        return ModeTensor(t, self)
+                    else:
+                        return t
+
+                return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
+
+        class BasicMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        x = torch.tensor(4.)
+        with Mode():
+            y = x + x
+            z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        with Mode():
+            with BasicMode():  # we can't nest two modes that call make_subclass because it only accepts vanilla tensors
+                y = x + x
+                z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        assert self.assertRaisesRegex(RuntimeError, "subclass Mode but.* associated to a python object of type Mode")
+
+    def test_make_wrapper_subclass_with_modes(self):
+        class ModeTensor(torch.Tensor):
+            def __new__(cls, elem, mode):
+                r = torch.Tensor._make_wrapper_subclass(cls, elem.shape)
+                r.elem = elem
+                r.mode = mode
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
                     return func(*args, **kwargs)
 
         class Mode(TorchDispatchMode):
@@ -1073,6 +1129,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         with Mode():
             y = x + x
             z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        with Mode():
+            with Mode():
+                y = x + x
+                z = y + y
         self.assertIsInstance(y, ModeTensor)
         self.assertIsInstance(z, ModeTensor)
 
