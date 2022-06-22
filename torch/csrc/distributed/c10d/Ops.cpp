@@ -33,8 +33,8 @@ c10::intrusive_ptr<ProcessGroup::Work> allreduce_(
 
 c10::intrusive_ptr<ProcessGroup::Work> allgather_(
     const std::vector<std::vector<at::Tensor>>& output_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<at::Tensor>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t timeout) {
   return process_group->allgather(
       const_cast<std::vector<std::vector<at::Tensor>>&>(output_tensors),
@@ -44,8 +44,8 @@ c10::intrusive_ptr<ProcessGroup::Work> allgather_(
 
 c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter_(
     const std::vector<at::Tensor>& output_tensors,
-    const c10::intrusive_ptr<ProcessGroup>& process_group,
     const std::vector<std::vector<at::Tensor>>& input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
     int64_t reduce_op,
     int64_t timeout) {
   return process_group->reduce_scatter(
@@ -131,11 +131,11 @@ c10::intrusive_ptr<ProcessGroup::Work> allgather(
                        .findSchemaOrThrow("c10d::allgather_", "")
                        .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            const std::vector<std::vector<at::Tensor>>&,
-                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            const std::vector<at::Tensor>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t)>();
   return op.call(
-      output_tensors, process_group, input_tensors, opts.timeout.count());
+      output_tensors, input_tensors, process_group, opts.timeout.count());
 }
 
 c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
@@ -147,14 +147,14 @@ c10::intrusive_ptr<ProcessGroup::Work> reduce_scatter(
                        .findSchemaOrThrow("c10d::reduce_scatter_", "")
                        .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
                            const std::vector<at::Tensor>&,
-                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            const std::vector<std::vector<at::Tensor>>&,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                            int64_t,
                            int64_t)>();
   return op.call(
       output_tensors,
-      process_group,
       input_tensors,
+      process_group,
       static_cast<uint64_t>(opts.reduceOp),
       opts.timeout.count());
 }
