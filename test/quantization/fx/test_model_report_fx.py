@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
+import torch.nn as nn
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn.functional as F
 from torch.ao.quantization import QConfig, QConfigMapping
@@ -845,3 +846,102 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             for value in model_report.get_observers_of_interest().values():
                 self.assertEqual(len(value), 0)
+
+    @skipIfNoFBGEMM
+    def test_prepare_model_callibration(self):
+        """
+        Tests model_report.prepare_detailed_calibration that prepares the model for callibration
+
+        Specifically looks at:
+        - Whether observers are properly inserted into regular nn.Module
+        - Whether the target and the arguments of the observers are proper
+        - Whether the internal representation of observers of interest is updated
+        """
+
+        # example model to use for tests
+        class ThreeOps(nn.Module):
+            def __init__(self):
+                super(ThreeOps, self).__init__()
+                self.linear = nn.Linear(3, 3)
+                self.bn = nn.BatchNorm2d(3)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.bn(x)
+                x = self.relu(x)
+                return x
+
+        class TwoThreeOps(nn.Module):
+            def __init__(self):
+                super(TwoThreeOps, self).__init__()
+                self.block1 = ThreeOps()
+                self.block2 = ThreeOps()
+
+            def forward(self, x):
+                x = self.block1(x)
+                y = self.block2(x)
+                z = x + y
+                z = F.relu(z)
+                return z
+
+        with override_quantized_engine('fbgemm'):
+            # create model report object
+            # make an example set of detectors
+            torch.backends.quantized.engine = "fbgemm"
+            backend = torch.backends.quantized.engine
+            test_detector_set = set([DynamicStaticDetector(), PerChannelDetector(backend)])
+            # initialize with an empty detector
+            model_report = ModelReport(test_detector_set)
+
+            # prepare the model
+            model = TwoThreeOps()
+            example_input = torch.randn(1, 3, 3, 3)
+            current_backend = torch.backends.quantized.engine
+            q_config_mapping = QConfigMapping()
+            q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
+
+            model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
+
+            # prepare the model for callibration
+            prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
+
+            # see whether observers properly in regular nn.Module
+            # there should be 4 observers present in this case
+            modules_observer_cnt = 0
+            for fqn, module in prepared_for_callibrate_model.named_modules():
+                if isinstance(module, ModelReportObserver):
+                    modules_observer_cnt += 1
+
+            self.assertEqual(modules_observer_cnt, 4)
+
+            model_report_str_check = "model_report"
+            # also make sure arguments for observers in the graph are proper
+            for node in prepared_for_callibrate_model.graph.nodes:
+                # not all node targets are strings, so check
+                if isinstance(node.target, str) and model_report_str_check in node.target:
+                    # if pre-observer has same args as the linear (next node)
+                    if "pre_observer" in node.target:
+                        self.assertEqual(node.args, node.next.args)
+                    # if post-observer, args are the target linear (previous node)
+                    if "post_observer" in node.target:
+                        self.assertEqual(node.args, (node.prev,))
+
+            # ensure model_report observers of interest updated
+            # there should be two entries
+            self.assertEqual(len(model_report.get_observers_of_interest()), 2)
+            for detector in test_detector_set:
+                self.assertTrue(detector.get_detector_name() in model_report.get_observers_of_interest().keys())
+
+                # get number of entries for this detector
+                detector_obs_of_interest_fqns = model_report.get_observers_of_interest()[detector.get_detector_name()]
+
+                # assert that the per channel detector has 0 and the dynamic static has 4
+                if isinstance(detector, PerChannelDetector):
+                    self.assertEqual(len(detector_obs_of_interest_fqns), 0)
+                elif isinstance(detector, DynamicStaticDetector):
+                    self.assertEqual(len(detector_obs_of_interest_fqns), 4)
+
+            # ensure that we can prepare for callibration only once
+            with self.assertRaises(ValueError):
+                prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
