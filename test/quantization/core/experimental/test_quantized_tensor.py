@@ -23,9 +23,9 @@ class TestQuantizedTensor(unittest.TestCase):
         # get apot quantized tensor result
         qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
 
-        tensor_apot = TensorAPoT(quantizer)
+        tensor_apot = TensorAPoT(quantizer, orig_tensor2quantize)
 
-        qtensor_int_rep = tensor_apot.int_repr(orig_tensor2quantize)
+        qtensor_int_rep = tensor_apot.int_repr()
 
         self.assertTrue(torch.equal(qtensor, qtensor_int_rep))
 
