@@ -15,11 +15,20 @@ class NvFuserOperatorSupport(OperatorSupport):
     """
     Operator support for nvFuser backend.
 
-    Note: When adding a rule, please add it to the corresponding secion and follow the
+    Currently, partitioning is based on FX ATen graph. The fused subgraph will latter be decomposed into prims.
+    To determine if an ATen ops is supported by nvFuser, we shall check the prim ops used in its ref decomposition.
+    Only if all the prim ops in the ref has a nvfuser_impl, we say this Aten op is suppported by nvFuser.
+
+    Note: When adding a rule, please add it to the corresponding section and follow the
     alphabetical order.
     """
 
     def __init__(self):
+
+        # TODO: current list copied from torch/csrc/jit/codegen/cuda/parser.cpp is incorrect,
+        # as that file is solely for TorchScript and doesn't represent the actual status
+        # whether operation would be runnable by primTorch+nvFuser.
+        # We will iterate on this list to reflect the the reality.
         support_dict = {
             # ===============================================================
             # call_function aten
@@ -141,7 +150,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # ===============================================================
             # call_function aten: inplace variants
             # ===============================================================
-            # These nodes shouldn't show up, the functionalization pass should have removed inplace ops
+            # TODO: These nodes shouldn't show up, the functionalization pass should have removed inplace ops
             "torch.ops.aten.add_": None,
             "torch.ops.aten.relu_": None,
 
@@ -157,17 +166,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             #     "_operator.truediv": None,
         }
 
-        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))   # type: ignore[attr-defined]
-
-        ops_with_nvfuser_impl = {
-            "torch.ops.prims." + name + ".default" : None
-            for name in prim_nvfuser_ops
-            if getattr(torch.ops.prims, name).default.impl_nvfuser is not None
-        }
-
-        merged_support_dict = {**support_dict, **ops_with_nvfuser_impl}
-
-        super().__init__(merged_support_dict)
+        super().__init__(support_dict)
 
     def is_node_supported(
         self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node

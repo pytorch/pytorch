@@ -202,8 +202,10 @@ class TestFXGraphPasses(JitTestCase):
 
 
     @parametrize("fn, expected_partition", [
-        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),  # horizontal fusion without a common downstream node, not supported yet
-        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),  # horizontal fusion with a common downstream node, not supported yet
+        # horizontal fusion without a common downstream node, not supported yet
+        (TestPartitionFunctions.forward3, [["add_2", "add_1", "add"]]),
+        # horizontal fusion with a common downstream node, not supported yet
+        (TestPartitionFunctions.forward4, [["add_2", "add_1", "add"]]),
     ])
     def test_partitioner_xfail(self, fn, expected_partition):
         traced = symbolic_trace(fn)

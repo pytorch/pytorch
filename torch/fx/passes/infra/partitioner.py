@@ -15,9 +15,9 @@ logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
 
 class Partition:
-    def __init__(self, id: int = None, nodes: Iterable[Node] = {}):
+    def __init__(self, id: int = None, nodes: Iterable[Node] = None):
         self.id = id
-        self.nodes: Set[Node] = set(nodes)
+        self.nodes: Set[Node] = set(nodes) if nodes is not None else set()
 
     def __repr__(self) -> str:
         return str(self.nodes)
