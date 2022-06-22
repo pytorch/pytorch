@@ -150,6 +150,7 @@ def get_generate_code_bin_outs():
             "autograd/generated/python_torch_functions_1.cpp": ["autograd/generated/python_torch_functions_1.cpp"],
             "autograd/generated/python_torch_functions_2.cpp": ["autograd/generated/python_torch_functions_2.cpp"],
             "autograd/generated/python_variable_methods.cpp": ["autograd/generated/python_variable_methods.cpp"],
+            "autograd/generated/python_enum_tag.cpp": ["autograd/generated/python_enum_tag.cpp"],
         })
     return outs
 
