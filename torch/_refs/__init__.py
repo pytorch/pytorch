@@ -554,7 +554,6 @@ def logsumexp(
     if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
         # For float and complex dtypes, we shift input to exp by a constant to avoid overflow
         a_max = torch.amax(a, dim, keepdim=True)
-        print(a_max.shape, dim)
         a_max = torch.where(a_max.abs() == float("inf"), 0.0, a_max)
         a_max_squeezed = (
             prims.squeeze(a_max, dim) if not keepdim and a_max.ndim > 0 else a_max
