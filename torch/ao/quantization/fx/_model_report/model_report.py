@@ -32,27 +32,28 @@ class ModelReport:
 
         # keep the reports private so they can't be modified
         self._desired_report_detectors = desired_report_detectors
-        self._desired_reports = set([detector.get_detector_name() for detector in desired_report_detectors])
+        self._desired_detector_names = set([detector.get_detector_name() for detector in desired_report_detectors])
 
         # keep a mapping of desired reports to observers of interest
         # this is to get the readings, and to remove them, can create a large set
         # this set can then be used to traverse the graph and remove added observers
-        self._report_name_to_observer_fqns: Dict[str, Set[str]] = {}
+        self._detector_name_to_observer_fqns: Dict[str, Set[str]] = {}
 
         # initialize each report to have empty set of observers of interest
-        for desired_report in self._desired_reports:
-            self._report_name_to_observer_fqns[desired_report] = set([])
+        for desired_report in self._desired_detector_names:
+            self._detector_name_to_observer_fqns[desired_report] = set([])
 
-        # flags to ensure that we can only prepare once
+        # flags to ensure that we can only prepare and generate report once
         self._prepared_flag = False
+        self._removed_observers = False
 
     def get_desired_reports_names(self) -> Set[str]:
         """ Returns a copy of the desired reports for viewing """
-        return self._desired_reports.copy()
+        return self._desired_detector_names.copy()
 
     def get_observers_of_interest(self) -> Dict[str, Set[str]]:
         """ Returns a copy of the observers of interest for viewing """
-        return self._report_name_to_observer_fqns.copy()
+        return self._detector_name_to_observer_fqns.copy()
 
     def prepare_detailed_calibration(self, prepared_fx_model: GraphModule) -> GraphModule:
         r"""
@@ -61,7 +62,7 @@ class ModelReport:
 
         Each observer is inserted based on the desired_reports into the relavent locations
 
-        Right now, each report in self._desired_reports has independent insertions
+        Right now, each report in self._desired_detector_names has independent insertions
             However, if a module already has a Observer of the same type, the insertion will not occur
             This is because all of the same type of Observer collect same information, so redundant
 
@@ -84,7 +85,7 @@ class ModelReport:
             # map each insert point to the observer to use
             insert_observers_fqns.update(obs_fqn_to_info)
             # update the set of observers this report cares about
-            self._report_name_to_observer_fqns[detector.get_detector_name()] = set(obs_fqn_to_info.keys())
+            self._detector_name_to_observer_fqns[detector.get_detector_name()] = set(obs_fqn_to_info.keys())
 
         # now insert all the observers at their desired locations
         for observer_fqn in insert_observers_fqns:
@@ -142,7 +143,20 @@ class ModelReport:
 
         Returns the Node object of the given node_fqn otherwise returns None
         """
-        pass
+        node_to_return = None
+        for node in fx_model.graph.nodes:
+            # if the target matches the fqn, it's the node we are looking for
+            if node.target == node_fqn:
+                node_to_return = node
+                break
+
+        if node_to_return is None:
+            raise ValueError("The node_fqn is was not found within the module.")
+
+        # assert for MyPy
+        assert isinstance(node_to_return, torch.fx.node.Node)
+
+        return node_to_return
 
     def generate_model_report(
         self, calibrated_fx_model: GraphModule, remove_inserted_observers: bool
@@ -161,4 +175,42 @@ class ModelReport:
             The textual summary of that report information
             A dictionary containing relavent statistics or information for that report
         """
-        pass
+        # if we already removed the observers, we cannot generate report
+        if self._removed_observers:
+            raise Exception("Cannot generate report on model you already removed observers from")
+
+        # keep track of all the reports of interest and their outputs
+        reports_of_interest = {}
+
+        for detector in self._desired_report_detectors:
+            # generate the individual report for the detector
+            report_output = detector.generate_detector_report(calibrated_fx_model)
+            reports_of_interest[detector.get_detector_name()] = report_output
+
+        # if user wishes to remove inserted observers, go ahead and remove
+        if remove_inserted_observers:
+            self._removed_observers = True
+            # get the set of all Observers inserted by this instance of ModelReport
+            all_observers_of_interest: Set[str] = set([])
+            for desired_report in self._detector_name_to_observer_fqns:
+                observers_of_interest = self._detector_name_to_observer_fqns[desired_report]
+                all_observers_of_interest.update(observers_of_interest)
+
+            # go through all_observers_of_interest and remove them from the graph and model
+            for observer_fqn in all_observers_of_interest:
+                # remove the observer from the model
+                calibrated_fx_model.delete_submodule(observer_fqn)
+
+                # remove the observer from the graph structure
+                node_obj = self._get_node_from_fqn(calibrated_fx_model, observer_fqn)
+
+                if node_obj:
+                    calibrated_fx_model.graph.erase_node(node_obj)
+                else:
+                    raise ValueError("Node no longer exists in GraphModule structure")
+
+            # remember to recompile the model
+            calibrated_fx_model.recompile()
+
+        # return the reports of interest
+        return reports_of_interest
