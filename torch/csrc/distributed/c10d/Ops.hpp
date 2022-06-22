@@ -25,6 +25,10 @@ TORCH_API c10::intrusive_ptr<ProcessGroup::Work> gather(const c10::intrusive_ptr
       const std::vector<std::vector<at::Tensor>>& output_tensors,
       const std::vector<at::Tensor>& input_tensors,
       const GatherOptions& opts = {});
+TORCH_API c10::intrusive_ptr<ProcessGroup::Work> scatter(const c10::intrusive_ptr<ProcessGroup>& process_group,
+      const std::vector<at::Tensor>& output_tensors,
+      const std::vector<std::vector<at::Tensor>>& input_tensors,
+      const ScatterOptions& opts ={});
 
 } // namespace ops
 } // namespace c10d
