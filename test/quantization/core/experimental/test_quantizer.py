@@ -72,9 +72,61 @@ class TestQuantizer(unittest.TestCase):
 
         self.assertTrue(torch.equal(qtensor_data, expected_qtensor))
 
-    def test_dequantize(self):
-        with self.assertRaises(NotImplementedError):
-            APoTQuantizer.dequantize(self)
+    r""" Tests dequantize_apot result on random 1-dim tensor
+        and hardcoded values for b, k.
+        Dequant -> quant an input tensor and verify that
+        result is equivalent to input
+        * tensor2quantize: Tensor
+        * b: 4
+        * k: 2
+    """
+    def test_dequantize_quantize_rand_b4(self):
+        # generate random size of float2apot between 1->20
+        size = random.randint(1, 20)
+
+        # initialize quantize APoT tensor to dequantize:
+        # generate tensor with random values between 0 -> 2**4 = 16
+        # because there are 2**b = 2**4 quantization levels total
+        float2apot = 16 * torch.rand(size)
+        quantizer = APoTQuantizer(4, 2, 1.0, False)
+        float2apot = float2apot.int()
+        orig_input = torch.clone(float2apot)
+
+        dequantized_result = quantizer.dequantize(float2apot)
+
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
+
+        quantized_result = quantized_result.int()
+
+        self.assertTrue(torch.equal(quantized_result, orig_input))
+
+    r""" Tests dequantize_apot result on random 1-dim tensor
+        and hardcoded values for b, k.
+        Dequant -> quant an input tensor and verify that
+        result is equivalent to input
+        * tensor2quantize: Tensor
+        * b: 6
+        * k: 2
+    """
+    def test_dequantize_quantize_rand_b6(self):
+        # generate random size of float2apot
+        size = random.randint(1, 20)
+
+        # initialize quantize APoT tensor to dequantize:
+        # generate tensor with random values between 0 -> 2**6 = 64
+        # because there are 2**b = 2**6 quantization levels total
+        float2apot = 64 * torch.rand(size)
+        quantizer = APoTQuantizer(6, 2, 1.0, False)
+        float2apot = float2apot.int()
+        orig_input = torch.clone(float2apot)
+
+        dequantized_result = quantizer.dequantize(float2apot)
+
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
+
+        quantized_result = quantized_result.int()
+
+        self.assertTrue(torch.equal(quantized_result, orig_input))
 
     def test_q_apot_alpha(self):
         with self.assertRaises(NotImplementedError):
