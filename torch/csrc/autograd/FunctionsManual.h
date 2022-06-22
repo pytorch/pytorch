@@ -301,7 +301,7 @@ at::Tensor evenly_distribute_backward(
     at::Tensor grad,
     const at::Tensor& input,
     const at::Tensor& value);
-Tensor sgn_backward(const Tensor& x, const Tensor& gx, const Tensor& sgn);
+at::Tensor sgn_backward(Tensor result, Tensor grad, Tensor self);
 at::Tensor var_backward(
     at::Tensor grad,
     const at::Tensor& self,
@@ -322,27 +322,24 @@ at::Tensor std_backward(
     at::OptionalIntArrayRef dim,
     c10::optional<int64_t> correction,
     bool keepdim);
-Tensor mean_backward(
-    const Tensor& grad,
-    IntArrayRef shape,
-    IntArrayRef dim,
-    int64_t numel,
+at::Tensor mean_backward(
+    at::Tensor grad,
+    const at::IntArrayRef sizes,
+    at::IntArrayRef dim,
     bool keepdim);
-Tensor var_mean_backward(
-    const Tensor& gvar,
-    const Tensor& gmean,
-    const Tensor& self,
-    at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
-    bool keepdim);
-Tensor std_mean_backward(
-    const Tensor& gstd,
-    const Tensor& gmean,
-    const Tensor& self,
-    const Tensor& std,
-    at::OptionalIntArrayRef dim_opt,
-    c10::optional<int64_t> correction_opt,
-    bool keepdim);
+at::Tensor mean_backward(
+    at::Tensor grad,
+    const at::IntArrayRef sizes,
+    int64_t numel);
+at::Tensor var_std_mean_backward(
+    const variable_list& grads,
+    const at::Tensor& self,
+    const at::Tensor& r1,
+    const at::Tensor& r2,
+    at::OptionalIntArrayRef dim,
+    c10::optional<int64_t> correction,
+    bool keepdim,
+    bool is_std);
 at::Tensor masked_scatter_backward(
     const at::Tensor& grad,
     const at::Tensor& mask,
@@ -751,12 +748,6 @@ std::tuple<Tensor, Tensor> atan2_backward(
     const Tensor& self,
     const Tensor& other,
     std::array<bool, 2> output_mask);
-Tensor amaxamin_jvp(
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& result,
-    IntArrayRef dim,
-    bool keepdim);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,
     const c10::optional<Tensor>& gamma,
