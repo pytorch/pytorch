@@ -1,7 +1,11 @@
+import functools
+from collections import namedtuple
+
 from typing import Callable, Iterator, Sized, TypeVar, Optional, Union, Any, Dict, List
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data._utils.collate import default_collate
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import _check_lambda_fn
 
@@ -9,14 +13,6 @@ __all__ = [
     "CollatorIterDataPipe",
     "MapperIterDataPipe",
 ]
-import functools
-from collections import namedtuple
-
-from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
-
-if DILL_AVAILABLE:
-    import dill
-    dill.extend(use_dill=False)
 
 T_co = TypeVar("T_co", covariant=True)
 
@@ -134,23 +130,33 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
 def _collate_helper(conversion, item):
     # TODO(VitalyFedyunin): Verify that item is any sort of batch
     if len(item.items) > 1:
-        print(item.items)
-        # TODO(VitalyFedyunin): Compact all batch dataframes into the one
+        # TODO(VitalyFedyunin): Compact all batch dataframes into one
         raise Exception("Only supports one DataFrame per batch")
     df = item[0]
     columns_name = df_wrapper.get_columns(df)
     tuple_names: List = []
     tuple_values: List = []
+
+    for name in conversion.keys():
+        if name not in columns_name:
+            raise Exception("Conversion keys missmatch")
+    
     for name in columns_name:
         if name in conversion:
             if not callable(conversion[name]):
                 raise Exception('Collate (DF)DataPipe requires callable as dict values')
-            tuple_names.append(str(name))
-            value = conversion[name](getattr(df, name))
-            tuple_values.append(value)
+            collation_fn = conversion[name]
+        else:
+            #TODO(VitalyFedyunin): Add default collation into df_wrapper
+            try:
+                import torcharrow.pytorch as tap
+                collation_fn = tap.rec.Default()
+            except Exception:
+                raise Exception("unable to import default collation function from the TorchArrrow")
 
-    if len(tuple_names) != len(conversion.keys()):
-        raise Exception("Conversion keys missmatch")
+        tuple_names.append(str(name))
+        value = collation_fn(df[name])
+        tuple_values.append(value)
 
     # TODO(VitalyFedyunin): We can dynamically extract types from the tuple_values here
     tpl_cls = namedtuple("CollateResult", tuple_names)  # type: ignore
@@ -204,7 +210,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
         collate_fn: Callable = default_collate,
         conversion: Optional[
             Union[
-            Callable[[Any], Any],
+            Callable[..., Any],
             # TODO(VitalyFedyunin): Replace with `Callable[[IColumn], Any]`
             Dict[Union[str, Any], Union[Callable, Any]],
             # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`
