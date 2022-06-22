@@ -740,7 +740,17 @@ class TestNestedTensorAutograd(TestCase):
         weight = torch.randn(2, 2, requires_grad=True, dtype=torch.float32)
         bias = torch.randn(2, requires_grad=True, dtype=torch.float32)
         nt = torch.nested_tensor([a, b, c])
-        torch.functional.F.linear(c, weight, bias)
+
+        out = torch.functional.F.linear(nt, weight, bias)
+
+        out.backward(out.clone())
+
+        assert weight.grad is not None
+        assert bias.grad is not None
+
+        assert a.grad is None
+        assert b.grad is None
+        assert c.grad is None
 
 
 

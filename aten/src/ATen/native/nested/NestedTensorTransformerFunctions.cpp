@@ -63,6 +63,9 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
     const Tensor& grad_output,
     const Tensor& weight,
     std::array<bool, 3> output_mask) {
+  if (!grad_output.defined()) {
+    return std::tuple<Tensor, Tensor, Tensor>{Tensor(), Tensor(), Tensor()};
+  }
   Tensor grad_input, grad_weight, grad_bias;
   auto* nt_grad_output = get_nested_tensor_impl(grad_output);
   auto* nt_input = get_nested_tensor_impl(input);
@@ -72,22 +75,19 @@ std::tuple<Tensor, Tensor, Tensor> nested_linear_backward(
   auto grad_ouput_buffer = nt_grad_output->get_buffer();
   auto input_buffer = nt_input->get_buffer();
 
+  auto reshaped_grad = grad_ouput_buffer.reshape({-1, weight.size(0)});
+
   if (output_mask[0]) {
-    auto grad_input_buffer =
-        at::mm(grad_ouput_buffer.reshape({-1, weight.size(0)}), weight)
-            .view({-1});
+    auto grad_input_buffer = at::mm(reshaped_grad, weight).view({-1});
     auto grad_input_nt_size = nt_input->get_nested_size_tensor().clone();
     grad_input = wrap_buffer(grad_input_buffer, grad_input_nt_size);
   }
   if (output_mask[1]) {
-    grad_weight = at::mm(
-        grad_ouput_buffer.reshape({-1, weight.size(0)}).t_(),
-        input_buffer.reshape({-1, weight.size(1)}));
+    grad_weight =
+        at::mm(reshaped_grad.t(), input_buffer.reshape({-1, weight.size(1)}));
   }
-
   if (output_mask[2]) {
-    grad_bias = input_buffer.reshape({-1, weight.size(0)});
-    grad_bias = grad_bias.sum(0);
+    grad_bias = reshaped_grad.sum(0);
   }
   return std::tuple<Tensor, Tensor, Tensor>{grad_input, grad_weight, grad_bias};
 }

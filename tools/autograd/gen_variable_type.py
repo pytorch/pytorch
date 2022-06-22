@@ -787,12 +787,6 @@ def gen_variable_type_func(
     assert (name in MANUAL_BACKEND) == f.manual_kernel_registration
     # If you want to register a kernel to Autograd, you must make the op abstract.
     # In other words, this op must have dispatch section in native_functions.yaml.
-    if name == 'linear' or name=="linear_out":
-        from pprint import pprint
-        print("NAME:",name)
-        pprint(f)
-        pprint(f.is_abstract)
-        pprint("-".center(100,'-'))
     if name in MANUAL_AUTOGRAD_AND_TRACER or (fn.info and fn.info.has_derivatives):
         msg = (
             f"There's a formula for {name}(or its functional variant) in derivatives.yaml. "
