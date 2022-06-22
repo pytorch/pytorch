@@ -19757,11 +19757,11 @@ op_db: List[OpInfo] = [
     UnaryUfuncInfo(
         'special.gamma',
         decorators=(
-            precisionOverride(
+            toleranceOverride(
                 {
-                    torch.float32: 1e-03,
-                    torch.float64: 1e-05,
-                },
+                    torch.float32: tol(atol=1e-03, rtol=1.3e-05),
+                    torch.float64: tol(atol=1e-05, rtol=1.3e-05)
+                }
             ),
         ),
         dtypes=all_types_and(torch.bool),
