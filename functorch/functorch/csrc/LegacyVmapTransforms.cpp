@@ -4,7 +4,7 @@
 // This source code is licensed under the BSD-style license found in the
 // LICENSE file in the root directory of this source tree.
 
-#include <functorch/csrc/VmapTransforms.h>
+#include <functorch/csrc/LegacyVmapTransforms.h>
 #include <functorch/csrc/DynamicLayer.h>
 
 #include <ATen/ATen.h>
