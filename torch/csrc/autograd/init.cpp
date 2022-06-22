@@ -262,7 +262,13 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     py::class_<Inputs>(m, "_Inputs")
         .def_readonly("shapes", &Inputs::shapes_)
         .def_readonly("strides", &Inputs::strides_)
-        .def_readonly("scalars", &Inputs::scalars_)
+        .def_property_readonly("ivalues", [](const Inputs& inputs) {
+          py::list list;
+          for(auto& v : inputs.ivalues_) {
+            list.append(torch::jit::toPyObject(v));
+          }
+          return list;
+        })
         .def_readonly("dtypes", &Inputs::dtypes_);
 
     py::class_<ExtraFields<EventType::Backend>>(m, "_ExtraFields_Backend");

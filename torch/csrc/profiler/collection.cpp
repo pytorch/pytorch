@@ -24,7 +24,8 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
       push(value.toTensor());
     } else if (value.isScalar()) {
       tags_.emplace_back(Tag::Scalar);
-      scalars_.emplace_back(value.toScalar());
+      // Scalars are small enough to store as IValues
+      ivalues_.emplace_back(value);
     } else if (value.isTensorList()) {
       tags_.emplace_back(Tag::TensorListBegin);
       // TODO: Skip TensorList for now.
@@ -67,7 +68,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_it = tensor_sizes_.begin(),
-          scalars_it = scalars_.begin(),
+          ivals_it = ivalues_.begin(),
           tensor_strides_it = tensor_strides_.begin()]
           () mutable {
     struct Inputs out;
@@ -78,7 +79,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
       switch (*tag_it) {
         case Tag::Tensor:
           {
-            out.scalars_.emplace_back();
+            out.ivalues_.emplace_back();
             const auto& md = *tensor_metadata_it++;
             for (const auto _ : c10::irange(md.dim_)) {
               (void)_; // Suppress unused variable warning
@@ -93,17 +94,17 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             // TODO: Skip TensorLists for now.
           }
           out.dtypes_.emplace_back("TensorList");
-          out.scalars_.emplace_back();
+          out.ivalues_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
-          out.scalars_.emplace_back(*scalars_it++);
+          out.ivalues_.emplace_back(*ivals_it++);
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          out.scalars_.emplace_back();
+          out.ivalues_.emplace_back();
           out.dtypes_.emplace_back();
           break;
 
@@ -128,7 +129,7 @@ void InputOutputEncoder::clear() {
   tensor_metadata_.clear();
   tensor_sizes_.clear();
   tensor_strides_.clear();
-  scalars_.clear();
+  ivalues_.clear();
 }
 
 namespace {

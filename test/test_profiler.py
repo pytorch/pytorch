@@ -1160,8 +1160,8 @@ class TestTorchTidyProfiler(TestCase):
             torch._C._autograd._ExtraFields_Allocation)
 
     def test_tensor_sizes_strides(self):
-        x = torch.ones(10, 10)
-        y = torch.ones(1, 10)
+        x = torch.ones(10, 10).as_strided([4, 4], [12, 3])
+        y = torch.ones(4, 1)
 
         with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
             _ = x + y
@@ -1175,8 +1175,25 @@ class TestTorchTidyProfiler(TestCase):
             torch._C._autograd._ExtraFields_TorchOp)
 
         # The alpha scalar has a [] size
-        self.assertEqual(node.extra_fields.inputs.shapes, [[10, 10], [1, 10], []])
+        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
         self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
+        self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])
+
+    def test_scalar_ins(self):
+        x = torch.ones(5, 5)
+        alpha = 0.9
+
+        with profile(with_stack=True, profile_memory=True, record_shapes=True) as p:
+            _ = torch.add(x, 9.1, alpha=alpha)
+
+        nodes = p.profiler.kineto_results.experimental_event_tree()
+        node = find_node_with_name(nodes, "aten::add")
+        self.assertIsNotNone(node)
+
+        # The second argument to the add gets promotoed to a zerodim Tensor
+        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'double', 'Scalar'])
+        self.assertEqual(node.extra_fields.inputs.shapes, [[5, 5], [], []])
+        self.assertEqual(node.extra_fields.inputs.ivalues, [None, None, alpha])
 
 
 if __name__ == '__main__':
