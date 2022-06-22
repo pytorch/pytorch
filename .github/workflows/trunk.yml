@@ -77,12 +77,12 @@ jobs:
       docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
       build-generates-artifacts: false
 
-  libtorch-linux-xenial-cuda11_3-py3_7-gcc7-build:
-    name: libtorch-linux-xenial-cuda11.3-py3.7-gcc7
+  libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
+    name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: libtorch-linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       build-generates-artifacts: false
 
   # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
@@ -210,20 +210,20 @@ jobs:
       build-environment: macos-10-15-py3-arm64
 
   # please ensure that this and its corresponding job in pull.yml are in sync
-  win-vs2019-cuda11_3-py3-build:
-    name: win-vs2019-cuda11.3-py3
+  win-vs2019-cuda11_6-py3-build:
+    name: win-vs2019-cuda11.6-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cuda11.3-py3
-      cuda-version: "11.3"
+      build-environment: win-vs2019-cuda11.6-py3
+      cuda-version: "11.6"
 
-  win-vs2019-cuda11_3-py3-test:
-    name: win-vs2019-cuda11.3-py3
+  win-vs2019-cuda11_6-py3-test:
+    name: win-vs2019-cuda11.6-py3
     uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cuda11_3-py3-build
+    needs: win-vs2019-cuda11_6-py3-build
     with:
-      build-environment: win-vs2019-cuda11.3-py3
-      cuda-version: "11.3"
+      build-environment: win-vs2019-cuda11.6-py3
+      cuda-version: "11.6"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "windows.8xlarge.nvidia.gpu" },

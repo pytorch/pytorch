@@ -13,34 +13,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  linux-bionic-cuda11_6-py3_7-gcc7-build:
-    name: linux-bionic-cuda11.6-py3.7-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
-
-  linux-bionic-cuda11_6-py3_7-gcc7-test:
-    name: linux-bionic-cuda11.6-py3.7-gcc7
-    uses: ./.github/workflows/_linux-test.yml
-    needs: linux-bionic-cuda11_6-py3_7-gcc7-build
-    with:
-      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
-      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-build.outputs.docker-image }}
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
-
-  libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
-    name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
-      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
-      build-generates-artifacts: false
-
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build:
     name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
@@ -125,48 +97,27 @@ jobs:
           { config: "multigpu", shard: 1, num_shards: 1, runner: "linux.16xlarge.nvidia.gpu" },
         ]}
 
-  linux-xenial-cuda11_3-py3_7-gcc7-debug-build:
-    name: linux-xenial-cuda11.3-py3.7-gcc7-debug
+  linux-bionic-cuda11_6-py3_7-gcc7-debug-build:
+    name: linux-bionic-cuda11.6-py3.7-gcc7-debug
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-debug
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7-debug
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       build-with-debug: true
 
-  linux-xenial-cuda11_3-py3_7-gcc7-debug-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7-debug
+  linux-bionic-cuda11_6-py3_7-gcc7-debug-test:
+    name: linux-bionic-cuda11.6-py3.7-gcc7-debug
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-cuda11_3-py3_7-gcc7-debug-build
+    needs: linux-bionic-cuda11_6-py3_7-gcc7-debug-build
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-debug
-      docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-debug-build.outputs.docker-image }}
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7-debug
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-debug-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
-
-  win-vs2019-cuda11_6-py3-build:
-    name: win-vs2019-cuda11.6-py3
-    uses: ./.github/workflows/_win-build.yml
-    with:
-      build-environment: win-vs2019-cuda11.6-py3
-      cuda-version: "11.6"
-
-  win-vs2019-cuda11_6-py3-test:
-    name: win-vs2019-cuda11.6-py3
-    uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cuda11_6-py3-build
-    with:
-      build-environment: win-vs2019-cuda11.6-py3
-      cuda-version: "11.6"
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 2, runner: "windows.8xlarge.nvidia.gpu" },
-          { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
   ios-12-5-1-arm64:
