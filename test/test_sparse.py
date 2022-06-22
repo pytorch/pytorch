@@ -829,10 +829,9 @@ class TestSparse(TestCase):
 
         test_shape(2, 3, [2, 3, 4, 5])
         test_shape(2, 3, [2, 2, 0])
-        # For some reason the case below fails for gradcheck:
-        # grads have indices of shape (3, 0), not (2, 0) as it should be.
-        # TODO: file an issue
-        # test_shape(2, 0, [0, 0, 2])
+        # if nnz=0, it is not true that t == t.to_dense().to_sparse()
+        # unless t.sparse_dim == t.dim (i.e. t is not hybrid)
+        test_shape(3, 0, [0, 0, 2])
 
     @coalescedonoff
     @onlyCPU
