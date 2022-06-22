@@ -193,7 +193,10 @@ struct _cuda_scatter_large_index_internal_kernel {
     const int64_t *index_strides_data = index_strides.data();
     const int64_t *src_shape_data = src_shape.data();
     const int64_t *src_strides_data = src_strides.data();
-    int64_t index_shape_host[ndim], index_strides_host[ndim], src_shape_host[ndim], src_strides_host[ndim];
+    int64_t* index_shape_host = (int64_t*) malloc(ndim * sizeof(int64_t));
+    int64_t* index_strides_host = (int64_t*) malloc(ndim * sizeof(int64_t));
+    int64_t* src_shape_host = (int64_t*) malloc(ndim * sizeof(int64_t));
+    int64_t* src_strides_host = (int64_t*) malloc(ndim * sizeof(int64_t));
     int64_t *index_shape_device, *index_strides_device, *src_shape_device, *src_strides_device;
 
     bool index_is_noncontiguous = false;
