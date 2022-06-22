@@ -10659,7 +10659,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=False)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
                         # clamp_max supports two tensor input with bool, but not a bool scalar
                         DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
@@ -10672,7 +10672,7 @@ op_db: List[OpInfo] = [
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=True,
-                    rhs_make_tensor_kwargs=dict(exclude_zero=False)),
+                    rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
                         # clamp_min supports two tensor input with bool, but not a bool scalar
                         DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
