@@ -186,7 +186,7 @@ radixSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
   StridedRandomAccessor<K, IndexType> keys_iter(keys_slice, keySliceStride);
   StridedRandomAccessor<V, IndexType> values_iter(values_slice, valueSliceStride);
 
-  namespace cub = NO_ROCM(at_cuda_detail)::cub;
+  namespace cub = ROCM_HIPCUB(at_cuda_detail::cub);
 
   using key_t = typename at::cuda::cub::detail::cuda_type<K>::type;
   using LoadKeys = cub::BlockLoad<K, block_size, items_per_thread,
