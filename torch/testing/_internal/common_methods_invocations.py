@@ -6282,6 +6282,18 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
                 yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
 
 
+def sample_inputs_constant_pad_nd(*args, **kwargs):
+    nn_samples = sample_inputs_nn_pad(*args, **kwargs, mode='constant')
+    def drop_mode_argument(input, pad, mode=None, value=None):
+        if value is None:
+            return SampleInput(input, args=(pad,))
+        else:
+            return SampleInput(input, args=(pad, value))
+
+    for sample in nn_samples:
+        yield drop_mode_argument(sample.input, *sample.args, **sample.kwargs)
+
+
 # TODO: reconcile with torch.linalg.det and torch.linalg.slogdet
 # Creates matrices with a positive nonzero determinant
 def sample_inputs_logdet(op_info, device, dtype, requires_grad, **kwargs):
@@ -13905,6 +13917,12 @@ op_db: List[OpInfo] = [
                             'TestCudaFuserOpInfo', 'test_nvfuser_correctness'),
            ],
            sample_inputs_func=sample_inputs_local_response_norm,),
+    OpInfo('constant_pad_nd',
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           sample_inputs_func=sample_inputs_constant_pad_nd,
+           supports_out=False),
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
@@ -19888,12 +19906,12 @@ op_db: List[OpInfo] = [
 #   construction arguments. These arguments can be overridden
 #   by adding kwargs to the constructor.
 
-def _find_referenced_opinfo(referenced_name):
+def _find_referenced_opinfo(referenced_name, variant):
     '''
     Finds the OpInfo with the given name that has no variant name.
     '''
     for opinfo in op_db:
-        if opinfo.name == referenced_name and opinfo.variant_test_name == '':
+        if opinfo.name == referenced_name and opinfo.variant_test_name == variant:
             return opinfo
 
 def _inherit_constructor_args(name, op, inherited, overrides):
@@ -19948,12 +19966,13 @@ class PythonRefInfo(OpInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant='',
             validate_view_consistency=True,
             supports_nvfuser=True,
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant)
         self.validate_view_consistency = validate_view_consistency
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, OpInfo)
@@ -19972,11 +19991,12 @@ class ReductionPythonRefInfo(ReductionOpInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant='',
             supports_nvfuser=True,
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant)
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, ReductionOpInfo)
 
@@ -19998,11 +20018,12 @@ class ElementwiseUnaryPythonRefInfo(UnaryUfuncInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant='',
             supports_nvfuser=True,
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant)
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, UnaryUfuncInfo)
 
@@ -20021,11 +20042,12 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
             *,
             op=None,  # the function variant of the operation, populated as torch.<name> if None
             torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant='',
             supports_nvfuser=True,
             **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
 
         self.torch_opinfo_name = torch_opinfo_name
-        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name)
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant)
         self.supports_nvfuser = supports_nvfuser
         assert isinstance(self.torch_opinfo, BinaryUfuncInfo)
 
@@ -20914,6 +20936,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.column_stack",
         torch_opinfo_name="column_stack",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.constant_pad_nd",
+        torch_opinfo_name="constant_pad_nd",
         supports_nvfuser=False,
     ),
     PythonRefInfo(

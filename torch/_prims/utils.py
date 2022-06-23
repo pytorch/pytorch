@@ -51,6 +51,7 @@ torch_function_passthrough = {
     torch.Tensor.dtype.__get__,  # type: ignore[attr-defined]
     torch.Tensor.shape.__get__,  # type: ignore[attr-defined]
     torch.Tensor.device.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
@@ -549,7 +550,7 @@ def extract_shape_from_varargs(
     """
 
     # Handles tuple unwrapping
-    if len(shape) == 1 and isinstance(shape[0], tuple):
+    if len(shape) == 1 and isinstance(shape[0], Sequence):
         shape = shape[0]
 
     validate_shape(shape)  # type: ignore[arg-type]

@@ -33,6 +33,7 @@ from collections.abc import Iterable
 from functools import reduce, partial, wraps
 from typing import Sequence, Optional, Union, Callable, List, Tuple
 import operator
+import builtins
 import warnings
 import math
 from enum import Enum
@@ -183,6 +184,7 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "constant_pad_nd",
     "dsplit",
     "dstack",
     "flatten",
@@ -1756,6 +1758,77 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
         for x in tensors
     )
     return cat(aligned_tensors, 1)
+
+
+# @register_decomposition(torch.ops.aten.constant_pad_nd)
+def constant_pad_nd(
+    input: TensorLikeType, pad: List[int], value: NumberType = 0
+) -> TensorLikeType:
+    if len(pad) % 2 != 0:
+        raise RuntimeError(
+            f"Length of pad must be even but instead it equals {len(pad)}"
+        )
+
+    input_sizes = input.shape
+    l_inp = len(input_sizes)
+
+    l_pad = len(pad) // 2
+    l_diff = l_inp - l_pad
+
+    if l_inp < l_pad:
+        raise RuntimeError(
+            "Length of pad should be no more than twice the number of "
+            f"dimensions of the input. Pad length is {len(pad)} while the input has ",
+            f"{l_inp} dimensions.",
+        )
+
+    c_input = input
+    for i in range(l_diff, l_inp):
+        pad_idx = 2 * (l_inp - i - 1)
+        if pad[pad_idx] < 0:
+            c_input = narrow(c_input, i, -pad[pad_idx], c_input.shape[i] + pad[pad_idx])
+
+        if pad[pad_idx + 1] < 0:
+            c_input = narrow(c_input, i, 0, c_input.shape[i] + pad[pad_idx + 1])
+
+    # if none of the pads are positive we can just return the result
+    if builtins.all(p <= 0 for p in pad):
+        return prims.clone(c_input)
+
+    new_shape = list(input_sizes[:l_diff])
+
+    for i in range(l_pad):
+        pad_idx = len(pad) - ((i + 1) * 2)
+        new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
+        if new_dim <= 0:
+            raise RuntimeError(
+                f"The input size {input_sizes[l_diff + i]}, plus negative padding ",
+                f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
+                f"which is invalid. Check dimension {l_diff + i} of your input.",
+            )
+        new_shape.append(new_dim)
+
+    print(new_shape, [type(i) for i in new_shape])
+
+    output = full(
+        new_shape,
+        value,
+        dtype=input.dtype,
+        device=input.device,
+        requires_grad=input.requires_grad,
+    )
+    c_output = output
+    for i in range(l_diff, l_inp):
+        pad_idx = 2 * (l_inp - i - 1)
+        if pad[pad_idx] > 0:
+            c_output = narrow(
+                c_output, i, pad[pad_idx], c_output.shape[i] - pad[pad_idx]
+            )
+        if pad[pad_idx + 1] > 0:
+            c_output = narrow(c_output, i, 0, c_output.shape[i] - pad[pad_idx + 1])
+
+    prims.copy_to(c_output, c_input)
+    return output
 
 
 @out_wrapper
