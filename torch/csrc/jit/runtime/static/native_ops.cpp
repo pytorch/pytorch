@@ -201,6 +201,63 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
     });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::list,
+    aten_list,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto str = p_node->Input(0).toStringRef();
+        c10::List<std::string> chars;
+        chars.reserve(str.size());
+        for (auto c : str) {
+          chars.emplace_back(1, c);
+        }
+        p_node->Output(0) = std::move(chars);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::numel,
+    aten_numel,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& arg = p_node->Input(0).toTensor();
+        p_node->Output(0) = arg.numel();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::cpu,
+    aten_cpu,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& arg = p_node->Input(0).toTensor();
+        p_node->Output(0) = arg.cpu();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::__range_length,
+    aten_range_length,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto lo = p_node->Input(0).toInt();
+        auto hi = p_node->Input(1).toInt();
+        auto step = p_node->Input(2).toInt();
+        // error handling when step_val == 0 during runtime
+        if (step == 0) {
+          throw std::runtime_error("range() arg 3 must not be zero");
+        }
+        if (step > 0 && lo < hi) {
+          p_node->Output(0) = 1 + (hi - 1 - lo) / step;
+        } else if (step < 0 && lo > hi) {
+          p_node->Output(0) = 1 + (lo - 1 - hi) / (0 - step);
+        } else {
+          p_node->Output(0) = 0;
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::index_put,
     aten_index_put,
     [](Node* n) -> SROperator {
