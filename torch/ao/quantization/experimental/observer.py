@@ -32,8 +32,8 @@ class APoTObserver(ObserverBase):
         self.min_val = torch.tensor([])
         self.max_val = torch.tensor([])
 
-    # alpha is an optional arg to override alpha from
-    # observer's internal state
+    # min_val and max_val are optional args to override
+    # the min_val and max_val observed by forward
     def calculate_qparams(self, signed, min_val=None, max_val=None):
         return self._calculate_qparams(signed, min_val, max_val)
 
@@ -41,7 +41,8 @@ class APoTObserver(ObserverBase):
     https://arxiv.org/pdf/1909.13144.pdf.
     Arg:
         signed: specifies whether to include signed values in quantization level calculations
-        alpha: optional value that can override internal alpha attribute for testing purposes
+        min_val: optional arg that can override min_val internal attribute
+        max_val: optional arg that can override max_val internal attribute
     Returns:
         gamma: gamma quantization parameter, defined to ensure that alpha is the maximum of the range
         quantization_levels: non-uniform quantization levels (fp representation)
@@ -119,8 +120,8 @@ class APoTObserver(ObserverBase):
 
         return (gamma, quantization_levels, level_indices)
 
+    r"""Records the running minimum and maximum of ``x``."""
     def forward(self, x_orig):
-        r"""Records the running minimum and maximum of ``x``."""
         if x_orig.numel() == 0:
             return x_orig
         x = x_orig.detach()
