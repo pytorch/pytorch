@@ -3,10 +3,12 @@
 
 import logging
 from torch.ao.sparsity import BaseDataScheduler, DataNormSparsifier
-
+import warnings
 from torch.testing._internal.common_utils import TestCase
 from torch import nn
 import torch
+from typing import Tuple
+import copy
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -16,7 +18,11 @@ class ImplementedDataScheduler(BaseDataScheduler):
         super().__init__(sparsifier, sparsifier_hyperparam, last_epoch, verbose)
 
     def get_schedule_param(self):
-        pass
+        if self.last_epoch > 0:
+            return {name: config['sparsity_level'] * 0.5
+                    for name, config in self.data_sparsifier.data_groups.items()}
+        else:
+            return self.base_param
 
 
 class TestBaseDataScheduler(TestCase):
@@ -52,14 +58,75 @@ class TestBaseDataScheduler(TestCase):
     def _get_schedule_param(self):
         return 'sparsity_level'
 
+    def _get_name_data_config(self, some_data, defaults):
+        config = copy.deepcopy(defaults)
+        if isinstance(some_data, Tuple):
+            # dealing with data_list
+            name, data = some_data
+        else:
+            # dealing with data_with_config
+            name, data, new_config = some_data['name'], some_data['data'], some_data['config']
+            config.update(new_config)
+        return name, data, config
+
     def test_constructor(self):
+        """Checks if the warning is thrown if the scheduler step is called
+        before the sparsifier step"""
         data_list, data_with_config, defaults = self._get_data()
         sparsifier = self._get_sparsifier(data_list, data_with_config, defaults)
         schedule_param = self._get_schedule_param()
         scheduler = self._get_scheduler(sparsifier, schedule_param)
 
         assert scheduler.data_sparsifier == sparsifier
-        assert scheduler._step_count == 0  # 0 now as step() is not yet implemented
+        assert scheduler._step_count == 1
 
         for name, config in sparsifier.data_groups.items():
             assert scheduler.base_param[name] == config.get(schedule_param, None)
+
+    def test_order_of_steps(self):
+        data_list, data_with_config, defaults = self._get_data()
+        sparsifier = self._get_sparsifier(data_list, data_with_config, defaults)
+        schedule_param = self._get_schedule_param()
+        scheduler = self._get_scheduler(sparsifier, schedule_param)
+
+        # Sparsifier step is not called
+        with self.assertWarns(UserWarning):
+            scheduler.step()
+
+        # Correct order has no warnings
+        # Note: This will trigger if other warnings are present.
+        with warnings.catch_warnings(record=True) as w:
+            sparsifier.step()
+            scheduler.step()
+            # Make sure there is no warning related to the base_data_scheduler
+            for warning in w:
+                fname = warning.filename
+                fname = '/'.join(fname.split('/')[-5:])
+                assert fname != 'torch/ao/sparsity/experimental/scheduler/data_scheduler/base_data_scheduler.py'
+
+    def test_step(self):
+        data_list, data_with_config, defaults = self._get_data()
+        sparsifier = self._get_sparsifier(data_list, data_with_config, defaults)
+        schedule_param = self._get_schedule_param()
+        scheduler = self._get_scheduler(sparsifier, schedule_param)
+
+        all_data = data_list + data_with_config
+
+        for some_data in all_data:
+            name, _, config = self._get_name_data_config(some_data, defaults)
+            assert sparsifier.data_groups[name][schedule_param] == config[schedule_param]
+
+        sparsifier.step()
+        scheduler.step()
+
+        for some_data in all_data:
+            name, _, config = self._get_name_data_config(some_data, defaults)
+            assert sparsifier.data_groups[name][schedule_param] == config[schedule_param] * 0.5
+
+        # checking step count
+        step_cnt = 5
+        for _ in range(0, step_cnt):
+            sparsifier.step()
+            scheduler.step()
+
+        assert scheduler._step_count == step_cnt + 2  # step_cnt + step above + 1 step in constructor
