@@ -85,7 +85,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['_linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_cholesky_ex'], input=(), names=('L', 'info'), hasout=True),
             op(operators=['linalg_inv_ex'], input=(), names=('inverse', 'info'), hasout=True),
-            op(operators=['linalg_solve_ex'], input=(a,), names=('result', 'LU', 'pivots'), hasout=True),
+            op(operators=['linalg_solve_ex'], input=(a,), names=('result', 'info'), hasout=True),
             op(operators=['_linalg_solve_ex'], input=(a,), names=('result', 'LU', 'pivots', 'info'), hasout=True),
             op(operators=['linalg_lu_factor'], input=(), names=('LU', 'pivots'), hasout=True),
             op(operators=['linalg_lu_factor_ex'], input=(), names=('LU', 'pivots', 'info'), hasout=True),
