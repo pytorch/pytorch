@@ -44,6 +44,11 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
                 f"non-default parameters, but {sz} are required."
             )
 
+    if len(sig.parameters) < sz:
+        raise ValueError(
+            f"The function {fn.__name__} takes {len(sig.parameters)} "
+            f"parameters, but {sz} are required."
+        )
 
 
 def _check_lambda_fn(fn):
