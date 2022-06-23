@@ -41,9 +41,9 @@ on:
       script:
         required: false
         type: string
-        default: .jenkins/pytorch/build.sh
+        default: ""
         description: |
-          Build script to use. Will be run inside docker.
+          If set, override the build script to use. Will be run inside docker.
           If this is set, an `artifact-suffix` input is required, to avoid
           colliding with other build artifacts that use the same docker image.
 
@@ -156,7 +156,7 @@ jobs:
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
-          docker exec -t "${container_name}" sh -c "${BUILD_SCRIPT}"
+          docker exec -t "${container_name}" sh -c "${BUILD_SCRIPT:-.jenkins/pytorch/build.sh}"
 
       - name: Archive artifacts into zip
         if: inputs.upload-artifacts
