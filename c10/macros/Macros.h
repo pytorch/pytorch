@@ -416,15 +416,6 @@ __host__ __device__
 #define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
-#if !defined(__clang__) && !defined(_MSC_VER) && defined(__GNUC__) && \
-    __GNUC__ < 6
-#define CONSTEXPR_EXCEPT_GCC5
-#define IS_NOT_GCC5_CONSTEXPR 0
-#else
-#define CONSTEXPR_EXCEPT_GCC5 constexpr
-#define IS_NOT_GCC5_CONSTEXPR 1
-#endif
-
 #if defined(__CUDA_ARCH__)
 #if defined(_MSC_VER) && defined(__CUDACC__)
 #define CONSTEXPR_EXCEPT_WIN_CUDA const

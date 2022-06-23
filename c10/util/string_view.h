@@ -179,7 +179,7 @@ class basic_string_view final {
     return size() == 0;
   }
 
-  CONSTEXPR_EXCEPT_GCC5 void remove_prefix(size_type n) {
+  constexpr void remove_prefix(size_type n) {
     if (n > size()) {
       throw std::out_of_range(
           "basic_string_view::remove_prefix: out of range. PrefixLength: " +
@@ -189,7 +189,7 @@ class basic_string_view final {
     size_ -= n;
   }
 
-  CONSTEXPR_EXCEPT_GCC5 void remove_suffix(size_type n) {
+  constexpr void remove_suffix(size_type n) {
     if (n > size()) {
       throw std::out_of_range(
           "basic_string_view::remove_suffix: out of range. SuffixLength: " +
@@ -198,7 +198,7 @@ class basic_string_view final {
     size_ -= n;
   }
 
-  CONSTEXPR_EXCEPT_GCC5 void swap(basic_string_view& sv) noexcept {
+  constexpr void swap(basic_string_view& sv) noexcept {
     auto tmp = *this;
     *this = sv;
     sv = tmp;
@@ -694,7 +694,7 @@ inline std::basic_ostream<CharT>& operator<<(
 }
 
 template <class CharT>
-CONSTEXPR_EXCEPT_GCC5 inline void swap(
+constexpr inline void swap(
     basic_string_view<CharT>& lhs,
     basic_string_view<CharT>& rhs) {
   lhs.swap(rhs);
