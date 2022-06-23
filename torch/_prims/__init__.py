@@ -451,8 +451,9 @@ def _elementwise_meta(
 
 
 def _complex_only_elementwise_meta(*args, **kwargs):
-    utils.check(utils.is_complex_dtype(args[0].dtype),
-                lambda: "Only complex dtype is supported")
+    utils.check(
+        utils.is_complex_dtype(args[0].dtype), lambda: "Only complex dtype is supported"
+    )
     return _elementwise_meta(*args, **kwargs)
 
 
