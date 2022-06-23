@@ -971,6 +971,26 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
+def check_for_sev(org: str, project: str, force: bool) -> None:
+    if force:
+        return
+    response = cast(
+        Dict[str, Any],
+        fetch_json(
+            "https://api.github.com/search/issues",
+            params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
+        ),
+    )
+    if response["total_count"] != 0:
+        for item in response["items"]:
+            if "merge blocking" in item["body"].lower():
+                raise RuntimeError(
+                    "Not merging any PRs at the moment because there is a "
+                    + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
+                    + f"{item['html_url']}"
+                )
+    return
+
 def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
     [owner, name] = repo.gh_owner_and_name()
     checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
@@ -1005,6 +1025,7 @@ def merge(pr_num: int, repo: GitRepo,
     org, project = repo.gh_owner_and_name()
     pr = GitHubPR(org, project, pr_num)
     initial_commit_sha = pr.last_commit()['oid']
+    check_for_sev(org, project, force)
     if force or can_skip_internal_checks(pr, comment_id):
         # do not wait for any pending signals if PR is closed as part of co-development process
         return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
@@ -1019,6 +1040,7 @@ def merge(pr_num: int, repo: GitRepo,
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
+        check_for_sev(org, project, force)
         current_time = time.time()
         elapsed_time = current_time - start_time
         print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
@@ -1044,7 +1066,7 @@ def merge(pr_num: int, repo: GitRepo,
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
             print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
-            time.sleep(60)
+            time.sleep(5 * 60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
