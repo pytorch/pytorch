@@ -930,7 +930,7 @@ class FullyShardedDataParallel(nn.Module):
         # setting communication hook to a default
         self.communication_hook = self._get_default_comm_hook()
         self.communication_hook_state = self._get_default_comm_hook_state()
-        self._comm_hook_was_called = False
+        self._hook_registered = False
 
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
@@ -4074,7 +4074,6 @@ class FullyShardedDataParallel(nn.Module):
 
         """
         assert self.check_is_root(), "register_comm_hook can only be called on a root instance."
-        assert not self._comm_hook_was_called, "register_comm_hook can be only called once"
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             raise NotImplementedError(
                 "Communication hooks are currently only available for a NO_SHARD strategy."
@@ -4082,7 +4081,8 @@ class FullyShardedDataParallel(nn.Module):
         else:
             # register same hook for root and all submodules
             for submodule in self.fsdp_modules(self):
-                submodule._comm_hook_was_called = True
+                assert not self.self._hook_registered, "communication hook can be only registered once"
+                submodule.self._hook_registered = True
                 # registering hook only if it hasn't been already registered
                 if submodule.communication_hook == self._get_default_comm_hook():
                     submodule.communication_hook_state = state
