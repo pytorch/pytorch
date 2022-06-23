@@ -17,3 +17,5 @@ jobs:
         run: echo "howdy everyone!"
       - name: second speech
         run: echo "howdy again!"
+  zain-reusable-workflow:
+    uses: ./.github/workflows/_zain-build.yml
