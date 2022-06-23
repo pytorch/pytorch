@@ -3,7 +3,7 @@
 # being built
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
-load("@fbsource//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
+load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
 load(":build_variables.bzl", "aten_native_source_list")
 load(
     ":ufunc_defs.bzl",
@@ -154,13 +154,14 @@ def get_generate_code_bin_outs():
         })
     return outs
 
-def get_template_registration_files_outs():
+def get_template_registration_files_outs(is_oss = False):
     outs = {}
-    for file_path in TEMPLATE_MASKRCNN_SOURCE_LIST:
-        outs[file_path] = [file_path]
+    if not is_oss:
+        for file_path in TEMPLATE_MASKRCNN_SOURCE_LIST:
+            outs[file_path] = [file_path]
 
-    for file_path in TEMPLATE_BATCH_BOX_COX_SOURCE_LIST:
-        outs[file_path] = [file_path]
+        for file_path in TEMPLATE_BATCH_BOX_COX_SOURCE_LIST:
+            outs[file_path] = [file_path]
 
     for file_path in TEMPLATE_SOURCE_LIST:
         outs[file_path] = [file_path]
@@ -171,9 +172,9 @@ def get_template_registration_files_outs():
 
     return outs
 
-def get_template_registration_file_rules(rule_name):
+def get_template_registration_file_rules(rule_name, is_oss = False):
     rules = []
-    for file_path in TEMPLATE_SOURCE_LIST + TEMPLATE_MASKRCNN_SOURCE_LIST + TEMPLATE_BATCH_BOX_COX_SOURCE_LIST:
+    for file_path in TEMPLATE_SOURCE_LIST if is_oss else (TEMPLATE_SOURCE_LIST + TEMPLATE_MASKRCNN_SOURCE_LIST + TEMPLATE_BATCH_BOX_COX_SOURCE_LIST):
         rules.append(":{}[{}]".format(rule_name, file_path))
     for file_path in aten_ufunc_generated_all_cpu_sources():
         rules.append(":{}[aten/src/ATen/{}]".format(rule_name, file_path))

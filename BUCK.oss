@@ -1,35 +1,14 @@
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
 load(
-    ":build_variables.bzl",
-    "aten_cpu_source_list",
-    "aten_native_source_list",
-    "core_sources_common",
-    "jit_core_headers",
-    "jit_core_sources",
-    "libtorch_profiler_sources",
-)
-load(
     ":pt_defs.oss.bzl",
-    "USED_PT_BACKENDS",
-    "build_aten_cpu",
-    "gen_aten_files",
-    "gen_aten_libtorch_files",
-    "get_aten_codegen_extra_params",
-    "get_pt_compiler_flags",
-    "get_pt_preprocessor_flags",
     "pt_operator_library",
     "get_pt_ops_deps",
-    "aten_ufunc_generated_all_cpu_sources",
-    "pt_xplat_cxx_library",
-    "TEMPLATE_SOURCE_LIST",
 )
 load(":buckbuild.bzl",
     "define_buck_targets",
 )
 
-define_buck_targets(
-    pt_xplat_cxx_library = pt_xplat_cxx_library,
-)
+define_buck_targets()
 
 cxx_library(
     name = "pthreadpool",
@@ -77,59 +56,6 @@ cxx_library(
     preprocessor_flags = ['-DUSE_INTERNAL_PTHREADPOOL_IMPL'],
     visibility = ['PUBLIC'],
 )
-
-build_aten_cpu(
-    name = "aten_cpu",
-    srcs = jit_core_sources +
-           aten_cpu_source_list + [
-        # Generated
-        ":gen_aten[Functions.cpp]",
-        ":gen_aten[Operators_0.cpp]",
-        ":gen_aten[Operators_1.cpp]",
-        ":gen_aten[Operators_2.cpp]",
-        ":gen_aten[Operators_3.cpp]",
-        ":gen_aten[Operators_4.cpp]",
-        ":gen_aten[core/ATenOpList.cpp]",
-        ":gen_aten[core/TensorMethods.cpp]",
-    ] + [
-        # Needed by ATen/native/EmbeddingBag.cpp
-        "caffe2/perfkernels/embedding_lookup_idx.cc",
-    ],
-)
-
-gen_aten_files(
-    name = "gen_aten",
-    extra_flags = get_aten_codegen_extra_params(USED_PT_BACKENDS),
-    visibility = ["PUBLIC"],
-)
-
-ATEN_EXPORTED_HEADERS = {
-    "CPUFunctions.h": ":gen_aten[CPUFunctions.h]",
-    "CPUFunctions_inl.h": ":gen_aten[CPUFunctions_inl.h]",
-    "CompositeExplicitAutogradFunctions.h": ":gen_aten[CompositeExplicitAutogradFunctions.h]",
-    "CompositeExplicitAutogradFunctions_inl.h": ":gen_aten[CompositeExplicitAutogradFunctions_inl.h]",
-    "CompositeExplicitAutogradNonFunctionalFunctions.h": ":gen_aten[CompositeExplicitAutogradNonFunctionalFunctions.h]",
-    "CompositeExplicitAutogradNonFunctionalFunctions_inl.h": ":gen_aten[CompositeExplicitAutogradNonFunctionalFunctions_inl.h]",
-    "CompositeImplicitAutogradFunctions.h": ":gen_aten[CompositeImplicitAutogradFunctions.h]",
-    "CompositeImplicitAutogradFunctions_inl.h": ":gen_aten[CompositeImplicitAutogradFunctions_inl.h]",
-    "FunctionalInverses.h": ":gen_aten[FunctionalInverses.h]",
-    "Functions.h": ":gen_aten[Functions.h]",
-    "MethodOperators.h": ":gen_aten[MethodOperators.h]",
-    "NativeFunctions.h": ":gen_aten[NativeFunctions.h]",
-    "NativeMetaFunctions.h": ":gen_aten[NativeMetaFunctions.h]",
-    "Operators.h": ":gen_aten[Operators.h]",
-    "RedispatchFunctions.h": ":gen_aten[RedispatchFunctions.h]",
-    "core/TensorBody.h": ":gen_aten[core/TensorBody.h]",
-    "core/aten_interned_strings.h": ":gen_aten[core/aten_interned_strings.h]",
-    "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
-}
-
-cxx_library(
-    name = "generated_aten_headers_cpu",
-    header_namespace = "ATen",
-    exported_headers = ATEN_EXPORTED_HEADERS,
-)
-gen_aten_libtorch_files(name = "gen_aten_libtorch")
 
 cxx_library(
     name = "caffe2_serialize",
@@ -194,14 +120,5 @@ cxx_binary(
         ":torch_mobile_core",
         ":torch_mobile_all_ops",
         "//c10:c10",
-    ],
-)
-
-filegroup(
-    name = "templated_selective_build_srcs",
-    # NB: no glob here, there are generated targets in this list!
-    srcs = glob(TEMPLATE_SOURCE_LIST) + aten_ufunc_generated_all_cpu_sources(":gen_aten[{}]"),
-    visibility = [
-        "PUBLIC",
     ],
 )
