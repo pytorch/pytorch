@@ -2723,6 +2723,11 @@ class TestTensorCreation(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'must be greater or equal to'):
                     torch.eye(n, m, device=device, dtype=dtype)
 
+            # Test the RuntimeError raised when k is out of bounds
+            for n, m, k in ((5, 5, -5), (5, 5, 7), (5, 3, 4)):
+                with self.assertRaisesRegex(RuntimeError, 'should be between'):
+                    torch.eye(n, m, k, device=device, dtype=dtype)
+
             # Test when the `m` parameter is not provided
             for n in (3, 5, 7):
                 res1 = torch.eye(n, device=device, dtype=dtype)
@@ -2733,6 +2738,32 @@ class TestTensorCreation(TestCase):
                 # Check eye_out outputs
                 res2 = torch.empty(0, device=device, dtype=dtype)
                 torch.eye(n, out=res2)
+                self.assertEqual(res1, res2)
+
+            # Test that offsets (`k`) work
+            for n, m, k in ((5, 5, 1), (3, 5, -1),
+                            (5, 3, 1), (2, 6, -1),
+                            (2, 6, 3), (5, 5, -1)):
+                res1 = torch.eye(n, m, k, device=device, dtype=dtype)
+                naive_eye = torch.zeros(n, m, dtype=dtype, device=device)
+                naive_eye.diagonal(dim1=-2, dim2=-1, offset=k).fill_(1)
+                self.assertEqual(naive_eye, res1)
+
+                # Check eye_out outputs
+                res2 = torch.empty(0, device=device, dtype=dtype)
+                torch.eye(n, m, k, out=res2)
+                self.assertEqual(res1, res2)
+
+            # Test the offset (`k`) can be passed by keyword, without `m`
+            for n, k in ((3, -1), (5, 0), (7, 2)):
+                res1 = torch.eye(n, k=k, device=device, dtype=dtype)
+                naive_eye = torch.zeros(n, n, dtype=dtype, device=device)
+                naive_eye.diagonal(dim1=-2, dim2=-1, offset=k).fill_(1)
+                self.assertEqual(naive_eye, res1)
+
+                # Check eye_out outputs
+                res2 = torch.empty(0, device=device, dtype=dtype)
+                torch.eye(n, k=k, out=res2)
                 self.assertEqual(res1, res2)
 
             for n, m in product([3, 5, 7], repeat=2):

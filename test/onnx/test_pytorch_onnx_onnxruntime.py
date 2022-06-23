@@ -5955,9 +5955,11 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
             def forward(self, x):
                 return (
                     torch.eye(x.size()[1], 3),
+                    torch.eye(x.size()[1], 3, 1),
                     torch.eye(4, 4, dtype=torch.long),
                     torch.eye(x.size()[1], 2, dtype=torch.long),
                     torch.eye(x.shape[0]),
+                    torch.eye(3, 3, -2),
                     torch.eye(x.shape[0], dtype=torch.float64),
                 )
 
