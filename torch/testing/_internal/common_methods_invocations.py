@@ -14734,7 +14734,7 @@ op_db: List[OpInfo] = [
     ),
     UnaryUfuncInfo(
         'nn.functional.threshold',
-        ref=lambda x, threshold, value: np.where(np.isnan(x), x, np.where(x > threshold, x, value)).astype(x.dtype),
+        ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
