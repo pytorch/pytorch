@@ -126,7 +126,7 @@ Diagram::
 
 PTSQ API Example::
 
-  import torch
+  import torch_cause_error
 
   # define a floating point model where some layers could be statically quantized
   class M(torch.nn.Module):
