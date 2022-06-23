@@ -137,9 +137,9 @@ class BasicEvaluation:
         all_events = cuda_launch_events + cuda_kernel_events + self.events
 
         def new_old_event_comparator(event):
-            if isinstance(event, _KinetoEvent):
+            if hasattr(event, "start_us"):
                 return event.start_us() * 1000
-            if isinstance(event, _ProfilerEvent):
+            if hasattr(event, "start_time_ns"):
                 return event.start_time_ns
             raise Exception("Unknown Event Type")
 
@@ -147,14 +147,14 @@ class BasicEvaluation:
         all_events.sort(key=new_old_event_comparator)
         for event in all_events:
             # Find latest cuda kernel event
-            if isinstance(event, _KinetoEvent):
+            if hasattr(event, "start_us"):
                 start_time = event.start_us() * 1000
                 end_time = (event.start_us() + event.duration_us()) * 1000
                 # Find current spawned cuda kernel event
                 if event in kernel_mapping and kernel_mapping[
                         event] is not None:
                     spawned_kernel_index = kernel_mapping[event]
-            elif isinstance(event, _ProfilerEvent):
+            elif hasattr(event, "start_time_ns"):
                 start_time = event.start_time_ns
                 end_time = event.end_time_ns
 
@@ -164,11 +164,10 @@ class BasicEvaluation:
                 current_kernel_index += 1
             current_queue_depth = spawned_kernel_index - current_kernel_index + 1
 
-            if isinstance(event, _KinetoEvent):
+            if hasattr(event, "start_us"):
                 queue_depth_list.append(
                     Interval(start_time, end_time, current_queue_depth))
-
-            if isinstance(event, _ProfilerEvent):
+            elif hasattr(event, "start_time_ns"):
                 self.metrics[EventKey(event)].queue_depth = current_queue_depth
 
         return queue_depth_list
