@@ -4204,13 +4204,15 @@ Alias for :func:`torch.special.expm1`.
 add_docstr(
     torch.eye,
     r"""
-eye(n, m=None, *, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
+eye(n, m=None, *, k=0, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
 Returns a 2-D tensor with ones on the diagonal and zeros elsewhere.
 
 Args:
     n (int): the number of rows
     m (int, optional): the number of columns with default being :attr:`n`
+    k (int, optional): the diagonal offset, a positive value refers to an upper diagonal, and a negative value
+           to a lower diagonal, with the default being 0, the main diagonal
 
 Keyword arguments:
     {out}
@@ -4220,7 +4222,7 @@ Keyword arguments:
     {requires_grad}
 
 Returns:
-    Tensor: A 2-D tensor with ones on the diagonal and zeros elsewhere
+    Tensor: A 2-D tensor with ones on the :attr:`k`-th diagonal and zeros elsewhere
 
 Example::
 
