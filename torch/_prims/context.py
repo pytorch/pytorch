@@ -84,7 +84,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         func = mapping.get(orig_func, None)
         if func is not None:
             # torch calls inside func should be interpreted as refs calls
-            with self.push():
+            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
                 return func(*args, **kwargs)
         if self.strict:
             raise RuntimeError(
