@@ -178,10 +178,43 @@ class TestCommunicationHooks(FSDPTest):
                 self.assertEqual(entry.communication_hook.__qualname__, allreduce_hook.allreduce_hook.__qualname__)
 
             dummy_state = DummyState(process_group=None)
+
+            if has_wrapping:
+                # Creating a list of non-root submodules to test
+                submodules = [
+                    submodule for submodule in FSDP.fsdp_modules(fsdp_model_with_hook)
+                    if not submodule.check_is_root()
+                ]
+                # Check that assertion is raised for registering a comm hook on a non-root
+                with self.assertRaises(AssertionError):
+                    submodules[0].register_comm_hook(
+                        dummy_state,
+                        dummy_hook
+                    )
+
+                # Simmulate a registretion of a hook on a submodule
+                submodules[1]._hook_registered = True
+
+                # Check that an error is raised when some of submodules have a non-default hook assigned
+                with self.assertRaises(AssertionError):
+                    fsdp_model_with_hook.register_comm_hook(
+                        dummy_state,
+                        dummy_hook
+                    )
+
+                # Reinitialize model to default
+                fsdp_model_with_hook = FSDP(
+                    Net(has_wrapping),
+                    device_id=torch.cuda.current_device(),
+                    sharding_strategy=sharding_strategy
+                ).to(device)
+
+
             fsdp_model_with_hook.register_comm_hook(
                 dummy_state,
                 dummy_hook
             )
+            # Check that we can't register comm hook twice
             with self.assertRaises(AssertionError):
                 fsdp_model_with_hook.register_comm_hook(
                     dummy_state,
