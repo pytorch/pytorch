@@ -14,7 +14,7 @@
 #else
 #include <ATen/ops/sparse_coo_tensor.h>
 #endif
-
+#include <iostream>
 namespace at {
 namespace native {
 namespace impl {
@@ -56,53 +56,50 @@ Tensor spdiags_impl(
       "spdiags(): Expected a LongTensor of offsets but got ",
       offsets_1d.scalar_type());
 
+  TORCH_CHECK(
+      offsets_1d.unsqueeze(0)
+          .permute({1, 0})
+          .eq(offsets_1d)
+          .sum(-1)
+          .equal(at::ones_like(offsets_1d)),
+      "spdiags(): Offset tensor contains duplicate values");
+
+  const auto n_diag = offsets_1d.size(0);
+
   auto nnz_per_diag = at::zeros_like(offsets_1d);
 
   auto setup_iter = TensorIteratorConfig()
                         .add_output(nnz_per_diag)
                         .add_input(offsets_1d)
                         .build();
-  int64_t nnz = 0;
+
   // Checks offsets and computes nnz per diag
-  setup_func(setup_iter, shape[0], shape[1], diagonals_2d.size(1), nnz);
-  auto n_diag = offsets_1d.size(0);
-  auto nnz_prefix = nnz_per_diag.cumsum(0).sub(nnz_per_diag);
+  setup_func(setup_iter, shape[0], shape[1], diagonals_2d.size(1));
 
-  // We need to restride outputs so that the nnz dimension appears to be n_diag,
-  // and we will advance it manually
-  auto indices = at::zeros({2, nnz}, offsets_1d.options());
-  auto row_indices_restrided = indices[0].as_strided({n_diag}, {0});
-  auto col_indices_restrided = indices[1].as_strided({n_diag}, {0});
-  auto values = at::zeros({nnz}, diagonals_2d.options());
-  auto values_restrided = values.as_strided({n_diag}, {0});
+  auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
+  // const auto nnz = nnz_per_diag_cumsum.select(0, -1).item<int64_t>();
+  // Note the above fails when no diagonals are provided, this case is allowed
+  // by scipy.
+  const auto nnz = nnz_per_diag.sum(-1).item<int64_t>();
+  auto result_mem_offsets = nnz_per_diag_cumsum.sub_(nnz_per_diag);
 
-  // Diagonals is going to advance normally, but only over rows, we must drop
-  // the col dim, so the shapes match
-  auto diagonals_restrided =
-      diagonals_2d.as_strided({n_diag}, {diagonals_2d.stride(0)});
+  auto indices = at::empty({2, nnz}, offsets_1d.options());
+  auto values = at::empty({nnz}, diagonals_2d.options());
 
-  // We build an index value buffer so we can do fast copies into the indices
-  // view
-  auto max_idx = std::max(shape[0], shape[1]);
-  Tensor idx_buffer = at::arange(max_idx, offsets_1d.options());
-  auto idx_buffer_restrided = idx_buffer.as_strided({n_diag}, {0});
+  Tensor diag_index = at::arange(n_diag, offsets_1d.options());
+  // cpu_kernel requires an output
+  auto dummy = at::empty({1}, offsets_1d.options());
 
   auto iter = TensorIteratorConfig()
-                  .set_check_mem_overlap(false)
-                  .check_all_same_dtype(false)
-                  .resize_outputs(false)
-                  .add_output(values_restrided)
-                  .add_output(row_indices_restrided)
-                  .add_output(col_indices_restrided)
-                  .add_input(diagonals_restrided)
+                  .add_output(dummy)
+                  .add_input(diag_index)
                   .add_input(offsets_1d)
-                  .add_input(idx_buffer_restrided)
+                  .add_input(result_mem_offsets)
                   .add_input(nnz_per_diag)
-                  .add_input(nnz_prefix)
                   .build();
 
-  kernel_func(iter, diagonals_2d.stride(1));
-  auto result_coo = at::sparse_coo_tensor(indices, values, shape).coalesce();
+  kernel_func(iter, diagonals_2d, values, indices);
+  auto result_coo = at::sparse_coo_tensor(indices, values, shape);
   if (layout) {
     if (*layout == Layout::SparseCsr) {
       return result_coo.to_sparse_csr();
