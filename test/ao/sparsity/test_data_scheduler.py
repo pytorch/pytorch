@@ -130,3 +130,27 @@ class TestBaseDataScheduler(TestCase):
             scheduler.step()
 
         assert scheduler._step_count == step_cnt + 2  # step_cnt + step above + 1 step in constructor
+
+    def test_state_dict(self):
+        data_list, data_with_config, defaults = self._get_data()
+        sparsifier = self._get_sparsifier(data_list, data_with_config, defaults)
+        schedule_param = self._get_schedule_param()
+        scheduler1 = self._get_scheduler(sparsifier, schedule_param)
+
+        sparsifier.step()
+        scheduler1.step()
+
+        scheduler2 = self._get_scheduler(sparsifier, schedule_param)
+        all_data = data_list + data_with_config
+        for some_data in all_data:
+            name, _, _ = self._get_name_data_config(some_data, defaults)
+            assert scheduler1.base_param[name] != scheduler2.base_param[name]
+            assert scheduler1._last_param[name] == scheduler2.base_param[name]
+
+        scheduler1_state = scheduler1.state_dict()
+        scheduler2.load_state_dict(scheduler1_state)
+
+        for some_data in all_data:
+            name, _, _ = self._get_name_data_config(some_data, defaults)
+            assert scheduler1.base_param[name] == scheduler2.base_param[name]
+            assert scheduler1._last_param[name] == scheduler2._last_param[name]
