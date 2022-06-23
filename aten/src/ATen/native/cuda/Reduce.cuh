@@ -900,7 +900,7 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   }
 }
 
-void launch_jitted_reduce_kernel(
+inline void launch_jitted_reduce_kernel(
     std::mutex &jiterator_mutex,
     std::array<at::cuda::jit::NvrtcFunction, 3> &fn_cache,
     const at::cuda::jit::KernelDescriptor &desc,
