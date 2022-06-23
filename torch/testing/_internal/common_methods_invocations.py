@@ -10666,6 +10666,8 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        # test error disabled since rhs non-tensor python scalar is supported
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_errors'),
                     )),
     BinaryUfuncInfo('clamp_min',
                     ref=_clamp_min_numpy,
@@ -10682,6 +10684,8 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        # test error disabled since rhs non-tensor python scalar is supported
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_errors'),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -20766,11 +20770,19 @@ python_ref_db = [
         "_refs.clamp_min",
         torch_opinfo_name="clamp_min",
         supports_nvfuser=False,
+        skips=(
+            # test error disabled since rhs non-tensor python scalar is supported
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.clamp_max",
         torch_opinfo_name="clamp_max",
         supports_nvfuser=False,
+        skips=(
+            # test error disabled since rhs non-tensor python scalar is supported
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_errors'),
+        ),
     ),
     PythonRefInfo(
         "_refs.clamp",
