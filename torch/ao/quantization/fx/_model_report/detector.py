@@ -484,3 +484,75 @@ class DynamicStaticDetector(DetectorBase):
 
         # return the string as well as the dictionary of information
         return (dynamic_vs_static_string, module_dynamic_static_info)
+
+
+class InputWeightEqualizationDetector(DetectorBase):
+    r"""
+    Determines whether input-weight equalization can help improve quantization for certain modules.
+
+    Specifically, this list of modules includes:
+        linear
+        conv
+
+    Determines whether input-weight equalization is recommended based on the comp stat:
+        s_c = sqrt(w_c/W)/sqrt(i_c/I)
+        where:
+            w_c is range of weight for channel c, W is range of weight over all channels
+            i_c is range of input for channel c, I is range of input over all channels
+
+        if s_c >= threshold or <= 1 / threshold, recommends input-weight equalization
+
+    Args:
+        ratio_threshold (float): The threshold for s_c to determine if input-weight equalization is sugggested
+        channel (int, optional): The channel being observed to determine input weight equalization
+            Default: 1
+    """
+
+    def __init__(self):
+        pass
+
+    def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
+        r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
+        For this detector, we want to place observers in front of supported layers.
+
+        Currently inserts observers for:
+            linear layers
+            conv layers
+
+        Args:
+            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
+            key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
+            key "insert_observer" -> the observer we wish to insert (ObserverBase)
+            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_args" -> The arguments that are meant to be passed into the observer
+        """
+
+    def get_detector_name(self) -> str:
+        r""" Returns the name of this detector """
+        return "input_weight_equalization_detector"
+
+    def generate_detector_report(self, model: GraphModule) -> Tuple[str, Dict[str, Any]]:
+        r"""
+        Determines whether input weight equalization is appropriate for a given module.
+
+        Takes advantage of the ModelReport Observer which records per channel information of input range
+        It then uses the passed in weight info inconjunction to compute the desired ratio
+        Finally, it gives suggestions based on this information for each module of interest
+
+        Args:
+            model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
+            weight_info (Dict): Maps modules of interest to information on their weights to be analyzed
+
+        Returns a tuple with two elements:
+            String report of of whether input weight equalization is recommended for certain modules
+            Dictionary mapping modules of interst to:
+                whether input weight equalization is recommended
+                their s_c metric compared to the threshold
+                the threshold used to make the recommendation
+                the channel used for recording data
+                the input channel range ratio
+                the weight channel range ratio
+        """
+        pass
