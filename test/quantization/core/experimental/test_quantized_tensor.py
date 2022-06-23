@@ -3,6 +3,7 @@
 import torch
 import random
 import unittest
+from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
@@ -18,15 +19,14 @@ class TestQuantizedTensor(unittest.TestCase):
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
         orig_tensor2quantize = torch.clone(tensor2quantize)
 
-        min_val = torch.min(tensor2quantize)
-        max_val = torch.max(tensor2quantize)
+        observer = APoTObserver(b=4, k=2)
 
-        quantizer = APoTQuantizer(4, 2, min_val, max_val, False)
+        quantizer = APoTQuantizer(observer)
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, signed=False)
 
-        tensor_apot = TensorAPoT(quantizer, orig_tensor2quantize)
+        tensor_apot = TensorAPoT(quantizer=quantizer, tensor2quantize=orig_tensor2quantize, signed=False)
 
         qtensor_int_rep = tensor_apot.int_repr()
 
