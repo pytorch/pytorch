@@ -27,6 +27,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <c10/core/SymIntArrayRef.h>
 
@@ -452,14 +453,48 @@ Tensor eye(int64_t n, int64_t m,
   return at::eye_out(tensor, n, m);
 }
 
+Tensor eye(int64_t n, c10::optional<int64_t> k,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  auto tensor = at::empty({0}, options); // to be resized
+  // k defaults to 0
+  int64_t k_v{k.has_value() ? k.value() : 0};
+  return at::eye_out(tensor, n, n, k_v);
+}
+
+Tensor eye(int64_t n, int64_t m, int64_t k,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Layout> layout,
+    c10::optional<Device> device,
+    c10::optional<bool> pin_memory) {
+  // See [Note: hacky wrapper removal for TensorOptions]
+  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+
+  auto tensor = at::empty({0}, options); // to be resized
+  return at::eye_out(tensor, n, m, k);
+}
+
 Tensor& eye_out_cpu(int64_t n, Tensor& result) {
   // the default value of `m` equals to `n`
   return native::eye_out_cpu(n, n, result);
 }
 
 Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
+  // the default value of `k` equals to 0
+  return native::eye_out_cpu(n, m, 0, result);
+}
+
+Tensor& eye_out_cpu(int64_t n, int64_t m, int64_t k, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
+  TORCH_CHECK((k > -n && k < m) || (k == 0),
+              "k out of range, should be between (-",
+              n, ", ", m, "), or 0 but got ", k);
 
   result.resize_({n, m});
 
@@ -467,15 +502,37 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
 
   result.zero_();
 
-  int64_t sz = std::min<int64_t>(n, m);
+  int64_t sz {std::min<int64_t>(n, m) - std::abs(k)};
+  int64_t wraparound_k {k};
+
+  if (k < 0) {
+    wraparound_k = -k * m; // Iterate over column elements
+    if (n > m) { // More rows than columns
+      sz = std::min<int64_t>(m, (n + k));
+    } // m >= n is handled by sz
+  } else if (k > 0) {
+    wraparound_k = k;
+    if (m>n) { // More columns than rows
+      sz = std::min<int64_t>(n, (m - k));
+    } // n >= m is handled by sz
+  }
+
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::Bool, result.scalar_type(), "eye", [&]() -> void {
     scalar_t* result_data = result.data_ptr<scalar_t>();
     at::parallel_for(0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
-      for (const auto i : c10::irange(p_begin, p_end))result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
+      for (const auto idx : c10::irange(p_begin, p_end)){
+        result_data[(idx * (result.strides()[0] + result.strides()[1]) + wraparound_k)] = 1;
+      }
     });
   });
 
   return result;
+}
+
+Tensor& eye_out_cpu_nk(int64_t n, c10::optional<int64_t> k, Tensor& result) {
+  // the default value of `m` equals to `n`
+  int64_t k_v{k.has_value() ? k.value() : 0};
+  return native::eye_out_cpu(n, n, k_v, result);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
