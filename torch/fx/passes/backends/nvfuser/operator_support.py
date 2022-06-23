@@ -5,12 +5,6 @@ import torch.fx
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 
-try:
-    from torch._C._nvfuser import FusionDefinition as fd  # type: ignore[import]
-except ImportError:
-    # Not all PyTorch builds have nvfuser
-    pass
-
 class NvFuserOperatorSupport(OperatorSupport):
     """
     Operator support for nvFuser backend.
@@ -38,7 +32,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.add": None,
             "torch.ops.aten.sub": None,
             "torch.ops.aten.rsub": None,
-            "torch.ops.aten.div": None,
+            # "torch.ops.aten.div": None,       # missing prim decomp
             "torch.ops.aten.atan2": None,
             "torch.ops.aten.mul": None,
             "torch.ops.aten.max": None,
@@ -104,7 +98,8 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.rand_like": None,
             "torch.ops.aten.softplus": None,
             "torch.ops.aten.threshold": None,
-            "torch.ops.aten.threshold_backward": None,
+            # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.new_zero op
+            # "torch.ops.aten.threshold_backward": None,
             "torch.ops.aten.clamp": None,
             "torch.ops.aten.where": None,
             "torch.ops.aten.lerp": None,
@@ -121,10 +116,12 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.native_batch_norm_backward": None,
             "torch.ops.aten.native_layer_norm": None,
             "torch.ops.aten.layer_norm": None,
-            "torch.ops.aten.native_layer_norm_backward": None,
+            # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.div
+            # "torch.ops.aten.native_layer_norm_backward": None,
             "torch.ops.aten.softmax.int": None,
             "torch.ops.aten.log_softmax.int": None,
-            "torch.ops.aten._softmax": None,
+            # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.amax
+            # "torch.ops.aten._softmax": None,
             "torch.ops.aten._log_softmax_backward_data": None,
             "torch.ops.aten._softmax_backward_data": None,
             "torch.ops.aten.var.dim": None,
@@ -140,19 +137,20 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
             "torch.ops.aten.gelu_backward": None,
-            "torch.ops.aten.tanh_backward": None,
-            "torch.ops.aten.amax": None,
+            # relying on aten->aten->prim decomp, aten2aten is using unsupported aten.conj_physical
+            # "torch.ops.aten.tanh_backward": None,
+            # "torch.ops.aten.amax": None,      # missing prim decomp
             "torch.ops.aten.amin": None,
             "torch.ops.aten.reshape": None,
-            "torch.ops.aten.view": None,
+            # "torch.ops.aten.view": None,      # missing prim decomp
             "torch.ops.aten.flatten.using_ints": None,
 
             # ===============================================================
             # call_function aten: inplace variants
             # ===============================================================
             # TODO: These nodes shouldn't show up, the functionalization pass should have removed inplace ops
-            "torch.ops.aten.add_": None,
-            "torch.ops.aten.relu_": None,
+            # "torch.ops.aten.add_": None,
+            # "torch.ops.aten.relu_": None,
 
             # ===============================================================
             # call_function builtins and operator

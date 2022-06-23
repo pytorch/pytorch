@@ -56,17 +56,17 @@ def validate_partition(partition: NodeList) -> bool:
 
     def dfs_find_cycle(node):
         if node in partition_set:
-            return False  # found cycle, return False for invalid
+            return True  # found cycle, return
 
         visited.add(node)
         for user_node in node.users:
             if user_node not in visited:
-                if not dfs_find_cycle(user_node):
-                    return False
-        return True
+                if dfs_find_cycle(user_node):
+                    return True
+        return False
 
     for output_node in outputs:
-        if not dfs_find_cycle(output_node):
+        if dfs_find_cycle(output_node):
             return False
 
     return True
