@@ -1387,7 +1387,7 @@ def prepare(
         node_name_to_scope: Dict[str, Tuple[str, type]],
         example_inputs: Tuple[Any, ...],
         prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-        equalization_config: Union[QConfigMapping, Dict[str, Any], None] = None,
+        _equalization_config: Union[QConfigMapping, Dict[str, Any], None] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
         is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
@@ -1412,8 +1412,8 @@ def prepare(
     """
     if prepare_custom_config is None:
         prepare_custom_config = PrepareCustomConfig()
-    if equalization_config is None:
-        equalization_config = QConfigMapping()
+    if _equalization_config is None:
+        _equalization_config = QConfigMapping()
 
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
@@ -1421,11 +1421,11 @@ def prepare(
             "in a future version. Please pass in a QConfigMapping instead.")
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
 
-    if isinstance(equalization_config, Dict):
+    if isinstance(_equalization_config, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
             "be supported in a future version. Please pass in a QConfigMapping instead.")
-        equalization_config = QConfigMapping.from_dict(equalization_config)
+        _equalization_config = QConfigMapping.from_dict(_equalization_config)
 
     if isinstance(prepare_custom_config, Dict):
         warnings.warn(
@@ -1434,9 +1434,9 @@ def prepare(
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
     assert(isinstance(qconfig_mapping, QConfigMapping))
-    assert(isinstance(equalization_config, QConfigMapping))
+    assert(isinstance(_equalization_config, QConfigMapping))
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
-    equalization_config = copy.deepcopy(equalization_config)
+    _equalization_config = copy.deepcopy(_equalization_config)
 
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
@@ -1477,7 +1477,7 @@ def prepare(
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
     update_qconfig_for_fusion(model, qconfig_mapping)
-    update_qconfig_for_fusion(model, equalization_config)
+    update_qconfig_for_fusion(model, _equalization_config)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
@@ -1498,7 +1498,7 @@ def prepare(
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
     equalization_qconfig_map = generate_qconfig_map(
-        model, modules, model.graph, equalization_config, node_name_to_scope)
+        model, modules, model.graph, _equalization_config, node_name_to_scope)
     qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
 
     # match the patterns that will get quantized
