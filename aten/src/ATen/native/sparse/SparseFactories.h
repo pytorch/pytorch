@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/SparseTensorUtils.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/core/ATen_fwd.h>
@@ -14,7 +15,7 @@
 #else
 #include <ATen/ops/sparse_coo_tensor.h>
 #endif
-
+#include <iostream>
 namespace at {
 namespace native {
 namespace impl {
@@ -56,53 +57,50 @@ Tensor spdiags_impl(
       "spdiags(): Expected a LongTensor of offsets but got ",
       offsets_1d.scalar_type());
 
+  TORCH_CHECK(
+      offsets_1d.unsqueeze(0)
+          .permute({1, 0})
+          .eq(offsets_1d)
+          .sum(-1)
+          .equal(at::ones_like(offsets_1d)),
+      "spdiags(): Offset tensor contains duplicate values");
+
+  const auto n_diag = offsets_1d.size(0);
+
   auto nnz_per_diag = at::zeros_like(offsets_1d);
 
   auto setup_iter = TensorIteratorConfig()
                         .add_output(nnz_per_diag)
                         .add_input(offsets_1d)
                         .build();
-  int64_t nnz = 0;
+
   // Checks offsets and computes nnz per diag
-  setup_func(setup_iter, shape[0], shape[1], diagonals_2d.size(1), nnz);
-  auto n_diag = offsets_1d.size(0);
-  auto nnz_prefix = nnz_per_diag.cumsum(0).sub(nnz_per_diag);
+  setup_func(setup_iter, shape[0], shape[1], diagonals_2d.size(1));
 
-  // We need to restride outputs so that the nnz dimension appears to be n_diag,
-  // and we will advance it manually
-  auto indices = at::zeros({2, nnz}, offsets_1d.options());
-  auto row_indices_restrided = indices[0].as_strided({n_diag}, {0});
-  auto col_indices_restrided = indices[1].as_strided({n_diag}, {0});
-  auto values = at::zeros({nnz}, diagonals_2d.options());
-  auto values_restrided = values.as_strided({n_diag}, {0});
+  auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
+  // const auto nnz = nnz_per_diag_cumsum.select(0, -1).item<int64_t>();
+  // Note the above fails when no diagonals are provided, this case is allowed
+  // by scipy.
+  const auto nnz = nnz_per_diag.sum(-1).item<int64_t>();
+  auto result_mem_offsets = nnz_per_diag_cumsum.sub_(nnz_per_diag);
 
-  // Diagonals is going to advance normally, but only over rows, we must drop
-  // the col dim, so the shapes match
-  auto diagonals_restrided =
-      diagonals_2d.as_strided({n_diag}, {diagonals_2d.stride(0)});
+  auto indices = at::empty({2, nnz}, offsets_1d.options());
+  auto values = at::empty({nnz}, diagonals_2d.options());
 
-  // We build an index value buffer so we can do fast copies into the indices
-  // view
-  auto max_idx = std::max(shape[0], shape[1]);
-  Tensor idx_buffer = at::arange(max_idx, offsets_1d.options());
-  auto idx_buffer_restrided = idx_buffer.as_strided({n_diag}, {0});
+  Tensor diag_index = at::arange(n_diag, offsets_1d.options());
+  // cpu_kernel requires an output
+  auto dummy = at::empty({1}, offsets_1d.options());
 
   auto iter = TensorIteratorConfig()
-                  .set_check_mem_overlap(false)
-                  .check_all_same_dtype(false)
-                  .resize_outputs(false)
-                  .add_output(values_restrided)
-                  .add_output(row_indices_restrided)
-                  .add_output(col_indices_restrided)
-                  .add_input(diagonals_restrided)
+                  .add_output(dummy)
+                  .add_input(diag_index)
                   .add_input(offsets_1d)
-                  .add_input(idx_buffer_restrided)
+                  .add_input(result_mem_offsets)
                   .add_input(nnz_per_diag)
-                  .add_input(nnz_prefix)
                   .build();
 
-  kernel_func(iter, diagonals_2d.stride(1));
-  auto result_coo = at::sparse_coo_tensor(indices, values, shape).coalesce();
+  kernel_func(iter, diagonals_2d, values, indices);
+  auto result_coo = at::sparse_coo_tensor(indices, values, shape);
   if (layout) {
     if (*layout == Layout::SparseCsr) {
       return result_coo.to_sparse_csr();
@@ -112,6 +110,62 @@ Tensor spdiags_impl(
     }
   }
   return result_coo;
+}
+
+template <typename kernel_func_t>
+Tensor spdiags_backward_impl(
+    const Tensor& grad_out,
+    const Tensor& offsets,
+    IntArrayRef input_shape,
+    const kernel_func_t& kernel_func) {
+  auto offsets_1d = offsets.dim() == 0 ? offsets.unsqueeze(0) : offsets;
+
+  auto n_diag = input_shape.size() == 2 ? input_shape[0] : 1;
+  auto n_col_in = input_shape.size() == 2 ? input_shape[1] : input_shape[0];
+  AT_ASSERT(grad_out.dim() == 2);
+  AT_ASSERT(offsets_1d.size(0) == n_diag);
+  auto grad_in_options = grad_out.options().layout(Layout::Strided);
+  Tensor grad_in = at::zeros({n_diag, n_col_in}, grad_in_options);
+  auto grad_out_coo =
+      grad_out.layout() == Layout::Sparse ? grad_out : grad_out.to_sparse();
+
+  auto nnz = sparse::get_sparse_impl(grad_out_coo)->nnz();
+
+  // Restride tensors for TensorIterator
+  // here we restride n-diag dims to nnz
+  // We are going to iterate through values/indices, compute the diagonal the
+  // element is on, the col index already gives us a col position, and we search
+  // the offsets to find the row position.
+
+  // Grad_out and offsets need to be restrided
+  auto grad_in_restrided = grad_in.as_strided({nnz}, {0});
+  auto offsets_restrided = offsets_1d.as_strided({nnz}, {0});
+  // We will need these to compute assignment positions into grad_in
+  auto grad_in_strides = grad_in.strides();
+  // We will need these to ensure the computed position in bounds
+  auto grad_in_shape = grad_in.sizes();
+  // These do not need to be restrided if we take a view on row/col indiecs
+  // separately
+  auto grad_out_values = sparse::get_sparse_impl(grad_out_coo)->values_;
+  auto grad_out_indices = sparse::get_sparse_impl(grad_out_coo)->indices_;
+  auto grad_out_row_indices = grad_out_indices[0];
+  auto grad_out_col_indices = grad_out_indices[1];
+
+  auto iter = TensorIteratorConfig()
+                  .set_check_mem_overlap(false)
+                  .check_all_same_dtype(false)
+                  .resize_outputs(false)
+                  .add_output(grad_in_restrided)
+                  .add_input(offsets_restrided)
+                  .add_input(grad_out_values)
+                  .add_input(grad_out_row_indices)
+                  .add_input(grad_out_col_indices)
+                  .build();
+
+  kernel_func(
+      iter, n_diag, offsets_1d.stride(0), grad_in_strides, grad_in_shape);
+
+  return grad_in.reshape(input_shape);
 }
 } // namespace impl
 } // namespace native
