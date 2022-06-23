@@ -7,7 +7,7 @@ import numpy as np
 
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
-from torch.autograd import _KinetoEvent, _ProfilerEvent
+from torch.autograd import _KinetoEvent
 
 
 @dataclass
@@ -137,6 +137,7 @@ class BasicEvaluation:
 
         current_kernel_index = 0
         spawned_kernel_index = -1
+
         all_events = cuda_launch_events + cuda_kernel_events + self.events
 
         def new_old_event_comparator(event):
@@ -158,8 +159,8 @@ class BasicEvaluation:
                         event] is not None:
                     spawned_kernel_index = kernel_mapping[event]
             elif hasattr(event, "start_time_ns"):
-                start_time = event.start_time_ns
-                end_time = event.end_time_ns
+                start_time = event.start_time_ns  # type: ignore[attr-defined]
+                end_time = event.end_time_ns  # type: ignore[attr-defined]
 
             while (current_kernel_index < len(cuda_kernel_events) and
                    (cuda_kernel_events[current_kernel_index].start_us()) * 1000
