@@ -439,7 +439,6 @@ meta_function_expected_failures = {
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product
     torch.linalg.lstsq: {f32, f64},  # aten::linalg_lstsq.out
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular
-    torch.logdet: {f32, f64},  # aten::where.ScalarSelf
 }
 
 """
