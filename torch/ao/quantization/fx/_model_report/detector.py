@@ -524,10 +524,6 @@ class InputWeightEqualizationDetector(DetectorBase):
     :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
     """
 
-    # TODO Needs supported types attribute so it knows what to look at
-    # TODO Do we support Lazy Conv and Transpose Conv?
-    # TODO Make sure we are only looking at these types and not sub-classes since not all supported
-    # TODO can we have recursive fused modules
     SUPPORTED_MODULES: Set[Callable] = set(
         [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]
     )
