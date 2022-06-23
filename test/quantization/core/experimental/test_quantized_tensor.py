@@ -28,7 +28,7 @@ class TestQuantizedTensor(unittest.TestCase):
         quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
+        qtensor = APoTQuantizer.quantize_APoT(tensor2quantize=tensor2quantize, quantization_levels=qparams[1], level_indices=qparams[2])
 
         tensor_apot = TensorAPoT(quantizer=quantizer, tensor2quantize=orig_tensor2quantize)
 
