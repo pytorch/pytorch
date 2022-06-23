@@ -27,8 +27,6 @@ class APoTQuantizer():
     The approach follows the method outlined in the APoT paper: https://arxiv.org/pdf/1909.13144.pdf.
     Args:
         tensor2quantize: fp Tensor
-        quantization_levels: Tensor from APoT calculated qparams
-        level_indices: Tensor from APoT calculated qparams
     Returns:
         result: integer APoT representation of tensor2quantize
     """
@@ -62,10 +60,14 @@ class APoTQuantizer():
     def q_apot_alpha(self) -> float:
         raise NotImplementedError
 
+r""" Global method to create quantizer and call quantizer quantize_APoT
+"""
 def quantize_APoT(tensor2quantize: Tensor, qparams: Tuple):
     quantizer = APoTQuantizer(alpha=qparams[0], gamma=qparams[1], quantization_levels=qparams[2], level_indices=qparams[3])
     return quantizer.quantize_APoT(tensor2quantize)
 
+r""" Global method to create quantizer and call quantizer dequantize_APoT
+"""
 def dequantize_APoT(float2apot, qparams: Tuple):
     quantizer = APoTQuantizer(alpha=qparams[0], gamma=qparams[1], quantization_levels=qparams[2], level_indices=qparams[3])
     return quantizer.dequantize_APoT(float2apot)
