@@ -706,8 +706,7 @@ def run_tests(argv=UNITTEST_ARGS):
                               capture_output=True).returncode != 0:
                 subprocess.run([sys.executable, "-m", "pip", "install", "pytest-xdist"])
             os.environ["NO_COLOR"] = "1"
-            os.environ['OMP_NUM_THREADS'] = "1"
-            os.environ['MKL_NUM_THREADS'] = "1"
+            os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
             test_report_path = os.path.join(test_report_path, test_filename)
             exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-n=2', '-vv', '-s',
                                     f'--junitxml={test_report_path}.xml'])
