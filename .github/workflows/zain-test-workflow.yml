@@ -1,0 +1,19 @@
+name: Zain Test Workflow
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+      - zainr/workflow-payground
+      - release/*
+
+jobs:
+  say-something:
+    runs-on: linux.20_04.16x
+    steps:
+      - name: First speech
+        run: echo "howdy everyone!"
+      - name: second speech
+        run: echo "howdy again!"
