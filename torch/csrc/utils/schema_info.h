@@ -1,8 +1,11 @@
 #pragma once
 
-#include <ATen/core/alias_info.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <ATen/core/function_schema.h>
+#include <algorithm>
 #include <iterator>
+#include <string>
+#include <vector>
 
 namespace torch {
 namespace utils {
@@ -29,6 +32,10 @@ struct TORCH_API SchemaArgument {
 class TORCH_API SchemaInfo {
  public:
   SchemaInfo(c10::FunctionSchema schema) : schema_(schema) {}
+
+  SchemaInfo(const char* signature) : schema_(torch::jit::getOperatorForLiteral(signature)->schema()) {}
+
+  bool isDeterministic() const;
 
   bool isMutating(int index) const;
 
