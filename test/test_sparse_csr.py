@@ -729,37 +729,35 @@ class TestSparseCompressed(TestCase):
                torch.tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
                shape((2, 3)),
-               r'compressed_indices\[0\] \(=1\) == 0 is unsatisfied')
+               r'`c{row|col}_indices[..., 0] == 0` is not satisfied.')
 
         yield ('invalid compressed_indices[-1]',
                torch.tensor([0, 2, 5]),
                torch.tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
                shape((2, 3)),
-               r'compressed_indices\[2\] \(=5\) <= nnz \(=4\) is unsatisfied')
+               r'`c{row|col}_indices[..., 0] == 0` is not satisfied.')
 
         yield ('invalid compressed_indices.diff(dim=-1)',
                torch.tensor([0, 0, 4]),
                torch.tensor([0, 1, 0, 2]),
                values([1, 2, 3, 4]),
                shape((2, 3)),
-               r'compressed_indices\[2\] \(=4\) - compressed_indices\[1\] \(=0\) <= '
-               r'number of plain_indices_names \(=3\) is unsatisfied')
+               r'0 <= c{row|col}_indices[..., 1:] - c{row|col}_indices[..., :\-1] <= dim` is not satisfied.')
 
         yield ('invalid max(plain_indices)',
                torch.tensor([0, 2, 4]),
                torch.tensor([0, 1, 0, 3]),
                values([1, 2, 3, 4]),
                shape((2, 3)),
-               r'plain_indices\[3\] \(=3\) is out of range \(0, 3\)')
+               r'`0 <= {row|col}_indices < dim` is not satisfied.')
 
         yield ('non-coalesced',
                torch.tensor([0, 2, 4]),
                torch.tensor([1, 0, 0, 2]),
                values([1, 2, 3, 4]),
                shape((2, 3)),
-               r'plain_indices must be ordered sequence of distinct integers but plain_indices\[0\] \(=1\) < '
-               r'plain_indices\[1\] \(=0\) is unsatisfied')
+               r'`{col|row}_indices[..., c{row|col}_indices[..., i - 1]:c{row|col}_indices[..., i]] for all i = 1, ..., cdim are sorted and distinct along the last dimension values` is not satisfied.')
 
         if TEST_CUDA:
             yield ('indices and values mismatch of device',
@@ -773,13 +771,13 @@ class TestSparseCompressed(TestCase):
                    torch.tensor([0, 1, 0, 1]),
                    values([1, 2, 3, 4]),
                    shape((2, 3)),
-                   r'device of compressed_indices \(=cuda:0\) must match device of values \(=cpu\)')
+                   r'Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!')
             yield ('compressed/plain_indices mismatch of device',
                    torch.tensor([0, 2, 4], device='cuda'),
                    torch.tensor([0, 1, 0, 1]),
                    values([1, 2, 3, 4], device='cuda'),
                    shape((2, 3)),
-                   r'device of compressed_indices \(=cuda:0\) must match device of plain_indices \(=cpu\)')
+                   r'Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!')
 
     @skipMeta
     @onlyCPU

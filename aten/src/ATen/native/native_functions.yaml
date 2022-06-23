@@ -2487,6 +2487,13 @@
     CPU: _fft_c2c_mkl_out
     CUDA: _fft_c2c_cufft_out
 
+- func: _validate_compressed_sparse_indices(Tensor compressed_idx, Tensor plain_idx, int cdim, int dim, int nnz) -> ()
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CPU: _validate_compressed_sparse_indices_cpu
+    CUDA: _validate_compressed_sparse_indices_cuda
+
 - func: _cufft_get_plan_cache_size(int device_index) -> int
 
 - func: _cufft_get_plan_cache_max_size(int device_index) -> int
