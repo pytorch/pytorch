@@ -76,8 +76,7 @@ void _spdiags_kernel_cpu(
       });
 }
 
-// Check offsets for duplicates, and out-of-bounds diagonals
-// While checking offsets, compute nnz per diagonal
+// Check offsets for out-of-bounds diagonals and compute nnz per diagonal
 void _spdiags_setup_cpu(
     TensorIterator& iter,
     int64_t n_row_out,
