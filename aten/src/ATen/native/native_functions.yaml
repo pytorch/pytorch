@@ -4600,6 +4600,9 @@
   variants: method
   device_check: NoCheck
   device_guard: False
+  dispatch:
+    NestedTensorCUDA, NestedTensorCPU: nested_tensor_sum_to_checked
+    CompositeExplicitAutograd: sum_to_checked
 
 - func: sqrt(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator

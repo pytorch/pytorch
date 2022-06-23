@@ -4,9 +4,38 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
+#include "c10/util/Exception.h"
 
 namespace at {
 namespace native {
+
+
+Tensor nested_tensor_sum_to_checked(const Tensor &grad, c10::optional<c10::SymIntArrayRef> size, const c10::optional<Tensor>& ten_size, int64_t grad_idx) {
+
+  TORCH_INTERNAL_ASSERT(grad.is_nested() && ten_size.has_value());
+
+  if (at::native::get_nested_size_tensor(grad).is_same_size(*ten_size)) {
+    return grad;
+  }
+
+  std::stringstream ss;
+  ss << "invalid gradient at index " << grad_idx << " - got ";
+  if (grad.is_nested()) {
+    ss << at::native::get_nested_size_tensor(grad);
+  } else {
+    ss << grad.sizes();
+  }
+  ss << " but expected shape compatible with ";
+  if (ten_size.has_value()) {
+    ss << *ten_size;
+  } else {
+    ss << c10::asIntArrayRefSlow(*size);
+  }
+  // TODO: We still need to add the error prologue
+  // to match the error message exactly
+  AT_ERROR(ss.str());
+}
+
 
 inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
