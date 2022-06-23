@@ -1444,6 +1444,14 @@ class TestMPS(TestCase):
                          torch.tensor(4, dtype=torch.int32))
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
+        # Cast int8 and uint8 to float and compare results
+        # See https://github.com/pytorch/pytorch/issues/80009 for more details
+        cpu_byte = torch.tensor([60, 160, 20, 220], dtype=torch.uint8)
+        cpu_char = torch.tensor([60, -60, 20, -120], dtype=torch.uint8)
+        for x_cpu in [cpu_byte, cpu_char]:
+            x_mps = x_cpu.to('mps')
+            self.assertEqual(x_mps.to(torch.float32), x_cpu.to(torch.float32))
+
 
     def test_setitem_scalar(self) -> None:
         device = 'mps'
@@ -2757,6 +2765,50 @@ class TestNLLLoss(TestCase):
             self.assertEqual(two_three_keepdim_var, two_three_dim_keepvar_cpu)
 
         helper((4, 5, 6, 7))
+
+    # Test forward amax
+    def test_amax(self):
+        def helper(shape, dim, keepdim):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            result = torch.amax(x, dim=dim, keepdim=keepdim)
+            result_cpu = torch.amax(cpu_x, dim=dim, keepdim=keepdim)
+
+            cpu_grad = torch.randn(result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            result_cpu.backward(gradient=cpu_grad)
+            result.backward(gradient=grad)
+
+            self.assertEqual(result, result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        for dim in ([], [0], [0, 1], [2, 3]):
+            for keepdim in [False, True]:
+                helper((2, 8, 4, 5), dim, keepdim)
+
+    # Test forward amin
+    def test_amin(self):
+        def helper(shape, dim, keepdim):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            result = torch.amin(x, dim=dim, keepdim=keepdim)
+            result_cpu = torch.amin(cpu_x, dim=dim, keepdim=keepdim)
+
+            cpu_grad = torch.randn(result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            result_cpu.backward(gradient=cpu_grad)
+            result.backward(gradient=grad)
+
+            self.assertEqual(result, result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        for dim in ([], [0], [0, 1], [2, 3]):
+            for keepdim in [False, True]:
+                helper((2, 8, 4, 5), dim, keepdim)
 
     # Test minimum and maximum
     def test_minimum_maximum(self):
