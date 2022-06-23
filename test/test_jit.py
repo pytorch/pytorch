@@ -16108,6 +16108,16 @@ dedent """
         inp = torch.ones(1)
         self.checkModule(MyModule(), inp)
 
+    def test_index_with_tuple(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return x[(1,)]
+
+        self.checkModule(MyModule(), (torch.ones(2, 3),))
+
 # known to be failing in tracer
 EXCLUDE_TRACED = {
     # The following fail due to #12024.

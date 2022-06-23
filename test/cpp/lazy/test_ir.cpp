@@ -4,6 +4,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/ir.h>
 #include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
@@ -133,6 +134,10 @@ TEST(IrTest, DimensionNodeTest) {
   ASSERT_EQ(DIM0, size0->getStaticValue());
   ASSERT_EQ(DIM1, size1->getStaticValue());
 
+  NodePtr size0_np = size0;
+  auto size0_dn = std::dynamic_pointer_cast<DimensionNode>(size0_np);
+  ASSERT_EQ(DIM0, size0_dn->getStaticValue());
+
   auto add_dim = std::dynamic_pointer_cast<SizeAdd>(
       MakeNode<SizeAdd>(Value{size0}, Value{size1}));
   ASSERT_EQ(DIM0 + DIM1, add_dim->getStaticValue());
@@ -140,6 +145,37 @@ TEST(IrTest, DimensionNodeTest) {
   auto mul_dim = std::dynamic_pointer_cast<SizeMul>(
       MakeNode<SizeMul>(Value{size0}, Value{size1}));
   ASSERT_EQ(DIM0 * DIM1, mul_dim->getStaticValue());
+}
+
+TEST(IrTest, DimensionIsDynamicTest) {
+  const size_t DIM0 = 5;
+  const size_t DIM1 = 8;
+  const auto shape = Shape(c10::kFloat, {DIM0, DIM1});
+  NodePtr node1 = MakeNode<TsNode>(
+      OpKind(at::aten::view),
+      shape.with_symbolic_dims(std::vector<bool>{true, false}),
+      /*num_outputs*/ 1,
+      /*hash_seed*/ kHashSeed);
+
+  auto size0 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 0));
+  auto size1 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
+
+  ASSERT_EQ(true, size0->isDynamic());
+  ASSERT_EQ(false, size1->isDynamic());
+
+  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(
+      MakeNode<SizeAdd>(Value{size0}, Value{size1}));
+  ASSERT_EQ(true, add_dim->isDynamic());
+
+  add_dim = std::dynamic_pointer_cast<SizeAdd>(
+      MakeNode<SizeAdd>(Value{size1}, Value{size1}));
+  ASSERT_EQ(false, add_dim->isDynamic());
+
+  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(
+      MakeNode<SizeMul>(Value{size0}, Value{size0}));
+  ASSERT_EQ(true, mul_dim->isDynamic());
 }
 
 } // namespace lazy
