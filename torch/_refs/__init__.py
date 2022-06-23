@@ -464,6 +464,15 @@ def frac(x: TensorLikeType) -> TensorLikeType:
     return sub(x, trunc_x)
 
 
+# imag does not use _make_elementwise_unary_reference because it does not support out
+def imag(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    if not utils.is_complex_dtype(a.dtype):
+        msg = "imag only supports complex tensors."
+        raise RuntimeError(msg)
+    return prims.imag(a)
+
+
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL,
     aten_op=None,  # CompositeImplicitAutograd
@@ -615,6 +624,14 @@ def positive(a: TensorLikeType) -> TensorLikeType:
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
         raise RuntimeError(msg)
+    return a
+
+
+# real does not use _make_elementwise_unary_reference because it does not support out
+def real(a: TensorLikeType) -> TensorLikeType:
+    assert isinstance(a, TensorLike)
+    if utils.is_complex_dtype(a.dtype):
+        return prims.real(a)
     return a
 
 
