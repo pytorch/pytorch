@@ -15,12 +15,18 @@ from ..quantize import (
     propagate_qconfig_,
 )
 from ..observer import (
+    _FIXED_QPARAMS_OP_TO_OBSERVER,
     ObserverBase,
 )
-from ..qconfig import QConfigAny, is_reuse_input_qconfig
+from ..qconfig import (
+    is_reuse_input_qconfig,
+    QConfig,
+    QConfigAny,
+)
 from ..qconfig_mapping import QConfigMapping
 from ..qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
+    get_object_type_qconfig,
     update_qconfig_for_qat,
 )
 from .qconfig_utils import (
@@ -1316,6 +1322,19 @@ def insert_observers_for_model(
 
     return results_node
 
+def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_mapping: QConfigMapping):
+    """
+    Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
+    """
+    empty_qconfig = QConfig(activation=None, weight=None)
+    for node in model.graph.nodes:
+        if node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
+            qconfig = get_object_type_qconfig(qconfig_mapping, node.target, empty_qconfig)
+            if qconfig.activation != _FIXED_QPARAMS_OP_TO_OBSERVER[node.target]:
+                raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
+                                 "'%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
+                                 "torch.ao.quantization.get_default_qat_qconfig_mapping instead." % node.target)
+
 def run_prepare_fx_on_standalone_modules(
     model: torch.nn.Module,
     is_qat: bool,
@@ -1435,6 +1454,8 @@ def prepare(
 
     assert(isinstance(qconfig_mapping, QConfigMapping))
     assert(isinstance(equalization_config, QConfigMapping))
+
+    _validate_fixed_qparams_qconfigs(model, qconfig_mapping)
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     equalization_config = copy.deepcopy(equalization_config)
 

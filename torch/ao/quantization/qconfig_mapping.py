@@ -13,6 +13,7 @@ from .qconfig import (
     QConfig,
     QConfigAny
 )
+from .observer import _FIXED_QPARAMS_OP_TO_OBSERVER
 
 
 __all__ = [
@@ -30,7 +31,7 @@ MODULE_NAME_DICT_KEY = "module_name"
 MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
 
 
-def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int):
+def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QConfigMapping:
     """
     Return the default QConfigMapping for the given quantization type and backend.
     """
@@ -38,18 +39,18 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int):
         qconfig = get_default_qat_qconfig(backend, version)
     else:
         qconfig = get_default_qconfig(backend, version)
+    default_weight = default_weight_fake_quant if is_qat else default_weight_observer
 
     # default_per_channel_weight_observer is not currently compatible with fbgemm backend
     # so we have to modify the weight observer to default_weight_observer or another
     # per tensor supported observer.
     # see https://github.com/pytorch/pytorch/issues/47535
     if backend == "fbgemm":
-        default_weight = default_weight_fake_quant if is_qat else default_weight_observer
         qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight)
     else:
         qconfig_transpose = qconfig
 
-    return QConfigMapping() \
+    qconfig_mapping = QConfigMapping() \
         .set_global(qconfig) \
         .set_object_type("reshape", default_reuse_input_qconfig) \
         .set_object_type(torch.nn.Conv1d, qconfig) \
@@ -73,13 +74,24 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int):
         .set_object_type(torch.nn.BatchNorm2d, qconfig) \
         .set_object_type(torch.nn.BatchNorm3d, qconfig)
 
-def get_default_qconfig_mapping(backend="fbgemm", version=0):
+    # Use special observers for ops with fixed qparams
+    fixed_qparams_observer_to_qconfig = {}
+    for fixed_qparams_op, observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
+        if observer in fixed_qparams_observer_to_qconfig:
+            fixed_qparams_qconfig = fixed_qparams_observer_to_qconfig[observer]
+        else:
+            fixed_qparams_qconfig = QConfig(activation=observer, weight=default_weight)
+        qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
+
+    return qconfig_mapping
+
+def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
     """
     Return the default QConfigMapping for post training quantization.
     """
     return _get_default_qconfig_mapping(False, backend, version)
 
-def get_default_qat_qconfig_mapping(backend="fbgemm", version=1):
+def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMapping:
     """
     Return the default QConfigMapping for quantization aware training.
     """
