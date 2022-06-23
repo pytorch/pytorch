@@ -2,6 +2,10 @@ name: Setup EC2 Linux
 
 description: Setup EC2 Linux
 
+inputs:
+  GITHUB_TOKEN:
+    required: true
+
 runs:
   using: composite
   steps:

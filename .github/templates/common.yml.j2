@@ -140,6 +140,8 @@ on:
 {%- macro setup_ec2_linux() -%}
       - name: Setup EC2 Linux
         uses: .github/actions/setup-ec2-linux
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 {%- endmacro -%}
 
 {%- macro setup_rocm_linux() -%}
