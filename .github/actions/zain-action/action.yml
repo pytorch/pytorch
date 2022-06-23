@@ -9,9 +9,11 @@ runs:
       shell: bash
       run: echo "look ma, i'm composed!"
     - name: Zain Composite act 2
+      if: github.repository_owner == 'pytorch'
       shell: bash
       run: echo "look ma, i'm composed 2!"
     - name: Zain Composite act 3
+      if: github.repository_owner != 'pytorch'
       shell: bash
       run: echo "look ma, i'm composed 3!"
     - name: Zain Composite act 4
