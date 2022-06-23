@@ -1996,9 +1996,7 @@ TORCH_IMPL_FUNC(_linalg_solve_out)(const Tensor& A,
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU),
                               const_cast<Tensor&>(pivots),
                               const_cast<Tensor&>(info),
-                              use_A_T ? A.mT() : A,
-                              /*pivot=*/true,
-                              /*check_errors=*/false);
+                              use_A_T ? A.mT() : A);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
 
   // [numpy-compat] Handle vectors on the rhs
