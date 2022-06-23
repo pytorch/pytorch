@@ -4,7 +4,7 @@ from typing import Dict, List
 
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
-from torch.autograd import _KinetoEvent, _ProfilerEvent
+from torch.autograd import _KinetoEvent
 
 
 @dataclass
@@ -68,6 +68,7 @@ class BasicEvaluation:
         self.events = [e.event for e in self.event_keys]
         self.cuda_events: List[_KinetoEvent] = []
         self.queue_depth_list = self.compute_queue_depth()
+        self.compute_idle_time()
 
     def compute_self_time(self):
         '''
@@ -133,6 +134,7 @@ class BasicEvaluation:
 
         current_kernel_index = 0
         spawned_kernel_index = -1
+
         all_events = cuda_launch_events + cuda_kernel_events + self.events
 
         def new_old_event_comparator(event):
@@ -154,8 +156,8 @@ class BasicEvaluation:
                         event] is not None:
                     spawned_kernel_index = kernel_mapping[event]
             elif hasattr(event, "start_time_ns"):
-                start_time = event.start_time_ns
-                end_time = event.end_time_ns
+                start_time = event.start_time_ns  # type: ignore[attr-defined]
+                end_time = event.end_time_ns  # type: ignore[attr-defined]
 
             while (current_kernel_index < len(cuda_kernel_events) and
                    (cuda_kernel_events[current_kernel_index].start_us()) * 1000
@@ -170,6 +172,27 @@ class BasicEvaluation:
                 self.metrics[EventKey(event)].queue_depth = current_queue_depth
 
         return queue_depth_list
+
+    def compute_idle_time(self):
+        '''
+        Computes idle time of the profile.
+        '''
+        # Based on queue_depth_list, we can calculate idle time for all the events
+        idle = False
+        idle_start = 0
+        idle_intervals: List[Interval] = []
+        for data_point in self.queue_depth_list:
+            if data_point.queue_depth == 0 and not idle:
+                idle_start = data_point.end
+                idle = True
+            if data_point.queue_depth > 0 and idle:
+                idle_intervals.append(Interval(idle_start, data_point.start))
+                idle = False
+
+        event_list = [e.event for e in self.metrics.keys()]
+        for event in event_list:
+            self.metrics[EventKey(event)].idle_time_ns = EventKey(
+                event).intervals_overlap(idle_intervals)
 
 
 def index_of_first_match(seq, predicate, start=0, end=None):
