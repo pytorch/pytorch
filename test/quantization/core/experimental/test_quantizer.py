@@ -30,7 +30,9 @@ class TestQuantizer(unittest.TestCase):
         quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = APoTQuantizer.quantize_APoT(tensor2quantize=tensor2quantize, quantization_levels=qparams[1], level_indices=qparams[2])
+        qtensor = APoTQuantizer.quantize_APoT(tensor2quantize=tensor2quantize,
+                                              quantization_levels=qparams[1],
+                                              level_indices=qparams[2])
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
@@ -72,7 +74,9 @@ class TestQuantizer(unittest.TestCase):
         quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = APoTQuantizer.quantize_APoT(tensor2quantize=tensor2quantize, quantization_levels=qparams[1], level_indices=qparams[2])
+        qtensor = APoTQuantizer.quantize_APoT(tensor2quantize=tensor2quantize,
+                                              quantization_levels=qparams[1],
+                                              level_indices=qparams[2])
         qtensor_data = torch.tensor(qtensor).type(torch.uint8)
 
         # expected qtensor values calculated based on
@@ -114,7 +118,9 @@ class TestQuantizer(unittest.TestCase):
 
         dequantized_result = quantizer.dequantize(float2apot=float2apot)
 
-        quantized_result = APoTQuantizer.quantize_APoT(tensor2quantize=dequantized_result, quantization_levels=qparams[1], level_indices=qparams[2])
+        quantized_result = APoTQuantizer.quantize_APoT(tensor2quantize=dequantized_result,
+                                                       quantization_levels=qparams[1],
+                                                       level_indices=qparams[2])
 
         quantized_result = quantized_result.int()
 
@@ -150,7 +156,9 @@ class TestQuantizer(unittest.TestCase):
 
         dequantized_result = quantizer.dequantize(float2apot=float2apot)
 
-        quantized_result = APoTQuantizer.quantize_APoT(tensor2quantize=dequantized_result, quantization_levels=qparams[1], level_indices=qparams[2])
+        quantized_result = APoTQuantizer.quantize_APoT(tensor2quantize=dequantized_result,
+                                                       quantization_levels=qparams[1],
+                                                       level_indices=qparams[2])
 
         quantized_result = quantized_result.int()
 
