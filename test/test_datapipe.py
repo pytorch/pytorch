@@ -603,6 +603,11 @@ def _worker_init_fn(worker_id):
     torch.utils.data.graph_settings.apply_sharding(datapipe, num_workers, worker_id)
 
 
+lambda_fn1 = lambda x: x  # noqa: E731
+lambda_fn2 = lambda x: x % 2  # noqa: E731
+lambda_fn3 = lambda x: x >= 5  # noqa: E731
+
+
 class TestFunctionalIterDataPipe(TestCase):
 
     def _serialization_test_helper(self, datapipe, use_dill):
@@ -702,16 +707,41 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))
-        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
-            (dp.iter.Collator, (lambda x: x,), {}),
-            (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),
-            (dp.iter.Filter, (lambda x: x >= 5,), {}),
-            (dp.iter.Grouper, (lambda x: x >= 5,), {}),
-            (dp.iter.Mapper, (lambda x: x,), {}),
+
+        datapipes_with_lambda_fn: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
+            (dp.iter.Collator, (lambda_fn1,), {}),
+            (dp.iter.Demultiplexer, (2, lambda_fn2,), {}),
+            (dp.iter.Filter, (lambda_fn3,), {}),
+            (dp.iter.Grouper, (lambda_fn3,), {}),
+            (dp.iter.Mapper, (lambda_fn1,), {}),
         ]
+
+        def _local_fns():
+            def _fn1(x):
+                return x
+
+            def _fn2(x):
+                return x % 2
+
+            def _fn3(x):
+                return x >= 5
+
+            return _fn1, _fn2, _fn3
+
+        fn1, fn2, fn3 = _local_fns()
+
+        datapipes_with_local_fn: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
+            (dp.iter.Collator, (fn1,), {}),
+            (dp.iter.Demultiplexer, (2, fn2,), {}),
+            (dp.iter.Filter, (fn3,), {}),
+            (dp.iter.Grouper, (fn3,), {}),
+            (dp.iter.Mapper, (fn1,), {}),
+        ]
+
         dp_compare_children = {dp.iter.Demultiplexer}
+
         if HAS_DILL:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
+            for dpipe, dp_args, dp_kwargs in datapipes_with_lambda_fn + datapipes_with_local_fn:
                 if dpipe in dp_compare_children:
                     dp1, dp2 = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                     self._serialization_test_for_dp_with_children(dp1, dp2, use_dill=True)
@@ -719,13 +749,18 @@ class TestFunctionalIterDataPipe(TestCase):
                     datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                     self._serialization_test_for_single_dp(datapipe, use_dill=True)
         else:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
-                with warnings.catch_warnings(record=True) as wa:
-                    datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                    self.assertEqual(len(wa), 1)
-                    self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
-                    with self.assertRaises(AttributeError):
-                        p = pickle.dumps(datapipe)
+            msgs = (
+                r"^Lambda function is not supported by pickle",
+                r"^Local function is not supported by pickle"
+            )
+            for dps, msg in zip((datapipes_with_lambda_fn, datapipes_with_local_fn), msgs):
+                for dpipe, dp_args, dp_kwargs in dps:
+                    with warnings.catch_warnings(record=True) as wa:
+                        datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                        self.assertEqual(len(wa), 1)
+                        self.assertRegex(str(wa[0].message), msg)
+                        with self.assertRaises((pickle.PicklingError, AttributeError)):
+                            p = pickle.dumps(datapipe)
 
     def test_iterable_wrapper_datapipe(self):
 
@@ -1677,24 +1712,43 @@ class TestFunctionalMapDataPipe(TestCase):
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.map.SequenceWrapper(range(10))
-        unpicklable_datapipes: List[
+
+        datapipes_with_lambda_fn: List[
             Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Mapper, (lambda x: x,), {}),
+            (dp.map.Mapper, (lambda_fn1,), {}),
         ]
+
+        def _local_fns():
+            def _fn1(x):
+                return x
+
+            return _fn1
+
+        fn1 = _local_fns()
+
+        datapipes_with_local_fn: List[
+            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
+        ] = [
+            (dp.map.Mapper, (fn1,), {}),
+        ]
+
         if HAS_DILL:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
+            for dpipe, dp_args, dp_kwargs in datapipes_with_lambda_fn + datapipes_with_local_fn:
                 _ = dill.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
         else:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
-                with warnings.catch_warnings(record=True) as wa:
-                    datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                    self.assertEqual(len(wa), 1)
-                    self.assertRegex(
-                        str(wa[0].message), r"^Lambda function is not supported for pickle"
-                    )
-                    with self.assertRaises(AttributeError):
-                        p = pickle.dumps(datapipe)
+            msgs = (
+                r"^Lambda function is not supported by pickle",
+                r"^Local function is not supported by pickle"
+            )
+            for dps, msg in zip((datapipes_with_lambda_fn, datapipes_with_local_fn), msgs):
+                for dpipe, dp_args, dp_kwargs in dps:
+                    with warnings.catch_warnings(record=True) as wa:
+                        datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                        self.assertEqual(len(wa), 1)
+                        self.assertRegex(str(wa[0].message), msg)
+                        with self.assertRaises((pickle.PicklingError, AttributeError)):
+                            p = pickle.dumps(datapipe)
 
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))

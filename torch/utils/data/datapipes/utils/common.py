@@ -4,7 +4,8 @@ import warnings
 import inspect
 
 from io import IOBase
-from typing import Dict, Iterable, List, Tuple, Union, Optional, Callable
+from functools import partial
+from typing import Callable, Dict, Iterable, List, Tuple, Union, Optional
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
@@ -51,13 +52,30 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
         )
 
 
-def _check_lambda_fn(fn):
-    # Partial object has no attribute '__name__', but can be pickled
-    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+def _check_unpickable_fn(fn: Callable):
+    if not callable(fn):
+        raise TypeError(f"A callable function is expected, but {type(fn)} is provided.")
+
+    # Extract function from partial object
+    # Nested partial function is automatically expanded as a single partial object
+    if isinstance(fn, partial):
+        fn = fn.func
+
+    # Local function
+    if hasattr(fn, "__qualname__") and "<locals>" in fn.__qualname__ and not DILL_AVAILABLE:
         warnings.warn(
-            "Lambda function is not supported for pickle, please use "
+            "Local function is not supported by pickle, please use "
             "regular python function or functools.partial instead."
         )
+        return
+
+    # Lambda function
+    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+        warnings.warn(
+            "Lambda function is not supported by pickle, please use "
+            "regular python function or functools.partial instead."
+        )
+        return
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
