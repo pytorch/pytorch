@@ -1244,10 +1244,8 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
             def forward(self, x):
                 return x.T
 
-        x1 = torch.randn(4, 7)
-        self.run_test(NumpyTranspose(), x1)
-        x2 = torch.tensor(-42.0)
-        self.run_test(NumpyTranspose(), x2)
+        self.run_test(NumpyTranspose(), torch.randn(4, 7))
+        self.run_test(NumpyTranspose(), torch.tensor(-42.0))
 
     # Conversion of Transpose depends on input shape to be known.
     # The following test only works when onnx shape inference is enabled.
