@@ -102,7 +102,7 @@ inline void launch_jitted_unrolled_kernel(
     }
   }
 
-  auto args = pack_kernel_args(&N, &data, &ic, &oc, &l, &s, scalar_val);
+  auto args = pack_kernel_args(extra_args, &N, &data, &ic, &oc, &l, &s, scalar_val);
   at::cuda::jit::launch_jitted_pwise_function(fn_cache, args.data(), {grid, 1u, 1u},
   {num_threads(), 1u, 1u});
 }
@@ -241,7 +241,7 @@ void jitted_gpu_kernel_generic(
   auto input_offset_calculator = make_input_offset_calculator<arity>(iter);
   auto output_offset_calculator = make_output_offset_calculator(iter);
   launch_jitted_unrolled_kernel(
-      jiterator_mutex, cache.dynamic_contiguous, desc, numel, data, input_offset_calculator,
+      jiterator_mutex, cache.dynamic_noncontiguous, desc, numel, data, input_offset_calculator,
       output_offset_calculator, loader, storer, contiguous, scalar_pos, scalar_val, extra_args);
 }
 
