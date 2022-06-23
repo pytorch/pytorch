@@ -33,10 +33,11 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         def get_correct_path(path_from_docs):
             r"""
-            Current working directory when CI is running test seems to vary, this function
-            looks for docs and if it finds it looks for the path to the
-            file and if the file exists returns that path, otherwise keeps looking. Will
-            only work if cwd contains pytorch or docs or a parent contains docs.
+            Current working directory when CI is running test seems to vary (and the repo is
+            often not named pytorch), this function looks for docs and if it finds
+            it looks for the path to the file and if the file exists returns that
+            path, otherwise keeps looking. Will only work if cwd contains pytorch or docs
+            or a parent contains docs.
             """
 
             # # check if cwd contains pytorch or docs
@@ -44,20 +45,23 @@ class TestQuantizationDocs(QuantizationTestCase):
             #     return "./pytorch" + path_from_docs
 
             # get cwd
-            cur_dir_path = Path('.').resolve()
+            cur_dir_path = Path(".").resolve()
 
             # check if cwd contains pytorch, use that if it does
-            if (cur_dir_path/'pytorch').is_dir():
-                cur_dir_path = (cur_dir_path/'pytorch').resolve()
+            if (cur_dir_path / "pytorch").is_dir():
+                cur_dir_path = (cur_dir_path / "pytorch").resolve()
 
             # need to find docs dir, so we check current directory
             # and all parent directories to see if they contain it
             # if we get a hit, use rest of path to check whether the file is there
             check_dir = cur_dir_path
             while not check_dir == check_dir.parent:
-                docs_path = (check_dir/'docs').resolve()
-                if docs_path.is_dir() and (docs_path/path_from_docs).resolve().is_file():
-                    return (docs_path/path_from_docs).resolve()
+                docs_path = (check_dir / "docs").resolve()
+                if (
+                    docs_path.is_dir()
+                    and (docs_path / path_from_docs).resolve().is_file()
+                ):
+                    return (docs_path / path_from_docs).resolve()
                 check_dir = check_dir.parent.resolve()
 
             # no longer passing when file not found
