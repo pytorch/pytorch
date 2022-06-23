@@ -21,6 +21,16 @@ except ImportError:
     HAS_Z3 = False
 
 
+try:
+    from torchvision import models
+    HAS_TORCHVISION = True
+except ImportError:
+    HAS_TORCHVISION = False
+skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
+
+
+
+
 class ComposeOperationsGradualTypes(unittest.TestCase):
 
     def test_add_reshape_1(self):
@@ -1103,6 +1113,157 @@ class TestInternalConstraints(unittest.TestCase):
         c1 = ApplyBroadcasting(TVar(1), TVar(2), TVar(3), TVar(4))
         transformed, count = transform_apply_broadcasting(c1, 5)
         assert len(transformed.conjucts) == 41
+
+@skipIfNoTorchVision
+class TestResNet(unittest.TestCase):
+
+    def test_resnet50_unsat(self):
+        traced = symbolic_trace(models.resnet50())
+        for n in traced.graph.nodes:
+            n.type = Dyn
+
+        constraints = transform_all_constraints(traced, counter=0)
+        solver = z3.Solver()
+        solver.add(constraints)
+        input = z3.Const(1, tensor_type)
+        # input with 3 dimensions
+        solver.add(input == tensor_type.tensor3(D(1, 1), D(1, 3), D(1, 224)))
+        assert solver.check() == z3.unsat
+
+
+
+    def test_resnet50(self):
+        traced = symbolic_trace(models.resnet50())
+        for n in traced.graph.nodes:
+            n.type = Dyn
+
+        sample_input = torch.randn(1, 3, 224, 224)
+        res = models.resnet50().forward(sample_input).size()
+        constraints = transform_all_constraints(traced, counter=0)
+        solver = z3.Solver()
+        solver.add(constraints)
+        assert solver.check() == z3.sat
+        linear = z3.Const(650, tensor_type)
+
+        input = z3.Const(1, tensor_type)
+        solver.add(input == tensor_type.tensor4(D(1, 1), D(1, 3), D(1, 224), D(1, 224)))
+        assert solver.check() == z3.sat
+        assert solver.model()[linear] == tensor_type.tensor2(D(1, res[0]), D(1, res[1]))
+
+    def test_resnet502(self):
+        traced = symbolic_trace(models.resnet50())
+        for n in traced.graph.nodes:
+            n.type = Dyn
+
+        constraints = transform_all_constraints(traced, counter=0)
+        solver = z3.Solver()
+        solver.add(constraints)
+        linear = z3.Const(650, tensor_type)
+        input = z3.Const(1, tensor_type)
+        batch = z3.Int('b')
+        solver.add(input == tensor_type.tensor4(D(1, batch), D(1, 3), D(1, 224), D(1, 224)))
+        solver.add(batch > 4)
+        solver.check()
+        assert solver.model()[batch] == solver.model()[linear].arg(0).arg(1)
+
+    def test_resnet503(self):
+        traced = symbolic_trace(models.resnet50())
+        for n in traced.graph.nodes:
+            n.type = Dyn
+
+        constraints = transform_all_constraints(traced, counter=0)
+        solver = z3.Solver()
+        solver.add(constraints)
+        linear = z3.Const(650, tensor_type)
+        input = z3.Const(1, tensor_type)
+        batch, d1, d2 = z3.Ints('b d1 d2')
+        solver.add(input == tensor_type.tensor4(D(1, batch), D(1, 3), D(1, 224), D(1, 224)))
+        solver.add(linear == tensor_type.tensor2(D(1, d1), D(1, d2)))
+        assert solver.check() == z3.sat
+        solver.add(batch != d1)
+        assert solver.check() == z3.unsat
+
+@skipIfNoTorchVision
+class TestAlexNet(unittest.TestCase):
+    def test_alexnet1(self):
+
+        alexnet = models.alexnet()
+        symbolic_traced : torch.fx.GraphModule = symbolic_trace(alexnet)
+
+        for n in symbolic_traced.graph.nodes:
+            n.type = Dyn
+
+        # print(symbolic_traced)
+
+        res = alexnet.forward(torch.rand(10, 3, 227, 227)).size()
+        constraints = transform_all_constraints(symbolic_traced, counter=0)
+        solver = z3.Solver()
+        solver.add(constraints)
+        assert solver.check() == z3.sat
+        input = z3.Const(1, tensor_type)
+        conv = z3.Const(2, tensor_type)
+        solver.add(input == tensor_type.tensor4(D(1, 10), D(1, 3), D(1, 227), D(1, 227)))
+        assert solver.check() == z3.sat
+        assert solver.model()[conv] == tensor_type.tensor4(D(1, 10), D(1, 64), D(1, 56), D(1, 56))
+
+        relu = z3.Const(7, tensor_type)
+        assert solver.model()[relu] == tensor_type.tensor4(D(1, 10), D(1, 64), D(1, 56), D(1, 56))
+
+        maxpool = z3.Const(8, tensor_type)
+        assert solver.model()[maxpool] == tensor_type.tensor4(D(1, 10), D(1, 64), D(1, 27), D(1, 27))
+
+        maxpool2 = z3.Const(42, tensor_type)
+        assert solver.model()[maxpool2] == tensor_type.tensor4(D(1, 10), D(1, 256), D(1, 6), D(1, 6))
+
+        flatten = z3.Const(52, tensor_type)
+        assert solver.model()[flatten] == tensor_type.tensor2(D(1, 10), D(1, 9216))
+
+        linear = z3.Const(64, tensor_type)
+        assert solver.model()[linear] == tensor_type.tensor2(D(1, 10), D(1, 4096))
+
+        linear2 = z3.Const(109, tensor_type)
+        assert solver.model()[linear2] == tensor_type.tensor2(D(1, res[0]), D(1, res[1]))
+
+
+    def test_alexnet2(self):
+        alexnet = models.alexnet()
+        symbolic_traced : torch.fx.GraphModule = symbolic_trace(alexnet)
+
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, 4, 227, 227])
+
+        constraints = transform_all_constraints(symbolic_traced, counter=0)
+        solver = z3.Solver()
+        solver.add(constraints)
+        assert solver.check() == z3.unsat
+
+    def test_alexnet3(self):
+        alexnet = models.alexnet()
+        symbolic_traced : torch.fx.GraphModule = symbolic_trace(alexnet)
+
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, Dyn, 227, 227])
+
+        constraints = transform_all_constraints(symbolic_traced, counter=0)
+        solver = z3.Solver()
+        solver.add(constraints)
+        assert solver.check() == z3.sat
+
+    def test_alexnet4(self):
+        alexnet = models.alexnet()
+        symbolic_traced : torch.fx.GraphModule = symbolic_trace(alexnet)
+
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, Dyn, 227])
+
+        constraints = transform_all_constraints(symbolic_traced, counter=0)
+        solver = z3.Solver()
+        solver.add(constraints)
+        assert solver.check() == z3.unsat
+
 
 
 if __name__ == '__main__':
