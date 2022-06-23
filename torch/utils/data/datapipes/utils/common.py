@@ -1,8 +1,7 @@
+import fnmatch
 import inspect
 import os
-import fnmatch
 import warnings
-import inspect
 
 from io import IOBase
 from functools import partial

@@ -1183,14 +1183,19 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
-        def _helper(ref_fn, fn, input_col=None, output_col=None):
+        def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             for constr in (list, tuple):
                 datapipe = dp.iter.IterableWrapper([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
-                res_dp = datapipe.map(fn, input_col, output_col)
-                ref_dp = datapipe.map(ref_fn) if ref_fn is not None else datapipe
-                self.assertEqual(list(res_dp), list(ref_dp))
-                # Reset
-                self.assertEqual(list(res_dp), list(ref_dp))
+                if ref_fn is None:
+                    with self.assertRaises(error):
+                        res_dp = datapipe.map(fn, input_col, output_col)
+                        list(res_dp)
+                else:
+                    res_dp = datapipe.map(fn, input_col, output_col)
+                    ref_dp = datapipe.map(ref_fn)
+                    self.assertEqual(list(res_dp), list(ref_dp))
+                    # Reset
+                    self.assertEqual(list(res_dp), list(ref_dp))
 
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
@@ -1199,20 +1204,17 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: (data[0], data[1], 1 + data[1]), fn_n1_def, 1, 2)
 
         # The index of input column is out of range
-        with self.assertRaises(IndexError):
-            _helper(None, fn_1n, 3)
+        _helper(None, fn_1n, 3, error=IndexError)
 
         # Unmatched input columns with fn arguments
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, 1)
-            _helper(None, lambda d0, d1: d0 + d1, 0)
-            _helper(None, p_fn_n1, (0, 1))
+        _helper(None, fn_n1, 1, error=ValueError)
+        _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
+        _helper(None, p_fn_n1, (0, 1), error=ValueError)
 
         # Function takes fewer parameters than input col
-        with self.assertRaises(ValueError):
-            def zero_args():
-                return
-            _helper(None, zero_args, 0)
+        def zero_args():
+            return
+        _helper(None, zero_args, 0, error=ValueError)
 
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
@@ -1223,19 +1225,16 @@ class TestFunctionalIterDataPipe(TestCase):
                 2)
 
         # output_col can only be specified when input_col is not None
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, 1)
+        _helper(None, fn_n1, None, 1, error=ValueError)
         # output_col can only be single-element list or tuple
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, [0, 1])
+        _helper(None, fn_n1, None, [0, 1], error=ValueError)
         # Single-element list as output_col
         _helper(lambda data: (-data[1], data[1], data[2]), fn_11, 1, [0])
         # Replacing with one input column and single specified output column
         _helper(lambda data: (-data[1], data[1], data[2]), fn_11, 1, 0)
         _helper(lambda data: (data[0], data[1], (-data[1], data[1])), fn_1n, 1, 2)
         # The index of output column is out of range
-        with self.assertRaises(IndexError):
-            _helper(None, fn_1n, 1, 3)
+        _helper(None, fn_1n, 1, 3, error=IndexError)
         _helper(lambda data: (data[0], data[0] + data[2], data[2]), fn_n1, [0, 2], 1)
         _helper(lambda data: ((-data[1], -data[2], data[1] + data[2]), data[1], data[2]), fn_nn, [1, 2], 0)
 
@@ -1271,17 +1270,22 @@ class TestFunctionalIterDataPipe(TestCase):
                     del _data[idx]
             return _data
 
-        def _helper(ref_fn, fn, input_col=None, output_col=None):
+        def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             datapipe = dp.iter.IterableWrapper(
                 [{"x": 0, "y": 1, "z": 2},
                  {"x": 3, "y": 4, "z": 5},
                  {"x": 6, "y": 7, "z": 8}]
             )
-            res_dp = datapipe.map(fn, input_col, output_col)
-            ref_dp = datapipe.map(ref_fn) if ref_fn is not None else datapipe
-            self.assertEqual(list(res_dp), list(ref_dp))
-            # Reset
-            self.assertEqual(list(res_dp), list(ref_dp))
+            if ref_fn is None:
+                with self.assertRaises(error):
+                    res_dp = datapipe.map(fn, input_col, output_col)
+                    list(res_dp)
+            else:
+                res_dp = datapipe.map(fn, input_col, output_col)
+                ref_dp = datapipe.map(ref_fn)
+                self.assertEqual(list(res_dp), list(ref_dp))
+                # Reset
+                self.assertEqual(list(res_dp), list(ref_dp))
 
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
@@ -1295,19 +1299,16 @@ class TestFunctionalIterDataPipe(TestCase):
         p_fn_n1 = partial(fn_n1, d1=1)
         _helper(lambda data: _dict_update(data, {"x": 1 + data["y"]}), p_fn_n1, "y", "x")
         # The key of input column is not in dict
-        with self.assertRaises(KeyError):
-            _helper(None, fn_1n, "a")
+        _helper(None, fn_1n, "a", error=KeyError)
         # Unmatched input columns with fn arguments
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, "y")
-            _helper(None, lambda x, y: x + y, "x")
-            _helper(None, p_fn_n1, ("x", "y"))
+        _helper(None, fn_n1, "y", error=ValueError)
+        _helper(None, lambda x, y: x + y, "x", error=ValueError)
+        _helper(None, p_fn_n1, ("x", "y"), error=ValueError)
 
         # Function takes fewer parameters than input col
-        with self.assertRaises(ValueError):
-            def zero_args():
-                return
-            _helper(None, zero_args, "x")
+        def zero_args():
+            return
+        _helper(None, zero_args, "x", error=ValueError)
 
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
@@ -1316,11 +1317,9 @@ class TestFunctionalIterDataPipe(TestCase):
         _helper(lambda data: _dict_update(data, {"x": data["x"] + data["y"]}), fn_n1_def, ("x", "y"), "x")
 
         # output_col can only be specified when input_col is not None
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, "x")
+        _helper(None, fn_n1, None, "x", error=ValueError)
         # output_col can only be single-element list or tuple
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, ["x", "y"])
+        _helper(None, fn_n1, None, ["x", "y"], error=ValueError)
         # Single-element list as output_col
         _helper(lambda data: _dict_update(data, {"x": -data["y"]}), fn_11, "y", ["x"])
         # Replacing with one input column and single specified output column
