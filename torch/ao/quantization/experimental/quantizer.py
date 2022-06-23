@@ -34,10 +34,11 @@ class APoTQuantizer():
     Returns:
         result: integer APoT representation of tensor2quantize
     """
-    def quantize_APoT(self, tensor2quantize: Tensor):
+    @staticmethod
+    def quantize_APoT(tensor2quantize: Tensor, quantization_levels: Tensor, level_indices: Tensor):
         result = torch.tensor([])
         # map float_to_apot over tensor2quantize elements
-        result = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
+        result = tensor2quantize.apply_(lambda x: float_to_apot(x, quantization_levels, level_indices))
 
         return result
 
