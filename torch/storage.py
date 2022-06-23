@@ -24,7 +24,7 @@ class _StorageBase(object):
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # noqa: E704
     def __getitem__(self, idx): ...  # noqa: E704
-    def copy_(self, source: T) -> T: ...  # noqa: E704
+    def copy_(self, source: T, non_blocking: bool = None) -> T: ...  # noqa: E704
     def nbytes(self) -> int: ...  # noqa: E704
 
     def size(self) -> int:
@@ -37,25 +37,44 @@ class _StorageBase(object):
     def data_ptr(self) -> int: ...  # noqa: E704
 
     # Defined in torch/csrc/generic/StorageSharing.cpp
-    def _share_filename_(self): ...  # noqa: E704
-    def _share_fd_(self): ...  # noqa: E704
+    def _share_filename_cpu_(self, *args, **kwargs): ...  # noqa: E704
+    def _share_fd_cpu_(self, *args, **kwargs): ...  # noqa: E704
     @classmethod
-    def _new_using_filename(cls: Type[T], size: int) -> T: ...  # noqa: E704
+    def _new_using_filename_cpu(cls: Type[T], size: int) -> T: ...  # noqa: E704
     @classmethod
-    def _new_using_fd(cls: Type[T], size: int) -> T: ...  # noqa: E704
+    def _new_using_fd_cpu(cls: Type[T], size: int) -> T: ...  # noqa: E704
     @classmethod
     def from_buffer(cls, *args, **kwargs) -> T: ...  # noqa: E704
     @classmethod
-    def _new_shared_filename(cls, manager, obj, size, *, device=None, dtype=None) -> T: ...  # noqa: E704
+    def _new_shared_filename_cpu(cls, manager, obj, size, *, device=None, dtype=None) -> T: ...  # noqa: E704
     @classmethod
-    def _release_ipc_counter(cls, *args, **kwargs) -> T: ...  # noqa: E704
+    def _release_ipc_counter_cuda(cls, *args, **kwargs) -> T: ...  # noqa: E704
     @classmethod
     def _new_with_weak_ptr(cls, *args, **kwargs) -> T: ...  # noqa: E704
     def _shared_decref(self) -> T: ...  # noqa: E704
+    def _write_file(self, *args, **kwargs): ...  # noqa: E704
+    def resize_(self, size: int): ...  # noqa: E704
+    def _weak_ref(self, *args, **kwargs) -> T: ...  # noqa: E704
+    def is_pinned(self) -> bool: ...  # noqa: E704
+    def _set_from_file(self, *args, **kwargs): ...  # noqa: E704
+    def _set_cdata(self, *args, **kwargs): ...  # noqa: E704
+    def _share_cuda_(self, *args, **kwargs): ...  # noqa: E704
+    def is_shared(self) -> bool: ...  # noqa: E704
+    @classmethod
+    def _new_shared_cuda(cls, *args, **kwargs) -> T: ...  # noqa: E704
+    def _shared_incref(self, *args, **kwargs): ...  # noqa: E704
+    @classmethod
+    def _free_weak_ref(cls, *args, **kwargs): ...  # noqa: E704
 
     def __str__(self):
-        content = ' ' + '\n '.join(str(self[i]) for i in range(len(self)))
-        return content + f'\n[{torch.typename(self)} of size {len(self)}]'
+        info_str = (
+            f'[{torch.typename(self)}(device={self.device}) '
+            f'of size {len(self)}]')
+        if self.device.type == 'meta':
+            return '...\n' + info_str
+        else:
+            data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
+            return data_str + '\n' + info_str
 
     def __repr__(self):
         return str(self)
@@ -84,9 +103,7 @@ class _StorageBase(object):
 
     def clone(self):
         """Returns a copy of this storage"""
-        device = self.get_device() if self.is_cuda else -1
-        with torch.cuda.device(device):
-            return type(self)(self.nbytes()).copy_(self)
+        return type(self)(self.nbytes(), device=self.device).copy_(self)
 
     def tolist(self):
         """Returns a list containing the elements of this storage"""
@@ -94,7 +111,17 @@ class _StorageBase(object):
 
     def cpu(self):
         """Returns a CPU copy of this storage if it's not already on the CPU"""
-        return _type(self, getattr(torch, self.__class__.__name__))
+        if self.device.type != 'cpu':
+            return torch._UntypedStorage(self.size()).copy_(self, False)
+        else:
+            return self
+
+    def mps(self):
+        """Returns a CPU copy of this storage if it's not already on the CPU"""
+        if self.device.type != 'mps':
+            return torch._UntypedStorage(self.size(), device="mps").copy_(self, False)
+        else:
+            return self
 
     def _to(self, dtype):
         if not isinstance(dtype, torch.dtype):
@@ -157,7 +184,7 @@ class _StorageBase(object):
         if self.is_cuda:
             raise TypeError(f"cannot pin '{self.type()}' only CPU memory can be pinned")
         import torch.cuda
-        allocator = torch.cuda._host_allocator()  # type: ignore[attr-defined]
+        allocator = torch.cuda.memory._host_allocator()  # type: ignore[attr-defined]
         return type(self)(self.size(), allocator=allocator).copy_(self)
 
     def share_memory_(self):
@@ -173,24 +200,32 @@ class _StorageBase(object):
         if self.is_cuda:
             pass  # CUDA doesn't use POSIX shared memory
         elif get_sharing_strategy() == 'file_system':
-            self._share_filename_()
+            self._share_filename_cpu_()
         else:
-            self._share_fd_()
+            self._share_fd_cpu_()
         return self
 
     @classmethod
-    def _new_shared(cls, size):
+    def _new_shared(cls, size, *, device='cpu'):
         """Creates a new storage in shared memory with the same data type"""
         from torch.multiprocessing import get_sharing_strategy
-        if cls.is_cuda:
-            return cls(size)
+        device = torch.device(device)
+        if device.type == 'cuda':
+            return cls(size, device=device)
         elif get_sharing_strategy() == 'file_system':
-            return cls._new_using_filename(size)
+            return cls._new_using_filename_cpu(size)
         else:
-            return cls._new_using_fd(size)
+            return cls._new_using_fd_cpu(size)
 
     def _untyped(self):
         return self
+
+
+class _UntypedStorage(torch._C.StorageBase, _StorageBase):
+    def __getitem__(self, *args, **kwargs):
+        if self.device.type == 'meta':
+            raise NotImplementedError("Not available for 'meta' device type")
+        return super().__getitem__(*args, **kwargs)
 
 
 def _load_from_bytes(b):
@@ -320,7 +355,7 @@ class _TypedStorage:
                         "\nNo positional arguments should be given when using "
                         "'wrap_storage'")
 
-                if not isinstance(wrap_storage, (torch._UntypedStorage, torch.cuda._UntypedStorage)):
+                if not isinstance(wrap_storage, torch._UntypedStorage):
                     raise TypeError(
                         arg_error_msg +
                         f"\nArgument 'wrap_storage' must be _UntypedStorage, but got {type(wrap_storage)}")
@@ -371,7 +406,7 @@ class _TypedStorage:
 
             self.dtype = dtype
 
-            if not isinstance(wrap_storage, (torch._UntypedStorage, torch.cuda._UntypedStorage)):
+            if not isinstance(wrap_storage, torch._UntypedStorage):
                 raise TypeError(
                     arg_error_msg +
                     f"\nArgument 'wrap_storage' must be _UntypedStorage, but got {type(wrap_storage)}")
@@ -382,23 +417,16 @@ class _TypedStorage:
             self.dtype = torch.get_default_dtype() if dtype is None else dtype
             device = torch.device('cpu' if device is None else device)
 
-            if device.type == 'cpu':
-                untyped_storage_class = torch._UntypedStorage
-            elif device.type == 'cuda':
-                untyped_storage_class = torch.cuda._UntypedStorage
-            else:
-                raise RuntimeError(f"Storage device not recognized: {device}")
-
             if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
                 if device.type == 'cuda':
                     raise RuntimeError("Cannot create CUDA storage with quantized dtype")
 
             if len(args) == 0:
-                self._storage = untyped_storage_class()
+                self._storage = torch._UntypedStorage(device=device)
 
             elif len(args) == 1:
                 if _isint(args[0]):
-                    self._storage = untyped_storage_class(int(args[0]) * self.element_size())
+                    self._storage = torch._UntypedStorage(int(args[0]) * self.element_size(), device=device)
                 elif isinstance(args[0], collections.abc.Sequence):
                     self._storage = _get_storage_from_sequence(args[0], self.dtype, device)
                 else:
@@ -420,16 +448,12 @@ class _TypedStorage:
         return self._storage
 
     def _new_wrapped_storage(self, untyped_storage):
-        module = eval(untyped_storage.__module__)
-        assert type(untyped_storage) == module._UntypedStorage
+        assert type(untyped_storage) == torch._UntypedStorage
 
         if type(self) == _TypedStorage:
             return _TypedStorage(wrap_storage=untyped_storage, dtype=self.dtype)
         else:
-            # NOTE: We need to use the module of untyped_storage in case self's
-            # module is different, e.g. if self is on CPU and untyped_storage
-            # is on CUDA, and vice versa
-            return getattr(module, type(self).__name__)(wrap_storage=untyped_storage)
+            return type(self)(wrap_storage=untyped_storage)
 
     def __len__(self):
         return self._storage.nbytes() // self.element_size()
@@ -462,6 +486,8 @@ class _TypedStorage:
     def __setitem__(self, idx, value):
         if not isinstance(idx, (int, slice)):
             raise RuntimeError(f"can't index a {type(self)} with {type(idx)}")
+        if torch.is_storage(value):
+            raise RuntimeError(f'cannot set item with value type {type(value)}')
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             interpret_dtypes = {
                 torch.quint8: torch.uint8,
@@ -480,6 +506,9 @@ class _TypedStorage:
         tmp_tensor[idx] = value
 
     def __getitem__(self, idx):
+        if self.device.type == 'meta':
+            raise NotImplementedError("Not available for 'meta' device type")
+
         # NOTE: Before _TypedStorage existed, indexing with a slice used to be
         # possible for <type>Storage objects. However, it would return
         # a storage view, which would be a hassle to implement in _TypedStorage,
@@ -505,7 +534,7 @@ class _TypedStorage:
         tmp_tensor = torch.tensor([], dtype=self.dtype, device=self.device).set_(self)
         return tmp_tensor[idx_wrapped].item()
 
-    def copy_(self, source: T, non_blocking=None):
+    def copy_(self, source: T, non_blocking: bool = None):
         self._storage.copy_(source._untyped(), non_blocking)
         return self
 
@@ -527,7 +556,7 @@ class _TypedStorage:
     def cuda(self, device=None, non_blocking=False, **kwargs) -> T:
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             raise RuntimeError("Cannot create CUDA storage with quantized dtype")
-        cuda_storage = self._storage.cuda(device, non_blocking, **kwargs)
+        cuda_storage: torch._UntypedStorage = self._storage.cuda(device, non_blocking, **kwargs)
         return self._new_wrapped_storage(cuda_storage)
 
     def element_size(self):
@@ -537,10 +566,14 @@ class _TypedStorage:
         return self._storage.get_device()
 
     def __str__(self):
-        data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
-        return data_str + (
-            f'\n[{torch.typename(self)}(dtype={self.dtype}, '
+        info_str = (
+            f'[{torch.typename(self)}(dtype={self.dtype}, '
             f'device={self.device}) of size {len(self)}]')
+        if self.device.type == 'meta':
+            return '...\n' + info_str
+        else:
+            data_str = ' ' + '\n '.join(str(self[i]) for i in range(self.size()))
+            return data_str + '\n' + info_str
 
     def __repr__(self):
         return str(self)
@@ -585,13 +618,12 @@ class _TypedStorage:
         self._storage.share_memory_()
         return self
 
-    def _new_shared(self, size):
+    def _new_shared(self, size, *, device=None):
         """Creates a new storage in shared memory with the same data type"""
-        if self.is_cuda:
-            untyped_cls = torch.cuda._UntypedStorage
-        else:
-            untyped_cls = torch._UntypedStorage
-        untyped_storage = untyped_cls._new_shared(size * self.element_size())
+        if device is None:
+            device = 'cpu'
+        device = torch.device(device)
+        untyped_storage = torch._UntypedStorage._new_shared(size * self.element_size(), device=device)
         return _TypedStorage(
             wrap_storage=untyped_storage,
             dtype=self.dtype)
@@ -626,7 +658,7 @@ class _TypedStorage:
 
     @classmethod
     def _free_weak_ref(cls, *args, **kwargs):
-        return eval(cls.__module__)._UntypedStorage._free_weak_ref(*args, **kwargs)
+        return _UntypedStorage._free_weak_ref(*args, **kwargs)
 
     def _weak_ref(self, *args, **kwargs):
         return self._storage._weak_ref(*args, **kwargs)
@@ -636,16 +668,9 @@ class _TypedStorage:
         if cls == _TypedStorage:
             dtype = torch.get_default_dtype() if dtype is None else dtype
             device = torch.device('cpu' if device is None else device)
-
-            if device.type == 'cpu':
-                untyped_cls = torch._UntypedStorage
-            elif device.type == 'cuda':
-                untyped_cls = torch.cuda._UntypedStorage
-            else:
-                raise RuntimeError(
-                    f"_TypedStorage.from_buffer: device '{device}' not recognized")
-            untyped_storage: Union[torch._UntypedStorage, torch.cuda._UntypedStorage]
-            untyped_storage = untyped_cls.from_buffer(*args, dtype=dtype, **kwargs)
+            if device.type != 'cpu':
+                raise RuntimeError(f'_TypedStorage.from_buffer: Not available for device {device.type}')
+            untyped_storage: torch._UntypedStorage = torch._UntypedStorage.from_buffer(*args, dtype=dtype, **kwargs)
 
         else:
             if dtype is not None or len(args) == 5:
@@ -658,7 +683,7 @@ class _TypedStorage:
                     "_UntypedStorage.from_buffer and _TypedStorage.from_buffer"))
 
             dtype = cls.dtype
-            untyped_storage = eval(cls.__module__)._UntypedStorage.from_buffer(*args, dtype=dtype, **kwargs)
+            untyped_storage = torch._UntypedStorage.from_buffer(*args, dtype=dtype, **kwargs)
 
         return _TypedStorage(wrap_storage=untyped_storage, dtype=dtype)
 
@@ -770,10 +795,10 @@ class _TypedStorage:
 
     @classmethod
     def _new_shared_cuda(cls, *args, **kwargs):
-        return torch.cuda._UntypedStorage._new_shared_cuda(*args, **kwargs)
+        return torch._UntypedStorage._new_shared_cuda(*args, **kwargs)
 
-    def _share_filename_(self, *args, **kwargs):
-        manager_handle, storage_handle, size = self._storage._share_filename_(*args, **kwargs)
+    def _share_filename_cpu_(self, *args, **kwargs):
+        manager_handle, storage_handle, size = self._storage._share_filename_cpu_(*args, **kwargs)
         return manager_handle, storage_handle, size // self.element_size()
 
     def _shared_decref(self):
@@ -782,22 +807,13 @@ class _TypedStorage:
 
     @classmethod
     def _release_ipc_counter(cls, *args, device=None, **kwargs):
-        device = torch.device('cpu' if device is None else device)
-
-        if device.type == 'cpu':
-            untyped_cls = torch._UntypedStorage
-        elif device.type == 'cuda':
-            untyped_cls = torch.cuda._UntypedStorage
-        else:
-            raise RuntimeError(f"device {device} not recognized")
-
-        return untyped_cls._release_ipc_counter(*args, **kwargs)
+        return torch._UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
 
     def _shared_incref(self, *args, **kwargs):
         return self._storage._shared_incref(*args, **kwargs)
 
-    def _share_fd_(self, *args, **kwargs):
-        fd, size = self._storage._share_fd_(*args, **kwargs)
+    def _share_fd_cpu_(self, *args, **kwargs):
+        fd, size = self._storage._share_fd_cpu_(*args, **kwargs)
         return fd, size // self.element_size()
 
     def _get_legacy_storage_class(self):
@@ -832,18 +848,17 @@ class _LegacyStorage(_TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
     def _new_shared(cls, size):
         """Creates a new storage in shared memory with the same data type"""
-        module = eval(cls.__module__)
-        untyped_storage = module._UntypedStorage._new_shared(size * cls().element_size())
+        untyped_storage = torch._UntypedStorage._new_shared(size * cls().element_size())
         return cls(wrap_storage=untyped_storage)
 
     @classmethod
     def _release_ipc_counter(cls, *args, **kwargs):
-        return eval(cls.__module__)._UntypedStorage._release_ipc_counter(*args, **kwargs)
+        return torch._UntypedStorage._release_ipc_counter_cuda(*args, **kwargs)
 
     @classmethod
     def _new_shared_filename(cls, manager, obj, size):
         bytes_size = size * torch._utils._element_size(cls.dtype)
-        return cls(wrap_storage=eval(cls.__module__)._UntypedStorage._new_shared_filename(manager, obj, bytes_size))
+        return cls(wrap_storage=torch._UntypedStorage._new_shared_filename_cpu(manager, obj, bytes_size))
 
 def _get_dtype_from_pickle_storage_type(pickle_storage_type: str):
     try:

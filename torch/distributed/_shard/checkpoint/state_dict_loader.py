@@ -1,8 +1,11 @@
-
 import io
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional, cast
+from torch.distributed._shard.metadata import ShardMetadata
+from torch.distributed._shard.sharded_tensor.shard import Shard
 
 import torch
+import torch.distributed as dist
+from torch import Tensor
 from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
     ShardedTensorMetadata
@@ -15,17 +18,41 @@ from torch.distributed._shard.sharding_spec._internals import (
 from .metadata import (
     BytesReadRequest,
     BytesStorageMetadata,
+    ShardStorageMetadata,
     TensorReadRequest,
     Metadata,
     ShardedTensorStorageMetadata,
     TensorStorageMetadata,
 )
 from .resharding import (
-    _prepare_sharded_tensor_read,
+    _prepare_generic_tensor_read,
     _shards_get_overlap_region_wrt_saved_tensor
 )
-from .storage import StorageReader
+from .storage import (
+    StorageReader,
+)
 
+from .api import CheckpointException
+
+def _create_shard_metadata(size: torch.Size) -> ShardMetadata:
+    rank = dist.get_rank() if dist.is_initialized() else 0
+    return ShardMetadata(
+        shard_offsets=[0] * len(size),
+        shard_sizes=list(size),
+    )
+
+def _create_shard_for(tensor: Tensor) -> Shard:
+    return Shard(
+        tensor=tensor,
+        metadata=_create_shard_metadata(tensor.size()),
+    )
+
+def _create_checkpoint_shard_for(storage: TensorStorageMetadata) -> ShardStorageMetadata:
+    return ShardStorageMetadata(
+        # The metadata device is not used during loading.
+        shard_metadata=_create_shard_metadata(storage.size),
+        storage_key=storage.storage_key,
+    )
 
 def _reshard_and_prepare_read_request(
     state_dict: Dict[str, Any], metadata_from_storage: Metadata
@@ -36,38 +63,12 @@ def _reshard_and_prepare_read_request(
     tensor_read_requests = []
     bytes_read_requests = []
     for fqn, obj in state_dict.items():
+        md = metadata_from_storage.state_dict_metadata[fqn]
         if isinstance(obj, ShardedTensor):
-            md = metadata_from_storage.state_dict_metadata[fqn]
-            if isinstance(md, ShardedTensorStorageMetadata):
-                tensor_read_requests += _prepare_sharded_tensor_read(md, obj)
-            else:
-                raise ValueError(
-                    f"Invalid checkpoint metadata for {fqn}, " +
-                    f"expected ShardedTensorStorageMetadata but found {type(md)}"
-                )
+            local_shards = obj.local_shards()
         elif isinstance(obj, torch.Tensor):
-            tensor = obj.detach()
-            md = metadata_from_storage.state_dict_metadata[fqn]
-            if isinstance(md, TensorStorageMetadata):
-                rr = TensorReadRequest(
-                    tensor=tensor,
-                    storage_key=md.storage_key,
-                    offsets=tuple([0] * len(tensor.size())),
-                    lengths=md.size,
-                )
-
-                tensor_read_requests.append(rr)
-            else:
-                raise ValueError(
-                    f"Invalid checkpoint metadata for {fqn}, " +
-                    f"expected TensorStorageMetadata but found {type(md)}"
-                )
+            local_shards = [_create_shard_for(obj)]
         else:
-            md = metadata_from_storage.state_dict_metadata[fqn]
-            # This is actually hard to handle correctly
-            # If the value is not a tensor but any random obj,
-            # we cannot just write whatever memory it points to inplace
-            # the best we can to is to replace it with an object of the same type
             if isinstance(md, BytesStorageMetadata):
                 bytes_io = io.BytesIO()
                 brr = BytesReadRequest(
@@ -81,6 +82,20 @@ def _reshard_and_prepare_read_request(
                     f"Invalid checkpoint metadata for {fqn}, " +
                     f"expected BytesStorageMetadata but found {type(md)}"
                 )
+            continue
+
+        if isinstance(md, ShardedTensorStorageMetadata):
+            checkpoint_shards = md.storage_metadata
+        elif isinstance(md, TensorStorageMetadata):
+            checkpoint_shards = [_create_checkpoint_shard_for(md)]
+        else:
+            raise ValueError(
+                f"Invalid checkpoint metadata for {fqn}, " +
+                f"expected TensorStorageMetadata but found {type(md)}"
+            )
+
+        tensor_read_requests += _prepare_generic_tensor_read(checkpoint_shards, local_shards)
+
 
 
     return (bytes_read_requests, tensor_read_requests)
@@ -89,6 +104,9 @@ def _reshard_and_prepare_read_request(
 def load_state_dict(
     state_dict: Dict[str, Any],
     storage_reader: StorageReader,
+    process_group: Optional[dist.ProcessGroup] = None,
+    coordinator_rank: int = 0,
+    no_dist: bool = False
 ) -> None:
     """
     Load a distributed state_dict in SPMD style.
@@ -108,10 +126,17 @@ def load_state_dict(
     Users must call `load_state_dict` on the root module to ensure load
     pos-processing and non-tensor data properly propagates.
 
+    This function can be used for local inference and load a checkpoint
+    produced by ``save_state_dict`` without having a process group initialized
+    by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
+
     Args:
         state_dict (Dict[str, Any]) : The state_dict to load. Note that this
             state dict will updated in places.
         storage_reader (StorageReader): StorageReader used to load data from.
+        process_group (ProcessGroup): ProcessGroup to be used for cross-rank synchronization
+        coordinator_rank (int): Rank to use to coordinate the checkpoint, rank0 is used by default
+        no_dist (bool): Don't attempt to load in SPMD style. Default to False
 
     Returns:
         None.
@@ -131,26 +156,56 @@ def load_state_dict(
         >>> # to flush the state_dict, must call it to
         >>> # ensure correct behavior.
         >>> my_model.load_state_dict(model_state_dict)
+
+    .. note:: load_state_dict uses collectives to coordinate reads across ranks.
+        For NCCL-based process groups, internal tensor representations of objects
+        must be moved to the GPU device before communication takes place. In this
+        case, the device used is given by ``torch.cuda.current_device()`` and it
+        is the user's responsibility to ensure that this is set so that each rank
+        has an individual GPU, via ``torch.cuda.set_device()``
     """
+    is_coordinator = no_dist or dist.get_rank(process_group) == coordinator_rank
 
-    metadata = storage_reader.read_metadata()
-    bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
-        state_dict=state_dict, metadata_from_storage=metadata
-    )
-    bytes_futures = storage_reader.read_bytes(bytes_read_requests)
-    tensor_futures = storage_reader.read_tensors(tensor_read_requests)
+    try:
+        metadata = storage_reader.read_metadata()
+        bytes_read_requests, tensor_read_requests = _reshard_and_prepare_read_request(
+            state_dict=state_dict, metadata_from_storage=metadata
+        )
+        bytes_futures = storage_reader.read_bytes(bytes_read_requests)
+        tensor_futures = storage_reader.read_tensors(tensor_read_requests)
 
-    bytes_futures.wait()
+        bytes_futures.wait()
 
-    # Addtional steps are required to convert the bytes to its original type
-    # Note that this is NOT inplace,
-    # it creating a new object and replace what's in the state dict
-    for req in bytes_read_requests:
-        # Ensure the BytesIO is rewound
-        req.bytes.seek(0)
-        state_dict[req.fqn] = torch.load(req.bytes)
+        # Addtional steps are required to convert the bytes to its original type
+        # Note that this is NOT inplace,
+        # it creating a new object and replace what's in the state dict
+        for req in bytes_read_requests:
+            # Ensure the BytesIO is rewound
+            req.bytes.seek(0)
+            state_dict[req.fqn] = torch.load(req.bytes)
 
-    tensor_futures.wait()
+        tensor_futures.wait()
+        result = None
+    except BaseException as e:
+        result = e
+
+    global_result: Optional[CheckpointException] = None
+    if not no_dist:
+        all_errors = [None] * dist.get_world_size(process_group)
+
+        dist.all_gather_object(
+            object_list=all_errors,
+            obj=result,
+            group=process_group)
+
+        node_failures = cast(Dict[int, BaseException], {i: err for i, err in enumerate(all_errors) if err is not None})
+        if len(node_failures) > 0:
+            global_result = CheckpointException("failed to read checkpoint", node_failures)
+    elif result is not None:
+        global_result = CheckpointException("failed to read storage", {coordinator_rank : result})
+
+    if global_result is not None:
+        raise global_result
 
 
 def _validate_sharded_tensor(

@@ -1,6 +1,6 @@
 #include <torch/csrc/jit/python/python_ir.h>
 
-#include <aten/src/ATen/core/jit_type.h>
+#include <ATen/core/jit_type.h>
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Dtype.h>
@@ -608,7 +608,7 @@ void initPythonIRBindings(PyObject* module_) {
           "schema",
           [](Node& n) {
             std::stringstream ss;
-            if (auto sch = n.maybeSchema()) {
+            if (n.maybeSchema()) {
               ss << n.schema();
             } else {
               ss << "(no schema)";
@@ -643,6 +643,11 @@ void initPythonIRBindings(PyObject* module_) {
       .def(
           "getModuleHierarchy",
           [](Node& n) { return torch::jit::utils::getNodesModuleHierarchy(n); })
+      .def(
+          "namedInput",
+          [](Node& n, const std::string& unqualName) {
+            return n.namedInput(unqualName);
+          })
       .NS(addInput)
       .NS(copyMetadata)
       .NS(replaceInput)
@@ -799,6 +804,9 @@ void initPythonIRBindings(PyObject* module_) {
             s << t;
             return s.str();
           })
+      .def(
+          "containedTypes",
+          [](Type& self) { return self.containedTypes().vec(); })
       .def("kind", [](const Type& t) { return typeKindToString(t.kind()); })
       .def(
           "dim",
@@ -1003,10 +1011,7 @@ void initPythonIRBindings(PyObject* module_) {
       });
   py::class_<UnionType, Type, UnionTypePtr>(m, "UnionType")
       .def(py::init(
-          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }))
-      .def("containedTypes", [](UnionType& self) {
-        return self.containedTypes().vec();
-      });
+          [](const std::vector<TypePtr>& a) { return UnionType::create(a); }));
   py::class_<ListType, Type, ListTypePtr>(m, "ListType")
       .def(py::init([](TypePtr a) { return ListType::create(a); }))
       .def_static("ofInts", &ListType::ofInts)

@@ -132,7 +132,7 @@ Tensor _mps_convolution(
           MPSGraph* mpsGraph = native_mps::make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphConvolution2DOpDescriptor *descriptor_ = [MPSGraphConvolution2DOpDescriptor new];
+          MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
           fill_conv_desc(descriptor_, stride[0], stride[1],
                                       dilation[0], dilation[1],
                                       padding[1], padding[0],
@@ -173,7 +173,7 @@ Tensor _mps_convolution(
       biasPlaceholder = native_mps::Placeholder(cachedGraph->biasTensor_, (bias_opt.value()).view({1, bias_shape[0], 1, 1}));
     auto outputPlaceholder = native_mps::Placeholder(cachedGraph->outputTensor_, *output);
 
-    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [[NSMutableDictionary alloc] initWithCapacity: 3];
+    NSMutableDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = [[[NSMutableDictionary alloc] initWithCapacity: 3] autorelease];
     feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
     feeds[weightsPlaceholder.getMPSGraphTensor()] = weightsPlaceholder.getMPSGraphTensorData();
     if(bias_defined) {
@@ -262,7 +262,7 @@ Tensor mps_convolution_backward_input(
           MPSGraph* mpsGraph = native_mps::make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphConvolution2DOpDescriptor *descriptor_ = [MPSGraphConvolution2DOpDescriptor new];
+          MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
           fill_conv_desc(descriptor_, stride[0], stride[1],
                                       dilation[0], dilation[1],
                                       padding[1], padding[0],
@@ -373,7 +373,7 @@ Tensor mps_convolution_backward_weights(
           MPSGraph* mpsGraph = native_mps::make_mps_graph();
           newCachedGraph = new CachedGraph(mpsGraph);
 
-          MPSGraphConvolution2DOpDescriptor *descriptor_ = [MPSGraphConvolution2DOpDescriptor new];
+          MPSGraphConvolution2DOpDescriptor *descriptor_ = [[MPSGraphConvolution2DOpDescriptor new] autorelease];
           fill_conv_desc(descriptor_, stride[0], stride[1],
                                       dilation[0], dilation[1],
                                       padding[1], padding[0],
