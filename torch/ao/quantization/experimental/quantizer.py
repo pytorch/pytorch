@@ -1,5 +1,6 @@
 import torch
 from torch import Tensor
+from typing import Tuple
 from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
 
 # class to store APoT quantizer and
@@ -31,11 +32,14 @@ class APoTQuantizer():
     Returns:
         result: integer APoT representation of tensor2quantize
     """
-    @staticmethod
-    def quantize_APoT(tensor2quantize: Tensor, quantization_levels: Tensor, level_indices: Tensor):
+    def quantize_APoT(self, tensor2quantize: Tensor):
         result = torch.tensor([])
         # map float_to_apot over tensor2quantize elements
-        result = tensor2quantize.apply_(lambda x: float_to_apot(x, quantization_levels, level_indices))
+        result_data = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
+
+        from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
+
+        result = TensorAPoT(self, result_data)
 
         return result
 
@@ -47,22 +51,21 @@ class APoTQuantizer():
     Returns:
         result: fp representation of input Tensor
     """
-    @staticmethod
-    def dequantize_APoT(float2apot):
-        quantization_levels = float2apot.quantizer.quantization_levels
-        level_indices = float2apot.quantizer.level_indices
+    def dequantize_APoT(self, float2apot):
         apot_tensor = float2apot.data
 
         # map apot_to_float over tensor2quantize elements
-        result = apot_tensor.apply_(lambda x: float(apot_to_float(x, quantization_levels, level_indices)))
+        result = apot_tensor.apply_(lambda x: float(apot_to_float(x, self.quantization_levels, self.level_indices)))
 
         return result
 
     def q_apot_alpha(self) -> float:
         raise NotImplementedError
 
-def quantize_APoT(tensor2quantize: Tensor, quantization_levels: Tensor, level_indices: Tensor):
-    return APoTQuantizer.quantize_APoT(tensor2quantize, quantization_levels, level_indices)
+def quantize_APoT(tensor2quantize: Tensor, qparams: Tuple):
+    quantizer = APoTQuantizer(alpha=qparams[0], gamma=qparams[1], quantization_levels=qparams[2], level_indices=qparams[3])
+    return quantizer.quantize_APoT(tensor2quantize)
 
-def dequantize_APoT(float2apot):
-    return APoTQuantizer.dequantize_APoT(float2apot)
+def dequantize_APoT(float2apot, qparams: Tuple):
+    quantizer = APoTQuantizer(alpha=qparams[0], gamma=qparams[1], quantization_levels=qparams[2], level_indices=qparams[3])
+    return quantizer.dequantize_APoT(float2apot)

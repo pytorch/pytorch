@@ -36,19 +36,19 @@ class TestNonUniformObserver(unittest.TestCase):
         gamma_test = 1 / gamma_test
 
         # check gamma value
-        self.assertEqual(obs_result[0], gamma_test)
+        self.assertEqual(obs_result[1], gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(obs_result[1]))
+        quantlevels_size_test = int(len(obs_result[2]))
         quantlevels_size = 2**4
         self.assertEqual(quantlevels_size_test, quantlevels_size)
 
         # check level indices size
-        levelindices_size_test = int(len(obs_result[2]))
+        levelindices_size_test = int(len(obs_result[3]))
         self.assertEqual(levelindices_size_test, 16)
 
         # check level indices unique values
-        level_indices_test_list = obs_result[2].tolist()
+        level_indices_test_list = obs_result[3].tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """
@@ -71,19 +71,19 @@ class TestNonUniformObserver(unittest.TestCase):
         gamma_test = 1 / gamma_test
 
         # check gamma value
-        self.assertEqual(obs_result[0], gamma_test)
+        self.assertEqual(obs_result[1], gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(obs_result[1]))
+        quantlevels_size_test = int(len(obs_result[2]))
         quantlevels_size = 2**6
         self.assertEqual(quantlevels_size_test, quantlevels_size)
 
         # check level indices size
-        levelindices_size_test = int(len(obs_result[2]))
+        levelindices_size_test = int(len(obs_result[3]))
         self.assertEqual(levelindices_size_test, 64)
 
         # check level indices unique values
-        level_indices_test_list = obs_result[2].tolist()
+        level_indices_test_list = obs_result[3].tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """
@@ -107,15 +107,15 @@ class TestNonUniformObserver(unittest.TestCase):
         gamma_test = 1 / gamma_test
 
         # check gamma value
-        self.assertEqual(obs_result[0], gamma_test)
+        self.assertEqual(obs_result[1], gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(obs_result[1]))
+        quantlevels_size_test = int(len(obs_result[2]))
         self.assertEqual(quantlevels_size_test, 49)
 
         # check negatives of each element contained
         # in quantization levels
-        quantlevels_test_list = obs_result[1].tolist()
+        quantlevels_test_list = obs_result[2].tolist()
         negatives_contained = True
         for ele in quantlevels_test_list:
             if not (-ele) in quantlevels_test_list:
@@ -123,11 +123,11 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertTrue(negatives_contained)
 
         # check level indices size
-        levelindices_size_test = int(len(obs_result[2]))
+        levelindices_size_test = int(len(obs_result[3]))
         self.assertEqual(levelindices_size_test, 49)
 
         # check level indices unique elements
-        level_indices_test_list = obs_result[2].tolist()
+        level_indices_test_list = obs_result[3].tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """
@@ -143,7 +143,9 @@ class TestNonUniformObserver(unittest.TestCase):
 
         qparams = obs.calculate_qparams(True)
 
-        self.assertEqual(obs.alpha, torch.tensor([100.23]))
+        alpha = qparams[0]
+
+        self.assertEqual(alpha, torch.tensor([100.23]))
 
 
 if __name__ == '__main__':
