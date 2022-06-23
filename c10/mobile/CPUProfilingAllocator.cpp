@@ -130,12 +130,12 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
 
   // lower_bound on this map will get all candidates of
   // the right size for allocation.
-  std::map<uint64_t, uint64_t> free_size_to_offset;
+  std::map<uint64_t, std::vector<uint64_t>> free_size_to_offset;
   // This provides fast lookup when we want to insert freed block
   // back, especially when we want to merge blocks.
-  ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator>
+  ska::flat_hash_map<uint64_t, std::map<uint64_t, std::vector<uint64_t>>::iterator>
       free_start_offset_to_size_iter;
-  ska::flat_hash_map<uint64_t, std::map<uint64_t, uint64_t>::iterator>
+  ska::flat_hash_map<uint64_t, std::map<uint64_t, std::vector<uint64_t>>::iterator>
       free_end_offset_to_size_iter;
   // Upon free end_ptr = offset + size
   // If end_ptr exists merge freed allocation
@@ -171,14 +171,25 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
         //    1.2 Erase the reverse map entries
         // 2. If block still has space left insert the remainder back in map.
         //    Including reverse map entries.
-        alloc_offset = it->second;
+        alloc_offset = it->second[0];
         new_offset = alloc_offset + mem_event.size;
         new_size = it->first - mem_event.size;
-        free_size_to_offset.erase(it);
+        if (it->second.size() == 1) {
+          free_size_to_offset.erase(it);      
+        } else {
+          it->second.erase(it->second.begin());
+        }
         free_start_offset_to_size_iter.erase(alloc_offset);
         free_end_offset_to_size_iter.erase(alloc_offset + it->first);
         if (new_size > 0) {
-          auto ref_it = free_size_to_offset.emplace(new_size, new_offset).first;
+          auto ref_it = free_size_to_offset.find(new_size);
+          if (ref_it != free_size_to_offset.end()) {
+            // When the free_size_to_offset map already has such size, directly insert will fail
+            ref_it->second.emplace_back(new_offset);
+          } else {
+            std::vector<uint64_t> offset_vector = {new_offset};
+            ref_it = free_size_to_offset.emplace(new_size, offset_vector).first;
+          }
           free_start_offset_to_size_iter.emplace(new_offset, ref_it);
           free_end_offset_to_size_iter.emplace(new_offset + new_size, ref_it);
         }
@@ -205,7 +216,11 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
         auto merge_block_iter = end_it->second;
         auto merge_block_size = merge_block_iter->first;
         freed_size += merge_block_size;
-        free_size_to_offset.erase(merge_block_iter);
+        if (merge_block_iter->second.size() == 1) {
+          free_size_to_offset.erase(merge_block_iter);      
+        } else {
+          merge_block_iter->second.erase(std::remove(merge_block_iter->second.begin(), merge_block_iter->second.end(), end_it->first), merge_block_iter->second.end());
+        }
         free_start_offset_to_size_iter.erase(end_it);
         // If the block is being merged then also remove it from
         // free_end_offset_to_size_iter
@@ -218,14 +233,25 @@ std::vector<uint64_t> formulate_greedy_allocation_plan(
         auto merge_block_size = merge_block_iter->first;
         freed_size += merge_block_size;
         freed_offset -= merge_block_size;
-        free_size_to_offset.erase(merge_block_iter);
+        if (merge_block_iter->second.size() == 1) {
+          free_size_to_offset.erase(merge_block_iter);      
+        } else {
+          merge_block_iter->second.erase(std::remove(merge_block_iter->second.begin(), merge_block_iter->second.end(), freed_offset), merge_block_iter->second.end());
+        }
         free_end_offset_to_size_iter.erase(start_it);
         // If the block is being merged then also remove it from
         // free_start_offset_to_size_iter
         free_start_offset_to_size_iter.erase(freed_offset);
       }
-      auto freed_block_it =
-          free_size_to_offset.emplace(freed_size, freed_offset).first;
+      
+      auto freed_block_it = free_size_to_offset.find(freed_size);
+      if (freed_block_it != free_size_to_offset.end()) {
+        freed_block_it->second.emplace_back(freed_offset);
+      } else {
+        std::vector<uint64_t> offset_vector = {freed_offset};
+        freed_block_it = free_size_to_offset.emplace(freed_size, offset_vector).first;        
+      }
+
       free_start_offset_to_size_iter.emplace(freed_offset, freed_block_it);
       free_end_offset_to_size_iter.emplace(
           freed_offset + freed_size, freed_block_it);
