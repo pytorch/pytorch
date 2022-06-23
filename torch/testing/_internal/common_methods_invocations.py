@@ -3367,6 +3367,7 @@ def sample_inputs_multi_margin_loss(op_info, device, dtype, requires_grad, **kwa
 
 def sample_inputs_logsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
+        ((), (0,), False),
         ((), (0,), True),
         ((S, S), (1,), True),
         ((S, S), (1,), False),
