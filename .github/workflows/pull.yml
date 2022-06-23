@@ -91,19 +91,20 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
         ]}
 
-  linux-xenial-py3_7-clang7-onnx-build:
-    name: linux-xenial-py3.7-clang7-onnx
+
+  linux-focal-py3_7-clang10-onnx-build:
+    name: linux-focal-py3.7-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
     with:
-      docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
+      docker-image-name: pytorch-linux-focal-py3-clang10-onnx
 
-  linux-xenial-py3_7-clang7-onnx-test:
-    name: linux-xenial-py3.7-clang7-onnx
+  linux-focal-py3_7-clang10-onnx-test:
+    name: linux-focal-py3.7-clang10-onnx
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-clang7-onnx-build
+    needs: linux-focal-py3_7-clang10-onnx-build
     with:
+      docker-image: ${{ needs.linux-focal-py3_7-clang10-onnx-build.outputs.docker-image }}
       script: .jenkins/caffe2/test.sh
-      docker-image: ${{ needs.linux-xenial-py3_7-clang7-onnx-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -202,6 +203,7 @@ jobs:
       script: .jenkins/pytorch/build-mobile.sh
 
   linux-bionic-py3_7-clang8-xla-build:
+    if: false
     name: linux-bionic-py3_7-clang8-xla
     uses: ./.github/workflows/_linux-build.yml
     with:
