@@ -13,7 +13,7 @@ import itertools
 import os
 import tempfile
 import warnings
-from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union, List
+from typing import Any, Callable, Mapping, Optional, Sequence, Tuple, Union
 
 import numpy as np
 
@@ -114,8 +114,8 @@ def _ort_session(
 
 
 def _compare_ort_pytorch_outputs(
-    ort_outs: List[np.ndarray],
-    pt_outs: List[torch.Tensor],
+    ort_outs: Sequence[np.ndarray],
+    pt_outs: Sequence[torch.Tensor],
     rtol: float,
     atol: float,
     check_shape: bool,
