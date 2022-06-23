@@ -1175,6 +1175,12 @@ class TestFunctionalIterDataPipe(TestCase):
             _helper(None, lambda d0, d1: d0 + d1, 0)
             _helper(None, p_fn_n1, (0, 1))
 
+        # Function takes fewer parameters than input col
+        with self.assertRaises(ValueError):
+            def zero_args():
+                return
+            _helper(None, zero_args, 0)
+
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
         _helper(lambda data: (data[0], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
@@ -1263,6 +1269,13 @@ class TestFunctionalIterDataPipe(TestCase):
             _helper(None, fn_n1, "y")
             _helper(None, lambda x, y: x + y, "x")
             _helper(None, p_fn_n1, ("x", "y"))
+
+        # Function takes fewer parameters than input col
+        with self.assertRaises(ValueError):
+            def zero_args():
+                return
+            _helper(None, zero_args, "x")
+
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
