@@ -17955,9 +17955,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
-        skips=(
-            # Could not run 'aten::where' with arguments from the 'AutogradMeta' backend.
-            DecorateInfo(unittest.expectedFailure, 'TestFakeTensorNonErroring', 'test_fake'),),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     # `log_softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
