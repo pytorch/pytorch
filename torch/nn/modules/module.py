@@ -47,7 +47,7 @@ class _WrappedHook:
 
         if module is not None:
             self.module: weakref.ReferenceType["Module"] = weakref.ref(module)
-            self.with_module: bool = True
+            self.with_module = True
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         if self.with_module:
