@@ -359,11 +359,7 @@ class TestNestedTensorDeviceType(TestCase):
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
-        self.assertRaisesRegex(
-            RuntimeError,
-            "cannot index an empty nested tensor",
-            lambda: nt0[0]
-        )
+        self.assertRaises(IndexError, lambda: nt0[0])
         # normal case
         x0 = torch.randn((2, 5), device=device, dtype=dtype)
         x1 = torch.randn((3, 4), device=device, dtype=dtype)
