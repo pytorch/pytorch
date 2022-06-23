@@ -1058,7 +1058,9 @@ def _logical_or(a: TensorLikeType, b: TensorLikeType):
         a = a != 0
     if not utils.is_boolean_dtype(b.dtype):
         b = b != 0
-    return a | b
+    # TODO: return a | b
+    # See: https://github.com/pytorch/pytorch/pull/78655#issuecomment-1163792791
+    return bitwise_or(a, b)
 
 
 logical_or = _make_elementwise_binary_reference(
