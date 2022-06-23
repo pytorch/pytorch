@@ -12,6 +12,7 @@ from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatc
 import weakref
 import functools
 import itertools
+import contextlib
 from dataclasses import dataclass
 
 
@@ -191,6 +192,20 @@ def resize_as_(fake_mode, func, *args, **kwargs):
     return func(*args, **kwargs)
 
 
+# Dont default to default device handling,
+# Since op can take in non-zero sized cpu
+# index tensors with cuda self
+@register_op_impl(aten.index.Tensor)
+def index_tensor(fake_mode, func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    out_device = new_kwargs["input"].device
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(*args, **kwargs)
+
+    return FakeTensor(fake_mode, out, out_device)
+
 # _to_copy fails when run with FakeTensors to cuda device
 # TODO: debug
 @register_op_impl(torch.ops.aten._to_copy.default)
@@ -233,6 +248,13 @@ def check_no_bool_index_tensors(func, self, indices):
 # FakeTensor extends MetaTensors to also carry an additional `fake_device`
 # which tracks devices that would have been used.
 
+@contextlib.contextmanager
+def in_kernel_invocation_manager(fake_mode):
+    fake_mode.in_kernel_invocation = True
+    try:
+        yield
+    finally:
+        fake_mode.in_kernel_invocation = False
 
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
@@ -271,12 +293,10 @@ class FakeTensor(torch.Tensor):
             kwarg_device = kwargs.pop("device")
             out_device = kwarg_device if kwarg_device else out_device
             kwargs["device"] = "meta"
-        self.in_kernel_invocation = True
-        try:
+
+        with in_kernel_invocation_manager(self.fake_mode):
             with no_dispatch():
                 meta_out = super().new(*args, **kwargs)
-        finally:
-            self.in_kernel_invocation = False
 
         with no_dispatch():
             return FakeTensor(self.fake_mode, meta_out, out_device)
@@ -344,7 +364,7 @@ class FakeTensor(torch.Tensor):
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise Exception(
+            raise RuntimeError(
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
 
@@ -449,15 +469,13 @@ class FakeTensorMode(TorchDispatchMode):
             if func == aten.index.Tensor:
                 check_no_bool_index_tensors(func, *args, **kwargs)
 
-            self.in_kernel_invocation = True
-            try:
-                r = func(*args, **kwargs)
-            except NotImplementedError as not_implemented_error:
-                if not self.allow_cpu_fallback:
-                    raise not_implemented_error
-                r = run_cpu_fallback(func, args, kwargs, not_implemented_error)
-            finally:
-                self.in_kernel_invocation = False
+            with in_kernel_invocation_manager(self):
+                try:
+                    r = func(*args, **kwargs)
+                except NotImplementedError as not_implemented_error:
+                    if not self.allow_cpu_fallback:
+                        raise not_implemented_error
+                    r = run_cpu_fallback(func, args, kwargs, not_implemented_error)
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
