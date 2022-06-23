@@ -13,11 +13,25 @@ namespace native {
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
+  // Note: in current implementation,
+  // empty nested tensor = no underlying tensor
+  // nesting empty tensors is not considered empty nested tensor
+  // both cases have `buffer_.numel() = 0`, though
+  // TODO: for now, we use `nested_size_tensor_.dim()`
+  // to determine whether a nested tensor is empty
+  // when empty, `nested_size_tensor_.dim() = 0`
+  // otherwise `nested_size_tensor_.dim() = 2`
+  // maybe there is a better indicator for emptiness?
+
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
   // callers cannot fix it.
   const Tensor& get_nested_size_tensor() const {
     return nested_size_tensor_;
+  }
+  // TODO: don't expose private implementation details like this
+  const Tensor& get_nested_stride_tensor() const {
+    return nested_stride_tensor_;
   }
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
@@ -28,6 +42,16 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
       return c10::nullopt;
     }
     return opt_sizes_[d];
+  }
+
+  int64_t size(int64_t d) const {
+    c10::optional<int64_t> optional_size = this->opt_size(d);
+    TORCH_CHECK(
+        optional_size.has_value(),
+        "Given dimension ",
+        d,
+        " is irregular and does not have a size.");
+    return *optional_size;
   }
 
   const at::Tensor& get_buffer() const {
@@ -42,6 +66,8 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   int64_t numel_custom() const override;
   bool is_contiguous_custom(MemoryFormat) const override;
   IntArrayRef sizes_custom() const override;
+  c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_sizes() const override;
   IntArrayRef strides_custom() const override;
 
   // this one is real
@@ -53,7 +79,7 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   void refresh_dim();
 
   at::Tensor buffer_;
-  const at::Tensor nested_size_tensor_;
+  const at::Tensor nested_size_tensor_, nested_stride_tensor_;
   // NOTE: -1 here means the size is missing
   std::vector<int64_t> opt_sizes_;
 };
