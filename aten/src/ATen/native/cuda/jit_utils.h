@@ -64,8 +64,8 @@ inline int can_vectorize_up_to(size_t default_alignment, void *pointer) {
 }
 
 inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*> pointers) {
-  TORCH_INTERNAL_ASSERT(desc.nOutput == 1);
-  TORCH_INTERNAL_ASSERT(pointers.size() == 1 + desc.nInput);
+  TORCH_INTERNAL_ASSERT(desc.nOutputs == 1);
+  TORCH_INTERNAL_ASSERT(pointers.size() == 1 + desc.nInputs);
 
   // Deals with output
   auto result_size = c10::scalarTypeToTypeMeta(desc.result_type).itemsize();
