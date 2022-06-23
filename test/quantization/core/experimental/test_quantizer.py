@@ -3,7 +3,7 @@
 import torch
 from torch import quantize_per_tensor
 from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import APoTQuantizer
+from torch.ao.quantization.experimental.quantizer import APoTQuantizer, quantize_APoT
 import unittest
 import random
 
@@ -30,7 +30,7 @@ class TestQuantizer(unittest.TestCase):
         quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = APoTQuantizer.quantize_APoT(tensor2quantize=tensor2quantize,
+        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
                                               quantization_levels=qparams[1],
                                               level_indices=qparams[2])
 
@@ -74,7 +74,7 @@ class TestQuantizer(unittest.TestCase):
         quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = APoTQuantizer.quantize_APoT(tensor2quantize=tensor2quantize,
+        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
                                               quantization_levels=qparams[1],
                                               level_indices=qparams[2])
         qtensor_data = torch.tensor(qtensor).type(torch.uint8)
@@ -118,7 +118,7 @@ class TestQuantizer(unittest.TestCase):
 
         dequantized_result = quantizer.dequantize(float2apot=float2apot)
 
-        quantized_result = APoTQuantizer.quantize_APoT(tensor2quantize=dequantized_result,
+        quantized_result = quantize_APoT(tensor2quantize=dequantized_result,
                                                        quantization_levels=qparams[1],
                                                        level_indices=qparams[2])
 
@@ -156,7 +156,7 @@ class TestQuantizer(unittest.TestCase):
 
         dequantized_result = quantizer.dequantize(float2apot=float2apot)
 
-        quantized_result = APoTQuantizer.quantize_APoT(tensor2quantize=dequantized_result,
+        quantized_result = quantize_APoT(tensor2quantize=dequantized_result,
                                                        quantization_levels=qparams[1],
                                                        level_indices=qparams[2])
 

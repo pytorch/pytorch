@@ -4,7 +4,7 @@ import torch
 import random
 import unittest
 from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import APoTQuantizer
+from torch.ao.quantization.experimental.quantizer import APoTQuantizer, quantize_APoT
 from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
 class TestQuantizedTensor(unittest.TestCase):
@@ -28,9 +28,9 @@ class TestQuantizedTensor(unittest.TestCase):
         quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = APoTQuantizer.quantize_APoT(tensor2quantize=tensor2quantize,
-                                              quantization_levels=qparams[1],
-                                              level_indices=qparams[2])
+        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
+                                quantization_levels=qparams[1],
+                                level_indices=qparams[2])
 
         tensor_apot = TensorAPoT(quantizer=quantizer, tensor2quantize=orig_tensor2quantize)
 

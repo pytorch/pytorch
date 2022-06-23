@@ -62,3 +62,6 @@ class APoTQuantizer():
 
     def q_apot_alpha(self) -> float:
         raise NotImplementedError
+
+def quantize_APoT(tensor2quantize: Tensor, quantization_levels: Tensor, level_indices: Tensor):
+    return APoTQuantizer.quantize_APoT(tensor2quantize, quantization_levels, level_indices)
