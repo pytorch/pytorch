@@ -12,8 +12,6 @@ fi
 SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 # shellcheck source=./common.sh
 source "$SCRIPT_PARENT_DIR/common.sh"
-# shellcheck source=./common-build.sh
-source "$SCRIPT_PARENT_DIR/common-build.sh"
 
 IMAGE_COMMIT_ID=$(git rev-parse HEAD)
 export IMAGE_COMMIT_ID

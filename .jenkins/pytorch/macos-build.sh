@@ -3,8 +3,6 @@
 # shellcheck disable=SC2034
 # shellcheck source=./macos-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/macos-common.sh"
-# shellcheck source=./common-build.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 # Build PyTorch
 if [ -z "${CI}" ]; then
