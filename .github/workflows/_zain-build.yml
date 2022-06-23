@@ -1,0 +1,18 @@
+name: zain-build
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    # Don't run on forked repos.
+    if: github.repository_owner == 'pytorch'
+    steps:
+      - name: Speech 3 pytorch only
+        run: echo "This is the pytorch owned repo"
+  other-build:
+    # Don't run on forked repos.
+    if: github.repository_owner != 'pytorch'
+    steps:
+      - name: Speech 4 non-pytorch only
+        run: echo "This is NOTNOTNOT the pytorch owned repo"
