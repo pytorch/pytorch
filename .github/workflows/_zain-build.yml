@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Speech 3 pytorch only
         run: echo "This is the pytorch owned repo"
+      - name: Morph into composite action power
+        uses: ./.github/actions/zain-action
   other-build:
     # Don't run on forked repos.
     runs-on: linux.20_04.16x
