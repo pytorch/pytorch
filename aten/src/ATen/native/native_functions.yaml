@@ -11413,23 +11413,19 @@
 # "_ex" stands for experimental
 - func: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_cholesky_ex
+  structured_delegate: linalg_cholesky_ex.L
 
 - func: linalg_cholesky_ex.L(Tensor self, *, bool upper=False, bool check_errors=False, Tensor(a!) L, Tensor(b!) info) -> (Tensor(a!) L, Tensor(b!) info)
   python_module: linalg
-  variants: function
+  structured: True
   dispatch:
     CPU, CUDA: linalg_cholesky_ex_out
 
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
-  variants: function
 
 - func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  variants: function
 
 - func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
   python_module: linalg
