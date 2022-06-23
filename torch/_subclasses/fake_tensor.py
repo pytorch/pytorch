@@ -192,20 +192,6 @@ def resize_as_(fake_mode, func, *args, **kwargs):
     return func(*args, **kwargs)
 
 
-# Dont default to default device handling,
-# Since op can take in non-zero sized cpu
-# index tensors with cuda self
-@register_op_impl(aten.index.Tensor)
-def index_tensor(fake_mode, func, *args, **kwargs):
-    _, new_kwargs = normalize_function(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
-    )
-    out_device = new_kwargs["input"].device
-    with in_kernel_invocation_manager(fake_mode):
-        out = func(*args, **kwargs)
-
-    return FakeTensor(fake_mode, out, out_device)
-
 # _to_copy fails when run with FakeTensors to cuda device
 # TODO: debug
 @register_op_impl(torch.ops.aten._to_copy.default)
@@ -241,6 +227,25 @@ def check_no_bool_index_tensors(func, self, indices):
     for index in indices:
         if index is not None and index.dtype in (torch.bool, torch.uint8):
             raise DynamicOutputShapeException(func)
+
+# Dont default to default device handling,
+# Since op can take in non-zero sized cpu
+# index tensors with cuda self
+@register_op_impl(aten.index.Tensor)
+def index_tensor(fake_mode, func, *args, **kwargs):
+    # dynamic shape op if indices are bool/uint8
+    check_no_bool_index_tensors(func, *args, **kwargs)
+
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    out_device = new_kwargs["input"].device
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(*args, **kwargs)
+
+    return FakeTensor(fake_mode, out, out_device)
+
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -465,9 +470,6 @@ class FakeTensorMode(TorchDispatchMode):
             for run_impl_check, op_impl in op_implementations:
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
-
-            if func == aten.index.Tensor:
-                check_no_bool_index_tensors(func, *args, **kwargs)
 
             with in_kernel_invocation_manager(self):
                 try:
