@@ -14,7 +14,7 @@ class APoTQuantizer():
             observer: APoTObserver) -> None:
         self.observer = observer
 
-    r""" Quantizes fp Tensor to integer APoT representatio.
+    r""" Quantizes fp Tensor to integer APoT representation.
     Conversion is based on the calculated quantization levels from a specified APoT non-uniform observer.
     The approach follows the method outlined in the APoT paper: https://arxiv.org/pdf/1909.13144.pdf.
     Args:
