@@ -21,12 +21,16 @@ class TestQuantizedTensor(unittest.TestCase):
 
         observer = APoTObserver(b=4, k=2)
 
-        quantizer = APoTQuantizer(observer)
+        observer.forward(tensor2quantize)
+
+        qparams = observer.calculate_qparams(signed=False)
+
+        quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, signed=False)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
 
-        tensor_apot = TensorAPoT(quantizer=quantizer, tensor2quantize=orig_tensor2quantize, signed=False)
+        tensor_apot = TensorAPoT(quantizer=quantizer, tensor2quantize=orig_tensor2quantize)
 
         qtensor_int_rep = tensor_apot.int_repr()
 
