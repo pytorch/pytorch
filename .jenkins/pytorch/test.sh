@@ -424,6 +424,10 @@ test_torch_function_benchmark() {
 }
 
 build_xla() {
+  # xla test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+
   XLA_DIR=xla
   USE_CACHE=0
   clone_pytorch_xla
@@ -438,6 +442,10 @@ build_xla() {
 }
 
 test_xla() {
+  # xla test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
@@ -487,6 +495,10 @@ test_forward_backward_compatibility() {
 
 test_bazel() {
   set -e
+
+  # bazel test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
   get_bazel
 

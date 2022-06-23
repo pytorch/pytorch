@@ -26,8 +26,6 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, windows.4xlarge]
     timeout-minutes: 240
-    env:
-      JOB_BASE_NAME: ${{ inputs.build-environment }}-build
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
