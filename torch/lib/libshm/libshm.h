@@ -9,7 +9,7 @@ void libshm_init(const char* manager_exec_path);
 // Superclass to run a constructor before at::RefcountedMapAllocator
 class THManagedMapAllocatorInit {
  protected:
-  THManagedMapAllocatorInit(const char* manager_handle, const char* filename);
+  THManagedMapAllocatorInit(const char* manager_handle, const char* filename, bool shm);
   std::string manager_handle_;
 };
 
@@ -41,6 +41,16 @@ class THManagedMapAllocator : private THManagedMapAllocatorInit,
   const char* manager_handle() const {
     return manager_handle_.c_str();
   }
+};
+
+// To allow general files to be managed by the shm manager
+class THManagedFile : private THManagedMapAllocatorInit {
+ public:
+  THManagedFile(const std::string& filename);
+  ~THManagedFile();
+
+ private:
+  std::string filename_;
 };
 
 #endif

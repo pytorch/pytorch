@@ -1127,6 +1127,9 @@ Call this whenever a new thread is created in order to propagate values from
       }))
       .def("expired", &WeakTensorRef::expired);
 
+  py::class_<THManagedFile>(py_module, "_THManagedFile")
+    .def(py::init<std::string>());
+
   py::enum_<at::native::ConvBackend>(py_module, "_ConvBackend")
       .value("CudaDepthwise2d", at::native::ConvBackend::CudaDepthwise2d)
       .value("CudaDepthwise3d", at::native::ConvBackend::CudaDepthwise3d)

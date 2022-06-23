@@ -10,10 +10,11 @@
 std::unordered_map<std::string, ClientSocket> managers;
 std::string manager_executable_path;
 
-AllocInfo get_alloc_info(const char* filename) {
+AllocInfo get_alloc_info(const char* filename, bool shm) {
   AllocInfo info = {0};
   info.pid = getpid();
   info.free = false;
+  info.shm = shm;
   size_t len = strlen(filename);
   if (len >= sizeof(info.filename)) {
     throw std::runtime_error("MapAllocatorContext_filename too long");
@@ -93,7 +94,8 @@ void libshm_init(const char* manager_exec_path) {
 
 THManagedMapAllocatorInit::THManagedMapAllocatorInit(
     const char* manager_handle,
-    const char* filename)
+    const char* filename,
+    bool shm)
     : manager_handle_(manager_handle ? manager_handle : "") {
   // TODO: unlock GIL when contacting the manager
   try {
@@ -109,7 +111,7 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(
       manager_handle_ = manager->first;
       socket = &manager->second;
     }
-    AllocInfo info = get_alloc_info(filename);
+    AllocInfo info = get_alloc_info(filename, shm);
     socket->register_allocation(info);
   } catch (std::exception& e) {
     TORCH_CHECK(false, e.what());
@@ -121,13 +123,13 @@ THManagedMapAllocator::THManagedMapAllocator(
     const char* filename,
     int flags,
     ptrdiff_t size)
-    : THManagedMapAllocatorInit(manager_handle, filename),
+    : THManagedMapAllocatorInit(manager_handle, filename, /* shm */ true),
       at::RefcountedMapAllocator(filename, flags, size) {}
 
 void THManagedMapAllocator::close() {
   if (closed_)
     return;
-  AllocInfo info = get_alloc_info(filename());
+  AllocInfo info = get_alloc_info(filename(), true);
   info.free = true;
   ClientSocket& socket = get_manager_socket(manager_handle_);
   at::RefcountedMapAllocator::close();
@@ -155,4 +157,14 @@ at::DataPtr THManagedMapAllocator::makeDataPtr(
 THManagedMapAllocator* THManagedMapAllocator::fromDataPtr(
     const at::DataPtr& dptr) {
   return dptr.cast_context<THManagedMapAllocator>(&deleteTHManagedMapAllocator);
+}
+
+THManagedFile::THManagedFile(const std::string& filename)
+  : THManagedMapAllocatorInit("", filename.c_str(), /* shm */ false), filename_(filename) {}
+
+THManagedFile::~THManagedFile() {
+  AllocInfo info = get_alloc_info(filename_.c_str(), false);
+  info.free = true;
+  ClientSocket& socket = get_manager_socket(manager_handle_);
+  socket.register_deallocation(info);
 }

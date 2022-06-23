@@ -35,7 +35,7 @@ struct ClientSession {
 std::vector<struct pollfd> pollfds;
 std::unordered_map<int, ClientSession> client_sessions;
 // TODO: check if objects have been freed from time to time
-std::set<std::string> used_objects;
+std::set<std::pair<std::string, char>> used_objects;
 
 void register_fd(int fd) {
   struct pollfd pfd = {0};
@@ -59,8 +59,13 @@ void print_init_message(const char* message) {
   write(1, "\n", 1);
 }
 
-bool object_exists(const char* name) {
-  int fd = shm_open(name, O_RDONLY, 0);
+bool object_exists(const char* name, bool shm) {
+  int fd;
+  if (shm) {
+    fd = shm_open(name, O_RDONLY, 0);
+  } else {
+    fd = open(name, O_RDONLY, 0);
+  }
   if (fd >= 0) {
     close(fd);
     return true;
@@ -69,10 +74,10 @@ bool object_exists(const char* name) {
   }
 }
 
-void free_used_object(const std::string& name) {
-  if (!object_exists(name.c_str())) {
+void free_used_object(const std::string& name, char shm) {
+  if (!object_exists(name.c_str(), shm)) {
     DEBUG("object %s appears to have been freed", name.c_str());
-    used_objects.erase(name);
+    used_objects.erase({name, shm});
   } else {
     DEBUG("object %s still exists", name.c_str());
   }
@@ -144,14 +149,15 @@ int main(int argc, char* argv[]) {
           AllocInfo info = session.socket.receive();
           session.pid = info.pid;
           DEBUG(
-              "got alloc info: %d %d %s",
+              "got alloc info: %d %d %d %s",
               (int)info.free,
+              info.shm,
               info.pid,
               info.filename);
           if (info.free) {
-            free_used_object(info.filename);
+            free_used_object(info.filename, info.shm);
           } else {
-            used_objects.insert(info.filename);
+            used_objects.insert({info.filename, info.shm});
             DEBUG("registered object %s", info.filename);
             session.socket.confirm();
           }
@@ -168,9 +174,15 @@ int main(int argc, char* argv[]) {
     to_remove.clear();
   }
 
-  for (auto& obj_name : used_objects) {
+  for (auto& obj : used_objects) {
+    auto obj_name = std::get<0>(obj);
+    auto obj_shm = std::get<1>(obj);
     DEBUG("freeing %s", obj_name.c_str());
-    shm_unlink(obj_name.c_str());
+    if (obj_shm) {
+      shm_unlink(obj_name.c_str());
+    } else {
+      unlink(obj_name.c_str());
+    }
   }
 
   // Clean up file descriptors
