@@ -152,7 +152,8 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
   struct TestModel : public torch::nn::Module {};
   {
     TestModel model;
-    model.register_parameter("undefined_tensor", torch::Tensor(), /*requires_grad=*/false);
+    model.register_parameter(
+        "undefined_tensor", torch::Tensor(), /*requires_grad=*/false);
     ASSERT_EQ(model.parameters().size(), 0);
   }
   {
@@ -163,11 +164,10 @@ TEST_F(ModuleTest, RegisterParameterUndefinedTensor) {
     ASSERT_EQ(model.parameters().size(), 0);
 
     ASSERT_EQ(
-      count_substr_occurrences(
-        warnings.str(),
-        "Ignoring the `requires_grad=true` function parameter"
-      ),
-    1);
+        count_substr_occurrences(
+            warnings.str(),
+            "Ignoring the `requires_grad=true` function parameter"),
+        1);
   }
 }
 
@@ -229,7 +229,8 @@ TEST_F(ModuleTest, AsCastsModulesCorrectly) {
 }
 
 void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
-  torch::Device to_device, torch::Dtype to_dtype) {
+    torch::Device to_device,
+    torch::Dtype to_dtype) {
   {
     // Case 1: Undefined tensors as parameters
     Linear module(LinearOptions(10, 20).bias(false));
@@ -248,7 +249,8 @@ void test_DeviceOrDtypeConversionSkipsUndefinedTensor(
   }
   {
     // Case 2: Undefined tensors as buffers
-    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(true));
+    BatchNorm1d module(
+        BatchNorm1dOptions(5).track_running_stats(false).affine(true));
     ASSERT_TRUE(module->weight.defined());
     ASSERT_FALSE(module->running_mean.defined());
 
@@ -269,7 +271,8 @@ TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor) {
 }
 
 TEST_F(ModuleTest, DeviceOrDtypeConversionSkipsUndefinedTensor_CUDA) {
-  test_DeviceOrDtypeConversionSkipsUndefinedTensor(torch::kCUDA, torch::kDouble);
+  test_DeviceOrDtypeConversionSkipsUndefinedTensor(
+      torch::kCUDA, torch::kDouble);
 }
 
 TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
@@ -285,7 +288,8 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
     ASSERT_TRUE(pointer_equal(named_params["weight"], module->weight));
   }
   {
-    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(false).affine(false));
+    BatchNorm1d module(
+        BatchNorm1dOptions(5).track_running_stats(false).affine(false));
 
     auto buffers = module->buffers();
     ASSERT_EQ(buffers.size(), 0);
@@ -293,7 +297,8 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
     ASSERT_EQ(named_buffers.size(), 0);
   }
   {
-    BatchNorm1d module(BatchNorm1dOptions(5).track_running_stats(true).affine(false));
+    BatchNorm1d module(
+        BatchNorm1dOptions(5).track_running_stats(true).affine(false));
 
     auto buffers = module->buffers();
     ASSERT_EQ(buffers.size(), 3);
@@ -301,11 +306,15 @@ TEST_F(ModuleTest, ParametersAndBuffersAccessorSkipsUndefinedTensor) {
     ASSERT_EQ(named_buffers.size(), 3);
 
     ASSERT_TRUE(pointer_equal(buffers[0], named_buffers["running_mean"]));
-    ASSERT_TRUE(pointer_equal(named_buffers["running_mean"], module->running_mean));
+    ASSERT_TRUE(
+        pointer_equal(named_buffers["running_mean"], module->running_mean));
     ASSERT_TRUE(pointer_equal(buffers[1], named_buffers["running_var"]));
-    ASSERT_TRUE(pointer_equal(named_buffers["running_var"], module->running_var));
-    ASSERT_TRUE(pointer_equal(buffers[2], named_buffers["num_batches_tracked"]));
-    ASSERT_TRUE(pointer_equal(named_buffers["num_batches_tracked"], module->num_batches_tracked));
+    ASSERT_TRUE(
+        pointer_equal(named_buffers["running_var"], module->running_var));
+    ASSERT_TRUE(
+        pointer_equal(buffers[2], named_buffers["num_batches_tracked"]));
+    ASSERT_TRUE(pointer_equal(
+        named_buffers["num_batches_tracked"], module->num_batches_tracked));
   }
 }
 
@@ -334,15 +343,22 @@ TEST_F(ModuleTest, Conversion_MultiCUDA) {
     }
   }
   {
-    module->to(torch::kInt32);
-    for (auto& parameter : module->parameters()) {
-      ASSERT_EQ(parameter.dtype(), torch::kInt32);
-    }
-  }
-  {
     module->to(torch::kFloat64);
     for (auto& parameter : module->parameters()) {
       ASSERT_EQ(parameter.dtype(), torch::kFloat64);
+    }
+  }
+}
+
+TEST_F(ModuleTest, Conversion_NoGrad_MultiCUDA) {
+  Linear module(128, 64);
+  for (auto& parameter : module->parameters()) {
+    parameter.requires_grad_(false);
+  }
+  {
+    module->to(torch::kInt32);
+    for (auto& parameter : module->parameters()) {
+      ASSERT_EQ(parameter.dtype(), torch::kInt32);
     }
   }
   {
@@ -394,7 +410,9 @@ struct TestDistinctParametersModule
   torch::Tensor buffer;
 };
 
-void testDistinctParameters(std::shared_ptr<Module> m1, std::shared_ptr<Module> m2) {
+void testDistinctParameters(
+    std::shared_ptr<Module> m1,
+    std::shared_ptr<Module> m2) {
   auto params1 = m1->named_parameters();
   auto params2 = m2->named_parameters();
   ASSERT_EQ(params1.size(), 6);
@@ -850,16 +868,17 @@ std::shared_ptr<TestContainer> make_deeply_nested_test_container() {
 
 std::vector<std::pair<std::string, int64_t>>
 make_key_value_pairs_for_deeply_nested_container() {
-  return {{"test_prefix", 0},
-          {"test_prefix.0", 1},
-          {"test_prefix.0.0", 2},
-          {"test_prefix.0.1", 3},
-          {"test_prefix.1", 4},
-          {"test_prefix.2", 5},
-          {"test_prefix.2.0", 6},
-          {"test_prefix.2.1", 7},
-          {"test_prefix.2.1.0", 8},
-          {"test_prefix.2.1.1", 9}};
+  return {
+      {"test_prefix", 0},
+      {"test_prefix.0", 1},
+      {"test_prefix.0.0", 2},
+      {"test_prefix.0.1", 3},
+      {"test_prefix.1", 4},
+      {"test_prefix.2", 5},
+      {"test_prefix.2.0", 6},
+      {"test_prefix.2.1", 7},
+      {"test_prefix.2.1.0", 8},
+      {"test_prefix.2.1.1", 9}};
 }
 
 TEST_F(ModuleTest, ModulesReturnsExpectedSubmodulesForDeepModel) {
@@ -1021,7 +1040,6 @@ TEST_F(ModuleTest, PrettyPrint) {
     int x_;
     float y_;
   };
-
 
   ASSERT_EQ(c10::str(EmptyModule{}), "EmptyModule");
   ASSERT_EQ(c10::str(TestModule(1, 3.14)), "TestModule(x=1, y=3.14)");
