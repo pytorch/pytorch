@@ -1093,55 +1093,63 @@ class TestFxModelReportClass(QuantizationTestCase):
 
 class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
+    class LinearConv(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(3, 3)
+            self.relu = torch.nn.ReLU()
+            self.conv2d = torch.nn.Conv2d(3, 3, 1)
+
+        def forward(self, x):
+            x = self.linear(x)
+            x = self.relu(x)
+            x = self.conv2d(x)
+            x = self.relu(x)
+            return x
+
+    class TwoBlockComplexNet(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.block1 = TestFxDetectInputWeightEqualization.LinearConv()
+            self.block2 = TestFxDetectInputWeightEqualization.LinearConv()
+
+        def forward(self, x):
+            x = self.block1(x)
+            y = self.block2(x)
+            z = x + y
+            z = F.relu(z)
+            return z
+
+    def _get_prepped_for_calibration_model(self, detector_set):
+        r"""Returns a model that has been prepared for callibration and corresponding model_report"""
+        # set the backend for this test
+        torch.backends.quantized.engine = "fbgemm"
+
+        model_report = ModelReport(detector_set)
+
+        # create model instance and prepare it
+        model = self.TwoBlockComplexNet()
+        example_input = torch.arange(27).reshape((1, 3, 3, 3))
+        example_input = example_input.to(torch.float)
+        current_backend = torch.backends.quantized.engine
+        q_config_mapping = QConfigMapping()
+        q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
+
+        model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
+
+        # prepare the model for callibration
+        prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
+
+        return (prepared_for_callibrate_model, model_report)
+
     @skipIfNoFBGEMM
     def test_input_weight_equalization_determine_points(self):
-        class LinearConv(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(3, 3)
-                self.relu = torch.nn.ReLU()
-                self.conv2d = torch.nn.Conv2d(3, 3, 1)
-
-            def forward(self, x):
-                x = self.linear(x)
-                x = self.relu(x)
-                x = self.conv2d(x)
-                x = self.relu(x)
-                return x
-
-        class TwoBlockComplexNet(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.block1 = LinearConv()
-                self.block2 = LinearConv()
-
-            def forward(self, x):
-                x = self.block1(x)
-                y = self.block2(x)
-                z = x + y
-                z = F.relu(z)
-                return z
-
         # use fbgemm and create our model instance
         # then create model report instance with detector
         with override_quantized_engine('fbgemm'):
-            # set the backend for this test
-            torch.backends.quantized.engine = "fbgemm"
-
-            detector_set = set([InputWeightEqualizationDetector(0.5)])
-            model_report = ModelReport(detector_set)
-
-            # create model instance and prepare it
-            model = TwoBlockComplexNet()
-            example_input = torch.randn(1, 3, 3, 3)
-            current_backend = torch.backends.quantized.engine
-            q_config_mapping = QConfigMapping()
-            q_config_mapping.set_global(torch.ao.quantization.get_default_qconfig(torch.backends.quantized.engine))
-
-            model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
-
             # prepare the model for callibration
-            prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
+            detector_set = set([InputWeightEqualizationDetector(0.5)])
+            prepared_for_callibrate_model, model_rep = self._get_prepped_for_calibration_model(detector_set)
 
             # supported modules to check
             mods_to_check = set([nn.Linear, nn.Conv2d])
@@ -1160,3 +1168,59 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                     number_of_obs_found += 1
 
             self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
+
+    @skipIfNoFBGEMM
+    def test_input_weight_equalization_report_gen(self):
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+
+            test_input_weight_detector = InputWeightEqualizationDetector(0.4)
+            detector_set = set([test_input_weight_detector])
+            # prepare the model for callibration
+            prepared_for_callibrate_model, model_report = self._get_prepped_for_calibration_model(detector_set)
+
+            # now we actually callibrate the model
+            example_input = torch.arange(27).reshape((1, 3, 3, 3))
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = model_report.generate_model_report(prepared_for_callibrate_model, True)
+
+            # check that sizes are appropriate only 1 detector
+            self.assertEqual(len(generated_report), 1)
+
+            # get the specific report for input weight equalization
+            input_weight_str, input_weight_dict = generated_report[test_input_weight_detector.get_detector_name()]
+
+            # we should have 4 layers looked at since 4 conv / linear layers
+            self.assertEqual(len(input_weight_dict), 4)
+
+            # we can validate that the max and min values of the detector were recorded properly for the first one
+            # this is because no data has been processed yet, so it should be values from original input
+
+            example_input = example_input.reshape((3, 3, 3))  # reshape input
+            for module_fqn in input_weight_dict:
+                # look for the first linear
+                if "block1.linear" in module_fqn:
+                    block_1_lin_recs = input_weight_dict[module_fqn]
+                    # get input range info and the channel axis
+                    input_range_info = block_1_lin_recs[InputWeightEqualizationDetector.INPUT_INFO_KEY]
+                    ch_axis = block_1_lin_recs[InputWeightEqualizationDetector.CHANNEL_KEY]
+
+                    # ensure that the min and max values extracted match properly
+                    example_min, example_max = torch.aminmax(example_input, dim=ch_axis)
+                    dimension_min = torch.amin(example_min, dim=ch_axis)
+                    dimension_max = torch.amax(example_max, dim=ch_axis)
+
+                    self.assertEqual(input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY], dimension_min)
+                    self.assertEqual(input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY], dimension_max)
+
+                    # make sure the global min and max were correctly recorded and presented
+                    self.assertEqual(input_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY], min(dimension_min))
+                    self.assertEqual(input_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY], max(dimension_max))
+
+                    # only looking at the first example so can break
+                    break
