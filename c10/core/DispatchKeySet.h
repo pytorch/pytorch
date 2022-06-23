@@ -367,6 +367,12 @@ class DispatchKeySet final {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
   }
+  // You're allowed to remove a backend bit from a DispatchKeySet,
+  // but you have to be explicit about it (remove_backend() instead of
+  // remove()).
+  constexpr DispatchKeySet remove_backend(BackendComponent b) const {
+    return DispatchKeySet(repr_ & ~(DispatchKeySet(b).repr_));
+  }
   // Is the set empty?  (AKA undefined tensor)
   bool empty() const {
     return repr_ == 0;
