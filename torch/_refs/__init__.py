@@ -1219,7 +1219,9 @@ def where(
 def clone(
     a: TensorLikeType, *, memory_format: torch.memory_format = torch.preserve_format
 ) -> TensorLikeType:
-    result = torch.empty_like(a, requires_grad=a.requires_grad, memory_format=memory_format)
+    result = torch.empty_like(
+        a, requires_grad=a.requires_grad, memory_format=memory_format
+    )
     copy_to(result, a)
     return result
 
@@ -1776,10 +1778,12 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
 def contiguous(
     a: Tensor, *, memory_format: torch.memory_format = torch.contiguous_format
 ) -> Tensor:
-    check(memory_format != torch.preserve_format,
-          lambda: "preserve memory format is unsupported by the contiguous operator")
+    check(
+        memory_format != torch.preserve_format,
+        lambda: "preserve memory format is unsupported by the contiguous operator",
+    )
 
-    if utils.is_contiguous_memory_format(a, memory_format=memory_format):
+    if utils.is_contiguous_for_memory_format(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -2518,8 +2522,10 @@ def empty(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.contiguous_format,
 ) -> TensorLikeType:
-    check(memory_format != torch.preserve_format,
-          lambda: "torch.empty: the Preserve memory format is not supported")
+    check(
+        memory_format != torch.preserve_format,
+        lambda: "torch.empty: the Preserve memory format is not supported",
+    )
 
     shape = utils.extract_shape_from_varargs(shape)
 
@@ -2528,8 +2534,10 @@ def empty(
     elif memory_format == torch.channels_last_3d:
         strides = utils.make_channels_last_3d_strides_for(shape)
     else:  # memory_format == torch.channels_last
-        check(memory_format == torch.channels_last,
-              lambda: f"torch.empty: received an unknown memory format {memory_format}!")
+        check(
+            memory_format == torch.channels_last,
+            lambda: f"torch.empty: received an unknown memory format {memory_format}!",
+        )
         strides = utils.make_channels_last_2d_strides_for(shape)
 
     return torch.empty_strided(
@@ -2552,13 +2560,20 @@ def empty_like(
     strides: Tuple[int, ...]
 
     if memory_format != torch.preserve_format:
-        return torch.empty(a.shape, dtype=dtype, device=device, requires_grad=requires_grad, memory_format=memory_format)
+        return torch.empty(
+            a.shape,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+            memory_format=memory_format,
+        )
 
     # memory_format == torch.preserve_format
     strides = utils.compute_elementwise_output_strides(a)
     return torch.empty_strided(
         a.shape, strides, dtype=dtype, device=device, requires_grad=requires_grad
     )
+
 
 # NOTE: for convenience, shape can be a tuple of ints or a tuple containing a tuple of ints
 def empty_strided(

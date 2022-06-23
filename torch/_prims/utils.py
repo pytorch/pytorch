@@ -252,6 +252,7 @@ def is_channels_last_contiguous_2d(a: Tensor) -> bool:
 
     return True
 
+
 def is_channels_last_contiguous_3d(a: Tensor) -> bool:
     # NDHWC or not channels last 3D contiguous
     if a.ndim != 5:
@@ -272,17 +273,27 @@ def is_channels_last_contiguous_3d(a: Tensor) -> bool:
 
     return True
 
-_memory_formats = set((
-    torch.contiguous_format,
-    torch.preserve_format,
-    torch.channels_last,
-    torch.channels_last_3d))
+
+_memory_formats = set(
+    (
+        torch.contiguous_format,
+        torch.preserve_format,
+        torch.channels_last,
+        torch.channels_last_3d,
+    )
+)
+
+
 def validate_memory_format(memory_format: torch.memory_format):
-    check(memory_format in _memory_formats,
-          lambda: f"Received unknown memory format {memory_format}!")
+    check(
+        memory_format in _memory_formats,
+        lambda: f"Received unknown memory format {memory_format}!",
+    )
 
 
-def is_contiguous_memory_format(a: Tensor, *, memory_format: torch.memory_format) -> bool:
+def is_contiguous_for_memory_format(  # type: ignore[return]
+    a: Tensor, *, memory_format: torch.memory_format
+) -> bool:
     validate_memory_format(memory_format)
 
     if memory_format == torch.contiguous_format:
@@ -292,8 +303,11 @@ def is_contiguous_memory_format(a: Tensor, *, memory_format: torch.memory_format
     if memory_format == torch.channels_last_3d:
         return is_channels_last_contiguous_3d(a)
 
-    check(False,
-          lambda: f"is_contiguous received unsupported memory format {memory_format}")
+    check(
+        False,
+        lambda: f"is_contiguous received unsupported memory format {memory_format}",
+    )
+
 
 # NOTE: that tensors with no elements and channels last is ???
 def is_channels_last_contiguous(a: Tensor) -> bool:
@@ -310,6 +324,7 @@ def is_channels_last_contiguous(a: Tensor) -> bool:
         for example.
     """
     return is_channels_last_contiguous_2d(a) or is_channels_last_contiguous_3d(a)
+
 
 def is_non_overlapping_and_dense(a: Tensor) -> bool:
     """
@@ -337,7 +352,9 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
-    lengths_and_strides = sorted(tuple(zip(a.shape, a.stride())), key=operator.itemgetter(1))
+    lengths_and_strides = sorted(
+        tuple(zip(a.shape, a.stride())), key=operator.itemgetter(1)
+    )
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
@@ -351,6 +368,7 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
         expected_stride *= length
 
     return True
+
 
 # NOTE: Based on the implementation in TensorIterator.cpp, but note that
 # the note [Computing output strides] is incorrect, because it
@@ -1239,10 +1257,13 @@ def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     result = tuple(reversed(strides))
     return result
 
+
 def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
-    check(len(shape) == 4,
-          lambda: "Only tensors of rank 4 can use the channels_last memory format")
+    check(
+        len(shape) == 4,
+        lambda: "Only tensors of rank 4 can use the channels_last memory format",
+    )
 
     shape = list(shape)
     shape[1], shape[-1] = shape[-1], shape[1]
@@ -1250,10 +1271,13 @@ def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     strides[-1], strides[1] = strides[1], strides[-1]
 
     return tuple(strides)
+
 
 def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
-    check(len(shape) == 5,
-          lambda: "Only tensors of rank 5 can use the channels_last_3d memory format")
+    check(
+        len(shape) == 5,
+        lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
+    )
 
     shape = list(shape)
     shape[1], shape[-1] = shape[-1], shape[1]
@@ -1261,6 +1285,7 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     strides[-1], strides[1] = strides[1], strides[-1]
 
     return tuple(strides)
+
 
 def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence
