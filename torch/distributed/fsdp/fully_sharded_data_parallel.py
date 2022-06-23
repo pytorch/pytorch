@@ -1461,7 +1461,6 @@ class FullyShardedDataParallel(nn.Module):
     def _reset_lazy_init(self) -> None:
         """
         Reset instance so :func:`_lazy_init` will run on the next forward.
-        Currently this is only called in __init__
         """
         self._is_root: Optional[bool] = None
         self._streams: Dict[str, torch.cuda.Stream] = {}
@@ -1479,38 +1478,46 @@ class FullyShardedDataParallel(nn.Module):
         self._init_reshard_after_forward()
 
     def _lazy_init(self) -> None:
-        """Initialization steps that should happen lazily, typically right
-        before the first forward pass.
         """
-        # Initialize param attributes lazily, in case the param's dtype or
-        # device changes after __init__.
-        for p in self.params:
-            self._init_param_attributes(p)
+        Performs initialization lazily, typically right before the first
+        forward pass. The laziness is needed to ensure that the parameter
+        device/dtype and the FSDP hierarchy have finalized.
 
-        # Initialize _is_root and setup streams. These steps would ideally
-        # happen in __init__, but _is_root can only be determined after the
-        # entire model hierarchy is setup, thus we run it lazily.
-        if self._is_root is None:
-            # _is_root means that we are in the outermost module's forward.
-            self._set_is_root()
-            self._setup_streams()
-
-        if self._is_root:
-            # Buffers stay on GPU, and don't get sharded. Since _cast_buffers
-            # applies recursively, we only call this from the root instance.
-            self._cast_buffers(recurse=True)
-
-            # Don't free the full params for the outer-most (root) instance,
-            # In most cases, root instance contains params in the last layers
-            # or has no params. In these cases, those params will be needed
-            # immediately after for the backward pass. Note that this only
-            # applies currently when freeing parameters at end of layer's
-            # forward pass.
-            self.reshard_after_forward = False
-
-            # Due to the use of streams, we need to make sure the previous
-            # ``optim.step()`` is done before we all-gather parameters.
-            self._wait_for_previous_optim_step()
+        This method's actual logic only runs on the root FSDP instance, which
+        performs initialization for all non-root FSDP instances to avoid
+        partial initialization.
+        """
+        if self._is_root is not None:
+            return  # no-op: already initialized
+        # The following logic is only run on the root FSDP instance
+        self._is_root = True
+        self._assert_state(TrainingState_.IDLE)
+        self._init_streams()
+        self._cast_buffers(recurse=True)
+        for param in self.params:
+            self._init_param_attributes(param)
+        # Do not reshard the root's parameters at the end of the forward pass
+        # with the intention that they are immediately used in the backward
+        # pass gradient computation (though this may not be true)
+        self.reshard_after_forward = False
+        self._exec_order_data.init(self)
+        # Initialize non-root FSDP instances and share attributes from the root
+        # to non-root instances (e.g. streams for overlapping)
+        for fsdp_module in self.fsdp_modules(self):
+            if fsdp_module is not self:
+                # Relax the assert for non-root FSDP instances in case the
+                # nested initialized module is wrapped again in FSDP later (e.g.
+                # after training to run inference)
+                assert fsdp_module._is_root is None or not fsdp_module._is_root, (
+                    "Non-root FSDP instance's `_is_root` should not have been "
+                    "set yet or should have been set to `False`"
+                )
+                fsdp_module._is_root = False
+                fsdp_module._streams = self._streams
+                fsdp_module._fsdp_graph_order = self._fsdp_graph_order
+                fsdp_module._exec_order_data = self._exec_order_data
+                for param in fsdp_module.params:
+                    fsdp_module._init_param_attributes(param)
 
     @torch.no_grad()
     def _init_param_attributes(self, p: Parameter) -> None:
@@ -1611,38 +1618,10 @@ class FullyShardedDataParallel(nn.Module):
             )
             _free_storage(p._full_param_padded)  # type: ignore[attr-defined]
 
-    def _set_is_root(self) -> None:
-        """If ``True``, implies that no other :class:`FullyShardedDataParallel`
-        instance wraps this one. Called once by :func:`_lazy_init`.
-        """
-        if self._is_root is not None:
-            return
-        # No FSDP instance wraps this, else _is_root would be set to False.
-        self._is_root = True
-        self._exec_order_data.init(self)
-        # If final backward callback is never been queued, state should be IDLE.
-        # If final backward callback is queued, the callback should be finished
-        # and the state was reset to be IDLE.
-        # This should be asserted at the beginning of forward pass in the root instance only.
-        # For children instances, if they are checkpointed, state will not be reset to
-        # IDLE after each inner forward/backward.
-        self._assert_state(TrainingState_.IDLE)
-        for m in self.modules():
-            if m is not self and isinstance(m, FullyShardedDataParallel):
-                # We relax the assert for non-root instance, when the nested initialized module is wrapped
-                # again in FSDP later, for example after training to run inference.
-                assert (
-                    m._is_root is None or not m._is_root
-                ), "Non-root instance's _is_root flag should have not been set yet" \
-                    "or has already been set as False."
-                if m._is_root is None:
-                    m._is_root = False
-
-    def _setup_streams(self) -> None:
-        """Create streams to overlap data transfer and computation."""
-        if len(self._streams) > 0 or not self._is_root:
-            return
-
+    def _init_streams(self) -> None:
+        """Initializes CUDA streams for overlapping data transfer and
+        computation. This should only be called on the root FSDP instance."""
+        assert self._is_root
         if torch.cuda.is_available():
             # Stream for all-gathering parameters.
             self._streams["all_gather"] = torch.cuda.Stream()
@@ -1653,33 +1632,18 @@ class FullyShardedDataParallel(nn.Module):
             if self._mixed_precision_enabled_for_params():
                 self._streams["mixed_precision_params"] = torch.cuda.Stream()
 
-        # We share streams with all children instances, which allows them to
-        # overlap transfers across the forward pass without synchronizing with
-        # the default stream.
-        for m in self.modules():
-            if m is not self and isinstance(m, FullyShardedDataParallel):
-                m._streams = self._streams
-                m._fsdp_graph_order = self._fsdp_graph_order
-                # Give each non-root FSDP module an alias to the root's
-                # execution order data structure and the root's ignored
-                # parameters and all buffer names since only the root's names
-                # are fully prefixed like the state dict keys
-                m._exec_order_data = self._exec_order_data
-
     def _wait_for_previous_optim_step(self) -> None:
         """
-        The outer-most :class:`FullyShardedDataParallel` instance (i.e., the root
-        instance) needs to synchronize with the default stream to ensure the
-        previous optimizer step is done.
+        The root :class:`FullyShardedDataParallel` instance needs to
+        synchronize with the default stream to ensure that the previous
+        optimizer step is done.
         """
-        if not torch.cuda.is_available():
+        if not torch.cuda.is_available() or not self._is_root:
             return
-
         if self._mixed_precision_enabled_for_params():
             self._streams["mixed_precision_params"].wait_stream(
                 torch.cuda.current_stream()
             )
-
         self._streams["all_gather"].wait_stream(torch.cuda.current_stream())
 
     def _need_prefetch_full_params(self, state: TrainingState_) -> bool:
@@ -1975,7 +1939,6 @@ class FullyShardedDataParallel(nn.Module):
         # is available.
         if torch.cuda.is_available():
             torch.cuda.synchronize()
-
         self._lazy_init()
         if self._state_dict_type == StateDictType.FULL_STATE_DICT:
             # Get config args
@@ -2287,6 +2250,7 @@ class FullyShardedDataParallel(nn.Module):
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         with torch.autograd.profiler.record_function("FullyShardedDataParallel.forward"):
             self._lazy_init()
+            self._wait_for_previous_optim_step()
 
             # Start of a forward pass.
             self.training_state = TrainingState_.FORWARD
@@ -3499,8 +3463,8 @@ class FullyShardedDataParallel(nn.Module):
         .. warning:: This needs to be called on all ranks, since synchronization
             primitives will be used.
         """
-        # Call `_lazy_init` to ensure the stream synchronization is done appropriately.
         self._lazy_init()
+        self._wait_for_previous_optim_step()
         assert self._is_root, "clip_grad_norm should only be called on the root (parent) instance"
         self._assert_state(TrainingState_.IDLE)
 
