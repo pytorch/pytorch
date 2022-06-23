@@ -755,12 +755,10 @@ class TestFunctionalIterDataPipe(TestCase):
             )
             for dps, msg in zip((datapipes_with_lambda_fn, datapipes_with_local_fn), msgs):
                 for dpipe, dp_args, dp_kwargs in dps:
-                    with warnings.catch_warnings(record=True) as wa:
+                    with self.assertWarnsRegex(UserWarning, msg):
                         datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                        self.assertEqual(len(wa), 1)
-                        self.assertRegex(str(wa[0].message), msg)
-                        with self.assertRaises((pickle.PicklingError, AttributeError)):
-                            p = pickle.dumps(datapipe)
+                    with self.assertRaises((pickle.PicklingError, AttributeError)):
+                        pickle.dumps(datapipe)
 
     def test_iterable_wrapper_datapipe(self):
 
@@ -1743,12 +1741,10 @@ class TestFunctionalMapDataPipe(TestCase):
             )
             for dps, msg in zip((datapipes_with_lambda_fn, datapipes_with_local_fn), msgs):
                 for dpipe, dp_args, dp_kwargs in dps:
-                    with warnings.catch_warnings(record=True) as wa:
+                    with self.assertWarnsRegex(UserWarning, msg):
                         datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                        self.assertEqual(len(wa), 1)
-                        self.assertRegex(str(wa[0].message), msg)
-                        with self.assertRaises((pickle.PicklingError, AttributeError)):
-                            p = pickle.dumps(datapipe)
+                    with self.assertRaises((pickle.PicklingError, AttributeError)):
+                        pickle.dumps(datapipe)
 
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))

@@ -1,3 +1,4 @@
+import inspect
 import os
 import fnmatch
 import warnings
@@ -52,6 +53,10 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
         )
 
 
+def _is_local_fn(fn):
+    return fn.__code__.co_flags & inspect.CO_NESTED
+
+
 def _check_unpickable_fn(fn: Callable):
     if not callable(fn):
         raise TypeError(f"A callable function is expected, but {type(fn)} is provided.")
@@ -62,7 +67,7 @@ def _check_unpickable_fn(fn: Callable):
         fn = fn.func
 
     # Local function
-    if hasattr(fn, "__qualname__") and "<locals>" in fn.__qualname__ and not DILL_AVAILABLE:
+    if _is_local_fn(fn) and not DILL_AVAILABLE:
         warnings.warn(
             "Local function is not supported by pickle, please use "
             "regular python function or functools.partial instead."
