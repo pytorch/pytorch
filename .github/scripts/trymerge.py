@@ -564,8 +564,11 @@ class GitHubPR:
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
                     conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
+                has_failing_check = False
                 while checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
+                        if checkrun_node["conclusion"] == 'FAILURE':
+                            has_failing_check = True
                         conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
                         rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
@@ -578,6 +581,9 @@ class GitHubPR:
                         checkruns = last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
                     else:
                         checkruns = None
+                # Github doesn't set conclusion to failure if a job is still pending
+                if workflow_run is not None and has_failing_check:
+                    conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
 
         add_conclusions(checksuites["edges"])
         while bool(checksuites["pageInfo"]["hasNextPage"]):
