@@ -102,6 +102,22 @@ present / required, e.g. to generate visualizations, there is also the
         else:
             return torch_tensor.detach().numpy()
 
+For ``torch`` tensors which require gradients, they can still be manipulated as
+NumPy arrays within the ``no_grad()`` context manager.
+
+.. doctest::
+
+  >>> b_torch = torch.ones(3, requires_grad=True)
+  >>> b_torch.requires_grad == True
+  True
+  >>> b_torch.numpy() # doctest: +SKIP
+  Traceback (most recent call last):
+  ...
+  RuntimeError: Can't call numpy() on Tensor that requires grad. Use tensor.detach().numpy() instead.
+  >>> with torch.no_grad():
+        print(b_torch.numpy())
+  [1. 1. 1.]
+
 Operations
 ----------
 
