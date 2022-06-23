@@ -7,7 +7,6 @@ import os
 import re
 import tempfile
 import unittest
-import time
 from dataclasses import dataclass
 
 import torch
@@ -968,7 +967,7 @@ class TestProfiler(TestCase):
         with TemporaryDirectoryName() as dname:
             with profile(
                     activities=[torch.profiler.ProfilerActivity.CPU] +
-                ([torch.profiler.ProfilerActivity.CUDA] if use_cuda else []),
+                    ([torch.profiler.ProfilerActivity.CUDA] if use_cuda else []),
                     schedule=torch.profiler.schedule(wait=1,
                                                      warmup=1,
                                                      active=2,
@@ -1160,80 +1159,102 @@ class TestProfiler(TestCase):
                     id_uniqueness_set.add(corr_id)
                     self.assertTrue(corr_id < uint32_max)
 
-    def test_utils_compute_self_time(self):
-        with profile() as prof:
-            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
-                1, requires_grad=True)
-            z = torch.add(t1, t2)
-            y = torch.ones(1)
-            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
-            loss.backward()
-        basic_eval = _utils.BasicEvaluation(prof.profiler)
-        metrics = basic_eval.metrics
-        self.assertTrue(len(metrics) > 0)
-        for event_key, event_metrics in metrics.items():
-            self.assertEqual(
-                event_metrics.self_time_ns,
-                event_key.event.duration_time_ns - sum([
-                    child.duration_time_ns
-                    for child in event_key.event.children
-                ]))
+    class TestExperimentalUtils(TestCase):
 
-    def test_utils_compute_queue_depth(self):
-        # We have to use Mock because time series data is too flakey to test
-        @dataclass(frozen=True)
-        class MockKinetoEvent():
-            _name: str
-            _start_us: int
-            _duration_us: int
-            _linked_correlation_id: int
-            _device_type: DeviceType
+        def generate_mock_profile(self):
 
-            def name(self) -> str:
-                return self._name
+            @dataclass(frozen=True)
+            class MockKinetoEvent():
+                _name: str
+                _start_us: int
+                _duration_us: int
+                _linked_correlation_id: int
+                _device_type: DeviceType
 
-            def start_us(self) -> int:
-                return self._start_us
+                def name(self) -> str:
+                    return self._name
 
-            def duration_us(self) -> int:
-                return self._duration_us
+                def start_us(self) -> int:
+                    return self._start_us
 
-            def linked_correlation_id(self) -> int:
-                return self._linked_correlation_id
+                def duration_us(self) -> int:
+                    return self._duration_us
 
-            def device_type(self) -> DeviceType:
-                return self._device_type
+                def linked_correlation_id(self) -> int:
+                    return self._linked_correlation_id
 
-        cuda_events = [
-            MockKinetoEvent("cudaLaunchKernel", 0, 100, 1, DeviceType.CPU),
-            MockKinetoEvent("cudaLaunchKernel", 101, 200, 2, DeviceType.CPU),
-            MockKinetoEvent("cudaLaunchKernel", 201, 300, 3, DeviceType.CPU),
-            MockKinetoEvent("Kernel", 300, 400, 1, DeviceType.CUDA),
-            MockKinetoEvent("Kernel", 401, 500, 2, DeviceType.CUDA),
-            MockKinetoEvent("Kernel", 501, 600, 3, DeviceType.CUDA)
-        ]
-        profiler = unittest.mock.Mock()
-        profiler.kineto_results = unittest.mock.Mock()
-        profiler.kineto_results.events = unittest.mock.Mock(
-            return_value=cuda_events)
-        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
-            return_value=[])
-        basic_evaluation = _utils.BasicEvaluation(profiler)
+                def device_type(self) -> DeviceType:
+                    return self._device_type
 
-        golden_queue_depth_list = [1, 2, 3, 2, 1, 0]
-        print(basic_evaluation.compute_queue_depth())
-        for entry, golden in zip(basic_evaluation.compute_queue_depth(),
-                                 golden_queue_depth_list):
-            self.assertTrue(entry.queue_depth == golden)
+            cuda_events = [
+                MockKinetoEvent("cudaLaunchKernel", 400, 100, 1,
+                                DeviceType.CPU),
+                MockKinetoEvent("cudaLaunchKernel", 500, 100, 2,
+                                DeviceType.CPU),
+                MockKinetoEvent("cudaLaunchKernel", 600, 100, 3,
+                                DeviceType.CPU),
+                MockKinetoEvent("GPU", 700, 100, 1, DeviceType.CUDA),
+                MockKinetoEvent("GPU", 800, 100, 2, DeviceType.CUDA),
+                MockKinetoEvent("GPU", 900, 100, 3, DeviceType.CUDA)
+            ]
+            profiler = unittest.mock.Mock()
+            profiler.kineto_results = unittest.mock.Mock()
+            profiler.kineto_results.events = unittest.mock.Mock(
+                return_value=cuda_events)
+            profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
+                return_value=[])
+            return profiler
 
-    def test_utils_compute_queue_depth_when_no_cuda_events(self):
-        # For traces with only cpu events, we expect empty queue depth list
-        x = torch.ones((1024, 1024))
-        with profile() as prof:
-            for _ in range(5):
-                x = x @ x
-        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
-        self.assertFalse(basic_evaluation.compute_queue_depth())
+        def test_utils_compute_self_time(self):
+            with profile() as prof:
+                t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
+                    1, requires_grad=True)
+                z = torch.add(t1, t2)
+                y = torch.ones(1)
+                loss = torch.nn.functional.binary_cross_entropy_with_logits(
+                    z, y)
+                loss.backward()
+            basic_eval = _utils.BasicEvaluation(prof.profiler)
+            metrics = basic_eval.metrics
+            self.assertTrue(len(metrics) > 0)
+            for event_key, event_metrics in metrics.items():
+                self.assertEqual(
+                    event_metrics.self_time_ns,
+                    event_key.event.duration_time_ns - sum([
+                        child.duration_time_ns
+                        for child in event_key.event.children
+                    ]))
+
+        def test_utils_compute_queue_depth(self):
+
+            def format_queue_depth(queue_depth_list, events):
+                res = ""
+                for data, event in zip(queue_depth_list, events):
+                    res += f"{data.queue_depth} [{event.name()}]\n"
+                return res
+
+            # We have to use Mock because time series data is too flakey to test
+            profiler = self.generate_mock_profile()
+            basic_evaluation = _utils.BasicEvaluation(profiler)
+            self.assertExpectedInline(
+                format_queue_depth(basic_evaluation.queue_depth_list,
+                                   basic_evaluation.cuda_events), """\
+1 [cudaLaunchKernel]
+2 [cudaLaunchKernel]
+3 [cudaLaunchKernel]
+2 [GPU]
+1 [GPU]
+0 [GPU]
+""")
+
+        def test_utils_compute_queue_depth_when_no_cuda_events(self):
+            # For traces with only cpu events, we expect empty queue depth list
+            x = torch.ones((1024, 1024))
+            with profile() as prof:
+                for _ in range(5):
+                    x = x @ x
+            basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+            self.assertFalse(basic_evaluation.compute_queue_depth())
 
     def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
