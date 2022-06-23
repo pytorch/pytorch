@@ -16,8 +16,8 @@ jobs:
       CUDA_VISIBLE_DEVICES: "0"
       CORE_LIST: "24-47"
       GOMP_CPU_AFFINITY: "24-47"
-      CUDA_VERSION: "11.6"
-      MAGMA_VERSION: "magma-cuda116"
+      CUDA_VERSION: "11.3"
+      MAGMA_VERSION: "magma-cuda113"
     steps:
       - name: Check out pytorch/pytorch
         uses: actions/checkout@v2
@@ -47,8 +47,12 @@ jobs:
           # conda install -y -c pytorch pytorch=1.11.0 torchvision torchtext
           # echo "RESULT_DIR=${HOME}/release-testing/1.11.0" >> $GITHUB_ENV
           # link: https://anaconda.org/pytorch-test/pytorch
-          conda install -y -c pytorch-test pytorch=1.12.0 torchvision torchtext
-          echo "RESULT_DIR=${HOME}/release-testing/1.12.0" >> $GITHUB_ENV
+          # conda install -y -c pytorch-test pytorch=1.12.0 torchvision torchtext
+          wget https://download.pytorch.org/whl/nightly/cu113/torch-1.12.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl -O pytorch.whl
+          wget https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl -O torchvision.whl
+          wget https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220512-cp38-cp38-linux_x86_64.whl -O torchtext.whl
+          pip install ./pytorch.whl  ./torchvision.whl ./torchtext.whl
+          echo "RESULT_DIR=${HOME}/release-testing/20220512" >> $GITHUB_ENV
           python -c "import torch"
           python -c "import torchvision"
           python -c "import torchtext"
@@ -71,7 +75,7 @@ jobs:
           pushd examples/mnist
           export LOG_FILE=${RESULT_DIR}/mnist/result.log
           export MEM_FILE=${RESULT_DIR}/mnist/result_mem.log
-          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 1
+          # taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 1
       - name: Run MNist HogWild
         run: |
           . activate reltest
@@ -81,7 +85,7 @@ jobs:
           pushd examples/mnist_hogwild
           export LOG_FILE=${RESULT_DIR}/mnist_hogwild/result.log
           export MEM_FILE=${RESULT_DIR}/mnist_hogwild/result_mem.log
-          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10
+          # taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10
       - name: Run CPU WLM LSTM
         run: |
           . activate reltest
@@ -91,7 +95,7 @@ jobs:
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_cpu_lstm/result.log
           export MEM_FILE=${RESULT_DIR}/wlm_cpu_lstm/result_mem.log
-          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM
+          # taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM
       - name: Run GPU WLM LSTM
         run: |
           . activate reltest
@@ -101,7 +105,7 @@ jobs:
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_gpu_lstm/result.log
           export MEM_FILE=${RESULT_DIR}/wlm_gpu_lstm/result_mem.log
-          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM --cuda
+          # taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM --cuda
       - name: Run CPU WLM Transformer
         run: |
           . activate reltest
@@ -121,7 +125,7 @@ jobs:
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_gpu_trans/result.log
           export MEM_FILE=${RESULT_DIR}/wlm_gpu_trans/result_mem.log
-          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model Transformer --cuda
+          # taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model Transformer --cuda
       - name: Remove Conda env
         run: |
           conda env remove --name reltest
