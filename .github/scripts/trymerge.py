@@ -742,12 +742,10 @@ class GitHubPR:
     def merge_into(self, repo: GitRepo, *,
                    force: bool = False,
                    dry_run: bool = False,
-                   already_merged: bool = False,
                    comment_id: Optional[int] = None) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
-        if not already_merged:
-            self.merge_changes(repo, force, comment_id)
+        self.merge_changes(repo, force, comment_id)
 
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
@@ -758,9 +756,14 @@ class GitHubPR:
         if not dry_run:
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 
-    def merge_changes(self, repo: GitRepo, force: bool = False, comment_id: Optional[int] = None) -> None:
-        if repo.current_branch() != self.default_branch():
-            repo.checkout(self.default_branch())
+    def merge_changes(self,
+                      repo: GitRepo,
+                      force: bool = False,
+                      comment_id: Optional[int] = None,
+                      branch: Optional[str] = None) -> None:
+        branch_to_merge_into = self.default_branch() if branch is None else branch
+        if repo.current_branch() != branch_to_merge_into:
+            repo.checkout(branch_to_merge_into)
         if not self.is_ghstack_pr():
             msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
@@ -770,14 +773,19 @@ class GitHubPR:
         else:
             self.merge_ghstack_into(repo, force, comment_id=comment_id)
 
-    def create_land_time_check_branch(self, repo: GitRepo) -> str:
-        branch_name = f'landchecks/{self.pr_num}'
+    def create_land_time_check_branch(self,
+                                      repo: GitRepo,
+                                      branch: str,
+                                      force: bool = False,
+                                      comment_id: Optional[int] = None,) -> str:
+        self.merge_changes(repo, branch=branch, force=force, comment_id=comment_id)
+        land_check_branch = f'landchecks/{self.pr_num}'
         try:
-            repo._run_git('branch', "-D", branch_name)
+            repo._run_git('branch', "-D", land_check_branch)
         except Exception:
             pass
-        repo._run_git('checkout', "-b", branch_name)
-        repo._run_git('push', '-u', 'origin', branch_name, '--force')
+        repo._run_git('checkout', "-b", land_check_branch)
+        repo._run_git('push', '-u', 'origin', land_check_branch, '--force')
         commit = repo.get_commit('HEAD').commit_hash
         gh_post_pr_comment(self.org, self.project, self.pr_num,
                            'Successfully started land time checks.' +
@@ -1033,8 +1041,7 @@ def merge(pr_num: int, repo: GitRepo,
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     if land_checks:
-        pr.merge_changes(repo, force=force, comment_id=comment_id)
-        commit = pr.create_land_time_check_branch(repo)
+        commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
 
     start_time = time.time()
     last_exception = ''
@@ -1060,7 +1067,7 @@ def merge(pr_num: int, repo: GitRepo,
                                                   f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
             if land_checks:
                 validate_land_time_checks(repo, commit)
-                return pr.merge_into(repo, dry_run=dry_run, force=force, already_merged=True, comment_id=comment_id)
+                return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
             else:
                 return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:
