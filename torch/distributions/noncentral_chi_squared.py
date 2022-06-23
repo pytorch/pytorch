@@ -6,8 +6,10 @@ from torch.distributions.distribution import Distribution
 
 
 class NoncentralChiSquared(Distribution):
+
     def __init__(self, validate_args=None):
         super().__init__(validate_args=validate_args)
+
 
     @property
     def arg_constraints(self) -> Dict[str, Constraint]:

@@ -5,11 +5,7 @@ from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 
 
-class InverseGamma(Distribution):
-
-    def __init__(self, validate_args=None):
-        super().__init__(validate_args=validate_args)
-
+class StudentT(Distribution):
     @property
     def arg_constraints(self) -> Dict[str, Constraint]:
         return {}
