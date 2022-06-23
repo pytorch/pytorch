@@ -24,10 +24,6 @@ aten = torch.ops.aten
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
 
 
-def create_meta(e):
-    return torch.empty_strided(e.shape, e.stride(), dtype=e.dtype, layout=e.layout, device='meta')
-
-
 @contextmanager
 def decompose(decomposition_table):
     global CURRENT_DECOMPOSITION_TABLE
@@ -81,7 +77,7 @@ def proxy_call(func_overload, args, kwargs=None):
     def unwrap_proxy(e):
         return e.proxy if isinstance(e, ProxyTensor) else e
 
-    def unwrap_fake(e):
+    def unwrap_elem(e):
         if isinstance(e, ProxyTensor):
             return e.elem
         return e
@@ -96,7 +92,7 @@ def proxy_call(func_overload, args, kwargs=None):
         args[0].proxy = proxy_out
         proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
-    real_out = func_overload(*pytree.tree_map(unwrap_fake, args), **pytree.tree_map(unwrap_fake, kwargs))
+    real_out = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
     # Seems like func isn't marked as inplace_view for some reason?
     if torch.Tag.inplace_view in func_overload.tags:  # type: ignore[attr-defined]
         with no_dispatch():
