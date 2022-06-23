@@ -269,7 +269,8 @@ Tensor quantile_compute(
     // then while computing jvp, we end calling `masked_fill_`
     // on a regular Tensor with CCT args, so we call
     // `masked_fill` instead.
-    if (ranks._fw_grad(/*level=*/0).defined()) {
+    if (isTensorSubclassLike(ranks) && 
+        ranks._fw_grad(/*level=*/0).defined()) {
       ranks = ranks.masked_fill(ranks < 0, 0);
     } else {
       ranks.masked_fill_(ranks < 0, 0);
@@ -311,7 +312,8 @@ Tensor quantile_compute(
     // but if the tangent of `value_below` is a regular Tensor,
     // then while computing jvp, we will end-up copying a `CCT`,
     // into regular Tensor. So we use out-of-place variant of `lerp`
-    if (values_below._fw_grad(/*level=*/0).defined()) {
+    if (areAnyTensorSubclassLike({values_below, values_above, weights}) &&
+        values_below._fw_grad(/*level=*/0).defined()) {
       values_below = values_below.lerp(values_above, weights);
     } else {
       values_below.lerp_(values_above, weights);
