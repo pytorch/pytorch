@@ -560,17 +560,11 @@ mobile::Module _load_for_mobile(
     std::istream& in,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  if (getFileFormat(in) == FileFormat::FlatbufferFileFormat) {
-    std::shared_ptr<char> data;
-    size_t size = 0;
-    std::tie(data, size) = get_stream_content(in);
-    return _load_mobile_from_bytes(
-        data, size, device, extra_files, kDefaultMobileLoadOptions);
-  }
-  std::unique_ptr<IStreamAdapter> rai = std::make_unique<IStreamAdapter>(&in);
-  auto module = _load_for_mobile_impl(
-      std::move(rai), device, extra_files, kDefaultMobileLoadOptions);
-  return module;
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_stream_content(in);
+  return _load_mobile_from_bytes(
+      data, size, device, extra_files, kDefaultMobileLoadOptions);
 }
 
 mobile::Module _load_for_mobile(
