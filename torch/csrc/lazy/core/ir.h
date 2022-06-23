@@ -134,7 +134,7 @@ class TORCH_API Node {
 
   virtual const Output& operand(size_t i) const;
 
-  // Gets operand at index i if index is valid, or a null lazy::Value otherwise.
+  // Gets operand at index i if index is valid, or kNullOutput otherwise.
   virtual const Output& nullable_operand(size_t i) const;
 
   // Returns the hash of the dag used to look up the compiled graph
