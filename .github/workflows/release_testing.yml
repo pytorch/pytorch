@@ -116,7 +116,7 @@ jobs:
           . activate reltest
           . switch-cuda.sh ${CUDA_VERSION}
           nvcc --version
-          pyhton -c 'import torch'
+          python -c 'import torch'
           mkdir -p ${RESULT_DIR}/wlm_cpu_trans
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_cpu_trans/result.log
