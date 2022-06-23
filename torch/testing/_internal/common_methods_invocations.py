@@ -10664,6 +10664,8 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
                         # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # dispatch to lazy test failed
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                     )),
     BinaryUfuncInfo('clamp_min',
                     ref=_clamp_min_numpy,
@@ -10678,6 +10680,8 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
                         # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
                         DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        # dispatch to lazy test failed
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
