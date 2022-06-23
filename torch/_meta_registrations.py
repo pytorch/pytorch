@@ -6,7 +6,7 @@ from torch._prims.utils import (
     check,
     elementwise_dtypes,
 )
-from torch._prims.wrappers import out_wrapper
+from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
 from typing import List, Optional
 
