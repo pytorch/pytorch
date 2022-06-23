@@ -42,6 +42,7 @@ DimsSequenceType = Union[List[int], Tuple[int, ...]]
 NumberType = Union[bool, int, float, complex]
 Number = (bool, int, float, complex)
 DeviceLikeType = Union[str, torch.device]
+Tensor = torch.Tensor
 
 
 torch_function_passthrough = {
@@ -196,6 +197,7 @@ def check_significant_strides(
     return True, None
 
 
+# This function is equivalent to compute_contiguous() from TensorImpl.cpp
 def is_contiguous(a: TensorLikeType) -> bool:
     """
     Tests whether a tensor is contiguous or not.
@@ -218,6 +220,127 @@ def is_contiguous(a: TensorLikeType) -> bool:
 
     return True
 
+
+# This function is equivalent to compute_channels_last_contiguous_2d() in TensorImpl.cpp
+def is_channels_last_contiguous_2d(a: Tensor) -> bool:
+    # NHWC or not channels last 2D contiguous
+    if a.ndim != 4:
+        return False
+
+    expected_stride = 1
+    for idx in (1, 3, 2, 0):
+
+        length = a.shape[idx]
+        if length == 1:
+            continue
+
+        stride = a.stride()[idx]
+        if stride != expected_stride:
+            return False
+
+        expected_stride *= length
+
+    return True
+
+def is_channels_last_contiguous_3d(a: Tensor) -> bool:
+    # NDHWC or not channels last 3D contiguous
+    if a.ndim != 5:
+        return False
+
+    expected_stride = 1
+    for idx in (1, 4, 3, 2, 0):
+
+        length = a.shape[idx]
+        if length == 1:
+            continue
+
+        stride = a.stride()[idx]
+        if stride != expected_stride:
+            return False
+
+        expected_stride *= length
+
+    return True
+
+_memory_formats = set((
+    torch.contiguous_format,
+    torch.preserve_format,
+    torch.channels_last,
+    torch.channels_last_3d))
+def validate_memory_format(memory_format: torch.memory_format):
+    check(memory_format in _memory_formats,
+          lambda: f"Received unknown memory format {memory_format}!")
+
+
+def is_contiguous_memory_format(a: Tensor, *, memory_format: torch.memory_format) -> bool:
+    validate_memory_format(memory_format)
+
+    if memory_format == torch.contiguous_format:
+        return is_contiguous(a)
+    if memory_format == torch.channels_last:
+        return is_channels_last_contiguous_2d(a)
+    if memory_format == torch.channels_last_3d:
+        return is_channels_last_contiguous_3d(a)
+
+    check(False,
+          lambda: f"is_contiguous received unsupported memory format {memory_format}")
+
+# NOTE: that tensors with no elements and channels last is ???
+def is_channels_last_contiguous(a: Tensor) -> bool:
+    """
+    True when a tensor is channels-last contiguous.
+
+    This requires that:
+
+      - the tensor is conceptually either 4 (NHWC) or 5 (NDHWC) dimensions
+      - if we name the tensor's dimensions NCHW or NCDHW, then the strides are such that the
+        stride of the 'C' dimension (Cs) is 1 and the strides corresponding to
+        each dimension (Xs) can be ordered Cs <= Ws <= Hs <= (Ds) <= Ns and are
+        "nested" -- so Ws = Cs * Cl, where Cl is the length of the 'C' dimension,
+        for example.
+    """
+    return is_channels_last_contiguous_2d(a) or is_channels_last_contiguous_3d(a)
+
+def is_non_overlapping_and_dense(a: Tensor) -> bool:
+    """
+    True when a tensor is non-overlapping and dense.
+
+    A tensor is non-overlapping and dense when there exists a permutation of
+    its dimensions that is contiguous.
+    """
+
+    # Short-circuits if the tensor is already contiguous or channels-last contiguous
+    if is_contiguous(a) or is_channels_last_contiguous(a):
+        return True
+
+    # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp
+
+    # Short-circuits for tensors with zero or one elements, which
+    # are trivially non-overlapping and "dense"
+    if a.numel() < 2:
+        return True
+
+    # Short-circuits for tensors of rank one, which are
+    # non-overlapping and "dense" if their stride is one
+    if a.ndim == 1:
+        return a.stride()[0] == 1
+
+    # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
+    # Sorts (length, stride) pairs by stride
+    lengths_and_strides = sorted(tuple(zip(a.shape, a.stride())), key=operator.itemgetter(1))
+
+    expected_stride = 1
+    for length, stride in lengths_and_strides:
+
+        if length == 1:
+            continue
+
+        if stride != expected_stride:
+            return False
+
+        expected_stride *= length
+
+    return True
 
 # NOTE: Based on the implementation in TensorIterator.cpp, but note that
 # the note [Computing output strides] is incorrect, because it
@@ -1106,6 +1229,28 @@ def make_contiguous_strides_for(shape: ShapeType) -> Tuple[int, ...]:
     result = tuple(reversed(strides))
     return result
 
+def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    # TODO: maybe inform the user of channels_last_3d if rank of the tensor is 5?
+    check(len(shape) == 4,
+          lambda: "Only tensors of rank 4 can use the channels_last memory format")
+
+    shape = list(shape)
+    shape[1], shape[-1] = shape[-1], shape[1]
+    strides = list(make_contiguous_strides_for(shape))
+    strides[-1], strides[1] = strides[1], strides[-1]
+
+    return tuple(strides)
+
+def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
+    check(len(shape) == 5,
+          lambda: "Only tensors of rank 5 can use the channels_last_3d memory format")
+
+    shape = list(shape)
+    shape[1], shape[-1] = shape[-1], shape[1]
+    strides = list(make_contiguous_strides_for(shape))
+    strides[-1], strides[1] = strides[1], strides[-1]
+
+    return tuple(strides)
 
 def compute_reduction_output_shape(
     shape: ShapeType, dimensions: Sequence

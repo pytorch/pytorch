@@ -8493,6 +8493,7 @@ def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_arg(()))
 
 def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
+    # NOTE: the default memory format for clone is torch.preserve_format
     yield from sample_inputs_clone(op, device, dtype, requires_grad, **kwargs)
 
     shapes = (
@@ -8511,6 +8512,11 @@ def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape, noncontiguous=True))
         yield SampleInput(make_arg(shape, noncontiguous=True).transpose(0, -1))
 
+        yield SampleInput(make_arg(shape), kwargs={'memory_format': torch.contiguous_format})
+        yield SampleInput(make_arg(shape).transpose(0, -1), kwargs={'memory_format': torch.contiguous_format})
+        yield SampleInput(make_arg(shape, noncontiguous=True), kwargs={'memory_format': torch.contiguous_format})
+        yield SampleInput(make_arg(shape, noncontiguous=True).transpose(0, -1), kwargs={'memory_format': torch.contiguous_format})
+
     # shape, strides, offset
     strided_cases = (
         ((5, 6, 2), (1, 1, 7), 2),
@@ -8523,11 +8529,48 @@ def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
 
     for shape, strides, offset in strided_cases:
         yield SampleInput(make_arg(500,).as_strided(shape, strides, offset))
+        yield SampleInput(make_arg(500,).as_strided(shape, strides, offset), kwargs={'memory_format': torch.contiguous_format})
+
+    # channels last 2D
+    yield SampleInput(make_arg((2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last})
+    a = make_arg((2, 2, 2, 2)).permute(0, 3, 1, 2)
+    yield SampleInput(a, kwargs={'memory_format': torch.channels_last})
+
+    # channels last 3D
+    yield SampleInput(make_arg((2, 2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last_3d})
+    a = make_arg((2, 2, 2, 2, 2)).permute(0, 4, 1, 2, 3)
+    yield SampleInput(a, kwargs={'memory_format': torch.channels_last_3d})
 
 
 def sample_inputs_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
     yield SampleInput(make_arg((S, S)))
+
+def reference_inputs_contiguous(op, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_contiguous(op, device, dtype, requires_grad, **kwargs)
+
+    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
+
+    # contiguous
+    yield SampleInput(make_arg((2, 2)))
+
+    # permuted
+    a = make_arg((2, 2)).permute(1, 0)
+    yield SampleInput(a)
+
+    # noncontiguous in memory
+    yield SampleInput(make_arg((6, 6), noncontiguous=True))
+
+    # channels last 2D
+    yield SampleInput(make_arg((2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last})
+    a = make_arg((2, 2, 2, 2)).permute(0, 3, 1, 2)
+    yield SampleInput(a, kwargs={'memory_format': torch.channels_last})
+
+    # channels last 3D
+    yield SampleInput(make_arg((2, 2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last_3d})
+    a = make_arg((2, 2, 2, 2, 2)).permute(0, 4, 1, 2, 3)
+    yield SampleInput(a, kwargs={'memory_format': torch.channels_last_3d})
 
 
 def sample_inputs_sum_to_size(op_info, device, dtype, requires_grad, **kwargs):
@@ -11152,6 +11195,7 @@ op_db: List[OpInfo] = [
            op=lambda x, *args, **kwargs: x.contiguous(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            sample_inputs_func=sample_inputs_contiguous,
+           reference_inputs_func=reference_inputs_contiguous,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            autodiff_fusible_nodes=['aten::contiguous'],
@@ -20828,6 +20872,9 @@ python_ref_db = [
         skips=(
             # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
+            # RuntimeError: no _refs support for torch.Tensor.requires_grad.__get__
+            # https://github.com/pytorch/pytorch/issues/80154
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
         ),
     ),
     #
