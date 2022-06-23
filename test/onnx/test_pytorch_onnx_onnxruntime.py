@@ -12228,7 +12228,6 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
     )
     def test_grid_sample(self, mode, padding_mode, align_corners):
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
-        print(self.__name__)
         class GridSampleModule(torch.nn.Module):
             def __init__(self, mode, padding_mode, align_corners) -> None:
                 super().__init__()
