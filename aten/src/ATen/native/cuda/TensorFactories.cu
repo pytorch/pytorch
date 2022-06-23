@@ -31,25 +31,39 @@
 namespace at {
 namespace native {
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 Tensor& eye_out_cuda(int64_t n, Tensor& result) {
-  // the default value of `m` equals to `n`
-  return at::native::eye_out_cuda(n, n, result);
+  // the default value of `k` equals to 0
+  return at::native::eye_out_cuda(n, n, 0, result);
 }
 
 Tensor& eye_out_cuda(int64_t n, int64_t m, Tensor& result) {
+  // the default value of `k` equals to 0
+  return at::native::eye_out_cuda(n, m, 0, result);
+}
+
+Tensor& eye_out_cuda_nk(int64_t n, c10::optional<int64_t> k, Tensor& result) {
+  // the default value of `m` equals to `n`
+  int64_t k_v{k.has_value() ? k.value() : 0};
+  return at::native::eye_out_cuda(n, n, k_v, result);
+}
+
+Tensor& eye_out_cuda(int64_t n, int64_t m, int64_t k, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
   TORCH_CHECK(m >= 0, "m must be greater or equal to 0, got ", m);
+  TORCH_CHECK((k > -n && k < m) || (k == 0),
+              "k out of range, should be between (-",
+              n, ", ", m, "), or 0 but got ", k);
 
   result.resize_({n, m});
   result.zero_();
+  result.diagonal(k).fill_(1);
 
-  int64_t sz = std::min<int64_t>(n, m);
-  int64_t stride = result.stride(0) + result.stride(1);
-
-  Tensor diag = result.as_strided({sz}, {stride});
-  diag.fill_(1);
   return result;
 }
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor empty_cuda(IntArrayRef size, c10::optional<ScalarType> dtype_opt, c10::optional<Layout> layout_opt, c10::optional<Device> device_opt, c10::optional<bool> pin_memory_opt, c10::optional<c10::MemoryFormat> memory_format_opt) {
   return at::detail::empty_cuda(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
