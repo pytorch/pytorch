@@ -112,6 +112,7 @@ jobs:
           # taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model LSTM --cuda
       - name: Run CPU WLM Transformer
         run: |
+          set -x
           . activate reltest
           . switch-cuda.sh ${CUDA_VERSION}
           nvcc --version
