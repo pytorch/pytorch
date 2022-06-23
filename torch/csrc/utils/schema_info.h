@@ -1,7 +1,7 @@
 #pragma once
 
-#include <torch/csrc/jit/runtime/operator.h>
 #include <ATen/core/function_schema.h>
+#include <torch/csrc/jit/runtime/operator.h>
 #include <algorithm>
 #include <iterator>
 #include <string>
@@ -33,7 +33,8 @@ class TORCH_API SchemaInfo {
  public:
   SchemaInfo(c10::FunctionSchema schema) : schema_(schema) {}
 
-  SchemaInfo(const char* signature) : schema_(torch::jit::getOperatorForLiteral(signature)->schema()) {}
+  SchemaInfo(const char* signature)
+      : schema_(torch::jit::getOperatorForLiteral(signature)->schema()) {}
 
   bool isDeterministic() const;
 
