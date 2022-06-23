@@ -67,7 +67,6 @@ jobs:
       - name: Build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           # TODO duplicated
           AWS_DEFAULT_REGION: us-east-1
@@ -80,7 +79,6 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
