@@ -402,11 +402,6 @@ meta_function_expected_failures = {
     torch.mvlgamma: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense, aten::mvlgamma.out
     torch.nanmean: {bf16, f16, f32, f64},
     torch.nanquantile: {f32, f64},
-    torch.nn.functional.conv1d: {bf16, f32, f64, i64},
-    torch.nn.functional.conv2d: {bf16, f32, f64, i64},
-    torch.nn.functional.conv_transpose1d: {f32, f64, i64},
-    torch.nn.functional.conv_transpose2d: {f32, f64, i64},
-    torch.nn.functional.conv_transpose3d: {f32, f64, i64},
     torch.nn.functional.ctc_loss: {f32, f64},
     torch.nn.functional.gaussian_nll_loss: {bf16, f32, f64},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f32, f64},  # aten::grid_sampler_2d, aten::grid_sampler_3d
