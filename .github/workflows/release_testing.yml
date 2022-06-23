@@ -16,6 +16,8 @@ jobs:
       CUDA_VISIBLE_DEVICES: "0"
       CORE_LIST: "24-47"
       GOMP_CPU_AFFINITY: "24-47"
+      CUDA_VERSION: "11.6"
+      MAGMA_VERSION: "magma-cuda116"
     steps:
       - name: Check out pytorch/pytorch
         uses: actions/checkout@v2
@@ -37,8 +39,10 @@ jobs:
       - name: Install PyTorch and setup environment
         run: |
           . activate reltest
-          conda install -y cudatoolkit=11.3
-          conda install -y -c pytorch magma-cuda113
+          . switch-cuda.sh ${CUDA_VERSION}
+          sudo ln -sf /usr/local/cuda-${CUDA_VERSION} /usr/local/cuda
+          conda install -y cudatoolkit=${CUDA_VERSION}
+          conda install -y -c pytorch ${MAGMA_VERSION}
           # link: https://anaconda.org/pytorch/pytorch
           conda install -y -c pytorch pytorch=1.11.0 torchvision torchtext
           echo "RESULT_DIR=${HOME}/release-testing/1.11.0" >> $GITHUB_ENV
@@ -61,6 +65,8 @@ jobs:
       - name: Run MNist
         run: |
           . activate reltest
+          . switch-cuda.sh ${CUDA_VERSION}
+          nvcc --version
           mkdir -p ${RESULT_DIR}/mnist
           pushd examples/mnist
           export LOG_FILE=${RESULT_DIR}/mnist/result.log
@@ -69,6 +75,8 @@ jobs:
       - name: Run MNist HogWild
         run: |
           . activate reltest
+          . switch-cuda.sh ${CUDA_VERSION}
+          nvcc --version
           mkdir -p ${RESULT_DIR}/mnist_hogwild
           pushd examples/mnist_hogwild
           export LOG_FILE=${RESULT_DIR}/mnist_hogwild/result.log
@@ -77,6 +85,8 @@ jobs:
       - name: Run CPU WLM LSTM
         run: |
           . activate reltest
+          . switch-cuda.sh ${CUDA_VERSION}
+          nvcc --version
           mkdir -p ${RESULT_DIR}/wlm_cpu_lstm
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_cpu_lstm/result.log
@@ -85,6 +95,8 @@ jobs:
       - name: Run GPU WLM LSTM
         run: |
           . activate reltest
+          . switch-cuda.sh ${CUDA_VERSION}
+          nvcc --version
           mkdir -p ${RESULT_DIR}/wlm_gpu_lstm
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_gpu_lstm/result.log
@@ -93,6 +105,8 @@ jobs:
       - name: Run CPU WLM Transformer
         run: |
           . activate reltest
+          . switch-cuda.sh ${CUDA_VERSION}
+          nvcc --version
           mkdir -p ${RESULT_DIR}/wlm_cpu_trans
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_cpu_trans/result.log
@@ -101,6 +115,8 @@ jobs:
       - name: Run GPU WLM Transformer
         run: |
           . activate reltest
+          . switch-cuda.sh ${CUDA_VERSION}
+          nvcc --version
           mkdir -p ${RESULT_DIR}/wlm_gpu_trans
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_gpu_trans/result.log
