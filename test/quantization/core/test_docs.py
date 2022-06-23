@@ -1,9 +1,10 @@
 # Owner(s): ["oncall: quantization"]
 
 import re
+import os
 from os import getcwd
 from os.path import exists
-
+from pathlib import Path
 import torch
 
 # import torch.nn.quantized as nnq
@@ -56,6 +57,19 @@ class TestQuantizationDocs(QuantizationTestCase):
             return None
 
         path_to_file = get_correct_path(path_from_pytorch)
+
+        hold = Path('.').resolve()
+        out = []
+        for i in range(3):
+            out.append((hold.absolute(), os.listdir(hold)))
+            hold = hold.parent.absolute()
+
+        cur = Path('.').resolve()
+        docs = cur.parent/'docs'
+        assert path_to_file is not None, \
+            "Couldn't find {}, cwd is\n\n{}\n\n, next \n\n{}\n\n, next \n\n{}\n\n" \
+            "docs in next level up?\n\n{}".format(path_from_pytorch, out[0], out[1], out[2], os.listdir(docs) if docs.exists() else False)
+
         if path_to_file:
             file = open(path_to_file)
             content = file.readlines()
@@ -92,6 +106,7 @@ class TestQuantizationDocs(QuantizationTestCase):
                 )
             )
             return code
+
         return None
 
     def _test_code(self, code, global_inputs=None):
@@ -139,7 +154,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         self._test_code(code, global_inputs)
 
     def test_quantization_doc_custom(self):
-        path_from_pytorch = "docs/source/quantization.rst"
+        path_from_pytorch = "docs/source/quantization.rstt"
         unique_identifier = "Custom API Example::"
 
         global_inputs = {"nnq": torch.nn.quantized}
