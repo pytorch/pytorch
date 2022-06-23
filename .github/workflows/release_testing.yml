@@ -44,11 +44,11 @@ jobs:
           conda install -y cudatoolkit=${CUDA_VERSION}
           conda install -y -c pytorch ${MAGMA_VERSION}
           # link: https://anaconda.org/pytorch/pytorch
-          conda install -y -c pytorch pytorch=1.11.0 torchvision torchtext
-          echo "RESULT_DIR=${HOME}/release-testing/1.11.0" >> $GITHUB_ENV
+          # conda install -y -c pytorch pytorch=1.11.0 torchvision torchtext
+          # echo "RESULT_DIR=${HOME}/release-testing/1.11.0" >> $GITHUB_ENV
           # link: https://anaconda.org/pytorch-test/pytorch
-          # conda install -y -c pytorch-test pytorch=1.12.0 torchvision torchtext
-          # echo "RESULT_DIR=${HOME}/release-testing/1.12.0" >> $GITHUB_ENV
+          conda install -y -c pytorch-test pytorch=1.12.0 torchvision torchtext
+          echo "RESULT_DIR=${HOME}/release-testing/1.12.0" >> $GITHUB_ENV
           python -c "import torch"
           python -c "import torchvision"
           python -c "import torchtext"
