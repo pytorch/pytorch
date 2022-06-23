@@ -21,6 +21,7 @@ import torch.utils.cpp_extension
 from torch.autograd._functions.utils import check_onnx_broadcast
 from torch.onnx.symbolic_opset9 import _prepare_onnx_paddings
 from torch.testing._internal.common_utils import load_tests, IS_SANDCASTLE, IS_WINDOWS
+from typing import List, Any
 
 # load_tests from torch.testing._internal.common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -743,7 +744,7 @@ class TestCppExtensionUtils(TestCase):
             to_kill = [1, 4, 5, 7]
 
             with multiprocessing.Manager() as manager:
-                global_list = manager.list()
+                global_list: List[Any] = manager.list()
                 ps = []
                 for i in range(nb_processes):
                     ps.append(multiprocessing.Process(target=_file_baton_test_fn, args=(i, global_list, to_kill, test_lock_file)))
