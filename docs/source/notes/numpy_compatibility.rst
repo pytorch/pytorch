@@ -219,7 +219,8 @@ Essentially these can be expressed as:
 
 The :meth:`torch.numpy()` method  and the :doc:`np.asarray()
 <numpy:reference/generated/numpy.asarray>` function returns a **view** of the
-underlying tensor as a ``np.ndarray`` object.
+underlying tensor as a ``np.ndarray`` object. This means that these are good way
+to call functions which accept NumPy arrays.
 
 .. doctest::
 
@@ -292,7 +293,7 @@ To obtain a **view** of the data, :meth:`torch.from_numpy()` can be used.
 - :meth:`torch.from_numpy()` is guaranteed to share memory with NumPy.
 - :meth:`torch.as_tensor()` will try to stay away from copy operations, it
   also has the effect of sharing memory. However, ``torch.as_tensor()`` has
-  slightly higher overhead as it checks and accepts other iteratable objects as
+  slightly higher overhead as it checks and accepts other iterable objects as
   well, e.g. ``list`` objects.
 - :meth:`torch.from_dlpack()` called with a NumPy array (``np.version.version >=
   1.20``) as its argument will also generate a ``torch.Tensor`` view.
