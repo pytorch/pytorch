@@ -2,6 +2,7 @@
 
 import torch
 from torch import quantize_per_tensor
+from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.quantizer import APoTQuantizer
 import unittest
 import random
@@ -22,13 +23,12 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values between 0 -> 1000
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
-        min_val = torch.min(tensor2quantize)
-        max_val = torch.max(tensor2quantize)
+        observer = APoTObserver(b=4, k=1)
 
-        quantizer = APoTQuantizer(4, 1, min_val, max_val, False)
+        quantizer = APoTQuantizer(observer=observer)
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, signed=False)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
@@ -63,10 +63,12 @@ class TestQuantizer(unittest.TestCase):
         min_val = torch.min(tensor2quantize)
         max_val = torch.max(tensor2quantize)
 
-        quantizer = APoTQuantizer(4, 2, min_val, max_val, False)
+        observer = APoTObserver(b=4, k=2)
+
+        quantizer = APoTQuantizer(observer=observer)
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, signed=False)
         qtensor_data = torch.tensor(qtensor).type(torch.uint8)
 
         # expected qtensor values calculated based on
@@ -94,13 +96,22 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random values between 0 -> 2**4 = 16
         # because there are 2**b = 2**4 quantization levels total
         float2apot = 16 * torch.rand(size)
-        quantizer = APoTQuantizer(4, 2, torch.tensor([0]), torch.tensor([1]), False)
+
+        observer = APoTObserver(b=4, k=2)
+
+        quantizer = APoTQuantizer(observer=observer)
         float2apot = float2apot.int()
         orig_input = torch.clone(float2apot)
 
-        dequantized_result = quantizer.dequantize(float2apot)
+        min_val = torch.Tensor([0])
+        max_val = torch.Tensor([1])
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
+        dequantized_result = quantizer.dequantize(float2apot=float2apot, signed=False, min_val=min_val, max_val=max_val)
+
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result,
+                                                   signed=False,
+                                                   min_val=min_val,
+                                                   max_val=max_val)
 
         quantized_result = quantized_result.int()
 
@@ -122,13 +133,21 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random values between 0 -> 2**6 = 64
         # because there are 2**b = 2**6 quantization levels total
         float2apot = 64 * torch.rand(size)
-        quantizer = APoTQuantizer(6, 2, torch.tensor([0]), torch.tensor([1]), False)
+
+        observer = APoTObserver(b=6, k=2)
+        quantizer = APoTQuantizer(observer=observer)
         float2apot = float2apot.int()
         orig_input = torch.clone(float2apot)
 
-        dequantized_result = quantizer.dequantize(float2apot)
+        min_val = torch.Tensor([0])
+        max_val = torch.Tensor([1])
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
+        dequantized_result = quantizer.dequantize(float2apot=float2apot, signed=False, min_val=min_val, max_val=max_val)
+
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result,
+                                                   signed=False,
+                                                   min_val=min_val,
+                                                   max_val=max_val)
 
         quantized_result = quantized_result.int()
 

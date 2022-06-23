@@ -17,16 +17,14 @@ class APoTObserver(ObserverBase):
     k: int
     n: int
     alpha: torch.Tensor
-    gamma: torch.Tensor
     min_val: torch.Tensor
     max_val: torch.Tensor
-    level_indices: torch.Tensor
 
     def __init__(
         self,
         b,
         k,
-            dtype=torch.quint8) -> None:
+            dtype=torch.uint8) -> None:
         super().__init__(dtype)
         self.b = b
         self.k = k
@@ -100,7 +98,7 @@ class APoTObserver(ObserverBase):
                 p_sum += float(tens[1])
 
         # assign gamma
-        self.gamma = self.alpha / p_sum
+        gamma = self.alpha / p_sum
 
         # calculate cartesian product
         cartesian_product = list(itertools.product(*p_all))
@@ -114,12 +112,12 @@ class APoTObserver(ObserverBase):
                 sum += ele
             quantization_levels_list.append(sum)
 
-        quantization_levels_gamma = [float(self.gamma) * ele for ele in quantization_levels_list]
+        quantization_levels_gamma = [float(gamma) * ele for ele in quantization_levels_list]
         quantization_levels = torch.tensor(quantization_levels_gamma)
         level_indices = torch.tensor([])
-        quantization_levels, self.level_indices = quantization_levels.sort()
+        quantization_levels, level_indices = quantization_levels.sort()
 
-        return (self.gamma, quantization_levels, self.level_indices)
+        return (gamma, quantization_levels, level_indices)
 
     def forward(self, x_orig):
         r"""Records the running minimum and maximum of ``x``."""
