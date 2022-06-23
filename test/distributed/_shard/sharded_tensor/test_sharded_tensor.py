@@ -19,7 +19,7 @@ from torch.distributed._shard.api import (
     _reshard_output,
 )
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
+    custom_sharded_op_impl,
     pre_load_state_dict_hook,
     state_dict_hook,
     ShardedTensor,
@@ -39,6 +39,7 @@ from torch.distributed._shard.sharded_tensor.api import (
 from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
+    tp_transports,
 )
 from torch.testing._internal.common_utils import (
     TestCase,
@@ -173,7 +174,7 @@ class TestShardParameter(ShardedTensorTestBase):
         with self.assertRaisesRegex(ValueError, 'does not match with src_rank'):
             shard_parameter(fc, 'weight', spec, src_rank=self.rank)
 
-        with self.assertRaisesRegex(ValueError, 'does not have parameter'):
+        with self.assertRaisesRegex(AttributeError, 'has no attribute'):
             shard_parameter(fc, 'foo', spec)
 
         with self.assertRaisesRegex(ValueError, 'Expected Linear.bias to be a Tensor, but found str'):
@@ -979,7 +980,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         self.init_pg()
 
         # Init RPC with different ranks.
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+        rpc_backend_options = rpc.TensorPipeRpcBackendOptions(_transports=tp_transports())
         rpc_backend_options.init_method = f"file://{self.file_name}"
         rank = (self.rank + 1) % self.world_size
         rpc.init_rpc(
@@ -1069,9 +1070,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         # Test with invalid input
         st = sharded_tensor.empty(spec, (10, 20), init_rrefs=True)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
-            st.size(-1)
-        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[0, 2\\)'):
+        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[-2, 2\\)'):
+            st.size(-3)
+        with self.assertRaisesRegex(ValueError, 'must be within the range of tensor dimensions \\[-2, 2\\)'):
             st.size(2)
 
         with self.assertRaises(TypeError):
@@ -2462,7 +2463,7 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     @requires_nccl()
     def test_custom_op(self):
 
-        @sharded_op_impl(torch.asin)
+        @custom_sharded_op_impl(torch.asin)
         def my_sharded_asin(types, args, kwargs, process_group):
             return torch.asin(args[0].local_shards()[0].tensor)
 
@@ -2487,7 +2488,9 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
 
         t = torch.rand(10, 10).cuda(self.rank)
 
-        @sharded_op_impl(torch.nn.functional.linear)
+        from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
+
+        @custom_sharding_spec_op(ChunkShardingSpec, torch.nn.functional.linear)
         def my_sharded_linear(types, args, kwargs, process_group):
             return t
 
@@ -2512,12 +2515,12 @@ class TestShardedTensorCustomOps(ShardedTensorTestBase):
     def test_custom_op_errors(self):
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @sharded_op_impl(torch.nn.functional.linear)
+            @custom_sharded_op_impl(torch.nn.functional.linear)
             def my_op1(types, args, kwargs, process_group, random_param):
                 pass
 
         with self.assertRaisesRegex(TypeError, 'expects signature'):
-            @sharded_op_impl(torch.nn.functional.linear)
+            @custom_sharded_op_impl(torch.nn.functional.linear)
             def my_op2(types):
                 pass
 

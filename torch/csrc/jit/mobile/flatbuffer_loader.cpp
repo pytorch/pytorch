@@ -177,6 +177,18 @@ void parseExtraFiles(
   parseExtraFilesFromVector(extra_files_offsets, &extra_files);
 }
 
+void FlatbufferLoader::parseAndPopulate(
+    uint32_t i,
+    const mobile::serialization::IValue* ivalue) {
+  if (const auto* func = ivalue->val_as_Function()) {
+    auto func_ptr = parseFunction(func);
+    all_functions_[i] = func_ptr.get();
+    mcu_->register_function(std::move(func_ptr));
+  } else {
+    all_ivalues_[i] = parseIValue(ivalue);
+  }
+}
+
 mobile::Module FlatbufferLoader::parseModule(
     mobile::serialization::Module* module) {
   module_ = module;
@@ -192,15 +204,14 @@ mobile::Module FlatbufferLoader::parseModule(
   storages_.resize(module->storage_data_size());
   storage_loaded_.resize(module->storage_data_size(), false);
 
-  for (uint32_t i = 0; i < ivalues->size(); i++) {
+  mobile_ivalue_size_ = module_->mobile_ivalue_size();
+  if (mobile_ivalue_size_ == 0) {
+    mobile_ivalue_size_ = ivalues->size();
+  }
+
+  for (uint32_t i = 0; i < mobile_ivalue_size_; i++) {
     const auto* ival = ivalues->Get(i);
-    if (const auto* func = ival->val_as_Function()) {
-      auto func_ptr = parseFunction(func);
-      all_functions_[i] = func_ptr.get();
-      mcu_->register_function(std::move(func_ptr));
-    } else {
-      all_ivalues_[i] = parseIValue(ival);
-    }
+    parseAndPopulate(i, ival);
   }
   IValue& module_ivalue = getIValue(module->state_obj());
 
@@ -213,8 +224,12 @@ mobile::Module FlatbufferLoader::parseModule(
   }
 
   module_parsed_ = true;
-  return mobile::Module(module_ivalue.toObject(), mcu_);
+  auto m = mobile::Module(module_ivalue.toObject(), mcu_);
+  m.set_min_operator_version(module->operator_version());
+  m.set_bytecode_version(module->bytecode_version());
+  return m;
 }
+
 namespace {
 void appendUpgraderFunctions(mobile::Function* function) {
 #ifndef DISABLE_UPGRADER
@@ -240,8 +255,6 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
     function->append_constant(getIValue(i));
   }
 
-  std::unordered_set<std::string> unsupported_op_names;
-
   appendUpgraderFunctions(function.get());
   // 2. Decides if upgrader is needed
   const uint32_t operator_version = module_->operator_version();
@@ -254,19 +267,13 @@ std::unique_ptr<mobile::Function> FlatbufferLoader::parseFunction(
       num_args = op->num_args_serialized();
     }
 
-    auto op_found = function->append_operator(
+    function->append_operator(
         op->name()->str(), op->overload_name()->str(), num_args);
-
-    if (!op_found) {
-      unsupported_op_names.emplace(
-          op->name()->str() + "/" + op->overload_name()->str());
-    }
   }
 
-  TORCH_CHECK(
-      unsupported_op_names.empty(),
-      "Unsupported ops: ",
-      c10::Join(", ", unsupported_op_names));
+  if (should_load_operators_) {
+    function->initialize_operators(true);
+  }
 
   for (const auto i : *method->type_annotations()) {
     function->append_type(getOrCreateTypeAnnotations(i));
@@ -664,6 +671,21 @@ void FlatbufferLoader::extractJitSourceAndConstants(
   AT_ASSERT(
       module_parsed_,
       "Need to first parse a flatbuffer file before extracing jit_sources");
+
+  const auto* ivalues = module_->ivalues();
+  for (uint32_t i = mobile_ivalue_size_; i < ivalues->size(); i++) {
+    const auto* ival = ivalues->Get(i);
+    parseAndPopulate(i, ival);
+  }
+  // register functions
+  for (const auto& f : all_functions_) {
+    if (f.first >= mobile_ivalue_size_) {
+      uint32_t class_index =
+          ivalues->Get(f.first)->val_as_Function()->class_type();
+      ClassTypePtr class_type = all_types_[class_index];
+      class_type->addMethod(f.second);
+    }
+  }
   const auto* jit_constants = module_->jit_constants();
   for (auto i = 0; i < jit_constants->size(); ++i) {
     constants->emplace_back(getIValue(jit_constants->Get(i)));
@@ -723,6 +745,14 @@ uint64_t get_bytecode_version(const std::string& filename) {
       "Format error");
   auto* flatbuffer_module = mobile::serialization::GetMutableModule(data.get());
   return flatbuffer_module->bytecode_version();
+}
+
+mobile::ModuleInfo get_module_info_from_flatbuffer(char* flatbuffer_content) {
+  auto* ff_module = mobile::serialization::GetMutableModule(flatbuffer_content);
+  FlatbufferLoader loader;
+  loader.setShouldLoadOperators(false);
+  mobile::Module m = loader.parseModule(ff_module);
+  return mobile::get_module_info(m);
 }
 
 } // namespace jit

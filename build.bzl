@@ -28,6 +28,7 @@ def define_targets(rules):
             ":DispatchKeyNativeFunctions.cpp",
             ":DispatchKeyNativeFunctions.h",
             ":LazyIr.h",
+            ":LazyNonNativeIr.h",
             ":RegisterDispatchKey.cpp",
             ":native_functions.yaml",
             ":shape_inference.h",
@@ -44,6 +45,12 @@ def define_targets(rules):
               "--gen_lazy_ts_backend",
     )
 
+    rules.cc_library(
+        name = "generated-autograd-headers",
+        hdrs = [":{}".format(h) for h in _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_AUTOGRAD_PYTHON_HEADERS],
+        visibility = ["//visibility:public"],
+    )
+
     rules.genrule(
         name = "version_h",
         srcs = [
@@ -56,6 +63,90 @@ def define_targets(rules):
               "--version-path $(location :version.txt) --output-path $@ ",
         tools = ["//tools/setup_helpers:gen_version_header"],
     )
+
+#
+# ATen generated code
+# You need to keep this is sync with the files written out
+# by gen.py (in the cmake build system, we track generated files
+# via generated_cpp.txt and generated_cpp.txt-cuda
+#
+# Sure would be nice to use gen.py to create this list dynamically
+# instead of hardcoding, no? Well, we can't, as discussed in this
+# thread:
+# https://fb.facebook.com/groups/askbuck/permalink/1924258337622772/
+
+GENERATED_H = [
+    "Functions.h",
+    "NativeFunctions.h",
+    "NativeMetaFunctions.h",
+    "FunctionalInverses.h",
+    "RedispatchFunctions.h",
+    "RegistrationDeclarations.h",
+]
+
+GENERATED_H_CORE = [
+    "Operators.h",
+    # CPUFunctions.h (and likely similar headers) need to be part of core because
+    # of the static dispatch build: TensorBody.h directly includes CPUFunctions.h.
+    # The disinction looks pretty arbitrary though; maybe will can kill core
+    # and merge the two?
+    "CPUFunctions.h",
+    "CPUFunctions_inl.h",
+    "CompositeExplicitAutogradFunctions.h",
+    "CompositeExplicitAutogradFunctions_inl.h",
+    "CompositeImplicitAutogradFunctions.h",
+    "CompositeImplicitAutogradFunctions_inl.h",
+    "MetaFunctions.h",
+    "MetaFunctions_inl.h",
+    "core/TensorBody.h",
+    "MethodOperators.h",
+    "core/aten_interned_strings.h",
+    "core/enum_tag.h",
+]
+
+GENERATED_H_CUDA = [
+    "CUDAFunctions.h",
+    "CUDAFunctions_inl.h",
+]
+
+GENERATED_CPP_CUDA = [
+    "RegisterCUDA.cpp",
+    "RegisterNestedTensorCUDA.cpp",
+    "RegisterSparseCUDA.cpp",
+    "RegisterSparseCsrCUDA.cpp",
+    "RegisterQuantizedCUDA.cpp",
+]
+
+GENERATED_CPP = [
+    "Functions.cpp",
+    "RegisterBackendSelect.cpp",
+    "RegisterCPU.cpp",
+    "RegisterQuantizedCPU.cpp",
+    "RegisterNestedTensorCPU.cpp",
+    "RegisterSparseCPU.cpp",
+    "RegisterSparseCsrCPU.cpp",
+    "RegisterMkldnnCPU.cpp",
+    "RegisterCompositeImplicitAutograd.cpp",
+    "RegisterZeroTensor.cpp",
+    "RegisterMeta.cpp",
+    "RegisterCompositeExplicitAutograd.cpp",
+    "CompositeViewCopyKernels.cpp",
+    "RegisterSchema.cpp",
+    "RegisterFunctionalization_0.cpp",
+    "RegisterFunctionalization_1.cpp",
+    "RegisterFunctionalization_2.cpp",
+    "RegisterFunctionalization_3.cpp",
+]
+
+GENERATED_CPP_CORE = [
+    "Operators_0.cpp",
+    "Operators_1.cpp",
+    "Operators_2.cpp",
+    "Operators_3.cpp",
+    "Operators_4.cpp",
+    "core/ATenOpList.cpp",
+    "core/TensorMethods.cpp",
+]
 
 # These lists are temporarily living in and exported from the shared
 # structure so that an internal build that lives under a different
@@ -76,14 +167,13 @@ _GENERATED_AUTOGRAD_CPP_HEADERS = [
     "torch/csrc/autograd/generated/variable_factories.h",
 ]
 
-GENERATED_AUTOGRAD_H = _GENERATED_AUTOGRAD_CPP_HEADERS + _GENERATED_AUTOGRAD_PYTHON_HEADERS
-
 GENERATED_TESTING_PY = [
     "torch/testing/_internal/generated/annotated_fn_args.py",
 ]
 
 GENERATED_LAZY_H = [
     "torch/csrc/lazy/generated/LazyIr.h",
+    "torch/csrc/lazy/generated/LazyNonNativeIr.h",
     "torch/csrc/lazy/generated/LazyNativeFunctions.h",
 ]
 
@@ -97,6 +187,7 @@ _GENERATED_AUTOGRAD_PYTHON_CPP = [
     "torch/csrc/autograd/generated/python_fft_functions.cpp",
     "torch/csrc/autograd/generated/python_linalg_functions.cpp",
     "torch/csrc/autograd/generated/python_return_types.cpp",
+    "torch/csrc/autograd/generated/python_enum_tag.cpp",
     "torch/csrc/autograd/generated/python_sparse_functions.cpp",
     "torch/csrc/autograd/generated/python_special_functions.cpp",
     "torch/csrc/autograd/generated/python_torch_functions_0.cpp",

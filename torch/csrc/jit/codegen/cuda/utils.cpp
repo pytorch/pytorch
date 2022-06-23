@@ -19,19 +19,23 @@ auto parseDebugDumpOptions() {
       {DebugDumpOption::FusionIr, false},
       {DebugDumpOption::FusionIrMath, false},
       {DebugDumpOption::KernelIr, false},
+      {DebugDumpOption::ComputeAtMap, false},
       {DebugDumpOption::CudaKernel, false},
       {DebugDumpOption::CudaFull, false},
       {DebugDumpOption::CudaToFile, false},
       {DebugDumpOption::LaunchParam, false},
       {DebugDumpOption::FusionSegments, false},
-      {DebugDumpOption::PrintRuntimeArgs, false},
+      {DebugDumpOption::FusionSegmenterLog, false},
+      {DebugDumpOption::FusionArgs, false},
+      {DebugDumpOption::KernelArgs, false},
       {DebugDumpOption::EffectiveBandwidth, false},
       {DebugDumpOption::FusionSegmentsDrawing, false},
       {DebugDumpOption::PrintPtxasLog, false},
       {DebugDumpOption::BufferReuseInfo, false},
       {DebugDumpOption::SchedulerDebug, false},
       {DebugDumpOption::ParallelDimensions, false},
-      {DebugDumpOption::Halo, false}};
+      {DebugDumpOption::Halo, false},
+      {DebugDumpOption::PerfDebugVerbose, false}};
 
   if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DUMP")) {
     c10::string_view options_view(dump_options);
@@ -44,6 +48,8 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::FusionIrMath] = true;
       } else if (token == "kernel_ir") {
         options_map[DebugDumpOption::KernelIr] = true;
+      } else if (token == "ca_map") {
+        options_map[DebugDumpOption::ComputeAtMap] = true;
       } else if (token == "cuda_kernel") {
         options_map[DebugDumpOption::CudaKernel] = true;
       } else if (token == "cuda_full") {
@@ -54,8 +60,12 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::LaunchParam] = true;
       } else if (token == "segmented_fusion") {
         options_map[DebugDumpOption::FusionSegments] = true;
-      } else if (token == "print_args") {
-        options_map[DebugDumpOption::PrintRuntimeArgs] = true;
+      } else if (token == "segmenter_logging") {
+        options_map[DebugDumpOption::FusionSegmenterLog] = true;
+      } else if (token == "fusion_args") {
+        options_map[DebugDumpOption::FusionArgs] = true;
+      } else if (token == "kernel_args") {
+        options_map[DebugDumpOption::KernelArgs] = true;
       } else if (token == "dump_eff_bandwidth") {
         options_map[DebugDumpOption::EffectiveBandwidth] = true;
       } else if (token == "draw_segmented_fusion") {
@@ -70,17 +80,96 @@ auto parseDebugDumpOptions() {
         options_map[DebugDumpOption::ParallelDimensions] = true;
       } else if (token == "halo") {
         options_map[DebugDumpOption::Halo] = true;
+      } else if (token == "perf_debug_verbose") {
+        options_map[DebugDumpOption::PerfDebugVerbose] = true;
       } else {
         TORCH_CHECK(
             false,
             "Invalid debug dump option: '",
             token,
             "'\nAvailable options:\n",
-            "\tfusion_ir, fusion_ir_math, kernel_ir, cuda_kernel, cuda_full,\n",
-            "\tcuda_to_file, launch_param, segmented_fusion, print_args,\n",
-            "\tdump_eff_bandwidth, draw_segmented_fusion, scheduler_params\n",
-            "\tparallel_dimensions, buffer_reuse_verbose, ptxas_verbose\n",
-            "\thalo\n");
+            "\tfusion_ir, fusion_ir_math, kernel_ir, ca_map, cuda_kernel, cuda_full,\n",
+            "\tcuda_to_file, launch_param, segmented_fusion, fusion_args,\n",
+            "\tkernel_args, dump_eff_bandwidth, draw_segmented_fusion,\n",
+            "\tscheduler_params, parallel_dimensions, buffer_reuse_verbose,\n",
+            "\tptxas_verbose, halo, segmenter_logging, perf_debug_verbose\n");
+      }
+      options_view = (end_pos != c10::string_view::npos)
+          ? options_view.substr(end_pos + 1)
+          : "";
+    }
+  }
+
+  return options_map;
+}
+
+auto parseDisableOptions() {
+  std::unordered_map<DisableOption, bool> options_map = {
+      {DisableOption::ArchCheck, false},
+      {DisableOption::Fallback, false},
+      {DisableOption::Fma, false},
+      {DisableOption::IndexHoist, false},
+      {DisableOption::Nvtx, false},
+      {DisableOption::PredicateElimination, false},
+      {DisableOption::UnrollWithRng, false}};
+
+  if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_DISABLE")) {
+    c10::string_view options_view(dump_options);
+    while (!options_view.empty()) {
+      const auto end_pos = options_view.find_first_of(',');
+      const auto token = options_view.substr(0, end_pos);
+      if (token == "arch_check") {
+        options_map[DisableOption::ArchCheck] = true;
+      } else if (token == "fallback") {
+        options_map[DisableOption::Fallback] = true;
+      } else if (token == "fma") {
+        options_map[DisableOption::Fma] = true;
+      } else if (token == "index_hoist") {
+        options_map[DisableOption::IndexHoist] = true;
+      } else if (token == "nvtx") {
+        options_map[DisableOption::Nvtx] = true;
+      } else if (token == "predicate_elimination") {
+        options_map[DisableOption::PredicateElimination] = true;
+      } else if (token == "unroll_with_rng") {
+        options_map[DisableOption::UnrollWithRng] = true;
+      } else {
+        TORCH_CHECK(
+            false,
+            "Invalid disable option: '",
+            token,
+            "'\nAvailable options:\n",
+            "\tarch_check, fallback, fma, index_hoist, nvtx, predicate_elimination\n",
+            "unroll_with_rng");
+      }
+      options_view = (end_pos != c10::string_view::npos)
+          ? options_view.substr(end_pos + 1)
+          : "";
+    }
+  }
+
+  return options_map;
+}
+
+auto parseEnableOptions() {
+  std::unordered_map<EnableOption, bool> options_map = {
+      {EnableOption::Complex, false}, {EnableOption::KernelProfile, false}};
+
+  if (const char* dump_options = std::getenv("PYTORCH_NVFUSER_ENABLE")) {
+    c10::string_view options_view(dump_options);
+    while (!options_view.empty()) {
+      const auto end_pos = options_view.find_first_of(',');
+      const auto token = options_view.substr(0, end_pos);
+      if (token == "complex") {
+        options_map[EnableOption::Complex] = true;
+      } else if (token == "kernel_profile") {
+        options_map[EnableOption::KernelProfile] = true;
+      } else {
+        TORCH_CHECK(
+            false,
+            "Invalid disable option: '",
+            token,
+            "'\nAvailable options:\n",
+            "\tcomplex, kernel_profile");
       }
       options_view = (end_pos != c10::string_view::npos)
           ? options_view.substr(end_pos + 1)
@@ -179,20 +268,23 @@ bool isDebugDumpEnabled(DebugDumpOption option) {
   return dump_options.at(option);
 }
 
+bool isDisabled(DisableOption option) {
+  const static auto options = parseDisableOptions();
+  return options.at(option);
+}
+
+bool isEnabled(EnableOption option) {
+  const static auto options = parseEnableOptions();
+  return options.at(option);
+}
+
 bool useFallback() {
+  // Keep this env var for compatibility
   const char* disable_fb_env = getenv("PYTORCH_NVFUSER_DISABLE_FALLBACK");
-  return !(disable_fb_env ? atoi(disable_fb_env) : false);
-}
+  bool fallback_disabled = disable_fb_env ? atoi(disable_fb_env) : false;
+  fallback_disabled = fallback_disabled || isDisabled(DisableOption::Fallback);
 
-bool disableRNGUnrolling() {
-  const char* disable_rng_unroll = getenv("PYTORCH_NVFUSER_DISABLE_RNG_UNROLL");
-  return disable_rng_unroll ? atoi(disable_rng_unroll) : false;
-}
-
-bool disableIndexHoisting() {
-  const static char* disable_index_hoist =
-      getenv("PYTORCH_NVFUSER_DISABLE_INDEX_HOIST");
-  return disable_index_hoist ? atoi(disable_index_hoist) : false;
+  return !fallback_disabled;
 }
 
 std::vector<int64_t> getTensorSizes(TensorTypePtr const& tensor_type) {

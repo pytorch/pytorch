@@ -316,7 +316,7 @@ class DispatchKeySet final {
   // Any backend bits set on self will remain unchanged.
   // See Note [Removing keys from DispatchKeySet Only Affects Functionality
   // Keys]
-  DispatchKeySet operator-(DispatchKeySet other) const {
+  constexpr DispatchKeySet operator-(DispatchKeySet other) const {
     return DispatchKeySet(repr_ & (full_backend_mask | ~other.repr_));
   }
 
@@ -332,10 +332,10 @@ class DispatchKeySet final {
   }
   // Add a DispatchKey to the DispatchKey set.  Does NOT mutate,
   // returns the extended DispatchKeySet!
-  C10_NODISCARD DispatchKeySet add(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet add(DispatchKey t) const {
     return *this | DispatchKeySet(t);
   }
-  C10_NODISCARD DispatchKeySet add(DispatchKeySet ks) const {
+  C10_NODISCARD constexpr DispatchKeySet add(DispatchKeySet ks) const {
     return *this | ks;
   }
 
@@ -363,7 +363,7 @@ class DispatchKeySet final {
   //
   // Instead, remove(DispatchKey.AutogradCPU) will only remove the "Autograd"
   // bit from the bitset.
-  constexpr DispatchKeySet remove(DispatchKey t) const {
+  C10_NODISCARD constexpr DispatchKeySet remove(DispatchKey t) const {
     return DispatchKeySet(
         repr_ & ~(DispatchKeySet(t).repr_ & ~full_backend_mask));
   }
@@ -504,6 +504,8 @@ class DispatchKeySet final {
     using iterator_category = std::input_iterator_tag;
     using value_type = DispatchKey;
     using difference_type = ptrdiff_t;
+    using reference = value_type&;
+    using pointer = value_type*;
     // final mask value should mask out the entire keyset
     static const uint8_t end_iter_mask_val =
         num_backends + num_functionality_keys;
@@ -676,7 +678,6 @@ constexpr DispatchKeySet autogradother_backends =
          DispatchKey::SparseCsrCUDA,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
-         DispatchKey::Meta,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
          DispatchKey::Quantized})
@@ -724,6 +725,7 @@ constexpr auto autograd_xpu_ks = DispatchKeySet(DispatchKey::AutogradXPU);
 constexpr auto autograd_cuda_ks = DispatchKeySet(DispatchKey::AutogradCUDA);
 constexpr auto autograd_xla_ks = DispatchKeySet(DispatchKey::AutogradXLA);
 constexpr auto autograd_lazy_ks = DispatchKeySet(DispatchKey::AutogradLazy);
+constexpr auto autograd_meta_ks = DispatchKeySet(DispatchKey::AutogradMeta);
 constexpr auto autograd_mps_ks = DispatchKeySet(DispatchKey::AutogradMPS);
 constexpr auto autograd_hpu_ks = DispatchKeySet(DispatchKey::AutogradHPU);
 constexpr auto autograd_privateuse1_ks =
@@ -799,6 +801,8 @@ inline DispatchKeySet getAutogradRelatedKeySetFromBackend(BackendComponent t) {
       return inplace_or_view_ks | autograd_xla_ks;
     case BackendComponent::LazyBit:
       return inplace_or_view_ks | autograd_lazy_ks;
+    case BackendComponent::MetaBit:
+      return inplace_or_view_ks | autograd_meta_ks;
     case BackendComponent::MPSBit:
       return inplace_or_view_ks | autograd_mps_ks;
     case BackendComponent::HPUBit:
