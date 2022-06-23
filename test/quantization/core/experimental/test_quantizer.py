@@ -24,11 +24,13 @@ class TestQuantizer(unittest.TestCase):
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
         observer = APoTObserver(b=4, k=1)
+        observer.forward(tensor2quantize)
+        qparams = observer.calculate_qparams(signed=False)
 
-        quantizer = APoTQuantizer(observer=observer)
+        quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, signed=False)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
@@ -64,11 +66,13 @@ class TestQuantizer(unittest.TestCase):
         max_val = torch.max(tensor2quantize)
 
         observer = APoTObserver(b=4, k=2)
+        observer.forward(tensor2quantize)
+        qparams = observer.calculate_qparams(signed=False)
 
-        quantizer = APoTQuantizer(observer=observer)
+        quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize, signed=False)
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
         qtensor_data = torch.tensor(qtensor).type(torch.uint8)
 
         # expected qtensor values calculated based on
@@ -99,19 +103,18 @@ class TestQuantizer(unittest.TestCase):
 
         observer = APoTObserver(b=4, k=2)
 
-        quantizer = APoTQuantizer(observer=observer)
-        float2apot = float2apot.int()
-        orig_input = torch.clone(float2apot)
-
         min_val = torch.Tensor([0])
         max_val = torch.Tensor([1])
 
-        dequantized_result = quantizer.dequantize(float2apot=float2apot, signed=False, min_val=min_val, max_val=max_val)
+        qparams = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result,
-                                                   signed=False,
-                                                   min_val=min_val,
-                                                   max_val=max_val)
+        quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
+        float2apot = float2apot.int()
+        orig_input = torch.clone(float2apot)
+
+        dequantized_result = quantizer.dequantize(float2apot=float2apot)
+
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
         quantized_result = quantized_result.int()
 
@@ -135,19 +138,19 @@ class TestQuantizer(unittest.TestCase):
         float2apot = 64 * torch.rand(size)
 
         observer = APoTObserver(b=6, k=2)
-        quantizer = APoTQuantizer(observer=observer)
-        float2apot = float2apot.int()
-        orig_input = torch.clone(float2apot)
 
         min_val = torch.Tensor([0])
         max_val = torch.Tensor([1])
 
-        dequantized_result = quantizer.dequantize(float2apot=float2apot, signed=False, min_val=min_val, max_val=max_val)
+        qparams = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result,
-                                                   signed=False,
-                                                   min_val=min_val,
-                                                   max_val=max_val)
+        quantizer = APoTQuantizer(alpha=observer.alpha, gamma=qparams[0], quantization_levels=qparams[1], level_indices=qparams[2])
+        float2apot = float2apot.int()
+        orig_input = torch.clone(float2apot)
+
+        dequantized_result = quantizer.dequantize(float2apot=float2apot)
+
+        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
 
         quantized_result = quantized_result.int()
 
