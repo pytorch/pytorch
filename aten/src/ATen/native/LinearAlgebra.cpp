@@ -229,7 +229,10 @@ Tensor lu_det_P(const Tensor& pivots) {
 TORCH_IMPL_FUNC(_linalg_det_out)(const Tensor& A, const Tensor& result, const Tensor& LU, const Tensor& pivots) {
   // info is an aux tensor
   auto info = at::empty({0}, A.options().dtype(kInt));
-  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A);
+  // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
+  // Use the transpose of if A is contiguous since det(A^T) = det(A)
+  // We limit this to real matrices, but it could also be implemented for complex matrices
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
 
   // det = det_P * prod(diag(LU))
   at::mul_out(const_cast<Tensor&>(result), lu_det_P(pivots), at::prod(LU.diagonal(0, -2 ,-1), /*dim=*/-1));
@@ -257,7 +260,10 @@ Tensor det(const Tensor& self) {
 TORCH_IMPL_FUNC(_linalg_slogdet_out)(const Tensor& A, const Tensor& sign, const Tensor& logabsdet, const Tensor& LU, const Tensor& pivots) {
   // info is an aux tensor
   auto info = at::empty({0}, A.options().dtype(kInt));
-  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A);
+  // Optimisation: lu_factor_ex requires the input to be F-contig, otherwise it copies
+  // Use the transpose of if A is contiguous since det(A^T) = det(A)
+  // We limit this to real matrices, but it could also be implemented for complex matrices
+  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A.is_contiguous() && !A.is_complex() ? A.mH() : A);
 
   auto diag_U = LU.diagonal(0, -2, -1);
   // sign

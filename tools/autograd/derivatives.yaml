@@ -495,8 +495,13 @@
 
 - name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
   A: linalg_det_backward(grad, result, A, LU, pivots)
-  result: at::linalg_lu_solve(LU, pivots, A_t).diagonal(0, -2, -1).sum(-1) * result
+  result: at::linalg_lu_solve(LU, pivots, A_t, /*left*/true, /*adjoint*/!A_p.is_complex() && A_p.is_contiguous()).diagonal(0, -2, -1).sum(-1) * result
   output_differentiability: [True, False, False]
+
+- name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
+  A: slogdet_backward(grad_sign, grad_logabsdet, A, sign, LU, pivots)
+  sign, logabsdet: slogdet_jvp(LU, pivots, A_t, sign, A_p.is_contiguous() && !A_p.is_complex())
+  output_differentiability: [True, True, False, False]
 
 - name: block_diag(Tensor[] tensors) -> Tensor
   tensors: block_diag_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors))
@@ -1426,10 +1431,6 @@
   # See Note [as_strided_scatter backward support]
   src: grad.contiguous().as_strided(size, stride, storage_offset)
   result: auto_linear
-
-- name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
-  A: slogdet_backward(grad, A, sign, logabsdet)
-  output_differentiability: [False, True, False, False]
 
 - name: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
   A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
