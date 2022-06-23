@@ -126,7 +126,9 @@ def select_model_mode_for_export(model, mode: _C_onnx.TrainingMode):
 
 
 @contextlib.contextmanager
-def disable_apex_o2_state_dict_hook(model: torch.nn.Module):
+def disable_apex_o2_state_dict_hook(
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction]
+):
     # Apex O2 hook state_dict to return fp16 weights as fp32.
     # Exporter cannot identify them as same tensors.
     # Since this hook is only used by optimizer, it is safe to
@@ -879,7 +881,7 @@ def _check_flatten_did_not_remove(original, jit_flattened):
 
 
 def _create_jit_graph(
-    model: torch.nn.Module, args: Sequence[Any]
+    model: Union[torch.nn.Module, torch.jit.ScriptFunction], args: Sequence[Any]
 ) -> Tuple[
     _C.Graph,
     List[_C.IValue],
@@ -909,15 +911,16 @@ def _create_jit_graph(
                 method_graph, tuple(in_vars), param_count_list, False, False
             )
             return graph, params, torch_out, module
-        if isinstance(model, torch.jit.ScriptFunction):
-            params = []
-            graph = model.graph
-            _C._jit_pass_onnx_function_substitution(graph)
-            param_count_list = _get_param_count_list(graph, args)
-            graph = _C._propagate_and_assign_input_shapes(
-                graph, flattened_args, param_count_list, False, False
-            )
-            return graph, params, torch_out, None
+
+        # torch.jit.ScriptFunction
+        params = []
+        graph = model.graph
+        _C._jit_pass_onnx_function_substitution(graph)
+        param_count_list = _get_param_count_list(graph, args)
+        graph = _C._propagate_and_assign_input_shapes(
+            graph, flattened_args, param_count_list, False, False
+        )
+        return graph, params, torch_out, None
 
     graph, torch_out = _trace_and_get_graph_from_model(model, args)
     _C._jit_pass_onnx_lint(graph)
