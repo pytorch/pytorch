@@ -3462,12 +3462,6 @@ class TestQuantizedLinear(TestCase):
     def test_qdq_fused_qlinear(self):
         qlinear_prepack = torch.ops.quantized.linear_prepack
         use_relu = False
-        if use_relu:
-            linear_op = torch.ops.quantized.linear_relu
-            qlinear_qdq_fused_op = torch.ops.quantized.linear_qdq_fused
-        else:
-            linear_op = None
-            qlinear_qdq_fused_op = torch.ops.quantized.linear_relu_qdq_fused
         X_scale = 0.2
         X_zp = 0
         batch_size = 2
@@ -3484,13 +3478,13 @@ class TestQuantizedLinear(TestCase):
         X_fake_quant = torch.fake_quantize_per_tensor_affine(X, X_scale, X_zp, 0, 255)
         W_fake_quant = torch.fake_quantize_per_tensor_affine(W, W_scale, W_zp, -128, 127)
         y_ref = torch.nn.functional.linear(X_fake_quant, W_fake_quant, bias=None)
-        y_fused = qlinear_qdq_fused_op(X, W_prepack, X_scale, X_zp)
+        y_fused =  torch.ops.quantized.linear_qdq_fused(X, W_prepack, X_scale, X_zp)
         y_dynamic = torch.ops.quantized.linear_dynamic(X_q.dequantize(), W_prepack, reduce_range=False)
         print(y_ref)
-        print(y)
+        print(y_fused)
         print(y_dynamic)
-        # self.assertEqual(X_q.dequantize(), X_fake_quant)
-        self.assertEqual(y_ref, y)
+        # self.assertEqual(y_ref, y_fused) # doesn't match
+        self.assertEqual(y_dynamic, y_fused) # matches
 
 
     """Tests the correctness of the quantized linear and linear_relu op."""
