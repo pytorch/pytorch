@@ -12,7 +12,8 @@ NumPy Compatibility
 
    **TL;DR:**
 
-   - Be explicit about obtaining and using NumPy arrays, ``.numpy()`` will always ensure valid arrays
+   - Be explicit about obtaining and using NumPy arrays, ``.numpy(force=True)``
+     will always ensure valid arrays [from ``1.12``]
    - `This tutorial`_ shows a more concrete example of interoperability between
      NumPy and PyTorch
 
@@ -83,13 +84,12 @@ existing object. We can obtain a **view** or interpretation of a Tensor from
 NumPy array as well.
 
 The conversion to a NumPy array may potentially be a lossy operation (the
-computational graph), and so there are also no inbuilt operations to
-unconditionally return a NumPy array. Practically speaking, a function can be
-created locally to return a NumPy array, for say, visualizations.
+computational graph). Where the user is certain that such information is not
+present / required, e.g. to generate visualizations, there is also the
+``torch.numpy(force=True)``, which is conceptually equivalent to:
 
 .. code-block:: python
 
-   # Possibly lossy function for visualizations
    def uncond_numpy(torch_tensor):
         if torch_tensor.device != torch.device(type="cpu"):
            torch_tensor = torch_tensor.cpu()
@@ -165,9 +165,11 @@ As a concrete example, consider the following snippet:
                     object is described in the `interoperability with NumPy`_ document.
 
 If it is absolutely necessary to write functions where the input objects are not
-unconditionally known to be either PyTorch tensors or NumPy arrays, it is
-possible to ensure operator functionality by using NumPy functions explicitly as
-they are more forgiving than their PyTorch equivalents.
+unconditionally known to be either PyTorch tensors or NumPy arrays, it is is
+**strongly recommended** to use the ``torch.numpy(force=True)`` method
+explicitly. As a less clear alternative, it is also possible to ensure operator
+functionality by using NumPy functions since these will coerce tensors without
+throwing errors.
 
 .. csv-table::
    :header: Operator, NumPy Function, Description
