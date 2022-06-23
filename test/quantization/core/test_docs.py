@@ -1,8 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import re
-from os import getcwd
-from os.path import exists
+from pathlib import Path
 
 import torch
 
@@ -22,7 +21,7 @@ class TestQuantizationDocs(QuantizationTestCase):
     """
 
     def _get_code(
-        self, path_from_pytorch, unique_identifier, offset=2, short_snippet=False
+        self, path_from_docs, unique_identifier, offset=2, short_snippet=False
     ):
         r"""
         This function reads in the code from the docs given a unique identifier.
@@ -32,30 +31,39 @@ class TestQuantizationDocs(QuantizationTestCase):
         we are not accidentally only importing a blank line or something.
         """
 
-        def get_correct_path(path_from_pytorch):
+        def get_correct_path(path_from_docs):
             r"""
             Current working directory when CI is running test seems to vary, this function
-            looks for the pytorch directory and if it finds it looks for the path to the
+            looks for docs and if it finds it looks for the path to the
             file and if the file exists returns that path, otherwise keeps looking. Will
-            only work if cwd contains pytorch or is somewhere in the pytorch repo.
+            only work if cwd contains pytorch or docs or a parent contains docs.
             """
 
-            # check if cwd contains pytorch
-            if exists("./pytorch" + path_from_pytorch):
-                return "./pytorch" + path_from_pytorch
+            # # check if cwd contains pytorch or docs
+            # if exists("./pytorch" + path_from_docs):
+            #     return "./pytorch" + path_from_docs
 
-            # check if pytorch is cwd or a parent of cwd
-            cur_dir_path = getcwd()
-            folders = cur_dir_path.split("/")[::-1]
-            path_prefix = "./"
-            for folder in folders:
-                if folder == "pytorch" and exists(path_prefix + path_from_pytorch):
-                    return path_prefix + path_from_pytorch
-                path_prefix = "." + path_prefix
-            # if not found
-            return None
+            # get cwd
+            cur_dir_path = Path('.').resolve()
 
-        path_to_file = get_correct_path(path_from_pytorch)
+            # check if cwd contains pytorch, use that if it does
+            if (cur_dir_path/'pytorch').is_dir():
+                cur_dir_path = (cur_dir_path/'pytorch').resolve()
+
+            # need to find docs dir, so we check current directory
+            # and all parent directories to see if they contain it
+            # if we get a hit, use rest of path to check whether the file is there
+            check_dir = cur_dir_path
+            while not check_dir == check_dir.parent:
+                docs_path = (check_dir/'docs').resolve()
+                if docs_path.is_dir() and (docs_path/path_from_docs).resolve().is_file():
+                    return (docs_path/path_from_docs).resolve()
+                check_dir = check_dir.parent.resolve()
+
+            # no longer passing when file not found
+            raise FileNotFoundError("could not find {}".format(path_from_docs))
+
+        path_to_file = get_correct_path(path_from_docs)
         if path_to_file:
             file = open(path_to_file)
             content = file.readlines()
@@ -92,6 +100,7 @@ class TestQuantizationDocs(QuantizationTestCase):
                 )
             )
             return code
+
         return None
 
     def _test_code(self, code, global_inputs=None):
@@ -104,19 +113,19 @@ class TestQuantizationDocs(QuantizationTestCase):
             exec(expr, global_inputs)
 
     def test_quantization_doc_ptdq(self):
-        path_from_pytorch = "docs/source/quantization.rst"
+        path_from_docs = "source/quantization.rst"
         unique_identifier = "PTDQ API Example::"
-        code = self._get_code(path_from_pytorch, unique_identifier)
+        code = self._get_code(path_from_docs, unique_identifier)
         self._test_code(code)
 
     def test_quantization_doc_ptsq(self):
-        path_from_pytorch = "docs/source/quantization.rst"
+        path_from_docs = "source/quantization.rst"
         unique_identifier = "PTSQ API Example::"
-        code = self._get_code(path_from_pytorch, unique_identifier)
+        code = self._get_code(path_from_docs, unique_identifier)
         self._test_code(code)
 
     def test_quantization_doc_qat(self):
-        path_from_pytorch = "docs/source/quantization.rst"
+        path_from_docs = "source/quantization.rst"
         unique_identifier = "QAT API Example::"
 
         def _dummy_func(*args, **kwargs):
@@ -125,24 +134,24 @@ class TestQuantizationDocs(QuantizationTestCase):
         input_fp32 = torch.randn(1, 1, 1, 1)
         global_inputs = {"training_loop": _dummy_func, "input_fp32": input_fp32}
 
-        code = self._get_code(path_from_pytorch, unique_identifier)
+        code = self._get_code(path_from_docs, unique_identifier)
         self._test_code(code, global_inputs)
 
     def test_quantization_doc_fx(self):
-        path_from_pytorch = "docs/source/quantization.rst"
+        path_from_docs = "source/quantization.rst"
         unique_identifier = "FXPTQ API Example::"
 
         input_fp32 = SingleLayerLinearModel().get_example_inputs()
         global_inputs = {"UserModel": SingleLayerLinearModel, "input_fp32": input_fp32}
 
-        code = self._get_code(path_from_pytorch, unique_identifier)
+        code = self._get_code(path_from_docs, unique_identifier)
         self._test_code(code, global_inputs)
 
     def test_quantization_doc_custom(self):
-        path_from_pytorch = "docs/source/quantization.rst"
+        path_from_docs = "source/quantization.rst"
         unique_identifier = "Custom API Example::"
 
         global_inputs = {"nnq": torch.nn.quantized}
 
-        code = self._get_code(path_from_pytorch, unique_identifier)
+        code = self._get_code(path_from_docs, unique_identifier)
         self._test_code(code, global_inputs)
