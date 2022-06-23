@@ -1,8 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
 import re
-from os import getcwd
-from os.path import exists
+from pathlib import Path
 
 import torch
 
@@ -34,26 +33,30 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         def get_correct_path(path_from_pytorch):
             r"""
-            Current working directory when CI is running test seems to vary, this function
-            looks for the pytorch directory and if it finds it looks for the path to the
-            file and if the file exists returns that path, otherwise keeps looking. Will
-            only work if cwd contains pytorch or is somewhere in the pytorch repo.
+            Current working directory when CI is running test seems to vary (and the repo is
+            often not named pytorch), this function looks for docs and if it finds
+            it looks for the path to the file and if the file exists returns that
+            path, otherwise keeps looking. Will only work if cwd contains pytorch or docs
+            or a parent contains docs.
             """
+            # get cwd
+            cur_dir_path = Path(".").resolve()
 
-            # check if cwd contains pytorch
-            if exists("./pytorch" + path_from_pytorch):
-                return "./pytorch" + path_from_pytorch
+            # check if cwd contains pytorch, use that if it does
+            if (cur_dir_path / "pytorch").is_dir():
+                cur_dir_path = (cur_dir_path / "pytorch").resolve()
 
-            # check if pytorch is cwd or a parent of cwd
-            cur_dir_path = getcwd()
-            folders = cur_dir_path.split("/")[::-1]
-            path_prefix = "./"
-            for folder in folders:
-                if folder == "pytorch" and exists(path_prefix + path_from_pytorch):
-                    return path_prefix + path_from_pytorch
-                path_prefix = "." + path_prefix
-            # if not found
-            return None
+            # need to find the file, so we check current directory
+            # and all parent directories to see if the path leads to it
+            check_dir = cur_dir_path
+            while not check_dir == check_dir.parent:
+                file_path = (check_dir / path_from_pytorch).resolve()
+                if file_path.is_file():
+                    return file_path
+                check_dir = check_dir.parent.resolve()
+
+            # no longer passing when file not found
+            raise FileNotFoundError("could not find {}".format(path_from_pytorch))
 
         path_to_file = get_correct_path(path_from_pytorch)
         if path_to_file:
@@ -92,6 +95,10 @@ class TestQuantizationDocs(QuantizationTestCase):
                 )
             )
             return code
+<<<<<<< HEAD
+
+=======
+>>>>>>> 6ef92627c98 ([ao][docs] tests for quantization docs)
         return None
 
     def _test_code(self, code, global_inputs=None):
