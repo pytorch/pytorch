@@ -8910,6 +8910,14 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(a, args=(c, b))
 
+    # two python scalars
+    other_dtype = torch.double if dtype is not torch.double else torch.long
+    c = make_cond((10, 3), noncontiguous=True)
+    a = make_arg((1,), dtype=torch.long).item()
+    b = make_arg((1,), dtype=other_dtype).item()
+
+    yield SampleInput(a, args=(c, b))
+
     # NaN propagation
     if dtype.is_floating_point or dtype.is_complex:
         if dtype.is_floating_point:
@@ -21014,6 +21022,11 @@ python_ref_db = [
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
+        skips=(
+            DecorateInfo(unittest.skip("Skipped!"),
+                         'TestCommon',
+                         'test_python_ref_executor'),
+        )
     ),
 ]
 
