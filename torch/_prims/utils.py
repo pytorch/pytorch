@@ -1173,3 +1173,19 @@ def check(
     """
     if not b:
         raise exc_type(s())
+
+
+def to_complex_dtype(dtype: torch.dtype) -> torch.dtype:
+    return {
+        torch.float16: torch.complex32,
+        torch.float32: torch.complex64,
+        torch.float64: torch.complex128,
+    }[dtype]
+
+
+def to_real_dtype(dtype: torch.dtype) -> torch.dtype:
+    return {
+        torch.complex32: torch.float16,
+        torch.complex64: torch.float32,
+        torch.complex128: torch.float64,
+    }[dtype]

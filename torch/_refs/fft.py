@@ -1,0 +1,79 @@
+import torch._prims as prims
+import torch._prims.utils as utils
+from torch._prims.utils import (
+    TensorLike,
+    TensorLikeType,
+    ShapeType,
+    getnvFuserDtype,
+    DimsType,
+    DimsSequenceType,
+    StrideType,
+    Number,
+    NumberType,
+    TensorMeta,
+)
+
+NormType = Union[NoneType, Literal["forward"], Literal["backward"], Literal["ortho"]]
+
+
+def apply_norm(x, norm, signal_numel, forward):
+    if norm == "ortho":
+        return prims.mul(x, 1 / math.sqrt(signal_numel))
+
+    normalize = (not forward and norm == "backward") or (
+        forward and (norm is None or norm == "forward")
+    )
+    if normalize:
+        return prims.mul(x, 1 / length)
+    else:
+        return x
+
+
+def promote_type_fft(
+    dtype: torch.dtype, require_complex: bool, device: torch.device
+) -> torch.dtype:
+    if dtype.is_complex_type:
+        return dtype
+
+    # Promote integral to default float type
+    if not dtype.is_floating_type:
+        dtype = torch.get_default_dtype()
+
+    is_rocm = False  # TODO: How to discern rocm from CUDA?
+    if dtype == torch.half and (not device.is_cuda() or is_rocm):
+        raise RuntimeError("Unsupported dtype Half")
+
+    if require_complex:
+        dtype = utils.to_complex_dtype(dtype)
+
+    return dtype
+
+
+def promote_tensor_fft(t: TensorLikeType, require_complex: bool = False):
+    cur_type = t.dtype
+    new_type = promote_type_fft(cur_type, require_complex, t.device)
+    return t if cur_type == new_type else t.to(new_type)
+
+
+# Fixes the shape of x such that x.size(dims[i]) == sizes[i],
+# either by zero-padding, or by slicing x starting from 0.
+def resize_fft_input(
+    x: TensorLikeType, dims: DimsSequenceType, sizes: ShapeType
+) -> TensorLikeType:
+    assert len(dims) == len(sizes)
+    must_copy = False
+    x_sizes = x.shape
+    pad_amount = [0] * len(x_sizes) * 2
+    for i in range(len(dims)):
+        if sizes[i] == -1:
+            continue
+
+        if x_sizes[dims[i]] < sizes[i]:
+            must_copy = True
+            pad_idx = len(pad_amount) - 2 * dims[i] - 1
+            pad_amount[pad_idx] = sizes[i] - x_sizes[dims[i]]
+
+        if x_sizes[dims[i]] > sizes[i]:
+            x = refs.narrow(x, dims[i], 0, sizes[i])
+
+    return refs.constant_pad_nd(x, pad_amount) if must_copy else x
