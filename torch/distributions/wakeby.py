@@ -6,7 +6,6 @@ from torch.distributions.distribution import Distribution
 
 
 class Wakeby(Distribution):
-
     def __init__(self, validate_args=None):
         super().__init__(validate_args=validate_args)
 
