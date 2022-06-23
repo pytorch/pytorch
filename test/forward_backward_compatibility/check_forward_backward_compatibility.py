@@ -64,6 +64,8 @@ ALLOW_LIST = [
     ("aten::slogdet.out", datetime.date(2022, 8, 1)),
     ("aten::linalg_slogdet", datetime.date(2022, 8, 1)),
     ("aten::linalg_slogdet.out", datetime.date(2022, 8, 1)),
+    ("aten::_linalg_solve", datetime.date(2022, 10, 1)),
+    ("aten::_linalg_solve.solution", datetime.date(20222, 10, 1)),
     ("aten::linalg_inv_ex", datetime.date(2022, 10, 1)),
     ("aten::linalg_inv_ex.inverse", datetime.date(2022, 10, 1)),
     ("aten::linalg_inv", datetime.date(2022, 10, 1)),
