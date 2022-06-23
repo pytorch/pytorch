@@ -29,7 +29,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     Returns:
         None.
     Raises:
-        TypeError: If the function is not compatible with the input column.
+        ValueError: If the function is not compatible with the input column.
     """
     sig = inspect.signature(fn)
     if isinstance(input_col, (list, tuple)):
@@ -59,6 +59,10 @@ def _is_local_fn(fn):
 
 
 def _check_unpickable_fn(fn: Callable):
+    """
+    Checks function is pickable or not. If it is a lambda or local function, a UserWarning
+    will be raised. If it's not a callable function, a TypeError will be raised.
+    """
     if not callable(fn):
         raise TypeError(f"A callable function is expected, but {type(fn)} is provided.")
 
