@@ -314,7 +314,101 @@ c10::optional<bool> getProfileNodeRequiresGrad(Node* n) {
   return type->expectRef<TensorType>().requiresGrad();
 }
 
-void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
+struct ContextMapping {
+  std::vector<const Node*> ctx_stack_;
+  std::unordered_map<const Node*, const Node*> node_to_ctx_;
+
+  void processNode(Node* n) {
+    node_to_ctx_[n] = ctx_stack_.back();
+
+    if (n->kind() == prim::Enter) {
+      ctx_stack_.push_back(n);
+    } else if (n->kind() == prim::Exit) {
+      ctx_stack_.pop_back();
+    }
+  }
+
+  void processBlock(Block* block) {
+    for (Node* n : block->nodes()) {
+      processNode(n);
+      for (Block* b : n->blocks()) {
+        processBlock(b);
+      }
+      if (n->kind() == prim::DifferentiableGraph) {
+        const auto& subgraph = n->g(attr::Subgraph);
+        processBlock(subgraph->block());
+      }
+    }
+  }
+
+  ContextMapping(const std::shared_ptr<Graph>& graph) {
+    ctx_stack_.push_back(nullptr);
+    processBlock(graph->block());
+  }
+
+  const Node* get(const Node* n) const {
+    auto it = node_to_ctx_.find(n);
+    TORCH_INTERNAL_ASSERT(
+        it != node_to_ctx_.end(),
+        "Cannot find node in node-to-context mapping.");
+    return it->second;
+  }
+
+  bool has(const Node* n) const {
+    return node_to_ctx_.find(n) != node_to_ctx_.end();
+  }
+};
+
+c10::optional<bool> findRequiresGradForOutput(
+    Node* diff_graph,
+    Value* output,
+    const ContextMapping& ctx_mapping) {
+  for (auto& use : output->uses()) {
+    // [Only consider profiles in the same context]
+    // Ignore profiled uses if the use is within a different context.
+    // For example, a profile node within a no_grad() context will record the
+    // wrong requires_grad information.
+    if (ctx_mapping.has(use.user) &&
+        ctx_mapping.get(use.user) != ctx_mapping.get(diff_graph)) {
+      continue;
+    }
+
+    if (use.user->kind() == prim::profile) {
+      c10::optional<bool> req_grad_use;
+      if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
+        return req_grad_use.value();
+      }
+    }
+
+    // maybe the profile node got absorbed into a differentiable graph
+    if (use.user->kind() == prim::DifferentiableGraph) {
+      const auto& dg = use.user->g(attr::Subgraph);
+      // check all the uses of this graph input to look for profile nodes.
+      Value* dg_value = dg->inputs()[use.offset];
+      for (auto& dg_use : dg_value->uses()) {
+        // See [Only consider profiles in the same context]
+        if (ctx_mapping.has(dg_use.user) &&
+            ctx_mapping.get(dg_use.user) != ctx_mapping.get(diff_graph)) {
+          continue;
+        }
+
+        if (dg_use.user->kind() == prim::profile) {
+          c10::optional<bool> req_grad_use;
+          if ((req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
+                  .has_value()) {
+            return req_grad_use.value();
+          }
+        }
+      }
+    }
+  }
+
+  return c10::nullopt;
+}
+
+void AddRequiresGradToDifferentiableGraph(
+    Node* diff_graph,
+    const ContextMapping& ctx_mapping) {
   TORCH_INTERNAL_ASSERT(diff_graph->kind() == prim::DifferentiableGraph);
   const auto& subgraph = diff_graph->g(attr::Subgraph);
   for (auto i : c10::irange(subgraph->outputs().size())) {
@@ -333,40 +427,23 @@ void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
 
     // this node doesn't have any requires_grad info.
     // look at its uses to try to find a profile node.
-    c10::optional<bool> requiresGrad = c10::nullopt;
-    for (auto& use : diff_graph->output(i)->uses()) {
-      if (use.user->kind() == prim::profile) {
-        c10::optional<bool> req_grad_use;
-        if ((req_grad_use = getProfileNodeRequiresGrad(use.user)).has_value()) {
-          requiresGrad = req_grad_use;
-          break;
-        }
-      }
+    auto requires_grad = findRequiresGradForOutput(
+        diff_graph, diff_graph->output(i), ctx_mapping);
 
-      // maybe the profile node got absorbed into a differentiable graph
-      if (use.user->kind() == prim::DifferentiableGraph) {
-        const auto& dg = use.user->g(attr::Subgraph);
-        // check all the uses of this graph input to look for profile nodes.
-        Value* dg_value = dg->inputs()[use.offset];
-        for (auto& dg_use : dg_value->uses()) {
-          if (dg_use.user->kind() == prim::profile) {
-            c10::optional<bool> req_grad_use;
-            if ((req_grad_use = getProfileNodeRequiresGrad(dg_use.user))
-                    .has_value()) {
-              requiresGrad = req_grad_use;
-              break;
-            }
-          }
-        }
-        if (requiresGrad) {
-          break;
-        }
-      }
+    output->setType(output->type()->expectRef<TensorType>().withRequiresGrad(
+        requires_grad));
+  }
+}
+
+void AddRequiresGradOnOutputNodes(
+    Block* block,
+    const ContextMapping& ctx_mapping) {
+  for (Node* n : block->nodes()) {
+    if (n->kind() == prim::DifferentiableGraph) {
+      AddRequiresGradToDifferentiableGraph(n, ctx_mapping);
     }
-
-    if (requiresGrad.has_value()) {
-      output->setType(output->type()->expectRef<TensorType>().withRequiresGrad(
-          requiresGrad));
+    for (Block* b : n->blocks()) {
+      AddRequiresGradOnOutputNodes(b, ctx_mapping);
     }
   }
 }
@@ -379,15 +456,9 @@ void AddRequiresGradToDifferentiableGraph(Node* diff_graph) {
 // couldn't be merged into the same DifferentiableGraph. (see [workblocks])
 // Or it could happen if the output is profiled twice and the profile nodes get
 // removed by unfusedAliasedOutputs.
-void AddRequiresGradOnOutputNodes(Block* block) {
-  for (Node* n : block->nodes()) {
-    if (n->kind() == prim::DifferentiableGraph) {
-      AddRequiresGradToDifferentiableGraph(n);
-    }
-    for (Block* b : n->blocks()) {
-      AddRequiresGradOnOutputNodes(b);
-    }
-  }
+void AddRequiresGradOnOutputNodes(const std::shared_ptr<Graph>& graph) {
+  ContextMapping ctx_mapping(graph);
+  AddRequiresGradOnOutputNodes(graph->block(), ctx_mapping);
 }
 } // anonymous namespace
 
@@ -399,7 +470,7 @@ std::vector<Node*> CreateAutodiffSubgraphs(
   GRAPH_DEBUG("Before creating autodiff subgraphs", *graph);
   SubgraphSlicer(graph->block(), graph, threshold, db, diff_nodes).run();
   GRAPH_DEBUG("After creating autodiff subgraphs", *graph);
-  AddRequiresGradOnOutputNodes(graph->block());
+  AddRequiresGradOnOutputNodes(graph);
   GRAPH_DEBUG("diff_nodes.size() ", diff_nodes.size());
   return diff_nodes;
 }
