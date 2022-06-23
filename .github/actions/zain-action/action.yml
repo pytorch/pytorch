@@ -2,12 +2,20 @@ name: Setup Linux
 
 description: Set up Docker workspace on EC2
 
+inputs:
+  BRANCH:
+    required: true
+    description: 'The branch, tag, or SHA to checkout'
+
+
 runs:
   using: composite
   steps:
     - name: Zain Composite act
       shell: bash
       run: echo "look ma, i'm composed!"
+    - name: Get input branch ref name
+      run: echo "Branch ref name is ${{ inputs.BRANCH || github.event_name == 'pull_request' || github.sha }}"
     - name: Zain Composite act 2
       if: github.repository_owner == 'pytorch'
       shell: bash

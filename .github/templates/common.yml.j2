@@ -227,14 +227,8 @@ on:
       {%- elif checkout_pr_head %}
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       {%- endif %}
-      {%- if deep_clone %}
-          # deep clone, to allow use of git merge-base
-          fetch-depth: 0
-      {%- endif %}
           submodules: !{{ submodules }}
-      {%- if repository != "pytorch/pytorch" %}
           repository: !{{ repository }}
-      {%- endif %}
       {%- if directory %}
           path: !{{ directory }}
       {%- endif %}
