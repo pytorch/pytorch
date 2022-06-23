@@ -318,12 +318,15 @@ class _Reduce_Scatter(Function):
 class _AllGather(Function):
     @staticmethod
     def forward(ctx, group, tensor):
+        # Need contiguous tensors for collectives.
+        tensor = tensor.contiguous()
+
         ctx.group = group
         out_tensor_list = [
             torch.empty_like(tensor) for _ in range(dist.get_world_size(group=group))
         ]
 
-        dist.all_gather(out_tensor_list, tensor.contiguous(), group=group)
+        dist.all_gather(out_tensor_list, tensor, group=group)
         return tuple(out_tensor_list)
 
     @staticmethod
@@ -359,7 +362,7 @@ class _AllGatherBase(Function):
                     f'not have first dimension divisible by world_size: {world_size}'
                 )
             out_size[0] = out_size[0] // dist.get_world_size(group=ctx.group)
-            gx = torch.empty(out_size, device=grad_output.device)
+            gx = torch.empty(out_size, device=grad_output.device, dtype=grad_output.dtype)
             dist._reduce_scatter_base(gx, grad_output, ReduceOp.SUM, ctx.group)
         else:
             raise RuntimeError("Backend not supported!")
@@ -392,7 +395,7 @@ class _AlltoAll(Function):
     @staticmethod
     def backward(ctx, *grad_outputs):
         tensor_list = [
-            torch.empty(size, device=grad_outputs[0].device)
+            torch.empty(size, device=grad_outputs[0].device, dtype=grad_outputs[0].dtype)
             for size in ctx.input_tensor_size_list
         ]
         return (None, None) + _AlltoAll.apply(ctx.group, tensor_list, *grad_outputs)
@@ -416,7 +419,7 @@ class _AlltoAllSingle(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        tensor = torch.empty(ctx.input_size, device=grad_output.device)
+        tensor = torch.empty(ctx.input_size, device=grad_output.device, dtype=grad_output.dtype)
         return (None, None, None, None) + (
             _AlltoAllSingle.apply(
                 ctx.group,

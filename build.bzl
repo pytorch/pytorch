@@ -1,3 +1,10 @@
+load(
+    ":ufunc_defs.bzl",
+    "aten_ufunc_generated_cpu_kernel_sources",
+    "aten_ufunc_generated_cpu_sources",
+    "aten_ufunc_generated_cuda_sources",
+)
+
 def define_targets(rules):
     rules.cc_library(
         name = "caffe2_serialize",
@@ -18,8 +25,62 @@ def define_targets(rules):
             ":caffe2_headers",
             "@com_github_glog//:glog",
             "//c10",
-            "//third_party/miniz-2.0.8:miniz",
+            "//third_party/miniz-2.1.0:miniz",
         ],
+    )
+
+    #
+    # ATen generated code
+    # You need to keep this is sync with the files written out
+    # by gen.py (in the cmake build system, we track generated files
+    # via generated_cpp.txt and generated_cpp.txt-cuda
+    #
+    # Sure would be nice to use gen.py to create this list dynamically
+    # instead of hardcoding, no? Well, we can't, as discussed in this
+    # thread:
+    # https://fb.facebook.com/groups/askbuck/permalink/1924258337622772/
+
+    gen_aten_srcs = [
+        "aten/src/ATen/native/native_functions.yaml",
+        "aten/src/ATen/native/tags.yaml",
+    ] + rules.glob(["aten/src/ATen/templates/*"])
+
+    gen_aten_cmd = " ".join([
+        "$(execpath //torchgen:gen)",
+        "--install_dir=$(RULEDIR)",
+        "--source-path aten/src/ATen",
+    ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
+
+    gen_aten_outs_cuda = (
+        GENERATED_H_CUDA + GENERATED_CPP_CUDA +
+        aten_ufunc_generated_cuda_sources()
+    )
+
+    gen_aten_outs = (
+        GENERATED_H + GENERATED_H_CORE +
+        GENERATED_CPP + GENERATED_CPP_CORE +
+        aten_ufunc_generated_cpu_sources() +
+        aten_ufunc_generated_cpu_kernel_sources() + [
+            "Declarations.yaml",
+        ] + gen_aten_outs_cuda
+    )
+
+    rules.genrule(
+        name = "gen_aten",
+        srcs = gen_aten_srcs,
+        tools = ["//torchgen:gen"],
+        outs = gen_aten_outs,
+        cmd = gen_aten_cmd,
+    )
+
+    rules.genrule(
+        name = "gen_aten_hip",
+        srcs = gen_aten_srcs,
+        tools = ["//torchgen:gen"],
+        outs = gen_aten_outs_cuda,
+        cmd = gen_aten_cmd + " --rocm",
+        features = ["-create_bazel_outputs"],
+        tags = ["-bazel"],
     )
 
     rules.genrule(
@@ -38,7 +99,7 @@ def define_targets(rules):
         ],
         tools = ["//tools/setup_helpers:generate_code"],
         outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
-        cmd = "$(location //tools/setup_helpers:generate_code) " +
+        cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
@@ -58,7 +119,7 @@ def define_targets(rules):
             ":version.txt",
         ],
         outs = ["torch/csrc/api/include/torch/version.h"],
-        cmd = "$(location //tools/setup_helpers:gen_version_header) " +
+        cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
               "--template-path $(location :torch/csrc/api/include/torch/version.h.in) " +
               "--version-path $(location :version.txt) --output-path $@ ",
         tools = ["//tools/setup_helpers:gen_version_header"],
@@ -94,6 +155,8 @@ GENERATED_H_CORE = [
     "CPUFunctions_inl.h",
     "CompositeExplicitAutogradFunctions.h",
     "CompositeExplicitAutogradFunctions_inl.h",
+    "CompositeExplicitAutogradNonFunctionalFunctions.h",
+    "CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "CompositeImplicitAutogradFunctions.h",
     "CompositeImplicitAutogradFunctions_inl.h",
     "MetaFunctions.h",
@@ -101,6 +164,7 @@ GENERATED_H_CORE = [
     "core/TensorBody.h",
     "MethodOperators.h",
     "core/aten_interned_strings.h",
+    "core/enum_tag.h",
 ]
 
 GENERATED_H_CUDA = [
@@ -129,6 +193,7 @@ GENERATED_CPP = [
     "RegisterZeroTensor.cpp",
     "RegisterMeta.cpp",
     "RegisterCompositeExplicitAutograd.cpp",
+    "RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "CompositeViewCopyKernels.cpp",
     "RegisterSchema.cpp",
     "RegisterFunctionalization_0.cpp",
@@ -186,6 +251,7 @@ _GENERATED_AUTOGRAD_PYTHON_CPP = [
     "torch/csrc/autograd/generated/python_fft_functions.cpp",
     "torch/csrc/autograd/generated/python_linalg_functions.cpp",
     "torch/csrc/autograd/generated/python_return_types.cpp",
+    "torch/csrc/autograd/generated/python_enum_tag.cpp",
     "torch/csrc/autograd/generated/python_sparse_functions.cpp",
     "torch/csrc/autograd/generated/python_special_functions.cpp",
     "torch/csrc/autograd/generated/python_torch_functions_0.cpp",

@@ -19,11 +19,11 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
+#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
 namespace {
-
 
 constexpr int kUnsetDivFactor = -1;
 
@@ -203,8 +203,7 @@ Reducer::Reducer(
               "Reducer tried to register duplicate grad accumulator for variable ",
               variable_index));
 
-      grad_accumulators_[variable_index] =
-          std::move(grad_accumulator);
+      grad_accumulators_[variable_index] = std::move(grad_accumulator);
     }
   }
 
@@ -283,15 +282,13 @@ void Reducer::initialize_local_used_map() {
 
   // Deliberately don't pin the memory even if local_used_map_dev_ will
   // be cuda. See Note [local_used_map_ -> local_used_map_dev copying]
-  local_used_map_ =
-      at::zeros({static_cast<long>(variable_count)}, options);
+  local_used_map_ = at::zeros({static_cast<long>(variable_count)}, options);
 
   // This tensor needs to be on the same device as the replica params because
   // backend such as NCCL may not support CPU tensors, and hence it might not
   // work if we always put it on CPU.
   options = options.device(params_[0].device());
-  local_used_map_dev_ =
-      at::empty({static_cast<long>(variable_count)}, options);
+  local_used_map_dev_ = at::empty({static_cast<long>(variable_count)}, options);
 }
 
 void Reducer::check_grad_layout(
@@ -401,8 +398,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
             logger_,
             "Encountered gradient which is undefined, but still allreduced by "
             "DDP reducer. This indicates a bug in DDP implementation, please "
-            "report a bug with a repro to PyTorch."
-        );
+            "report a bug with a repro to PyTorch.");
       }
       bucket_view.zero_();
     }
@@ -682,7 +678,8 @@ void Reducer::all_reduce_local_used_map() {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
   std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
-  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
+  local_used_work_ =
+      ops::allreduce(process_group_, temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
@@ -708,8 +705,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
     auto param_name = param_names_.find(index);
     const bool found_param_name = param_name != param_names_.end();
     TORCH_INTERNAL_ASSERT(
-        ddp_debug_level_ == c10d::DebugLevel::Off ||
-            found_param_name,
+        ddp_debug_level_ == c10d::DebugLevel::Off || found_param_name,
         "Expected to find parameter name in debug mode.");
     std::string paramInfo = c10::str(
         "Parameter at index ",
@@ -917,7 +913,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
   }
 }
 
-void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
+void Reducer::install_futures(
+    c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
   // Append instead of overwrite so that this method can be called multiple
   // times in one iteration.
   if (!installed_futures_) {
@@ -927,7 +924,8 @@ void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>>
   }
 }
 
-void Reducer::initialize_buckets(std::vector<std::vector<size_t>> bucket_indices) {
+void Reducer::initialize_buckets(
+    std::vector<std::vector<size_t>> bucket_indices) {
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -970,8 +968,7 @@ void Reducer::initialize_buckets(std::vector<std::vector<size_t>> bucket_indices
     // Variables that expect sparse gradients must have their own bucket.
     if (bucket_indices[bucket_index].size() == 1) {
       const auto variable_index = bucket_indices[bucket_index].front();
-      bucket.expect_sparse_gradient =
-          expect_sparse_gradients_[variable_index];
+      bucket.expect_sparse_gradient = expect_sparse_gradients_[variable_index];
     } else {
       for (const auto variable_index : bucket_indices[bucket_index]) {
         REDUCER_CHECK(
@@ -1382,8 +1379,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // the point as below where we wait for the reduction work, make D2H
       // copy, and update global_unused with the real global consensus, i.e.
       // local_used_map_reduced_ is true.
-      global_unused =
-          local_used_map_[variable_index].item<int>() == 0;
+      global_unused = local_used_map_[variable_index].item<int>() == 0;
       if (global_unused && !local_used_map_reduced_) {
         // Wait for local_used_map reduction to complete.
         local_used_work_->wait();
@@ -1391,8 +1387,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         // Blocking copy, if local_used_map_dev_ is cuda
         local_used_map_.copy_(local_used_map_dev_);
 
-        global_unused =
-            local_used_map_[variable_index].item<int>() == 0;
+        global_unused = local_used_map_[variable_index].item<int>() == 0;
         local_used_map_reduced_ = true;
       }
     }
@@ -1403,8 +1398,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
           std::vector<c10::IValue>({variable}));
       copy_bucket_to_grad(variable, bucket, intra_bucket_index, global_unused);
     } else {
-      const auto& bucket_view_out =
-          bucket.bucket_views_out[intra_bucket_index];
+      const auto& bucket_view_out = bucket.bucket_views_out[intra_bucket_index];
       auto& bucket_view_in = bucket.bucket_views_in[intra_bucket_index];
       // If a communication hook is registered, then `bucket_view_out` stores
       // the allreduced results in a newly allocated tensor, so we copy
@@ -1483,8 +1477,8 @@ void Reducer::finalize_backward() {
   }
 
   if (installed_futures_ != c10::nullopt) {
-      c10::collectAll(*installed_futures_)->wait();
-      installed_futures_ = c10::nullopt;
+    c10::collectAll(*installed_futures_)->wait();
+    installed_futures_ = c10::nullopt;
   }
 
   // See Note [Skip allreducing local_used_maps_dev]
@@ -1576,7 +1570,7 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor_device = at::empty({total_size + 1}, options);
   indices_tensor_device.copy_(indices_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
-  process_group_->broadcast(indices_tensor_list)->wait();
+  ops::broadcast(process_group_, indices_tensor_list)->wait();
   indices_tensor.copy_(indices_tensor_list.front(), /*non_blocking=*/false);
 
   // Update num_buckets after receiving it from rank 0
@@ -1595,7 +1589,7 @@ void Reducer::sync_bucket_indices(
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
-  process_group_->broadcast(bucket_sizes_tensor_list)->wait();
+  ops::broadcast(process_group_, bucket_sizes_tensor_list)->wait();
   bucket_sizes_tensor.copy_(
       bucket_sizes_tensor_list.front(), /*non_blocking=*/false);
 
@@ -1652,10 +1646,10 @@ bool Reducer::rebuild_buckets() {
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
-    // bucket. We cannot simply pass in {bucket_bytes_cap_, first_bucket_bytes_cap}
-    // as the bucket order as we would immediately advance to the 2nd element
-    // after the first bucket, whereas we only want the last bucket to have
-    // a smaller size.
+    // bucket. We cannot simply pass in {bucket_bytes_cap_,
+    // first_bucket_bytes_cap} as the bucket order as we would immediately
+    // advance to the 2nd element after the first bucket, whereas we only want
+    // the last bucket to have a smaller size.
     std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
     std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
   }
@@ -1679,8 +1673,7 @@ bool Reducer::rebuild_buckets() {
         rebuilt_bucket_indices.size() == per_bucket_size_limits.size())
     LOG(INFO) << rebuilt_bucket_indices.size()
               << " buckets rebuilt with size limits: "
-              << c10::Join(", ", per_bucket_size_limits)
-              << " bytes.";
+              << c10::Join(", ", per_bucket_size_limits) << " bytes.";
   }
 
   // For rebuilt bucket indices, it needs to be synced across all ranks.
@@ -1967,8 +1960,8 @@ compute_bucket_assignment_by_size(
     // be grouped together with other gradients and gets its own bucket.
     if (!expect_sparse_gradient.empty() &&
         expect_sparse_gradient[tensor_index]) {
-          result.emplace_back(std::vector<size_t>({tensor_index}), kNoSizeLimit);
-          continue;
+      result.emplace_back(std::vector<size_t>({tensor_index}), kNoSizeLimit);
+      continue;
     }
 
     auto key = BucketKey(tensor.scalar_type(), tensor.device());
@@ -2040,13 +2033,12 @@ compute_bucket_assignment_by_size(
   return std::make_tuple(bucket_indices, per_bucket_size_limits);
 }
 
-// Verifies corresponding params in the model replica have the same sizes/strides
-// across processes.
+// Verifies corresponding params in the model replica have the same
+// sizes/strides across processes.
 void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
     const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
-
   // First verify number of parameters to avoid inconsistent inputs into
   // broadcast which can cause a crash.
   // See https://github.com/pytorch/pytorch/issues/73547
@@ -2056,34 +2048,35 @@ void verify_params_across_processes(
   param_size_options = param_size_options.device(params[0].device());
   // Note: Not using tensor building API because of
   // https://github.com/pytorch/pytorch/issues/74114
-  at::Tensor param_size_tensor = at::tensor(
-    {static_cast<int64_t>(params.size())}, param_size_options);
+  at::Tensor param_size_tensor =
+      at::tensor({static_cast<int64_t>(params.size())}, param_size_options);
 
   // Allgather and verify parameter size.
   std::vector<std::vector<at::Tensor>> param_size_output_tensors;
   param_size_output_tensors.emplace_back(std::vector<at::Tensor>{});
   auto world_size = process_group->getSize();
-  for (size_t i = 0 ; i < world_size ; ++i) {
+  for (size_t i = 0; i < world_size; ++i) {
     param_size_output_tensors.front().emplace_back(
-      at::empty_like(param_size_tensor)
-    );
+        at::empty_like(param_size_tensor));
   }
 
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
   process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
   auto result_size_tensors = param_size_output_tensors.front();
-  for (size_t i = 0; i < world_size ; ++i ) {
+  for (size_t i = 0; i < world_size; ++i) {
     auto param_size_for_rank = result_size_tensors[i][0].item<int>();
     TORCH_CHECK(
-      param_size_for_rank == params.size(),
-      c10::str(
-        "DDP expects same model across all ranks, but Rank ",
-        process_group->getRank(),
-        " has ", params.size(), " params, while rank ", i,
-        " has inconsistent ", param_size_for_rank,
-        " params."
-      )
-    );
+        param_size_for_rank == params.size(),
+        c10::str(
+            "DDP expects same model across all ranks, but Rank ",
+            process_group->getRank(),
+            " has ",
+            params.size(),
+            " params, while rank ",
+            i,
+            " has inconsistent ",
+            param_size_for_rank,
+            " params."));
   }
 
   // Continue with parameter shape verification.
@@ -2110,7 +2103,7 @@ void verify_params_across_processes(
 
   auto metadata_dev = metadata.clone().to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
-  process_group->broadcast(vec)->wait();
+  ops::broadcast(process_group, vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.
@@ -2121,23 +2114,29 @@ void verify_params_across_processes(
   for (const auto p : c10::irange(params.size())) {
     const auto& t = params[p];
     for (const auto& sz : t.sizes()) {
-      auto msg = c10::str("[", process_group->getRank(),
-                        "]: params[", p, "] in this process",
-                        " with sizes ",
-                        t.sizes(),
-                        " appears not to match sizes of the same param in process 0.");
+      auto msg = c10::str(
+          "[",
+          process_group->getRank(),
+          "]: params[",
+          p,
+          "] in this process",
+          " with sizes ",
+          t.sizes(),
+          " appears not to match sizes of the same param in process 0.");
       if (logger.has_value()) {
         REDUCER_CHECK(sz == control_accessor[i++], logger.value(), msg)
       } else {
         TORCH_CHECK(sz == control_accessor[i++], msg)
       }
-
     }
     for (const auto& str : t.strides()) {
-      auto msg = c10::str("params[", p, "] in this process",
-                        " with sizes ",
-                        t.sizes(),
-                        " appears not to match strides of the same param in process 0.");
+      auto msg = c10::str(
+          "params[",
+          p,
+          "] in this process",
+          " with sizes ",
+          t.sizes(),
+          " appears not to match strides of the same param in process 0.");
       if (logger.has_value()) {
         REDUCER_CHECK(str == control_accessor[i++], logger.value(), msg)
       } else {

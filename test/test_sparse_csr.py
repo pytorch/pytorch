@@ -49,6 +49,8 @@ def _check_cusparse_sddmm_available():
     return version >= min_supported_version
 
 _sparse_csr_ops = list(filter(lambda op: op.supports_sparse_csr, op_db))
+_sparse_compressed_ops = list(filter(lambda op: (op.supports_sparse_csr or op.supports_sparse_csc
+                                                 or op.supports_sparse_bsr or op.supports_sparse_bsc), op_db))
 binary_functions_with_dense_output = ['mm', 'mv', ]
 binary_ops_with_dense_output = list(filter(lambda op: op.name in binary_functions_with_dense_output, op_db))
 
@@ -150,6 +152,7 @@ def sparse_compressed_nonblock_layouts(test_name='layout'):
     return parametrize(test_name, [
         subtest(torch.sparse_csr, name='SparseCSR'),
         subtest(torch.sparse_csc, name='SparseCSC')])
+
 
 sparse_compressed_indices_methods = {
     torch.sparse_csr: (torch.Tensor.crow_indices, torch.Tensor.col_indices),
@@ -424,6 +427,79 @@ class TestSparseCompressed(TestCase):
                 with self.assertRaisesRegex(RuntimeError,
                                             "copy of sparse compressed tensors having different block sizes is not supported"):
                     b.copy_(d)
+
+    def _smallest_divisor(self, n):
+        for i in range(2, int(n ** 0.5) + 1):
+            if n % i == 0:
+                return i
+        return n
+
+    @all_sparse_compressed_layouts()
+    @ops(_sparse_compressed_ops)
+    def test_consistency(self, layout, device, dtype, op):
+        # TODO: Normaly, we should use DecorateInfo instead of
+        # skipTest but this requires implemening OpInfo support for
+        # layout as a test parameter (similar to device and dtype).
+        if not (layout == torch.sparse_csr and op.supports_sparse_csr
+                or layout == torch.sparse_csc and op.supports_sparse_csc
+                or layout == torch.sparse_bsr and op.supports_sparse_bsr
+                or layout == torch.sparse_bsc and op.supports_sparse_bsc):
+            self.skipTest(f"{op.name} does not support input with {layout} layout")
+
+        require_mask = isinstance(op, ReductionOpInfo) and '_masked.' in op.name
+        if require_mask and layout in {torch.sparse_bsr, torch.sparse_bsc}:
+            self.skipTest(f"{op.name} does not support input with {layout} layout")
+
+        if layout is torch.sparse_bsc:
+            self.skipTest(f"test requires conversion from Strided layout to {layout} layout")
+
+        samples = list(op.sample_inputs(device, dtype))
+
+        # Fail early to prevent silent success with this test
+        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
+        if not any(ndims_equals_2d):
+            raise ValueError("Expected at least one 2D tensor in samples.")
+
+        count = 0
+        for sample in samples:
+            assert torch.is_tensor(sample.input)
+            # Sparse CSR/CSC only supports 2D tensors as inputs
+            if sample.input.ndim != 2:
+                continue
+            if isinstance(op, ReductionOpInfo):
+                # Reductions on sparse compressed require keepdim=True
+                if not sample.kwargs.get('keepdim'):
+                    continue
+                # Reductions on sparse compressed tensors require explicit mask
+                if require_mask and sample.kwargs.get('mask') is None:
+                    continue
+            expected = op(sample.input, **sample.kwargs)
+            assert torch.is_tensor(expected)
+            # Use smallest non-trivial blocksize for the given input shape:
+            blocksize = tuple(map(self._smallest_divisor, sample.input.shape[-2:]))
+            if layout is torch.sparse_bsr:
+                sparse = sample.input.to_sparse_bsr(blocksize)
+            elif layout is torch.sparse_bsc:
+                sparse = sample.input.to_sparse_bsc(blocksize)
+            elif layout is torch.sparse_csr:
+                sparse = sample.input.to_sparse_csr()
+            elif layout is torch.sparse_csc:
+                sparse = sample.input.to_sparse_csc()
+            else:
+                assert 0, layout
+
+            assert torch.is_tensor(sparse)
+            output = op(sparse, **sample.kwargs)
+            assert torch.is_tensor(output)
+            strided_output = output.to_dense()
+            if require_mask:
+                expected *= torch._masked._output_mask(op.op, sample.input, **sample.kwargs)
+            self.assertEqual(strided_output, expected)
+            count += 1
+
+        # Better fail late to prevent silent success with this test
+        if not count:
+            raise ValueError("Expected at least one sample with keepdim and/or explicit mask for reductions.")
 
 
 class TestSparseCSR(TestCase):
@@ -720,22 +796,51 @@ class TestSparseCSR(TestCase):
         self.assertEqual(torch.tensor([0, 1, 2] * 3, dtype=torch.int64), sparse.col_indices())
         self.assertEqual(torch.tensor([2] * 9, dtype=dtype), sparse.values())
 
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    def test_sparse_csr_to_dense(self, device, dtype):
+    def _test_sparse_compressed_to_dense(self, device, dtype, layout):
+        compressed_format_str = str(layout)[-3:]
+
+        def to_compressed(t):
+            return getattr(t, f"to_sparse_{compressed_format_str}")()
+
+        def compressed_constructor(*input, **kwargs):
+            constructor = getattr(torch, f"sparse_{compressed_format_str}_tensor")
+            return constructor(*input, **kwargs)
+
+        def get_dense_shape(shape, batch_ndim):
+            if layout is torch.sparse_csc:
+                compressed_dims_slice = slice(batch_ndim + 1, batch_ndim - 1, -1)
+            else:
+                compressed_dims_slice = slice(batch_ndim, batch_ndim + 2)
+            return shape[:batch_ndim] + shape[compressed_dims_slice] + shape[batch_ndim + 2:]
+
+        def transpose(t, batch_ndim):
+            if layout is torch.sparse_csc:
+                return t.transpose(batch_ndim, batch_ndim + 1)
+            return t
+
         mn = [5, 2, 0]
         for (m, n) in itertools.product(mn, mn):
             size = (m, n)
             dense = make_tensor(size, dtype=dtype, device=device)
-            sparse = dense.to_sparse_csr()
+            sparse = to_compressed(dense)
             self.assertEqual(sparse.to_dense(), dense)
 
         batch_shape = (2, 3)
-        crow_indices = torch.tensor([0, 3, 5], device=device).repeat(6, 1).reshape(*batch_shape, -1)
-        col_indices = torch.tensor([0, 1, 2, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        compressed_indices = torch.tensor([0, 3, 5], device=device).repeat(6, 1).reshape(*batch_shape, -1)
+        plain_indices = torch.tensor([0, 1, 2, 0, 1], device=device).repeat(6, 1).reshape(*batch_shape, -1)
         values = torch.tensor([1, 2, 1, 3, 4], device=device, dtype=dtype).repeat(6, 1).reshape(*batch_shape, -1)
-        csr = torch.sparse_csr_tensor(crow_indices, col_indices, values, dtype=dtype, device=device)
-        dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device).repeat(6, 1).reshape(csr.shape)
-        self.assertEqual(csr.to_dense(), dense)
+        sparse = compressed_constructor(compressed_indices, plain_indices, values, dtype=dtype, device=device)
+        dense_shape = get_dense_shape(sparse.shape, len(batch_shape))
+        dense = torch.tensor([[1, 2, 1], [3, 4, 0]], dtype=dtype, device=device).repeat(6, 1).reshape(dense_shape)
+        self.assertEqual(sparse.to_dense(), transpose(dense, len(batch_shape)))
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_sparse_csr_to_dense(self, device, dtype):
+        self._test_sparse_compressed_to_dense(device, dtype, torch.sparse_csr)
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_sparse_csc_to_dense(self, device, dtype):
+        self._test_sparse_compressed_to_dense(device, dtype, torch.sparse_csc)
 
     @skipMeta
     @skipCPUIfNoMklSparse
@@ -1462,9 +1567,6 @@ class TestSparseCSR(TestCase):
     def test_sparse_add(self, device, dtype):
         def run_test(m, n, index_dtype):
 
-            if TEST_WITH_ROCM and dtype.is_complex:
-                self.skipTest("ROCm doesn't work with complex dtype correctly.")
-
             alpha = random.random()
             nnz1 = random.randint(0, m * n)
             nnz2 = random.randint(0, m * n)
@@ -1668,10 +1770,9 @@ class TestSparseCSR(TestCase):
             b = make_tensor((k, n), dtype=dtype, device=device)
             run_test(c, a, b)
 
-    @skipCUDAIfRocm
     @onlyCUDA
     @skipCUDAIf(
-        not _check_cusparse_sddmm_available(),
+        not (TEST_WITH_ROCM or _check_cusparse_sddmm_available()),
         "cuSparse Generic API SDDMM is not available"
     )
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
@@ -1733,30 +1834,6 @@ class TestSparseCSR(TestCase):
             coo_sparse = csr_sparse.to_sparse()
 
             self.assertEqual(coo_sparse.to_dense(), dense)
-
-    @ops(_sparse_csr_ops)
-    def test_sparse_csr_consistency(self, device, dtype, op):
-        samples = list(op.sample_inputs(device, dtype))
-
-        # Fail early to prevent silent success with this test
-        ndims_equals_2d = (s.input.ndim == 2 for s in samples)
-        if not any(ndims_equals_2d):
-            raise ValueError("Expected at least one 2D tensor in samples.")
-
-        for sample in samples:
-            assert torch.is_tensor(sample.input)
-            # Sparse CSR only supports 2D tensors as inputs
-            if sample.input.ndim != 2:
-                continue
-            # Reductions on sparse CSR require keepdim=True
-            if isinstance(op, ReductionOpInfo):
-                continue
-            expected = op(sample.input)
-            assert torch.is_tensor(expected)
-            output = op(sample.input.to_sparse_csr())
-            assert torch.is_tensor(output)
-
-            self.assertEqual(output.to_dense(), expected)
 
     # Currently, there is no rule in PyTorch for filling zeros in the outputs
     #   from operations on Sparse CSR tensors. Hence only those operators are supported
