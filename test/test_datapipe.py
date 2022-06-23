@@ -1142,6 +1142,11 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_n1(d0, d1):
             return d0 + d1
 
+        def fn_n1_def(d0, d1=1):
+            return d0 + d1
+
+        p_fn_n1 = partial(fn_n1, d1=1)
+
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
@@ -1149,7 +1154,7 @@ class TestFunctionalIterDataPipe(TestCase):
             for constr in (list, tuple):
                 datapipe = dp.iter.IterableWrapper([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
                 res_dp = datapipe.map(fn, input_col, output_col)
-                ref_dp = datapipe.map(ref_fn)
+                ref_dp = datapipe.map(ref_fn) if ref_fn is not None else datapipe
                 self.assertEqual(list(res_dp), list(ref_dp))
                 # Reset
                 self.assertEqual(list(res_dp), list(ref_dp))
@@ -1157,15 +1162,32 @@ class TestFunctionalIterDataPipe(TestCase):
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
         _helper(lambda data: (data[0], (-data[1], data[1]), data[2]), fn_1n, 1)
+        _helper(lambda data: (data[0], data[1], 1 + data[1]), p_fn_n1, 1, 2)
+        _helper(lambda data: (data[0], data[1], 1 + data[1]), fn_n1_def, 1, 2)
+
         # The index of input column is out of range
         with self.assertRaises(IndexError):
             _helper(None, fn_1n, 3)
+
         # Unmatched input columns with fn arguments
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             _helper(None, fn_n1, 1)
+            _helper(None, lambda d0, d1: d0 + d1, 0)
+            _helper(None, p_fn_n1, (0, 1))
+
+        # Function takes fewer parameters than input col
+        with self.assertRaises(ValueError):
+            def zero_args():
+                return
+            _helper(None, zero_args, 0)
+
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
         _helper(lambda data: (data[0], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
+        _helper(lambda data: (data[0], data[1], data[0] + data[1]),
+                lambda d0, d1: d0 + d1, (0, 1), 2)
+        _helper(lambda data: (data[0], data[1], data[0] + data[1]), fn_n1_def, (0, 1),
+                2)
 
         # output_col can only be specified when input_col is not None
         with self.assertRaises(ValueError):
@@ -1201,6 +1223,9 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_n1(d0, d1):
             return d0 + d1
 
+        def fn_n1_def(d0, d1=1):
+            return d0 + d1
+
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
@@ -1220,7 +1245,7 @@ class TestFunctionalIterDataPipe(TestCase):
                  {"x": 6, "y": 7, "z": 8}]
             )
             res_dp = datapipe.map(fn, input_col, output_col)
-            ref_dp = datapipe.map(ref_fn)
+            ref_dp = datapipe.map(ref_fn) if ref_fn is not None else datapipe
             self.assertEqual(list(res_dp), list(ref_dp))
             # Reset
             self.assertEqual(list(res_dp), list(ref_dp))
@@ -1228,16 +1253,34 @@ class TestFunctionalIterDataPipe(TestCase):
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
         _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
+
+        _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}),
+                lambda x, y: x + y, ("x", "y"), "z")
+        _helper(lambda data: _dict_update(data, {"x": 1 + data["y"]}), fn_n1_def, "y",
+                "x")
+
+        p_fn_n1 = partial(fn_n1, d1=1)
+        _helper(lambda data: _dict_update(data, {"x": 1 + data["y"]}), p_fn_n1, "y", "x")
         # The key of input column is not in dict
         with self.assertRaises(KeyError):
             _helper(None, fn_1n, "a")
         # Unmatched input columns with fn arguments
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             _helper(None, fn_n1, "y")
+            _helper(None, lambda x, y: x + y, "x")
+            _helper(None, p_fn_n1, ("x", "y"))
+
+        # Function takes fewer parameters than input col
+        with self.assertRaises(ValueError):
+            def zero_args():
+                return
+            _helper(None, zero_args, "x")
+
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
             data, {"z": (-data["z"], -data["y"], data["y"] + data["z"])}, ["y"]), fn_nn, ["z", "y"])
+        _helper(lambda data: _dict_update(data, {"x": data["x"] + data["y"]}), fn_n1_def, ("x", "y"), "x")
 
         # output_col can only be specified when input_col is not None
         with self.assertRaises(ValueError):
@@ -1432,6 +1475,23 @@ class TestFunctionalIterDataPipe(TestCase):
 
         input_col_2_dp = tuple_input_ds.filter(_mul_filter_fn, input_col=[0, 2])
         self.assertEqual(list(input_col_2_dp), [(d - 1, d, d + 1) for d in range(5)])
+
+        # invalid input col
+        with self.assertRaises(ValueError):
+            tuple_input_ds.filter(_mul_filter_fn, input_col=0)
+
+        p_mul_filter_fn = partial(_mul_filter_fn, b=1)
+        out = tuple_input_ds.filter(p_mul_filter_fn, input_col=0)
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(10)])
+
+        def _mul_filter_fn_with_defaults(a, b=1):
+            return a + b < 10
+
+        out = tuple_input_ds.filter(_mul_filter_fn_with_defaults, input_col=0)
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(10)])
+
+        out = tuple_input_ds.filter(_mul_filter_fn_with_defaults, input_col=(0, 2))
+        self.assertEqual(list(out), [(d - 1, d, d + 1) for d in range(5)])
 
         # __len__ Test: DataPipe has no valid len
         with self.assertRaisesRegex(TypeError, r"has no len"):
