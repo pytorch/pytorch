@@ -21023,6 +21023,7 @@ python_ref_db = [
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
         skips=(
+            # Fixme: two scalar inputs cause a segfault
             DecorateInfo(unittest.skip("Skipped!"),
                          'TestCommon',
                          'test_python_ref_executor'),
