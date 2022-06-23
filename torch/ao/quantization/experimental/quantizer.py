@@ -5,7 +5,7 @@ from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to
 
 # class to store APoT quantizer
 # implements quantize and dequantize
-# and stores all quantization parameters
+# and stores APoT observer
 class APoTQuantizer():
     observer: APoTObserver
 
