@@ -699,6 +699,7 @@ libtorch_cuda_core_sources = [
     "torch/csrc/jit/codegen/cuda/lower_warp_reduce.cpp",
     "torch/csrc/jit/codegen/cuda/lower2device.cpp",
     "torch/csrc/jit/codegen/cuda/manager.cpp",
+    "torch/csrc/jit/codegen/cuda/maxinfo_propagator.cpp",
     "torch/csrc/jit/codegen/cuda/mutator.cpp",
     "torch/csrc/jit/codegen/cuda/non_divisible_split.cpp",
     "torch/csrc/jit/codegen/cuda/ops/alias.cpp",

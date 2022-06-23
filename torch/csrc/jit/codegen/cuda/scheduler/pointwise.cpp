@@ -850,7 +850,7 @@ void schedulePointwise(Fusion* fusion, const PointwiseParams& params) {
     }
   }
 
-  TransformPropagator::from(reference_tv);
+  TransformPropagator(reference_tv).run();
   scheduler_utils::parallelizeAllLike(reference_tv, all_tvs);
 
   if (params.vectorize) {

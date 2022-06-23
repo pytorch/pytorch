@@ -13795,7 +13795,7 @@ TEST_F(NVFuserTest, FusionSimpleVectorizeUnroll_CUDA) {
   tv3->reorder({{4, 2}});
   // [bidx, unswitch, vectorize{2}, unroll{2}, tidx]
 
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
   scheduler_utils::parallelizeAllLike(tv3, ir_utils::allTvs(&fusion));
 
   tv0_cache->axis(2)->parallelize(ParallelType::Vectorize);
@@ -14433,7 +14433,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicPass_CUDA) {
   // Split inner-most dim
   tv2->split(-1, kNumElems);
   tv2->split(-1, kVecSize);
-  TransformPropagator::from(tv2);
+  TransformPropagator(tv2).run();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -14495,7 +14495,7 @@ TEST_F(NVFuserTest, FusionVectorizeMisalignedPointwiseMergeSymbolicFail_CUDA) {
   }
   tv2->split(-1, kNumElems);
   tv2->split(-1, kVecSize);
-  TransformPropagator::from(tv2);
+  TransformPropagator(tv2).run();
 
   c0->computeAt(tv2, -2);
   c1->computeAt(tv2, -2);
@@ -15154,7 +15154,7 @@ TEST_F(NVFuserTest, FusionValidateParallelize6_CUDA) {
   tv4->split(0, 3);
   tv4->split(0, 2);
 
-  TransformPropagator::from(tv4);
+  TransformPropagator(tv4).run();
 
   tv0->computeAt(tv2, 2);
   tv3->computeAt(tv4, 2);
@@ -16524,7 +16524,7 @@ TEST_F(NVFuserTest, FusionSimpleWarp_CUDA) {
 
   tv1->split(1, 32);
   auto tv1_rf = tv1->rFactor({1});
-  TransformPropagator::from(tv1_rf);
+  TransformPropagator(tv1_rf).run();
   tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16570,7 +16570,7 @@ TEST_F(NVFuserTest, FusionSimpleWarpPad_CUDA) {
   tv1_rf->axis(-1)->padToMultipleOfWarp(32);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp(32);
-  TransformPropagator::from(tv1_rf);
+  TransformPropagator(tv1_rf).run();
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0->axis(-1)->padToMultipleOfWarp(32);
   tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16618,7 +16618,7 @@ TEST_F(NVFuserTest, FusionWarpPadMergeSplit_CUDA) {
   tv1_rf->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp();
-  TransformPropagator::from(tv1_rf);
+  TransformPropagator(tv1_rf).run();
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16659,7 +16659,7 @@ TEST_F(NVFuserTest, FusionSerialWarpReduction_CUDA) {
 
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp();
-  TransformPropagator::from(tv1);
+  TransformPropagator(tv1).run();
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
   tv2->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16703,7 +16703,7 @@ TEST_F(NVFuserTest, FusionTrivialWarpReduction_CUDA) {
   tv1_rf->axis(-2)->parallelize(ParallelType::TIDx);
   tv1->axis(-2)->parallelize(ParallelType::TIDx);
   tv1->axis(-2)->padToMultipleOfWarp();
-  TransformPropagator::from(tv1_rf);
+  TransformPropagator(tv1_rf).run();
   tv0->axis(-2)->parallelize(ParallelType::TIDx);
   tv0_cache->axis(-2)->parallelize(ParallelType::TIDx);
   tv2->axis(-2)->parallelize(ParallelType::TIDx);
@@ -16750,7 +16750,7 @@ TEST_F(NVFuserTest, FusionMultipleDimBinding_CUDA) {
   tv1_rf->axis(-1)->padToMultipleOfWarp(32);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp(32);
-  TransformPropagator::from(tv1_rf);
+  TransformPropagator(tv1_rf).run();
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0->axis(-1)->padToMultipleOfWarp(32);
   tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16832,7 +16832,7 @@ TEST_F(NVFuserTest, FusionWarpMutipleThreadDim_CUDA) {
   tv2_rf->axis(-1)->parallelize(ParallelType::TIDx);
   tv2_rf->axis(-1)->padToMultipleOfWarp();
 
-  TransformPropagator::from(tv2_rf);
+  TransformPropagator(tv2_rf).run();
 
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
@@ -16878,7 +16878,7 @@ TEST_F(NVFuserTest, FusionWarpReduceUnrollOuterLoop_CUDA) {
   tv1->axis(-1)->parallelize(ParallelType::TIDx);
   tv1->axis(-1)->padToMultipleOfWarp();
   tv1->axis(1)->parallelize(ParallelType::Unroll);
-  TransformPropagator::from(tv1_rf);
+  TransformPropagator(tv1_rf).run();
   tv0->axis(-1)->parallelize(ParallelType::TIDx);
   tv0->axis(1)->parallelize(ParallelType::Unroll);
   tv0_cache->axis(-1)->parallelize(ParallelType::TIDx);
@@ -17080,7 +17080,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination3_CUDA) {
 
   tv1->split(0, 10);
   tv1->split(0, 33);
-  TransformPropagator::from(tv1);
+  TransformPropagator(tv1).run();
 
   auto tv4 = tv1->rFactor({-1});
   auto tv5 = tv1->rFactor({-1});
@@ -17133,7 +17133,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination4_CUDA) {
   tv1->split(1, 7);
   tv1->split(0, 11);
   tv1->reorder({{1, 2}, {2, 1}});
-  TransformPropagator::from(tv1);
+  TransformPropagator(tv1).run();
 
   tv1->axis(0)->parallelize(ParallelType::TIDy);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
@@ -17181,7 +17181,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination5_CUDA) {
   fusion.addOutput(tv3);
 
   tvs2.avg->split(0, 4);
-  TransformPropagator::from(tvs2.avg);
+  TransformPropagator(tvs2.avg).run();
   auto rtvs2 = tvs2.rFactor({1});
 
   rtvs2.avg->axis(0)->parallelize(ParallelType::TIDx);
@@ -17225,7 +17225,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination6_CUDA) {
   fusion.addOutput(tv4);
 
   tv4->split(1, 5);
-  TransformPropagator::from(tv4);
+  TransformPropagator(tv4).run();
 
   tv4->reorder({{0, 1}, {1, 0}});
   tv3->computeAt(tv4, 1);
@@ -17272,7 +17272,7 @@ TEST_F(NVFuserTest, FusionPredicateElimination7_CUDA) {
   tv3->split(-1, 5);
   tv3->split(-1, 4);
   tv3->split(-1, 3);
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
 
   tv0->computeAt(tv3, 1);
 
@@ -18909,7 +18909,7 @@ TEST_F(NVFuserTest, FusionFloatPow_CUDA) {
   tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
 
-  TransformPropagator::from(tv1);
+  TransformPropagator(tv1).run();
   scheduler_utils::parallelizeAllLike(tv1, {tv2, tv3, tv4, tv5, tv6});
 
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
@@ -20152,7 +20152,7 @@ TEST_F(NVFuserTest, FusionNonDivisibleSplitVectorize2_CUDA) {
 
   tv3->split(0, 8, false);
   tv3->split(1, 4);
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
 
   tv3->axis(1)->parallelize(ParallelType::TIDx);
   scheduler_utils::parallelizeAllLike(tv3, {tv1, tv2});
@@ -20314,7 +20314,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering1_CUDA) {
 
   tv3->split(-1, 128);
   tv3->split(-1, 32);
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
 
   tv0->computeAt(tv3, 1);
 
@@ -20351,7 +20351,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering2_CUDA) {
 
   tv3->split(-1, 128);
   tv3->split(-1, 32);
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
 
   tv0->computeAt(tv3, -1);
 
@@ -20390,7 +20390,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering3_CUDA) {
 
   tv3->split(-1, 128);
   tv3->split(-1, 32);
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
 
   tv0->computeAt(tv3, 1);
 
@@ -20438,7 +20438,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering4_CUDA) {
   tv3->split(-1, 128);
   tv3->split(-1, 32);
   tv3->split(-1, 8);
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
 
   tv0->computeAt(tv3, 2);
   tv2->computeAt(tv3, -1);
@@ -20479,7 +20479,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering5_CUDA) {
   tv2->split(-1, 128);
   tv2->split(-1, 32);
   tv2->split(-1, 8);
-  TransformPropagator::from(tv2);
+  TransformPropagator(tv2).run();
 
   tv0->computeAt(tv2, 2);
   tv1->computeAt(tv2, -1);
@@ -20522,7 +20522,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering6_CUDA) {
   tv3->split(-1, 16);
   tv3->split(-2, 4);
   tv3->split(-2, 2);
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
 
   tv0->computeAt(tv3, 1);
   tv2->computeAt(tv3, -1);
@@ -20559,7 +20559,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering7_CUDA) {
 
   tv2->split(-1, 128);
   tv2->split(-1, 4);
-  TransformPropagator::from(tv2);
+  TransformPropagator(tv2).run();
 
   tv1->computeAt(tv2, 2);
 
@@ -20599,7 +20599,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering8_CUDA) {
 
   tv4->split(0, 32);
   tv4->split(0, 4);
-  TransformPropagator::from(tv4);
+  TransformPropagator(tv4).run();
 
   tv0->computeAt(tv4, 1);
   tv1->computeAt(tv4, 1);
@@ -20640,7 +20640,7 @@ TEST_F(NVFuserTest, FusionDoubleBuffering9_CUDA) {
 
   out->split(0, 32);
   out->split(0, 4);
-  TransformPropagator::from(out);
+  TransformPropagator(out).run();
 
   tv2->setMemoryType(MemoryType::Shared);
 
@@ -20708,7 +20708,7 @@ TEST_F(NVFuserTest, FusionSmemBlockGemmCacheDoubleBuffer_CUDA) {
 
   auto tv6_rf = tv6->rFactor({-1});
 
-  TransformPropagator::from(tv6_rf);
+  TransformPropagator(tv6_rf).run();
 
   tv0->computeAt(tv6, 3);
   tv1->computeAt(tv6, 3);
@@ -20774,7 +20774,7 @@ TEST_F(NVFuserTest, FusionIntermediateTensorVectorize_CUDA) {
     tv1->setMemoryType(mem_type);
 
     tv3->split(-1, 4);
-    TransformPropagator::from(tv3);
+    TransformPropagator(tv3).run();
 
     tv1->computeAt(tv3, -2);
 
@@ -21423,7 +21423,7 @@ TEST_F(NVFuserTest, FusionIndexHoist2_CUDA) {
   fusion.addOutput(tv5);
 
   tv5->split(-1, 4);
-  TransformPropagator::from(tv5);
+  TransformPropagator(tv5).run();
 
   tv4->split(-1, 3);
 
@@ -21515,7 +21515,7 @@ TEST_F(NVFuserTest, FusionTestGridComm2_CUDA) {
   tv4->merge(0);
   tv4->split(0, 2);
 
-  TransformPropagator::from(tv4);
+  TransformPropagator(tv4).run();
 
   tv3->computeAt(tv4, 1);
 
@@ -21881,7 +21881,7 @@ TEST_F(NVFuserTest, FusionContigIndexingWithBroadcast_CUDA) {
   fusion.addOutput(tv3);
 
   tv3->merge(0);
-  TransformPropagator::from(tv3);
+  TransformPropagator(tv3).run();
 
   tv2->setMemoryType(MemoryType::Local);
 
@@ -21930,7 +21930,7 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexValidationFail2_CUDA) {
   tv4->merge(1, 2);
   tv4->merge(0, 1);
   tv4->split(0, 4);
-  TransformPropagator::from(tv4);
+  TransformPropagator(tv4).run();
 
   tv0->computeAt(tv4, -2);
   tv1->computeAt(tv4, -2);
@@ -21975,7 +21975,7 @@ TEST_F(NVFuserTest, FusionVectorizeContigIndexWithBroadcast_CUDA) {
   // Don't modify tv1 so that it's replayed as tv2 with actual
   // transformations. It would create temporary IterDomains, and the
   // validation should still be able to detect vectorization by 4 is valid.
-  // TransformPropagator::from(tv3);
+  // TransformPropagator(tv3).run();
   tv2->merge(1, 2);
   tv2->merge(0, 1);
   tv2->split(0, 4);
@@ -22058,7 +22058,7 @@ TEST_F(NVFuserTest, FusionTrivialReductionForwarding1_CUDA) {
   tv2->merge(0);
   tv2->split(0, 4);
 
-  TransformPropagator::from(tv2);
+  TransformPropagator(tv2).run();
 
   // All tensors must be transformed to a 2D tensor with each axis
   // mapped with each other in the LOOP map.
@@ -22820,7 +22820,7 @@ TEST_F(NVFuserTest, FusionPropagateParallelTypesToSiblings_CUDA) {
   fusion.addOutput(tv_avg);
 
   tv_avg->split(0, 128);
-  TransformPropagator::from(tv_avg);
+  TransformPropagator(tv_avg).run();
 
   tv_avg->axis(0)->parallelize(ParallelType::BIDx);
   tv_avg->axis(1)->parallelize(ParallelType::TIDx);
@@ -23047,7 +23047,7 @@ TEST_F(NVFuserTest, FusionIncompleteConcreteID_CUDA) {
   tv6->merge(0);
   tv6->merge(0);
 
-  TransformPropagator::from(tv6);
+  TransformPropagator(tv6).run();
 
   tv0->computeAt(tv6, -1, ComputeAtMode::MostInlined);
   tv1->computeAt(tv6, -1, ComputeAtMode::MostInlined);
@@ -23108,7 +23108,7 @@ TEST_F(NVFuserTest, FusionTestReEntrantGridWelford_CUDA) {
   // T2_g[iblockIdx.x, ithreadIdx.x24, rblockIdx.y, rthreadIdx.y, rS{16},
   // iV25{4}]
 
-  TransformPropagator::from(reduction_tv);
+  TransformPropagator(reduction_tv).run();
   auto rfactor_tv = ir_utils::rfactorHelper(reduction_tv, {4});
   scheduler_utils::parallelizeAllLike(rfactor_tv, ir_utils::allTvs(&fusion));
 
@@ -23597,7 +23597,7 @@ TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
 
   auto tvs2 = tvs.rFactor({1, 4});
 
-  TransformPropagator::from(tvs2.var_sum);
+  TransformPropagator(tvs2.var_sum).run();
 
   // check that the resulting tensors in tvs2 are identical
   auto checkSiblingConsistency = [](TensorView* replay, TensorView* target) {
@@ -23659,7 +23659,7 @@ TEST_F(NVFuserTest, FusionTransformPropagatePosition_CUDA) {
 
   tv0->merge(2);
   tv0->merge(0);
-  TransformPropagator::from(tv0);
+  TransformPropagator(tv0).run();
 
   TORCH_CHECK(tv1->nDims() == 4);
 }

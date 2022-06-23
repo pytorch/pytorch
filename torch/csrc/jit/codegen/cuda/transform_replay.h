@@ -3,6 +3,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/maxinfo_propagator.h>
 
 #include <algorithm>
 #include <unordered_map>
@@ -155,29 +156,18 @@ class TORCH_CUDA_CU_API TransformReplay {
       const TensorDomain* self);
 };
 
-namespace {
-struct NextHopInfo;
-}
+class TORCH_CUDA_CU_API TransformPropagator
+    : public MaxRootDomainInfoPropagator {
+  std::unordered_map<TensorView*, size_t> replayed_pos;
+  static std::shared_ptr<TransformPropagator::RootDomainInfo>
+  getStartingRootIDInfo(TensorView* tv);
 
-// TransformPropagator starts from a reference tensor, and propagate
-// the transformations in this tensor to the entire graph. The propagation
-// is done with the Dijkstra algorithm which will transform every tensor
-// in this graph based on the information flow from the path that perserves
-// the most amount of information about the reference tensor. Every tensor in
-// the graph is replayed only once.
-//
-// During the propagation, we explicitly keep track of the information about
-// which reference tensor's root ID's information is preserved, and to which
-// level. This information is stored as a vector of `RootIDInfo`, where each
-// item in the vector correspond to one ID in the reference tensor's root
-// domain.
-class TORCH_CUDA_CU_API TransformPropagator {
-  TensorView* starting_tv = nullptr;
-  TransformPropagator(TensorView* from);
-  static unsigned int replay(const NextHopInfo&);
+ protected:
+  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
+  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
 
  public:
-  static void from(TensorView* tv);
+  TransformPropagator(TensorView* from);
 };
 
 } // namespace cuda
