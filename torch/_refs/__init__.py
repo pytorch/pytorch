@@ -577,14 +577,17 @@ def logsumexp(
 def nan_to_num(
     a: TensorLikeType,
     *,
-    nan: Optional[NumberType] = 0.0,
-    posinf: Optional[NumberType] = None,
-    neginf: Optional[NumberType] = None,
+    nan: Optional[float] = 0.0,
+    posinf: Optional[float] = None,
+    neginf: Optional[float] = None,
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
 
     if a.dtype == torch.bool:
         return clone(a)
+
+    if nan is None:
+        nan = 0.0
 
     if posinf is None:
         posinf = prims.maximum_value(a.dtype)
@@ -592,13 +595,13 @@ def nan_to_num(
     if neginf is None:
         neginf = prims.minimum_value(a.dtype)
 
-    result = torch.where(torch.isnan(a), nan, a)
+    result: Tensor = torch.where(torch.isnan(a), nan, a)
 
-    is_neg = torch.signbit(a)
+    is_neg: Tensor = torch.signbit(a)
     is_neginf = torch.isinf(a) & is_neg
     result = torch.where(is_neginf, neginf, result)
 
-    is_posinf = torch.isinf(a) & (~is_neg)
+    is_posinf: Tensor = torch.isinf(a) & (~is_neg)
     result = torch.where(is_posinf, posinf, result)
     return result
 
