@@ -54,18 +54,19 @@ KernelDescriptor make_kernel_descriptor(std::string name, std::string f) {
 
 inline int can_vectorize_up_to(size_t default_alignment, void *pointer) {
   auto ip = reinterpret_cast<uintptr_t>(pointer);
-  TORCH_INTERNAL_ASSERT(ip % default_alignment == 0,
-                        "Input to jitterated kernel is not aligned");
-  switch ((ip / default_alignment) % 4) {
-    case 0: return 4;
-    case 1: return 1;
-    case 2: return 2;
-    case 3: return 3;
+  if (ip % (4 * default_alignment) == 0) {
+    return 4;
   }
-  TORCH_INTERNAL_ASSERT(false);
+  if (ip % (2 * default_alignment) == 0) {
+    return 2;
+  }
+  return 1;
 }
 
 inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*> pointers) {
+  TORCH_INTERNAL_ASSERT(desc.nOutput == 1);
+  TORCH_INTERNAL_ASSERT(pointers.size() == 1 + desc.nInput);
+
   // Deals with output
   auto result_size = c10::scalarTypeToTypeMeta(desc.result_type).itemsize();
   int result = can_vectorize_up_to(result_size, pointers[0]);

@@ -72,7 +72,7 @@ template<typename array_t,
          typename out_calc_t,
          typename loader_t,
          typename storer_t>
-inline void launch_jitted_unrolled_kernel(
+void launch_jitted_unrolled_kernel(
     std::mutex &jiterator_mutex,
     at::cuda::jit::NvrtcFunction &fn_cache,
     const at::cuda::jit::KernelDescriptor &desc,
@@ -108,7 +108,7 @@ inline void launch_jitted_unrolled_kernel(
 }
 
 template<int arity, typename array_t>
-inline void launch_jitted_vectorized_kernel(
+void launch_jitted_vectorized_kernel(
     std::mutex &jiterator_mutex, JittedVecKernelCache &fn_cache,
     const at::cuda::jit::KernelDescriptor &desc, int64_t N, array_t data,
     at::cuda::jit::BinaryFuncVariant scalar_pos,
@@ -176,9 +176,6 @@ void jitted_gpu_kernel_generic(
     TensorIteratorBase& iter,
     const bool dynamic_casting,
     void *scalar_val) {
-  int64_t numel = iter.numel();
-  bool contiguous = iter.is_contiguous();
-
   TORCH_INTERNAL_ASSERT(iter.can_use_32bit_indexing());
   TORCH_INTERNAL_ASSERT(iter.ninputs() == arity);
   TORCH_INTERNAL_ASSERT(iter.noutputs() == 1);
@@ -188,6 +185,9 @@ void jitted_gpu_kernel_generic(
   for (auto i : c10::irange(ntensors)) {
     data[i] = (char*)iter.data_ptr(i);
   }
+
+  int64_t numel = iter.numel();
+  bool contiguous = iter.is_contiguous();
 
   // Decides which of 4 kernel types to launch
   // Variations are:
