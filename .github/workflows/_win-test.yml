@@ -79,7 +79,6 @@ jobs:
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           TEST_CONFIG: ${{ matrix.config }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           PR_BODY: ${{ github.event.pull_request.body }}
           TORCH_CUDA_ARCH_LIST: "7.0"
         run: |
@@ -110,7 +109,6 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
