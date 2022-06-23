@@ -24,9 +24,11 @@ install_ubuntu() {
   fi
 
   if [[ "$CLANG_VERSION" == 12 ]]; then
-    libomp_dev="libomp-12-dev"
+    maybe_libomp_dev="libomp-12-dev"
+  elif [[ "$CLANG_VERSION" == 10 ]]; then
+    maybe_libomp_dev="libomp-10-dev"
   else
-    libomp_dev=""
+    maybe_libomp_dev=""
   fi
 
   # TODO: Remove this once nvidia package repos are back online
@@ -60,7 +62,7 @@ install_ubuntu() {
     libjpeg-dev \
     libasound2-dev \
     libsndfile-dev \
-    ${libomp_dev} \
+    ${maybe_libomp_dev} \
     software-properties-common \
     wget \
     sudo \
