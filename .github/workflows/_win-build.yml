@@ -85,7 +85,7 @@ jobs:
         with:
           retention-days: 14
           if-no-files-found: error
-          name: ${{ env.BUILD_ENVIRONMENT }}
+          name: ${{ inputs.build-environment }}
           path: C:\${{ github.run_id }}\build-results
 
       - name: Upload sccache stats
