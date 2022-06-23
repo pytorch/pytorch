@@ -11,6 +11,7 @@ jobs:
     steps:
       - name: Speech 3 pytorch only
         run: echo "This is the pytorch owned repo"
+      - uses: actions/checkout@v3
       - name: Morph into composite action power
         uses: ./.github/actions/zain-action
   other-build:
