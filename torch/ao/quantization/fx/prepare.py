@@ -19,8 +19,8 @@ from ..observer import (
     ObserverBase,
 )
 from ..qconfig import (
+    float16_static_qconfig,
     is_reuse_input_qconfig,
-    QConfig,
     QConfigAny,
 )
 from ..qconfig_mapping import QConfigMapping
@@ -1326,11 +1326,15 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_mapping: QConfi
     """
     Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
     """
-    empty_qconfig = QConfig(activation=None, weight=None)
+    # TODO: handle fp16 qconfigs properly
+    allowed_qconfigs = {
+        float16_static_qconfig,
+    }
     for node in model.graph.nodes:
         if node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
-            qconfig = get_object_type_qconfig(qconfig_mapping, node.target, empty_qconfig)
-            if qconfig.activation != _FIXED_QPARAMS_OP_TO_OBSERVER[node.target]:
+            qconfig = get_object_type_qconfig(qconfig_mapping, node.target, qconfig_mapping.global_qconfig)
+            if qconfig is not None and qconfig not in allowed_qconfigs and\
+                    qconfig.activation != _FIXED_QPARAMS_OP_TO_OBSERVER[node.target]:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
                                  "'%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
                                  "torch.ao.quantization.get_default_qat_qconfig_mapping instead." % node.target)

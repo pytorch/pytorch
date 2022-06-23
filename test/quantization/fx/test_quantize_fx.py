@@ -6171,7 +6171,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         data = (torch.randn((2, 2, 2, 2), dtype=torch.float),)
         quant_type = QuantType.STATIC
-        qconfig_mapping = get_default_qconfig_mapping().set_global(float16_static_qconfig)
+        # TODO: use get_default_qconfig_mapping once it handles fp16
+        qconfig_mapping = QConfigMapping().set_global(float16_static_qconfig)
         backend_config_dict = get_test_only_legacy_native_backend_config_dict()
         node_occurrence = {
             ns.call_method("to"): 7
@@ -6944,7 +6945,8 @@ class TestQuantizeFxOps(QuantizationTestCase):
         w = torch.randn(4, 4)
         b = torch.randn(4)
         m = M(w, b).eval()
-        qconfig_mapping = get_default_qconfig_mapping() \
+        # TODO: use get_default_qconfig_mapping once it handles fp16
+        qconfig_mapping = QConfigMapping() \
             .set_global(float16_static_qconfig) \
             .set_object_type(torch.nn.functional.linear, default_qconfig)
         example_inputs = (torch.randn(1, 4),)
@@ -6956,7 +6958,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
             # input and weight of linear, output of linear
             ns.call_module(torch.ao.quantization.MinMaxObserver): 3,
             # input and output of sigmoid
-            ns.call_module(torch.ao.quantization.FixedQParamsObserver): 1,
+            ns.call_module(torch.ao.quantization.PlaceholderObserver): 2,
         }
         self.checkGraphModuleNodes(
             m,
@@ -6966,7 +6968,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
         m = convert_fx(m)
         expected_occurrence = {
             ns.call_function(torch.quantize_per_tensor): 1,
-            ns.call_method("dequantize"): 1,
+            ns.call_method("dequantize"): 3,
             ns.call_method("to"): 2
         }
         self.checkGraphModuleNodes(
