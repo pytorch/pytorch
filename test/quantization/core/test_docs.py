@@ -44,20 +44,23 @@ class TestQuantizationDocs(QuantizationTestCase):
             #     return "./pytorch" + path_from_docs
 
             # get cwd
-            cur_dir_path = Path('.').resolve()
+            cur_dir_path = Path(".").resolve()
 
             # check if cwd contains pytorch, use that if it does
-            if (cur_dir_path/'pytorch').is_dir():
-                cur_dir_path = (cur_dir_path/'pytorch').resolve()
+            if (cur_dir_path / "pytorch").is_dir():
+                cur_dir_path = (cur_dir_path / "pytorch").resolve()
 
             # need to find docs dir, so we check current directory
             # and all parent directories to see if they contain it
             # if we get a hit, use rest of path to check whether the file is there
             check_dir = cur_dir_path
             while not check_dir == check_dir.parent:
-                docs_path = (check_dir/'docs').resolve()
-                if docs_path.is_dir() and (docs_path/path_from_docs).resolve().is_file():
-                    return (docs_path/path_from_docs).resolve()
+                docs_path = (check_dir / "docs").resolve()
+                if (
+                    docs_path.is_dir()
+                    and (docs_path / path_from_docs).resolve().is_file()
+                ):
+                    return (docs_path / path_from_docs).resolve()
                 check_dir = check_dir.parent.resolve()
 
             # no longer passing when file not found
