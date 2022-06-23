@@ -257,3 +257,7 @@ jobs:
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
+  linux-ubuntu-android-tests:
+    name: linux-ubuntu-android-tests
+    uses: ./.github/workflows/_run_android_tests.yml
