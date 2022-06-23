@@ -3458,6 +3458,41 @@ class TestDynamicQuantizedOps(TestCase):
 
 
 class TestQuantizedLinear(TestCase):
+    """Tests the correctness of the fused quant-dequant linear and linear_relu op."""
+    def test_qdq_fused_qlinear(self):
+        qlinear_prepack = torch.ops.quantized.linear_prepack
+        use_relu = False
+        if use_relu:
+            linear_op = torch.ops.quantized.linear_relu
+            qlinear_qdq_fused_op = torch.ops.quantized.linear_qdq_fused
+        else:
+            linear_op = None
+            qlinear_qdq_fused_op = torch.ops.quantized.linear_relu_qdq_fused
+        X_scale = 0.2
+        X_zp = 0
+        batch_size = 2
+        in_features = 10
+        out_features = 20
+        X = torch.rand(batch_size, in_features) * 100
+        X_q = torch.quantize_per_tensor(X, scale=X_scale, zero_point=X_zp, dtype=torch.quint8)
+        W_scale = 2.5
+        W_zp = 10
+        W = torch.rand(out_features, in_features) * 10000
+        W_q = torch.quantize_per_tensor(W, scale=W_scale, zero_point=W_zp, dtype=torch.qint8)
+        use_bias = None
+        W_prepack = qlinear_prepack(W_q, float_bias if use_bias else None)
+        X_fake_quant = torch.fake_quantize_per_tensor_affine(X, X_scale, X_zp, 0, 255)
+        W_fake_quant = torch.fake_quantize_per_tensor_affine(W, W_scale, W_zp, -128, 127)
+        y_ref = torch.nn.functional.linear(X_fake_quant, W_fake_quant, bias=None)
+        y_fused = qlinear_qdq_fused_op(X, W_prepack, X_scale, X_zp)
+        y_dynamic = torch.ops.quantized.linear_dynamic(X_q.dequantize(), W_prepack, reduce_range=False)
+        print(y_ref)
+        print(y)
+        print(y_dynamic)
+        # self.assertEqual(X_q.dequantize(), X_fake_quant)
+        self.assertEqual(y_ref, y)
+
+
     """Tests the correctness of the quantized linear and linear_relu op."""
     @given(batch_size=st.integers(1, 4),
            input_channels=st.integers(16, 32),

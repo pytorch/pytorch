@@ -36,6 +36,28 @@ struct LinearPackedParamsBase : public torch::jit::CustomClassHolder {
     return output;
   }
 
+  // input is NOT quantized; quantization of input occurs within the function
+  virtual at::Tensor apply_fused_qdq(
+      at::Tensor input,
+      double input_scale,
+      int64_t input_zero_point) {
+    throw std::runtime_error(
+        "apply_fused_qdq is not implemented for this packed "
+        "parameter type");
+    return {};
+  }
+
+  // input is NOT quantized; quantization of input occurs within the function
+  virtual at::Tensor apply_fused_qdq_relu(
+      at::Tensor input,
+      double input_scale,
+      int64_t input_zero_point) {
+    throw std::runtime_error(
+        "apply_fused_qdq_relu is not implemented for this packed "
+        "parameter type");
+    return {};
+  }
+
   virtual at::Tensor apply_dynamic(
       at::Tensor input,
       bool reduce_range = false) = 0;
