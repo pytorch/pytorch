@@ -34,6 +34,11 @@ def _is_local_fn(fn):
             return "<locals>" in fn_type.__qualname__
     return False
 
+    if len(sig.parameters) < sz:
+        raise ValueError(
+            f"The function {fn.__name__} takes {len(sig.parameters)} "
+            f"parameters, but {sz} are required."
+        )
 
 def _check_unpickable_fn(fn: Callable):
     """
