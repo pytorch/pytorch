@@ -487,7 +487,7 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isinf(a: TensorLikeType) -> TensorLikeType:
     if utils.is_complex_dtype(a):
-        return logical_or(isinf(real(a), isinf(imag(a))
+        return logical_or(isinf(real(a)), isinf(imag(a)))
     return logical_not(logical_or(isnan(a), isfinite(a)))
 
 
