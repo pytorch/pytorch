@@ -778,7 +778,6 @@ class TestOperators(TestCase):
         xfail('fft.ihfftn'),  # conj_physical fallback
         xfail('istft'),  # col2im fallback
         xfail('polar'),  # complex fallback
-        xfail('nn.functional.l1_loss', ''),
         xfail('nn.functional.max_unpool3d', 'grad'),
         xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
@@ -911,7 +910,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.soft_margin_loss', ''),
         xfail('scatter_reduce', 'amin'),
         xfail('nn.functional.max_unpool1d', 'grad'),
-        xfail('nn.functional.l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('qr'),
         xfail('linalg.eigvalsh'),  # _linalg_eigh doesn't have batching rule
