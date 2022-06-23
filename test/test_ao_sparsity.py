@@ -28,5 +28,8 @@ from ao.sparsity.test_composability import TestComposability  # noqa: F401
 from ao.sparsity.test_data_sparsifier import TestBaseDataSparsifier  # noqa: F401
 from ao.sparsity.test_data_sparsifier import TestNormDataSparsifiers  # noqa: F401
 
+# Data Scheduler
+from ao.sparsity.test_data_scheduler import TestBaseDataScheduler  # noqa: F401
+
 if __name__ == '__main__':
     run_tests()
