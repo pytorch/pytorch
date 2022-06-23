@@ -1,6 +1,5 @@
 import torch
 from torch import Tensor
-from torch.ao.quantization.experimental.observer import APoTObserver
 from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
 
 # class to store APoT quantizer
