@@ -18,5 +18,4 @@ jobs:
       - name: second speech
         run: echo "howdy again!"
   zain-reusable-workflow:
-    runs-on: linux.20_04.16x
     uses: ./.github/workflows/_zain-build.yml

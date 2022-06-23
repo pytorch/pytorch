@@ -6,12 +6,14 @@ on:
 jobs:
   build:
     # Don't run on forked repos.
+    runs-on: linux.20_04.16x
     if: github.repository_owner == 'pytorch'
     steps:
       - name: Speech 3 pytorch only
         run: echo "This is the pytorch owned repo"
   other-build:
     # Don't run on forked repos.
+    runs-on: linux.20_04.16x
     if: github.repository_owner != 'pytorch'
     steps:
       - name: Speech 4 non-pytorch only
