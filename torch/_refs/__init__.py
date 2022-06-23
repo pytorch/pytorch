@@ -486,15 +486,9 @@ def isfinite(a: TensorLikeType) -> TensorLikeType:
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
 def isinf(a: TensorLikeType) -> TensorLikeType:
-    # TODO Add complex tensor support to remove is_infinite prim
-    # if utils.is_complex_dtype(a):
-    #     return bitwise_or(_isinf(real(a), _isinf(imag(a))
-    # else:
-    #     return bitwise_not(bitwise_or(isnan(a), isfinite(a)))
-    if utils.is_float_dtype(a.dtype) or utils.is_complex_dtype(a.dtype):
-        return prims.is_infinite(a)
-
-    return zeros_like(a, dtype=torch.bool)
+    if utils.is_complex_dtype(a):
+        return logical_or(isinf(real(a), isinf(imag(a))
+    return logical_not(logical_or(isnan(a), isfinite(a)))
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.ALWAYS_BOOL)
