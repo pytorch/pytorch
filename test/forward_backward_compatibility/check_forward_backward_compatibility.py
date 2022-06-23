@@ -88,6 +88,7 @@ ALLOW_LIST = [
     ("aten::segment_reduce", datetime.date(2022, 6, 30)),
     ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
     ("aten::empty.SymInt", datetime.date(9999, 1, 1)),
+    ("c10d::broadcast", datetime.date(2022, 6, 25)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]
