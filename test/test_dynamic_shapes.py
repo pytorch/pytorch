@@ -292,6 +292,17 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.sym_size(1)), str(x.sym_size(0)))
         self.assertTrue(str(expand_x.sym_size(1)), str(result.sym_size(0)))
 
+    @skipIfNoSympy
+    def test_aten_ops(self):
+
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5), shape_env)
+        torch.ops.aten.narrow_copy.SymInt(x, 0, 0, x.sym_size(0))
+
+        shape_env = ShapeEnv()
+        x = create_symbolic_tensor("x", torch.randn(5, 4, 3), shape_env)
+        torch.ops.aten.expand.SymInt(x, [x.sym_size(0), x.sym_size(1), x.sym_size(2)])
+
     def test_fx_trace_intlist(self):
         class CustomModule(torch.nn.Module):
             def forward(self, x):
