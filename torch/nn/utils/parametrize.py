@@ -325,6 +325,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         return tensor
 
     def get_parametrized(self) -> Tensor:
+        print("going through get_parametrized", id(self), id(self.parametrizations), self.parametrizations.keys())
         parametrization = self.parametrizations[tensor_name]
         if _cache_enabled:
             if torch.jit.is_scripting():
@@ -539,6 +540,7 @@ def register_parametrization(
             _inject_new_class(module)
             # Inject a ``ModuleDict`` into the instance under module.parametrizations
             module.parametrizations = ModuleDict()
+        print("Injecting to module", id(module), "with params list", id(module.parametrizations))
         # Add a property into the class
         _inject_property(module, tensor_name)
         # Add a ParametrizationList

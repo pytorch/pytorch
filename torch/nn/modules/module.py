@@ -273,7 +273,7 @@ class Module:
         "_load_state_dict_pre_hooks",
         "_load_state_dict_post_hooks",
         "_modules",
-        "__dict__",
+        "_dict",
     )
 
     def __init__(self) -> None:
@@ -294,7 +294,7 @@ class Module:
         object.__setattr__(self, '_load_state_dict_pre_hooks', OrderedDict())
         object.__setattr__(self, '_load_state_dict_post_hooks', OrderedDict())
         object.__setattr__(self, '_modules', OrderedDict())
-        object.__setattr__(self, '__dict__', OrderedDict())
+        object.__setattr__(self, '_dict', OrderedDict())
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -1242,8 +1242,8 @@ class Module:
             #modules = self.__dict__['_modules']
             #if name in modules:
             #    return modules[name]
-        if name in self.__dict__:
-            return self.__dict__[name]
+        if name in self._dict:
+            return self._dict[name]
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
@@ -1295,7 +1295,7 @@ class Module:
                                         .format(torch.typename(value), name))
                     buffers[name] = value
                 else:
-                    self.__dict__[name] = value
+                    self._dict[name] = value
                     #object.__setattr__(self, name, value)
 
     def __delattr__(self, name):
@@ -1994,7 +1994,7 @@ class Module:
 
     def __dir__(self):
         module_attrs = dir(self.__class__)
-        attrs = list(self.__dict__.keys())
+        attrs = list(self._dict.keys())
         parameters = list(self._parameters.keys())
         modules = list(self._modules.keys())
         buffers = list(self._buffers.keys())
