@@ -10657,7 +10657,6 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_rhs_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
                         # clamp_max supports two tensor input with bool, but not a bool scalar
@@ -10669,7 +10668,6 @@ op_db: List[OpInfo] = [
                     dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_rhs_python_scalar=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
                         # clamp_min supports two tensor input with bool, but not a bool scalar
