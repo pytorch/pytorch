@@ -19,6 +19,8 @@ from tempfile import NamedTemporaryFile
 import sys
 import os
 import subprocess
+import weakref
+import gc
 
 import torch
 
@@ -21758,6 +21760,14 @@ class TestStateDictHooks(TestCase):
             self.assertEqual(weak_m(), None)
         finally:
             gc.enable()
+
+    def test_pickled_hook(self):
+        m = nn.Linear(10, 10)
+        def hook_with_module(*args, **kwargs):
+                pass
+
+        m._register_load_state_dict_pre_hook(hook_with_module, True)
+        assert pickle.load(pickle.dumps(m)) == m
 
     def test_load_state_dict_module_pre_hook(self):
         hook_called = 0
