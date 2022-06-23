@@ -12,7 +12,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
   // torch.nested_tensor([]) should also has `dim() = 1` and `size(0) = 0`
   if (sizes.dim() == 0) {
-    return std::vector<int64_t>(1, 0);
+    return std::vector<int64_t>({0});
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
   std::vector<int64_t> result(1, sizes.sizes()[0]);
