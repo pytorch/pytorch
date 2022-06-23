@@ -781,7 +781,7 @@ class GitHubPR:
         commit = repo.get_commit('HEAD').commit_hash
         gh_post_pr_comment(self.org, self.project, self.pr_num,
                            'Successfully started land time checks.' +
-                           f' See progress here: https://github.com/{self.org}/{self.project}/commit/{commit}')
+                           f' See progress here: https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit}')
         return commit
 
 
