@@ -6,7 +6,9 @@ import re
 import shutil
 import random
 import subprocess
+import multiprocessing
 import tempfile
+import time
 import textwrap
 import unittest
 import torch
@@ -708,6 +710,69 @@ class TestCppExtensionUtils(TestCase):
 
     def test_cc_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('cc'))
+
+    def test_file_baton(self):
+        # This test ensures that the FileBaton is properly serializing a set of
+        # processes and also that it handles properly the case where one such
+        # process gets killed while holding the lock
+        try:
+            tmp_dir = tempfile.mkdtemp()
+
+            nb_processes = 10
+            test_lock_file = os.path.join(tmp_dir, "lock")
+            to_kill = [1, 4, 5, 7]
+
+            def test(tid, global_list):
+                baton = torch.utils.cpp_extension.FileBaton(test_lock_file)
+                while True:
+                    if baton.try_acquire():
+                        try:
+                            global_list.append(("enter", tid))
+                            # Kill random workers to force them to leak
+                            # their lock file
+                            if tid in to_kill:
+                                os.kill(os.getpid(), 9)
+                            time.sleep(0.1)
+                            global_list.append(("exit", tid))
+                        finally:
+                            baton.release()
+                        exit(0)
+
+                    else:
+                        baton.wait()
+
+            with multiprocessing.Manager() as manager:
+                global_list = manager.list()
+                ps = []
+                for i in range(nb_processes):
+                    ps.append(multiprocessing.Process(target=test, args=(i, global_list)))
+
+                for p in ps:
+                    p.start()
+
+                for p in ps:
+                    p.join(5)
+                    self.assertIsNotNone(p.exitcode)
+
+                self.assertEqual(len(global_list), 2 * nb_processes - len(to_kill))
+                i = 0
+                while i < len(global_list):
+                    state, tid = global_list[i]
+                    if i + 1 < len(global_list):
+                        next_state, next_tid = global_list[i + 1]
+                    else:
+                        next_state, next_tid = "invalid", -1
+                    self.assertEqual(state, "enter")
+                    if tid in to_kill:
+                        self.assertNotEqual(tid, next_tid)
+                        i += 1
+                    else:
+                        self.assertEqual(tid, next_tid)
+                        self.assertEqual(next_state, "exit")
+                        i += 2
+
+        finally:
+            shutil.rmtree(tmp_dir)
 
 
 if __name__ == '__main__':
