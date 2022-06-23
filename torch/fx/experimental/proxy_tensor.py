@@ -16,7 +16,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from contextlib import contextmanager, nullcontext
 
-from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
+from torch.utils._python_dispatch import TorchDispatchMode
 
 __all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict"]
 aten = torch.ops.aten
@@ -64,6 +64,7 @@ def wrap_output(real_out, proxy_out):
     else:
         return real_out
 
+from torch.testing._internal.composite_compliance import check_metadata_consistency
 
 def proxy_call(func_overload, args, kwargs=None):
     if func_overload == torch.ops.prim.device.default:
@@ -96,22 +97,27 @@ def proxy_call(func_overload, args, kwargs=None):
         proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
     real_out = func_overload(*pytree.tree_map(unwrap_fake, args), **pytree.tree_map(unwrap_fake, kwargs))
+    # Seems like func isn't marked as inplace_view for some reason?
+    if torch.Tag.inplace_view in func_overload.tags:  # type: ignore[attr-defined]
+        with no_dispatch():
+            func_overload(*args, **kwargs)
+    pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (real_out, args, kwargs))
     return wrap_output(real_out, proxy_out)
 
 
 class ProxyTensor(torch.Tensor):
     proxy: fx.Proxy
+    elem: torch.Tensor
+
 
     @staticmethod
     def __new__(cls, elem, proxy, *, requires_grad=None):
-        # Hack to deal with super().__new__ not working for sparse tensors
-        # if elem.is_sparse or requires_grad is not None:
-        #     if requires_grad is None:
-        #         requires_grad = False
-        #     r = torch.Tensor._make_subclass(cls, elem, requires_grad)
-        # else:
-        r = torch.Tensor._make_wrapper_subclass(cls, elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device, requires_grad=elem.requires_grad, strides=elem.stride(), storage_offset=elem.storage_offset())
-        # r = super().__new__(cls, fake_tensor_mode, elem.to('meta'), elem.device)  # type: ignore[call-arg]
+        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
+            cls,
+            elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
+            requires_grad=elem.requires_grad, strides=elem.stride(),
+            storage_offset=elem.storage_offset()
+        )
 
         if elem.is_sparse:
             proxy.node.meta['tensor_meta'] = {}
@@ -228,7 +234,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
             return wrap_output(real_out, proxy_out)
 
 
-def make_fx(f, decomposition_table=None, trace_factory_functions=True, trace_fake=False):
+def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=False):
     if decomposition_table is None:
         decomposition_table = {}
 
@@ -236,17 +242,18 @@ def make_fx(f, decomposition_table=None, trace_factory_functions=True, trace_fak
     def wrapped(*args):
         phs = pytree.tree_map(lambda _: fx.PH, args)  # type: ignore[attr-defined]
         fx_tracer = PythonKeyTracer()
-        fake_tensor_mode = FakeTensorMode() if trace_fake else nullcontext()
+        fake_tensor_mode = FakeTensorMode() if use_fake else nullcontext()
         proxy_mode = ProxyTorchDispatchMode(fx_tracer) if trace_factory_functions else nullcontext()
+
         def wrap_fake(x):
             if isinstance(x, torch.Tensor):
                 return FakeTensor(fake_tensor_mode, x.to('meta'), x.device)
             return x
 
         with decompose(decomposition_table):
-            with fake_tensor_mode:
-                with proxy_mode:
-                    if trace_fake:
+            with fake_tensor_mode:  # type: ignore[attr-defined]
+                with proxy_mode:  # type: ignore[attr-defined]
+                    if use_fake:  # type: ignore[attr-defined]
                         with no_dispatch():
                             args = pytree.tree_map(wrap_fake, args)
 
