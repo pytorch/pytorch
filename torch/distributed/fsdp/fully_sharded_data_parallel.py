@@ -4081,8 +4081,8 @@ class FullyShardedDataParallel(nn.Module):
         else:
             # register same hook for root and all submodules
             for submodule in self.fsdp_modules(self):
-                assert not self.self._hook_registered, "communication hook can be only registered once"
-                submodule.self._hook_registered = True
+                assert not submodule._hook_registered, "communication hook can be only registered once"
+                submodule._hook_registered = True
                 # registering hook only if it hasn't been already registered
                 if submodule.communication_hook == self._get_default_comm_hook():
                     submodule.communication_hook_state = state
