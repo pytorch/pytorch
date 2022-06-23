@@ -9,16 +9,19 @@ from torch.ao.quantization.experimental.apot_utils import float_to_reduced_preci
 class TestFakeQuantize(unittest.TestCase):
     r""" Tests fake quantize calculate_qparams() method
          by comparing with result from observer calculate_qparams.
-         Uses hard-coded values: max_val=1.0, b=4, k=2.
+         Uses hard-coded values: alpha=1.0, b=4, k=2.
     """
     def test_fake_calc_qparams(self):
-        observer = APoTObserver(max_val=1.0, b=4, k=2)
+        observer = APoTObserver(b=4, k=2)
 
         apot_fake = APoTFakeQuantize(observer)
 
-        qparams = apot_fake.calculate_qparams(signed=False)
+        min_val = torch.tensor([0.0])
+        max_val = torch.tensor([1.0])
 
-        qparams_expected = observer.calculate_qparams(signed=False)
+        qparams = apot_fake.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
+
+        qparams_expected = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
 
         self.assertEqual(qparams[0], qparams_expected[0])
         self.assertTrue(torch.equal(qparams[1], qparams_expected[1]))
@@ -35,8 +38,11 @@ class TestFakeQuantize(unittest.TestCase):
         # between 0 -> 1000 to quantize -> dequantize
         X = 1000 * torch.rand(20)
 
-        observer = APoTObserver(max_val=torch.max(X), b=4, k=2)
-        qparams = observer.calculate_qparams(signed=False)
+        min_val = torch.min(X)
+        max_val = torch.max(X)
+
+        observer = APoTObserver(b=4, k=2)
+        qparams = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
         quantization_levels = qparams[1]
         level_indices = qparams[2]
 

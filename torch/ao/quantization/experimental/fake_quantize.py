@@ -10,8 +10,8 @@ class APoTFakeQuantize(FakeQuantizeBase):
         super().__init__()
         self.observer = observer
 
-    def calculate_qparams(self, signed: bool):
-        qparams = self.observer.calculate_qparams(signed=signed)
+    def calculate_qparams(self, signed: bool, min_val=None, max_val=None):
+        qparams = self.observer.calculate_qparams(signed=signed, min_val=min_val, max_val=max_val)
         self.gamma = qparams[0]
         self.quantization_levels = qparams[1]
         self.level_indices = qparams[2]
@@ -19,7 +19,10 @@ class APoTFakeQuantize(FakeQuantizeBase):
         return qparams
 
     def forward(self, X: torch.Tensor, signed: bool):
-        quantizer = APoTQuantizer(self.observer.b, self.observer.k, self.observer.max_val, signed)
+        if self.observer_enabled[0] == 1:
+            qparams = self.calculate_qparams(signed,)
+        if self.fake_quant_enabled[0] == 1:
+        quantizer = APoTQuantizer(self.observer.b, self.observer.k, self.observer.min_val, self.observer.max_val, signed)
 
         X = quantizer.quantize_APoT(X)
         X = quantizer.dequantize(X)
