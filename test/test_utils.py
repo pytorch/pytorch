@@ -704,6 +704,26 @@ class TestExtensionUtils(TestCase):
             torch._register_device_module('xpu', DummyXPUModule)
 
 
+# This is global to allow picking
+def _file_baton_test_fn(tid, global_list, to_kill, test_lock_file):
+    baton = torch.utils.cpp_extension.FileBaton(test_lock_file)
+    while True:
+        if baton.try_acquire():
+            try:
+                global_list.append(("enter", tid))
+                # Kill random workers to force them to leak
+                # their lock file
+                if tid in to_kill:
+                    os.kill(os.getpid(), 9)
+                time.sleep(0.1)
+                global_list.append(("exit", tid))
+            finally:
+                baton.release()
+            exit(0)
+
+        else:
+            baton.wait()
+
 class TestCppExtensionUtils(TestCase):
     def test_cpp_compiler_is_ok(self):
         self.assertTrue(torch.utils.cpp_extension.check_compiler_ok_for_platform('c++'))
@@ -722,36 +742,22 @@ class TestCppExtensionUtils(TestCase):
             test_lock_file = os.path.join(tmp_dir, "lock")
             to_kill = [1, 4, 5, 7]
 
-            def test(tid, global_list):
-                baton = torch.utils.cpp_extension.FileBaton(test_lock_file)
-                while True:
-                    if baton.try_acquire():
-                        try:
-                            global_list.append(("enter", tid))
-                            # Kill random workers to force them to leak
-                            # their lock file
-                            if tid in to_kill:
-                                os.kill(os.getpid(), 9)
-                            time.sleep(0.1)
-                            global_list.append(("exit", tid))
-                        finally:
-                            baton.release()
-                        exit(0)
-
-                    else:
-                        baton.wait()
-
             with multiprocessing.Manager() as manager:
                 global_list = manager.list()
                 ps = []
                 for i in range(nb_processes):
-                    ps.append(multiprocessing.Process(target=test, args=(i, global_list)))
+                    ps.append(multiprocessing.Process(target=_file_baton_test_fn, args=(i, global_list, to_kill, test_lock_file)))
 
                 for p in ps:
                     p.start()
 
                 for p in ps:
-                    p.join(5)
+                    # the timeout time of the shm manager and thus the time we
+                    # will spend went waiting on it for clearing the locks
+                    shm_timeout_time = 2
+                    # The maximum estimated time for a process to execute the test function
+                    max_runtime = 2
+                    p.join(nb_processes * max_runtime + len(to_kill) * (shm_timeout_time + 0.2))
                     self.assertIsNotNone(p.exitcode)
 
                 self.assertEqual(len(global_list), 2 * nb_processes - len(to_kill))
