@@ -143,7 +143,7 @@ class TestQuantizationDocs(QuantizationTestCase):
         self._test_code(code, global_inputs)
 
     def test_quantization_doc_custom(self):
-        path_from_pytorch = "source/quantization.rst"
+        path_from_pytorch = "docs/source/quantization.rst"
         unique_identifier = "Custom API Example::"
 
         global_inputs = {"nnq": torch.nn.quantized}
