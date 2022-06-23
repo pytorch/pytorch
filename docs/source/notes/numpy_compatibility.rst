@@ -142,13 +142,13 @@ As a concrete example, consider the following snippet:
    >>> b_torch = torch.ones(3)
    >>> b_torch.dtype
    torch.float32
-   >>> torch.add(a_np, b_torch)
+   >>> torch.add(a_np, b_torch) # doctest: +SKIP
    Traceback (most recent call last):
    ...
    TypeError: add(): argument 'input' (position 1) must be Tensor, not numpy.ndarray
    >>> b_torch + a_np
    tensor([2., 2., 2.], dtype=torch.float64)
-   >>> a_np + b_torch
+   >>> a_np + b_torch # doctest: +SKIP
    Traceback (most recent call last):
    ...
    TypeError: Concatenation operation is not implemented for NumPy arrays, use np.concatenate() instead. Please do not rely on this error; it may not be given on all Python implementations.
