@@ -6,9 +6,9 @@ class TensorAPoT():
     quantizer: APoTQuantizer
     data: torch.Tensor
 
-    def __init__(self, quantizer: APoTQuantizer, apot_tensor: torch.Tensor):
+    def __init__(self, quantizer: APoTQuantizer, apot_data: torch.Tensor):
         self.quantizer = quantizer
-        self.data = apot_tensor
+        self.data = apot_data
 
     def int_repr(self):
         return self.data
