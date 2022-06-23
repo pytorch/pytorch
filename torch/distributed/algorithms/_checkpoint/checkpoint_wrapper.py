@@ -70,7 +70,6 @@ class CheckpointWrapper(torch.nn.Module):
         Overrides :meth:`named_parameters()` to intercept parameter names and
         remove all occurrences of _CHECKPOINT_PREFIX.
         """
-        # Determine which logic to use based on the context at call time
         for param_name, param in super().named_parameters(*args, **kwargs):
             yield param_name.replace(f"{_CHECKPOINT_PREFIX}.", ""), param
 
