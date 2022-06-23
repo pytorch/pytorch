@@ -37,6 +37,7 @@ from torch.testing._internal.common_methods_invocations import (
     _NOTHING,
     UnaryUfuncInfo,
     ReductionOpInfo,
+    ReductionPythonRefInfo,
     SpectralFuncInfo,
     ops_and_refs,
     python_ref_db,
@@ -387,11 +388,13 @@ class TestCommon(TestCase):
                     if isinstance(a, torch.Tensor) or isinstance(b, torch.Tensor):
                         prims.utils.compare_tensor_meta(a, b)
 
-    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False):
+    def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False, skip_zero_dim=False):
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             if isinstance(sample.input, torch.Tensor) and sample.input.numel() == 0 and skip_zero_numel:
+                continue
+            if isinstance(sample.input, torch.Tensor) and sample.input.ndim == 0 and skip_zero_dim:
                 continue
             with ctx():
                 ref_result = op(sample.input, *sample.args, **sample.kwargs)
@@ -520,6 +523,16 @@ class TestCommon(TestCase):
         if executor == "nvfuser" and not op.supports_nvfuser:
             raise unittest.SkipTest(f"{op.name} doesn't support nvfuser")
 
+        # nvFuser doesn't support reduction operations on 0-dim tensors yet
+        skip_zero_dim = False
+        if executor == "nvfuser" and isinstance(op, ReductionPythonRefInfo):
+            skip_zero_dim = True
+
+        # skip zero-dim tensors for some composites of reduction operations
+        normalization_ops = ["_refs.softmax", "_refs.logsumexp"]
+        if executor == "nvfuser" and op.name in normalization_ops:
+            skip_zero_dim = True
+
         from torch._prims.executor import make_traced
         from copy import copy
         op = copy(op)
@@ -530,6 +543,7 @@ class TestCommon(TestCase):
             dtype,
             op,
             skip_zero_numel=(executor == "nvfuser"),  # nvfuser doesn't support zero-sized tensors
+            skip_zero_dim=skip_zero_dim,
         )
 
     @skipMeta
