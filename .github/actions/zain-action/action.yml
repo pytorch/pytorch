@@ -4,9 +4,8 @@ description: Set up Docker workspace on EC2
 
 inputs:
   BRANCH:
-    required: true
     description: 'The branch, tag, or SHA to checkout'
-
+    default: "some_branch"
 
 runs:
   using: composite
