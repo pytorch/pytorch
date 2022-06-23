@@ -48,6 +48,7 @@ __all__ = [
     "asinh",
     "atan",
     "atanh",
+    "copysign",
     "cos",
     "cosh",
     "bessel_i0",
@@ -79,8 +80,10 @@ __all__ = [
     "sign",
     "signbit",
     "sin",
+    "sinc",
     "sinh",
     "sqrt",
+    "sng",
     "tan",
     "tanh",
     "trunc",
@@ -550,6 +553,13 @@ atanh = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+copysign = _make_elementwise_unary_prim(
+    "copysign",
+    impl_aten=torch.copysign,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 cos = _make_elementwise_unary_prim(
     "cos",
     impl_aten=torch.cos,
@@ -786,6 +796,13 @@ round = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+sgn = _make_elementwise_unary_prim(
+    "sgn",
+    impl_aten=torch.sgn,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 rsqrt = _make_elementwise_unary_prim(
     "rsqrt",
     impl_aten=torch.rsqrt,
@@ -816,6 +833,13 @@ sin = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+sinc = _make_elementwise_unary_prim(
+    "sinc",
+    impl_aten=torch.sinc,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 sinh = _make_elementwise_unary_prim(
     "sinh",
     impl_aten=torch.sinh,
@@ -828,6 +852,13 @@ sqrt = _make_elementwise_unary_prim(
     "sqrt",
     impl_aten=torch.sqrt,
     impl_nvfuser=_sqrt_nvfuser,  # type: ignore[name-defined]
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+sgn = _make_elementwise_unary_prim(
+    "sgn",
+    impl_aten=torch.sgn,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
