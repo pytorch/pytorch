@@ -9,7 +9,6 @@ on:
     # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
     branches:
       - nightly
-      - zainr/workflow-playground
     tags:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
@@ -51,8 +50,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -157,8 +174,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -258,8 +293,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -333,8 +386,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -440,8 +511,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -553,8 +642,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -628,8 +735,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -738,8 +863,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -851,8 +994,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -926,8 +1087,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1036,8 +1215,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -1149,8 +1346,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -1223,8 +1438,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1329,8 +1562,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -1430,8 +1681,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -1505,8 +1774,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1612,8 +1899,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -1725,8 +2030,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -1800,8 +2123,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -1910,8 +2251,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -2023,8 +2382,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -2098,8 +2475,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -2208,8 +2603,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -2321,8 +2734,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -2395,8 +2826,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -2501,8 +2950,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -2602,8 +3069,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -2677,8 +3162,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -2784,8 +3287,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -2897,8 +3418,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -2972,8 +3511,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3082,8 +3639,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -3195,8 +3770,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -3270,8 +3863,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3380,8 +3991,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -3493,8 +4122,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -3567,8 +4214,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3673,8 +4338,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -3774,8 +4457,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -3849,8 +4550,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -3956,8 +4675,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -4069,8 +4806,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -4144,8 +4899,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -4254,8 +5027,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -4367,8 +5158,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
@@ -4442,8 +5251,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
@@ -4552,8 +5379,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -4665,8 +5510,26 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Setup EC2 Linux
-        uses: .github/actions/setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
         uses: actions/checkout@v2
       - uses: seemethere/download-artifact-s3@v4
