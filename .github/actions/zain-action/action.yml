@@ -15,6 +15,7 @@ runs:
       shell: bash
       run: echo "look ma, i'm composed!"
     - name: Get input branch ref name
+      shell: bash
       run: echo "Branch ref name is ${{ inputs.BRANCH || github.event_name == 'pull_request' || github.sha }}"
     - name: Zain Composite act 2
       if: github.repository_owner == 'pytorch'
