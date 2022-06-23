@@ -10662,6 +10662,8 @@ op_db: List[OpInfo] = [
                     skips=(
                         # clamp_max supports two tensor input with bool, but not a bool scalar
                         DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+                        # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
                     )),
     BinaryUfuncInfo('clamp_min',
                     ref=_clamp_min_numpy,
@@ -10674,6 +10676,8 @@ op_db: List[OpInfo] = [
                     skips=(
                         # clamp_min supports two tensor input with bool, but not a bool scalar
                         DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+                        # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
