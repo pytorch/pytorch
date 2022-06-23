@@ -10656,6 +10656,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and(torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
+                    supports_rhs_python_scalar=False,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
@@ -10667,6 +10668,7 @@ op_db: List[OpInfo] = [
                     dtypes=all_types_and(torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
+                    supports_rhs_python_scalar=False,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
