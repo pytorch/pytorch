@@ -12,7 +12,7 @@ class TestQuantizedTensor(unittest.TestCase):
     and hard-coded values b=4, k=2
     """
     def test_int_repr(self):
-        # generate random size of tensor2dequantize between 1 -> 20
+        # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
 
         # generate tensor with random fp values between 0 -> 1000
