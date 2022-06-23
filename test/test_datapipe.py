@@ -1209,7 +1209,7 @@ class TestFunctionalIterDataPipe(TestCase):
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, 1, error=ValueError)
         _helper(None, lambda d0, d1: d0 + d1, 0, error=ValueError)
-        _helper(None, p_fn_n1, (0, 1), error=ValueError)
+        _helper(None, p_fn_n1, (0, 1, 3), error=ValueError)
 
         # Function takes fewer parameters than input col
         def zero_args():
@@ -1290,7 +1290,6 @@ class TestFunctionalIterDataPipe(TestCase):
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
         _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
-
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["y"]}),
                 lambda x, y: x + y, ("x", "y"), "z")
         _helper(lambda data: _dict_update(data, {"x": 1 + data["y"]}), fn_n1_def, "y",
@@ -1303,7 +1302,7 @@ class TestFunctionalIterDataPipe(TestCase):
         # Unmatched input columns with fn arguments
         _helper(None, fn_n1, "y", error=ValueError)
         _helper(None, lambda x, y: x + y, "x", error=ValueError)
-        _helper(None, p_fn_n1, ("x", "y"), error=ValueError)
+        _helper(None, p_fn_n1, ("x", "y", "z"), error=ValueError)
 
         # Function takes fewer parameters than input col
         def zero_args():

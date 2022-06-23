@@ -40,14 +40,16 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     if len(sig.parameters) > sz:
         non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
         if len(non_default_params) > sz:
+            fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
             raise ValueError(
-                f"The function {fn.__name__} takes {len(non_default_params)} "
+                f"The function {fn_name} takes {len(non_default_params)} "
                 f"non-default parameters, but {sz} are required for the given `input_col`."
             )
 
     if len(sig.parameters) < sz:
+        fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
         raise ValueError(
-            f"The function {fn.__name__} takes {len(sig.parameters)} "
+            f"The function {fn_name} takes {len(sig.parameters)} "
             f"parameters, but {sz} are required for the given `input_col`."
         )
 
