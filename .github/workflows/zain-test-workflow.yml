@@ -6,7 +6,7 @@ on:
     branches:
       - master
       - main
-      - zainr/workflow-payground
+      - zainr/*
       - release/*
 
 jobs:
