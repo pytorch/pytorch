@@ -70,7 +70,7 @@ jobs:
 
       - name: Validate workflow inputs
         env:
-          WORKFLOW_INPUTS: toJSON(inputs)
+          WORKFLOW_INPUTS: ${{ toJSON(inputs) }}
         run: echo "${WORKFLOW_INPUTS}" | python3 .github/scripts/validate_workflow_inputs.py
 
       - name: Setup Linux
