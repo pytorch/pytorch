@@ -66,6 +66,7 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
+# TODO: this condition is never true, need to fix this.
 if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
   # skip expensive checks when on PR and CI_MASTER flag is not set
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
@@ -152,6 +153,8 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
+
+# TODO: this condition is never (we have no NO_AVX512 config), need to fix this.
 elif [[ $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
@@ -284,6 +287,8 @@ test_libtorch() {
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+
+    # TODO: this condition is never (BUILD_ENVIRONMENT doesn't start with pytorch-), need to fix this.
     if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
       if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
         # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
@@ -575,7 +580,7 @@ elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
+elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchdynamo
   test_distributed
   # Only run RPC C++ tests on the first shard
