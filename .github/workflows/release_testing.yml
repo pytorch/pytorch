@@ -40,7 +40,11 @@ jobs:
         run: |
           . activate reltest
           . switch-cuda.sh ${CUDA_VERSION}
-          sudo ln -sf /usr/local/cuda-${CUDA_VERSION} /usr/local/cuda
+          # re-setup the cuda soft link
+          if [ -e "/usr/local/cuda" ]; then
+              sudo rm /usr/local/cuda
+              sudo ln -sf /usr/local/cuda-${CUDA_VERSION} /usr/local/cuda
+          fi
           conda install -y cudatoolkit=${CUDA_VERSION}
           conda install -y -c pytorch ${MAGMA_VERSION}
           # link: https://anaconda.org/pytorch/pytorch
