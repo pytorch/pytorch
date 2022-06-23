@@ -380,7 +380,6 @@ def _elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
     args_with_fixed_dtypes: Tuple[TensorLikeType, ...] = None,
-    complex_only=False,
 ) -> FakeTensor:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
@@ -416,12 +415,6 @@ def _elementwise_meta(
         elif isinstance(arg, Number):
             scalar_type = type(arg)
 
-    assert dtype is not None
-
-    if complex_only and not utils.is_complex_dtype(dtype):
-        msg = f"Expect complex data type, got {dtype}"
-        raise RuntimeError(msg)
-
     # Acquires the device (if it exists) or number
     device = None
     number = None
@@ -455,6 +448,12 @@ def _elementwise_meta(
     # NOTE: this case is not currently exercised
     # TODO: fix number type promotion (bool, complex->float)
     return TensorMeta(number)
+
+
+def _complex_only_elementwise_meta(*args, **kwargs):
+    utils.check(utils.is_complex_dtype(args[0].dtype),
+                lambda: "Only complex dtype is supported")
+    return _elementwise_meta(*args, **kwargs)
 
 
 def _make_elementwise_unary_prim(
@@ -695,7 +694,7 @@ floor = _make_elementwise_unary_prim(
 imag = _make_prim(
     schema="imag(Tensor self) -> Tensor",
     meta=partial(
-        _elementwise_meta,
+        _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
         complex_only=True,
     ),
@@ -755,7 +754,7 @@ log10 = _make_elementwise_unary_prim(
 real = _make_prim(
     schema="real(Tensor self) -> Tensor",
     meta=partial(
-        _elementwise_meta,
+        _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
         complex_only=True,
     ),

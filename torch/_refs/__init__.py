@@ -467,9 +467,8 @@ def frac(x: TensorLikeType) -> TensorLikeType:
 # imag does not use _make_elementwise_unary_reference because it does not support out
 def imag(a: TensorLikeType) -> TensorLikeType:
     assert isinstance(a, TensorLike)
-    if not utils.is_complex_dtype(a.dtype):
-        msg = "imag only supports complex tensors."
-        raise RuntimeError(msg)
+    utils.check(utils.is_complex_dtype(a.dtype),
+                lambda: "imag only supports complex tensors.")
     return prims.imag(a)
 
 
