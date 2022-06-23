@@ -111,7 +111,7 @@ class ProxyTensor(torch.Tensor):
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             elem.shape, dtype=elem.dtype, layout=elem.layout, device=elem.device,
-            requires_grad=elem.requires_grad, strides=elem.stride(),
+            requires_grad=requires_grad if requires_grad is not None else False, strides=elem.stride(),
             storage_offset=elem.storage_offset()
         )
 
@@ -120,7 +120,7 @@ class ProxyTensor(torch.Tensor):
         else:
             proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
         r.elem = elem
-        r.proxy = proxy  # type: ignore[attr-defined]
+        r.proxy = proxy
 
         return r
 
@@ -129,7 +129,7 @@ class ProxyTensor(torch.Tensor):
 
     def __repr__(self):
         with no_dispatch():
-            return f"ProxyTensor({self.as_subclass(torch.Tensor)}, proxy={self.proxy})"  # type: ignore[arg-type]
+            return f"ProxyTensor({self.elem}, proxy={self.proxy})"
 
     __torch_function__ = _disabled_torch_function_impl
 
