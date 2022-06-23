@@ -12217,19 +12217,18 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
     @common_utils.parametrize(
         "mode",
         ("bilinear", "nearest", "bicubic"),
-        name_fn=lambda mode: mode,
     )
     @common_utils.parametrize(
         "padding_mode",
         ("zeros", "border", "reflection"),
-        name_fn=lambda padding_mode: padding_mode,
     )
     @common_utils.parametrize(
-        "align_corners", (True, False), name_fn=lambda align_corners: str(align_corners)
+        "align_corners", (True, False),
+        name_fn=lambda align_corners: str(align_corners),
     )
     def test_grid_sample(self, mode, padding_mode, align_corners):
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
-
+        print(self.__name__)
         class GridSampleModule(torch.nn.Module):
             def __init__(self, mode, padding_mode, align_corners) -> None:
                 super().__init__()
@@ -12270,11 +12269,9 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
                             return y
                 return y
 
-        y = torch.ones((3, 4), dtype=torch.int)
-
         self.run_test(
             Module(),
-            y,
+            torch.ones((3, 4), dtype=torch.int),
             dynamic_axes={"y": {0: "y0", 1: "y1"}},
             input_names=["y"],
         )
