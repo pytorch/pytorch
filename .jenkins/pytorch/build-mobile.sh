@@ -8,8 +8,6 @@ set -eu -o pipefail
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-# shellcheck source=./common-build.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 # Install torch & torchvision - used to download & trace test model.
 # Ideally we should use the libtorch built on the PR so that backward
