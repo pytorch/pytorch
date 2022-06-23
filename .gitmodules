@@ -142,6 +142,3 @@
 [submodule "third_party/flatbuffers"]
 	path = third_party/flatbuffers
 	url = https://github.com/google/flatbuffers.git
-[submodule "third_party/hipify_torch"]
-	path = third_party/hipify_torch
-	url = https://github.com/ROCmSoftwarePlatform/hipify_torch.git
