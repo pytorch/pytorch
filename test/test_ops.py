@@ -361,9 +361,6 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(python_ref_db)
     def test_python_ref_meta(self, device, dtype, op):
-        if dtype is torch.chalf:
-            self.skipTest("Skipping chalf until it has more operator support")
-
         mode = torch._prims.utils.get_prim_fake_mode()
 
         def _to_tensormeta(x):
@@ -373,7 +370,6 @@ class TestCommon(TestCase):
             return x
 
         # TODO: iterate over requires_grad true/false
-        inps = tuple(op.reference_inputs(device, dtype, requires_grad=False))
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
             result = op(sample.input, *sample.args, **sample.kwargs)
 
@@ -381,9 +377,7 @@ class TestCommon(TestCase):
             try:
                 with enable_torch_dispatch_mode(mode):
                     meta_result = op(meta_sample.input, *meta_sample.args, **meta_sample.kwargs)
-            except torch._subclasses.fake_tensor.ComplexInputException:
-                continue
-            except torch._subclasses.fake_tensor.SparseInputException:
+            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 continue
 
             if isinstance(result, torch.Tensor):
@@ -394,9 +388,6 @@ class TestCommon(TestCase):
                         prims.utils.compare_tensor_meta(a, b)
 
     def _ref_test_helper(self, ctx, device, dtype, op, skip_zero_numel=False):
-        if dtype is torch.chalf:
-            self.skipTest("Skipping chalf until it has more operator support")
-
         # NOTE: this test works by comparing the reference
         ex = None
         for sample in op.reference_inputs(device, dtype, requires_grad=False):
@@ -1225,7 +1216,7 @@ class TestCompositeCompliance(TestCase):
         for sample in samples:
             args = [sample.input] + list(sample.args)
             kwargs = sample.kwargs
-            composite_compliance.check_backward_formula(op, args, kwargs)
+            composite_compliance.check_backward_formula(op, args, kwargs, sample.output_process_fn_grad)
 
     @unittest.skipIf(
         IS_FBCODE or IS_SANDCASTLE, "__torch_dispatch__ does not work in fbcode"
@@ -1556,7 +1547,6 @@ fake_skips = (
 dynamic_output_op_tests = (
     "argwhere",
     "bincount",
-    "index_select",
     "combinations",
     "linalg.lstsq",
     "masked_select",
@@ -1569,6 +1559,7 @@ dynamic_output_op_tests = (
 # some inputs invoke dynamic output shape operators, some do not
 sometimes_dynamic_output_op_test = (
     "__getitem__",
+    "index_select",
 )
 
 class TestFakeTensorNonErroring(TestCase):
@@ -1613,9 +1604,7 @@ class TestFakeTensorNonErroring(TestCase):
                     prims.utils.compare_tensor_meta(fake_out, real_out)
                 self.assertTrue(name not in dynamic_output_op_tests)
 
-            except torch._subclasses.fake_tensor.ComplexInputException:
-                pass
-            except torch._subclasses.fake_tensor.SparseInputException:
+            except torch._subclasses.fake_tensor.UnsupportedFakeTensorException:
                 pass
             except torch._subclasses.fake_tensor.DynamicOutputShapeException:
                 self.assertTrue(name in dynamic_output_op_tests or name in sometimes_dynamic_output_op_test)
