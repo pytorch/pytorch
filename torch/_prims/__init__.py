@@ -418,7 +418,7 @@ def _elementwise_meta(
     # Acquires the device (if it exists) or number
     device = None
     number = None
-    for arg in args_:
+    for arg in args:
         if isinstance(arg, TensorLike):
             device = arg.device
             break
