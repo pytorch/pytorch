@@ -184,6 +184,7 @@ _nvfuser_unary_ops = {
     "acos",
     "asin",
     "atan",
+    "atanh",
     "cos",
     "cosh",
     "bitwise_not",
@@ -539,6 +540,7 @@ atan = _make_elementwise_unary_prim(
 atanh = _make_elementwise_unary_prim(
     "atanh",
     impl_aten=torch.atanh,
+    impl_nvfuser=_atanh_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
