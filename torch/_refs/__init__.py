@@ -1171,19 +1171,21 @@ def clamp(
 ) -> TensorLikeType:
     a, min, max = _maybe_broadcast(a, min, max)
 
+    # NOTE: grad behavior with implementation `where` is not consistent on `nan`
     if min is None and max is None:
         msg = "clamp called but both min and max are none!"
         raise ValueError(msg)
     if min is not None:
         a_isnan = isnan(a)
         condition = bitwise_or(ge(a, min), a_isnan)
-        if isinstance(min, TensorLike):
-            condition = bitwise_and(condition, bitwise_not(isnan(min)))
+        # we should also propagate `nan` coming from boundaries. However, that's
+        # not necessary since `ge` would already `False` when either operands has
+        # a `nan`. So this is redundant 
+        #   `condition = bitwise_and(condition, bitwise_not(isnan(min)))`
         a = prims.where(condition, a, min)
     if max is not None:
         a_isnan = isnan(a)
-        if isinstance(max, TensorLike):
-            condition = bitwise_and(condition, bitwise_not(isnan(max)))
+        # same as above, no need to adjust `nan` from `max`
         condition = bitwise_or(le(a, max), a_isnan)
         a = prims.where(condition, a, max)
 
@@ -1199,12 +1201,7 @@ def clamp_min(
     self: TensorLikeType,
     min: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    self, min = _maybe_broadcast(self, min)
-    condition = bitwise_or(ge(self, min), isnan(self))
-    if isinstance(min, TensorLike):
-        condition = bitwise_and(condition, bitwise_not(isnan(min)))
-
-    return prims.where(condition, self, min)
+    torch.clamp(self, min=min)
 
 
 @out_wrapper
@@ -1216,12 +1213,7 @@ def clamp_max(
     self: TensorLikeType,
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    self, max = _maybe_broadcast(self, max)
-    condition = bitwise_or(le(self, max), isnan(self))
-    if isinstance(max, TensorLike):
-        condition = bitwise_and(condition, bitwise_not(isnan(max)))
-
-    return prims.where(condition, self, max)
+    torch.clamp(self, max=max)
 
 
 #
