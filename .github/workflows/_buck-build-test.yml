@@ -10,8 +10,6 @@ defaults:
 jobs:
   buck-build-test:
     runs-on: ubuntu-latest
-    env:
-      JOB_BASE_NAME: ubuntu-latest-buck
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
