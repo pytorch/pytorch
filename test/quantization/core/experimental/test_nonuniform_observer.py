@@ -13,7 +13,7 @@ class TestNonUniformObserver(unittest.TestCase):
         obs = APoTObserver(b=0, k=0)
 
         with self.assertRaises(AssertionError):
-            obs_result = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([0]))
+            qparams = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([0]))
 
     """
         Test case 2: calculate_qparams
@@ -26,7 +26,7 @@ class TestNonUniformObserver(unittest.TestCase):
     """
     def test_calculate_qparams_2terms(self):
         obs = APoTObserver(b=4, k=2)
-        obs_result = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
 
         # calculate expected gamma value
         gamma_test = 0
@@ -36,19 +36,19 @@ class TestNonUniformObserver(unittest.TestCase):
         gamma_test = 1 / gamma_test
 
         # check gamma value
-        self.assertEqual(obs_result[1], gamma_test)
+        self.assertEqual(gamma, gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(obs_result[2]))
+        quantlevels_size_test = int(len(quantization_levels))
         quantlevels_size = 2**4
         self.assertEqual(quantlevels_size_test, quantlevels_size)
 
         # check level indices size
-        levelindices_size_test = int(len(obs_result[3]))
+        levelindices_size_test = int(len(level_indices))
         self.assertEqual(levelindices_size_test, 16)
 
         # check level indices unique values
-        level_indices_test_list = obs_result[3].tolist()
+        level_indices_test_list = level_indices.tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """
@@ -61,7 +61,7 @@ class TestNonUniformObserver(unittest.TestCase):
     def test_calculate_qparams_3terms(self):
         obs = APoTObserver(b=6, k=2)
 
-        obs_result = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
 
         # calculate expected gamma value
         gamma_test = 0
@@ -71,19 +71,19 @@ class TestNonUniformObserver(unittest.TestCase):
         gamma_test = 1 / gamma_test
 
         # check gamma value
-        self.assertEqual(obs_result[1], gamma_test)
+        self.assertEqual(gamma, gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(obs_result[2]))
+        quantlevels_size_test = int(len(quantization_levels))
         quantlevels_size = 2**6
         self.assertEqual(quantlevels_size_test, quantlevels_size)
 
         # check level indices size
-        levelindices_size_test = int(len(obs_result[3]))
+        levelindices_size_test = int(len(level_indices))
         self.assertEqual(levelindices_size_test, 64)
 
         # check level indices unique values
-        level_indices_test_list = obs_result[3].tolist()
+        level_indices_test_list = level_indices.tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """
@@ -97,7 +97,7 @@ class TestNonUniformObserver(unittest.TestCase):
     """
     def test_calculate_qparams_signed(self):
         obs = APoTObserver(b=4, k=2)
-        obs_result = obs.calculate_qparams(signed=True, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=True, min_val=torch.tensor([0]), max_val=torch.tensor([1]))
 
         # calculate expected gamma value
         gamma_test = 0
@@ -107,15 +107,15 @@ class TestNonUniformObserver(unittest.TestCase):
         gamma_test = 1 / gamma_test
 
         # check gamma value
-        self.assertEqual(obs_result[1], gamma_test)
+        self.assertEqual(gamma, gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(obs_result[2]))
+        quantlevels_size_test = int(len(quantization_levels))
         self.assertEqual(quantlevels_size_test, 49)
 
         # check negatives of each element contained
         # in quantization levels
-        quantlevels_test_list = obs_result[2].tolist()
+        quantlevels_test_list = quantization_levels.tolist()
         negatives_contained = True
         for ele in quantlevels_test_list:
             if not (-ele) in quantlevels_test_list:
@@ -123,11 +123,11 @@ class TestNonUniformObserver(unittest.TestCase):
         self.assertTrue(negatives_contained)
 
         # check level indices size
-        levelindices_size_test = int(len(obs_result[3]))
+        levelindices_size_test = int(len(level_indices))
         self.assertEqual(levelindices_size_test, 49)
 
         # check level indices unique elements
-        level_indices_test_list = obs_result[3].tolist()
+        level_indices_test_list = level_indices.tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """

@@ -2868,6 +2868,7 @@
     "softmax"
   ],
   "torch.special": [
+    "airy_ai",
     "bessel_j0",
     "bessel_j1",
     "bessel_y0",
@@ -3174,7 +3175,6 @@
     "_cummax_helper",
     "_cummin_helper",
     "_debug_has_internal_overlap",
-    "_det_lu_based_helper",
     "_det_lu_based_helper_backward_helper",
     "_dim_arange",
     "_dirichlet_grad",
