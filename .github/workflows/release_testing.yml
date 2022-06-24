@@ -62,7 +62,8 @@ jobs:
           # pip install https://download.pytorch.org/whl/cu113/torch-1.11.0%2Bcu113-cp38-cp38-linux_x86_64.whl \
           #             https://download.pytorch.org/whl/cu113/torchvision-0.12.0%2Bcu113-cp38-cp38-linux_x86_64.whl \
           #             https://download.pytorch.org/whl/torchtext-0.12.0-cp38-cp38-linux_x86_64.whl
-          pushd pytorch
+          git clone https://github.com/pytorch/pytorch.git pytorch-src
+          pushd pytorch-src
           git checkout release/1.11
           python setup.py install
           echo "RESULT_DIR=${HOME}/release-testing/1.11.0-src" >> $GITHUB_ENV
