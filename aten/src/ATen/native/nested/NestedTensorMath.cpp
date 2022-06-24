@@ -716,15 +716,13 @@ Tensor softmax_nested(const Tensor& input, const int64_t dim, const bool half_to
 Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   auto self_ptr = get_nested_tensor_impl(self),
       mat2_ptr = get_nested_tensor_impl(mat2);
+  TORCH_CHECK(self_ptr->dim() == 3, "batch1 must be a 3D tensor");
+  TORCH_CHECK(mat2_ptr->dim() == 3, "batch2 must be a 3D tensor");
   int64_t ntensors = self_ptr->size(0),
       ntensors2 = mat2_ptr->size(0);
   TORCH_CHECK(ntensors == ntensors2,
       "Expected size for the 1st dimension of batch2 tensor to be: ", ntensors,
       " but got: ", ntensors2, ".");
-  const Tensor& self_sizemat = self_ptr->get_nested_size_tensor(),
-      & mat2_sizemat = mat2_ptr->get_nested_size_tensor();
-  TORCH_CHECK(ntensors > 0 && self_sizemat.size(1) == 2, "batch1 must be a 3D tensor");
-  TORCH_CHECK(mat2_sizemat.size(1) == 2, "batch2 must be a 3D tensor");
   std::vector<int64_t> self_offsets = NestedTensor_get_offsets(self_ptr),
       mat2_offsets = NestedTensor_get_offsets(mat2_ptr);
   std::vector<IntArrayRef> self_shapes = NestedTensor_get_shapes(self_ptr),
@@ -732,6 +730,7 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   const Tensor& self_buffer = self_ptr->get_buffer(),
       & mat2_buffer = mat2_ptr->get_buffer();
   // determine output size
+  const Tensor& self_sizemat = self_ptr->get_nested_size_tensor();
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
   int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
   std::vector<int64_t> out_offsets(ntensors + 1);
