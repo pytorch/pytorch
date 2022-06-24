@@ -169,7 +169,7 @@ class TestCommunicationHooks(FSDPTest):
 
             # Check that default hook is set to `all_reduce`
             for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-                self.assertEqual(entry.communication_hook.__qualname__, allreduce_hook.allreduce_hook.__qualname__)
+                self.assertEqual(entry.communication_hook, allreduce_hook.allreduce_hook)
 
             dummy_state = DummyState(process_group=None)
 
