@@ -8911,10 +8911,9 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
     yield SampleInput(a, args=(c, b))
 
     # two python scalars
-    other_dtype = torch.double if dtype is not torch.double else torch.long
     c = make_cond((10, 3), noncontiguous=True)
-    a = make_arg((1,), dtype=torch.long).item()
-    b = make_arg((1,), dtype=other_dtype).item()
+    a = make_arg((1,)).item()
+    b = make_arg((1,)).item()
 
     yield SampleInput(a, args=(c, b))
 
