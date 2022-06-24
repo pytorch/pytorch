@@ -699,19 +699,27 @@ def run_tests(argv=UNITTEST_ARGS):
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
         if test_filename in USE_PYTEST:
-            test_report_path.replace('python-unittest', 'python-pytest')
-            os.makedirs(test_report_path, exist_ok=True)
+            pytest_report_path = test_report_path.replace('python-unittest', 'python-pytest')
+            os.makedirs(pytest_report_path, exist_ok=True)
             # eventually move this to test.sh
             if subprocess.run([sys.executable, "-m", "pip", "show", "pytest-dist"], 
                               capture_output=True).returncode != 0:
                 subprocess.run([sys.executable, "-m", "pip", "install", "pytest-xdist"])
             os.environ["NO_COLOR"] = "1"
-            test_report_path = os.path.join(test_report_path, test_filename)
+            pytest_report_path = os.path.join(pytest_report_path, test_filename)
             exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-n=2', '-vv', '-s',
-                                    f'--junitxml={test_report_path}.xml'])
-            sanitize_pytest_xml(f'{test_report_path}.xml')
-            exit(exit_code)
+                                    f'--junitxml={pytest_report_path}.xml'])
+            sanitize_pytest_xml(f'{pytest_report_path}.xml')
+            unittest_success = unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+                output=test_report_path,
+                verbosity=2 if verbose else 1,
+                resultclass=XMLTestResultVerbose), exit=False).result.wasSuccessful()
+            if unittest_success and (exit_code == 0 or exit_code == 5):
+                exit(0)
+            else:
+                exit(1)
         else:
+            exit(0)
             unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
                 output=test_report_path,
                 verbosity=2 if verbose else 1,
