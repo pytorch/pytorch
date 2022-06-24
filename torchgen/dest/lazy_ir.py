@@ -317,7 +317,7 @@ class GenTSLazyIR(GenLazyIR):
         for arg in schema.positional_values:
             if isinstance(arg.lazy_type, OptionalCType):
                 value_comparison.append(
-                    f"operand(i++) == {arg.name}.value_or(kNullValue)"
+                    f"nullable_operand(i++) == {arg.name}.value_or(kNullValue)"
                 )
             else:
                 value_comparison.append(f"operand(i++) == {arg.name}")
