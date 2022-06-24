@@ -56,9 +56,9 @@ jobs:
           # 	      https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl \
           #             https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220512-cp38-cp38-linux_x86_64.whl
           # echo "RESULT_DIR=${HOME}/release-testing/20220512" >> $GITHUB_ENV
-          pip install https://download.pytorch.org/whl/nightly/cu113/torch-1.12.0.dev20220425%2Bcu113-cp38-cp38-linux_x86_64.whl \
-                      https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220425%2Bcu113-cp38-cp38-linux_x86_64.whl \
-                      https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220425-cp38-cp38-linux_x86_64.whl
+          pip install https://download.pytorch.org/whl/nightly/cu113/torch-1.12.0.dev20220424%2Bcu113-cp38-cp38-linux_x86_64.whl \
+                      https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220424%2Bcu113-cp38-cp38-linux_x86_64.whl \
+                      https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220424-cp38-cp38-linux_x86_64.whl
           echo "RESULT_DIR=${HOME}/release-testing/20220425" >> $GITHUB_ENV
           python -c "import torch"
           python -c "import torchvision"
