@@ -7316,7 +7316,8 @@ TEST_F(LazyOpsTest, NonZeroNarrowCopy) {
   auto x_cpu = torch::rand({10});
   auto y_cpu = torch::nonzero(x_cpu);
   int64_t y0_cpu_size = y_cpu.sizes()[0];
-  auto b_cpu = torch::randn({10}); // a base tensor so we can compute with symint
+  auto b_cpu =
+      torch::randn({10}); // a base tensor so we can compute with symint
   auto z_cpu = b_cpu.narrow_copy(0, 0, y0_cpu_size);
 
   // Same operations, but on LAZY tensor
