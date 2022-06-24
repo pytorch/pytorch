@@ -12394,10 +12394,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           skips=(
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-           ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],),
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
@@ -12408,10 +12404,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           skips=(
-               # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-           ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            ),
     OpInfo('linalg.cond',
@@ -19570,6 +19562,27 @@ op_db: List[OpInfo] = [
         ),
     ),
     UnaryUfuncInfo(
+        'special.airy_ai',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-03,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else _NOTHING,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestUnaryUfuncs',
+                'test_reference_numerics_large',
+            ),
+        ),
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
         'special.bessel_j0',
         decorators=(
             precisionOverride(
@@ -20030,7 +20043,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
         torch_opinfo_name="bitwise_not",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.ceil",
@@ -20135,6 +20147,8 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
+        # nvFuser test for float32 fails with AssertionError: Dtypes torch.float64 and torch.float32 are not equal!
+        # The test with int dtype passes
         supports_nvfuser=False,
     ),
     PythonRefInfo(
@@ -20197,7 +20211,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.softmax",
         torch_opinfo_name="softmax",
-        supports_nvfuser=False
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sqrt",
@@ -20365,7 +20378,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_and",
         torch_opinfo_name="bitwise_and",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_left_shift",
@@ -20375,17 +20387,14 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_or",
         torch_opinfo_name="bitwise_or",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.bitwise_xor",
         torch_opinfo_name="bitwise_xor",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.eq",
         torch_opinfo_name="eq",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.float_power",
@@ -20418,7 +20427,6 @@ python_ref_db = [
         "_refs.fmod",
         torch_opinfo_name="fmod",
         rhs_make_tensor_kwargs={'exclude_zero': True},
-        supports_nvfuser=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
@@ -20435,12 +20443,10 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.ge",
         torch_opinfo_name="ge",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.gt",
         torch_opinfo_name="gt",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.igamma",
@@ -20469,12 +20475,10 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.le",
         torch_opinfo_name="le",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_and",
         torch_opinfo_name="logical_and",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.logical_not",
@@ -20483,17 +20487,14 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_or",
         torch_opinfo_name="logical_or",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.logical_xor",
         torch_opinfo_name="logical_xor",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.lt",
         torch_opinfo_name="lt",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.maximum",
@@ -20517,7 +20518,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        supports_nvfuser=False,
         skips=(
             # Reference result was farther (0.0) from the precise computation
             # than the torch result was (nan)!
@@ -20543,7 +20543,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.ne",
         torch_opinfo_name="ne",
-        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.nextafter",
@@ -20553,7 +20552,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.pow",
         torch_opinfo_name="pow",
-        supports_nvfuser=False,
         skips=(
             # Reference result was farther (inf) from the precise
             # computation than the torch result was (nan)!
@@ -20578,7 +20576,6 @@ python_ref_db = [
     ElementwiseBinaryPythonRefInfo(
         "_refs.remainder",
         torch_opinfo_name="remainder",
-        supports_nvfuser=False,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
@@ -20774,7 +20771,6 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.native_layer_norm",
         torch_opinfo_name="native_layer_norm",
-        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.permute",
@@ -20871,48 +20867,39 @@ python_ref_db = [
     ReductionPythonRefInfo(
         "_refs.all",
         torch_opinfo_name="all",
-        # RuntimeError: Tried to reduce a 0-dim tensor
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.amax",
         torch_opinfo_name="amax",
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.amin",
         torch_opinfo_name="amin",
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.any",
         torch_opinfo_name="any",
-        supports_nvfuser=False
     ),
     ReductionPythonRefInfo(
         "_refs.mean",
         torch_opinfo_name="mean",
         supports_out=True,
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.std",
         torch_opinfo_name="std",
         supports_out=True,
-        supports_nvfuser=False,
     ),
     # std_mean and var_mean are not ReductionInfos
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
         validate_view_consistency=False,
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
         torch_opinfo_name="sum",
         supports_out=True,
-        supports_nvfuser=False,
     ),
     ReductionPythonRefInfo(
         "_refs.prod",
@@ -20924,13 +20911,11 @@ python_ref_db = [
         "_refs.var",
         torch_opinfo_name="var",
         supports_out=True,
-        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
-        supports_nvfuser=False,
     ),
     #
     # Linear Algebra Operators
