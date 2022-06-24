@@ -45,3 +45,4 @@ Functions
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
+.. autofunction:: airy_ai

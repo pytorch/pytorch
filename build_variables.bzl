@@ -1149,6 +1149,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/UpSampleKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleMoreKernel.cpp",
     "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
+    "aten/src/ATen/native/cpu/airy_ai.cpp",
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/gamma.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
