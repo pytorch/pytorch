@@ -1196,18 +1196,18 @@ class TestExperimentalUtils(TestCase):
         ]
 
         cpu_events = [
-            MockProfilerEvent("CPU", 1, 0, 100000),
-            MockProfilerEvent("CPU", 2, 100000, 100000),
-            MockProfilerEvent("CPU", 3, 200000, 100000),
-            MockProfilerEvent("CPU", 4, 300000, 100000),
-            MockProfilerEvent("CPU", 5, 400000, 100000),
-            MockProfilerEvent("CPU", 6, 500000, 100000),
-            MockProfilerEvent("CPU", 7, 600000, 100000),
-            MockProfilerEvent("CPU", 8, 700000, 100000),
-            MockProfilerEvent("CPU", 9, 800000, 100000),
-            MockProfilerEvent("CPU", 10, 900000, 100000),
-            MockProfilerEvent("CPU", 11, 1100000, 100000),
-            MockProfilerEvent("CPU", 12, 1200000, 500000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 1, 0, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 2, 100000, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 3, 200000, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 4, 300000, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 5, 400000, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 6, 500000, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 7, 600000, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 8, 700000, 100000),
+            MockProfilerEvent("CPU (After GPU)", 9, 800000, 100000),
+            MockProfilerEvent("CPU (After GPU)", 10, 900000, 100000),
+            MockProfilerEvent("CPU (After GPU)", 11, 1100000, 100000),
+            MockProfilerEvent("CPU (No Event)", 12, 1200000, 500000),
         ]
 
         profiler = unittest.mock.Mock()
@@ -1245,7 +1245,7 @@ class TestExperimentalUtils(TestCase):
                 res += f"{data.queue_depth} [{event.name()}]\n"
             return res
 
-        # We have to use Mock because time series data is too flakey to test
+        # We have to use Mock because time series data is too flaky to test
         profiler = self.generate_mock_profile()
         basic_evaluation = _utils.BasicEvaluation(profiler)
         self.assertExpectedInline(
@@ -1265,18 +1265,18 @@ class TestExperimentalUtils(TestCase):
                 basic_evaluation.metrics[k]
                 for k in basic_evaluation.event_keys
             ], basic_evaluation.events), """\
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-1 [CPU]
-2 [CPU]
-3 [CPU]
-2 [CPU]
-1 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+1 [CPU (After cudaLaunchKernel)]
+2 [CPU (After cudaLaunchKernel)]
+3 [CPU (After cudaLaunchKernel)]
+2 [CPU (After cudaLaunchKernel)]
+1 [CPU (After GPU)]
+0 [CPU (After GPU)]
+0 [CPU (After GPU)]
+0 [CPU (No Event)]
 """)
 
     def test_utils_compute_queue_depth_when_no_cuda_events(self):
@@ -1297,18 +1297,18 @@ class TestExperimentalUtils(TestCase):
 
         self.assertExpectedInline(
             res, """\
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-100000 [CPU]
-300000 [CPU]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After GPU)]
+0 [CPU (After GPU)]
+100000 [CPU (After GPU)]
+300000 [CPU (No Event)]
 """)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
