@@ -529,44 +529,11 @@
     "ProcessGroupMPI",
     "ProcessGroupNCCL"
   ],
-  "torch.distributed.elastic.agent.server.api": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "Event",
-    "EventSource",
-    "List",
-    "Optional",
-    "ProcessFailure",
-    "SignalException",
-    "Std",
-    "Store",
-    "Tuple",
-    "Union",
-    "closing",
-    "dataclass",
-    "field",
-    "get_logger",
-    "prof",
-    "put_metric",
-    "record"
-  ],
   "torch.distributed.elastic.events": [
     "Dict",
     "Enum",
     "EventMetadataValue",
     "Optional"
-  ],
-  "torch.distributed.elastic.events.api": [
-    "Dict",
-    "Enum",
-    "EventMetadataValue",
-    "Optional",
-    "Union",
-    "asdict",
-    "dataclass",
-    "field"
   ],
   "torch.distributed.elastic.events.handlers": [
     "Dict"
@@ -658,31 +625,7 @@
     "abstractmethod"
   ],
   "torch.distributed.elastic.rendezvous.dynamic_rendezvous": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "List",
-    "NodeState",
-    "Optional",
-    "PrefixStore",
-    "RendezvousClosedError",
-    "RendezvousError",
-    "RendezvousHandler",
-    "RendezvousParameters",
-    "RendezvousStateError",
-    "RendezvousTimeoutError",
-    "Set",
-    "Store",
-    "Token",
-    "Tuple",
-    "abstractmethod",
-    "cast",
-    "construct_and_record_rdzv_event",
-    "dataclass",
-    "datetime",
-    "timedelta"
+    "get_method_name"
   ],
   "torch.distributed.elastic.rendezvous.registry": [
     "RendezvousHandler",
@@ -2022,143 +1965,11 @@
   "torch.nn.intrinsic.quantized.modules.conv_relu": [
     "fuse_conv_bn_weights"
   ],
-  "torch.nn.modules.conv": [
-    "LazyModuleMixin",
-    "List",
-    "Module",
-    "Optional",
-    "Parameter",
-    "Tensor",
-    "Tuple",
-    "UninitializedParameter",
-    "Union"
-  ],
-  "torch.nn.modules.distance": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.dropout": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.flatten": [
-    "Module",
-    "Tensor",
-    "Tuple",
-    "Union"
-  ],
-  "torch.nn.modules.fold": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.instancenorm": [
-    "Tensor"
-  ],
-  "torch.nn.modules.lazy": [
-    "Protocol",
-    "is_lazy"
-  ],
   "torch.nn.modules.linear": [
-    "LazyModuleMixin",
-    "Module",
-    "NonDynamicallyQuantizableLinear",
-    "Parameter",
-    "Tensor",
-    "UninitializedParameter"
-  ],
-  "torch.nn.modules.loss": [
-    "Callable",
-    "Module",
-    "Optional",
-    "PairwiseDistance",
-    "Tensor"
-  ],
-  "torch.nn.modules.module": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Iterator",
-    "List",
-    "Mapping",
-    "Optional",
-    "OrderedDict",
-    "Parameter",
-    "RemovableHandle",
-    "Set",
-    "Tensor",
-    "Tuple",
-    "TypeVar",
-    "Union",
-    "device",
-    "dtype",
-    "namedtuple",
-    "overload"
-  ],
-  "torch.nn.modules.normalization": [
-    "List",
-    "Module",
-    "Parameter",
-    "Size",
-    "Tensor",
-    "Tuple",
-    "Union"
-  ],
-  "torch.nn.modules.padding": [
-    "Module",
-    "Sequence",
-    "Tensor",
-    "Tuple"
-  ],
-  "torch.nn.modules.pixelshuffle": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.pooling": [
-    "List",
-    "Module",
-    "Optional",
-    "Tensor"
+    "NonDynamicallyQuantizableLinear"
   ],
   "torch.nn.modules.rnn": [
-    "List",
-    "Module",
-    "Optional",
-    "PackedSequence",
-    "Parameter",
-    "Tensor",
-    "Tuple",
-    "overload"
-  ],
-  "torch.nn.modules.sparse": [
-    "Module",
-    "Optional",
-    "Parameter",
-    "Tensor"
-  ],
-  "torch.nn.modules.transformer": [
-    "Any",
-    "Callable",
-    "Dropout",
-    "LayerNorm",
-    "Linear",
-    "Module",
-    "ModuleList",
-    "MultiheadAttention",
-    "Optional",
-    "Tensor",
-    "Union",
-    "xavier_uniform_"
-  ],
-  "torch.nn.modules.upsampling": [
-    "Module",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.nn.modules.utils": [
-    "Any",
-    "Dict",
-    "List",
-    "repeat"
+    "apply_permutation"
   ],
   "torch.nn.parallel": [
     "DistributedDataParallelCPU"
@@ -2292,9 +2103,9 @@
   "torch.nn.quantized.modules.utils": [
     "repeat"
   ],
-  "torch.nn.utils.clip_grad": [
-    "Iterable",
-    "Union"
+  "torch.nn.utils.rnn": [
+    "bind",
+    "PackedSequence_"
   ],
   "torch.nn.utils.convert_parameters": [
     "Iterable",
@@ -2319,30 +2130,6 @@
     "Tuple",
     "Union",
     "contextmanager"
-  ],
-  "torch.nn.utils.rnn": [
-    "Iterable",
-    "List",
-    "Optional",
-    "Tensor",
-    "Tuple",
-    "Union",
-    "namedtuple"
-  ],
-  "torch.nn.utils.spectral_norm": [
-    "Any",
-    "Module",
-    "Optional",
-    "TypeVar",
-    "normalize"
-  ],
-  "torch.nn.utils.weight_norm": [
-    "Any",
-    "Module",
-    "Parameter",
-    "TypeVar",
-    "UninitializedParameter",
-    "norm_except_dim"
   ],
   "torch.onnx": [
     "Dict",
@@ -2393,91 +2180,11 @@
     "Iterable",
     "Union"
   ],
-  "torch.package.importer": [
-    "ABC",
-    "Any",
-    "Dict",
-    "List",
-    "ModuleType",
-    "Optional",
-    "Tuple",
-    "abstractmethod",
-    "demangle",
-    "get_mangle_prefix",
-    "is_mangled"
-  ],
-  "torch.package.package_exporter": [
-    "ActionHook",
-    "Any",
-    "BinaryIO",
-    "Callable",
-    "DefaultDict",
-    "DiGraph",
-    "Dict",
-    "Enum",
-    "GlobGroup",
-    "GlobPattern",
-    "Importer",
-    "List",
-    "Optional",
-    "OrderedDict",
-    "OrderedImporter",
-    "Path",
-    "RemovableHandle",
-    "Sequence",
-    "Set",
-    "Storage",
-    "Union",
-    "cast",
-    "create_pickler",
-    "dataclass",
-    "defaultdict",
-    "demangle",
-    "find_files_source_depends_on",
-    "is_mangled",
-    "is_stdlib_module",
-    "location_tag",
-    "normalize_storage_type"
-  ],
-  "torch.package.package_importer": [
-    "Any",
-    "BinaryIO",
-    "Callable",
-    "Dict",
-    "Directory",
-    "DirectoryReader",
-    "GlobPattern",
-    "Importer",
-    "List",
-    "Optional",
-    "PackageMangler",
-    "PackageUnpickler",
-    "Path",
-    "Union",
-    "WeakValueDictionary",
-    "cast",
-    "contextmanager",
-    "demangle"
-  ],
   "torch.profiler": [
     "DeviceType",
     "ProfilerActivity",
     "kineto_available",
     "record_function"
-  ],
-  "torch.profiler.profiler": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "Iterable",
-    "List",
-    "Optional",
-    "ProfilerActivity",
-    "Tuple",
-    "kineto_available",
-    "partial",
-    "warn"
   ],
   "torch.quantization": [
     "ABC",
@@ -2945,34 +2652,6 @@
     "convert_to_HWC",
     "make_np",
     "range"
-  ],
-  "torch.utils.tensorboard.writer": [
-    "Event",
-    "EventFileWriter",
-    "ProjectorConfig",
-    "SessionLog",
-    "audio",
-    "custom_scalars",
-    "figure_to_image",
-    "get_embedding_info",
-    "graph",
-    "histogram",
-    "histogram_raw",
-    "hparams",
-    "image",
-    "image_boxes",
-    "load_onnx_graph",
-    "make_mat",
-    "make_np",
-    "make_sprite",
-    "make_tsv",
-    "mesh",
-    "pr_curve",
-    "pr_curve_raw",
-    "scalar",
-    "text",
-    "video",
-    "write_pbtxt"
   ],
   "torch": [
     "BFloat16Storage",

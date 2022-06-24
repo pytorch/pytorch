@@ -10,6 +10,9 @@ from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 from .. import init
 from ... import _VF
+import warnings
+
+__all__ = ['RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell', 'GRUCell']
 
 _rnn_impls = {
     'RNN_TANH': _VF.rnn_tanh,
@@ -18,6 +21,7 @@ _rnn_impls = {
 
 
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
+    warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
     return tensor.index_select(dim, permutation)
 
 
