@@ -3726,6 +3726,29 @@ class TestNLLLoss(TestCase):
 
         helper((2, 8, 4, 5))
 
+    # Test flip
+    def test_flip(self):
+        def helper(shape, dims):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+
+            flip_result = torch.flip(x, dims=dims)
+            flip_result_cpu = torch.flip(cpu_x, dims=dims)
+
+            self.assertEqual(flip_result, flip_result_cpu)
+
+        helper((2, 8, 4, 5), [0])
+        helper((8, 8, 4, 5), [0, 1])
+        helper((2, 8, 4, 5), (0, 1, 2, 3))
+        helper((2, 3, 3), (-1,))
+        # empty dims
+        helper((2, 8, 4, 5), [])
+        # input.numel() == 1
+        helper((1,), (0,))
+        # input.numel() == 0
+        helper((0,), (0,))
+
+
     # Test index select
     def test_index_select(self):
         def helper(shape, dim, index, idx_dtype=torch.int32):
