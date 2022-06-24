@@ -15,7 +15,7 @@
 #else
 #include <ATen/ops/sparse_coo_tensor.h>
 #endif
-#include <iostream>
+
 namespace at {
 namespace native {
 namespace impl {
