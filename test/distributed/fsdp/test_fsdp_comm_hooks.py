@@ -208,7 +208,7 @@ class TestCommunicationHooks(FSDPTest):
                 dummy_hook
             )
             # Check that we can't register comm hook twice
-            with self.assertRaises(AssertionError):
+            with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
                 fsdp_model_with_hook.register_comm_hook(
                     dummy_state,
                     dummy_hook
