@@ -1,5 +1,5 @@
 import inspect
-from typing import Callable, List
+from typing import Callable, Dict, List, Set
 
 
 from torch.fx import GraphModule
@@ -18,6 +18,47 @@ def _validate_pass_schedule_constraint(
                 f" list."
             )
 
+def topological_sort_passes(
+    passes: List[Callable], constraints: List[Callable]
+) -> List[Callable]:
+    if len(constraints) == 0:
+        return passes
+
+    # Construct a graph
+    graph: Dict[Callable, Set[Callable]] = {}
+    visited: Dict[Callable, bool] = {}
+    for p in passes:
+        graph[p] = set()
+        visited[p] = False
+
+    for i, a in enumerate(passes):
+        for j, b in enumerate(passes):
+            if i == j:
+                continue
+
+            for constraint in constraints:
+                if not constraint(a, b):
+                    if b in graph[a]:
+                        graph[a].remove(b)
+                    graph[b].add(a)
+
+    # Topologically sort the graph
+    def topological_sort_util(graph, p, visited, res):
+        visited[p] = True
+
+        for dep in graph[p]:
+            if not visited[dep]:
+                topological_sort_util(graph, dep, visited, res)
+
+        res.append(p)
+
+    res: List[Callable] = []
+    for p in passes:
+        if not visited[p]:
+            topological_sort_util(graph, p, visited, res)
+
+    res.reverse()
+    return res
 
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
     """
@@ -69,8 +110,8 @@ class PassManager:
             after each pass
     """
 
-    passes: List[Callable] = []
-    constraints: List[Callable] = []
+    passes: List[Callable[[GraphModule], None]] = []
+    constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
 
@@ -115,6 +156,13 @@ class PassManager:
             _validate_pass_schedule_constraint(constraint, self.passes)
         self._validated = True
 
+    def solve_constraints(self):
+        """
+        Finds a valid traversal order based on the given constraints and orders
+        the passes based on this order.
+        """
+        self.passes = topological_sort_passes(self.passes, self.constraints)
+
     def add_checks(self, check: Callable) -> None:
         """
         Adds a function which takes runs various checks on a given graph module.
@@ -141,8 +189,8 @@ class PassManager:
         The list of passes will be run until the graph stops changing, or until
         `steps` number of times.
         """
-        # Check constraints
-        self.validate_constraints()
+        # Order the passes based on the constraints
+        self.solve_constraints()
 
         # Lint and check graph invariants
         graph_module.graph.lint()
