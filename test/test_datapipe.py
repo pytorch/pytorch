@@ -2759,6 +2759,50 @@ class TestIterDataPipeGraphFastForward(TestCase):
         graph7 = cdp1.concat(cdp2)
         self._fast_forward_graph_test_helper(graph7, simple_fast_forward_graph, rng=rng)
 
+    def _snapshot_test_helper(self, datapipe, n_iter=3, rng=None):
+        if rng is None:
+            rng = torch.Generator()
+        initial_rng_state = rng.get_state()
+        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        it = iter(datapipe)
+        for _ in range(n_iter):
+            next(it)
+        serialized_graph = pickle.dumps(datapipe)
+        deserialized_graph = pickle.loads(serialized_graph)
+        self.assertEqual(n_iter, datapipe._number_of_samples_yielded)
+        self.assertEqual(n_iter, deserialized_graph._number_of_samples_yielded)
+
+        rng_for_deserialized = torch.Generator()
+        rng_for_deserialized.set_state(initial_rng_state)
+        simple_fast_forward_graph(deserialized_graph, n_iter, rng=rng_for_deserialized)
+        self.assertEqual(list(it), list(deserialized_graph))
+
+    def test_snapshot_simple_fast_forward(self):
+        graph1 = dp.iter.IterableWrapper(range(10))
+        self._snapshot_test_helper(graph1)
+
+        graph2 = graph1.map(_mul_10)
+        self._snapshot_test_helper(graph2)
+
+        rng = torch.Generator()
+        graph3 = graph2.shuffle()
+        self._snapshot_test_helper(graph3)
+
+        graph4 = graph3.map(_mul_10)
+        self._snapshot_test_helper(graph4)
+
+        graph5 = graph4.batch(2)
+        self._snapshot_test_helper(graph5)
+
+        # With `fork` and `zip`
+        cdp1, cdp2 = graph5.fork(2)
+        graph6 = cdp1.zip(cdp2)
+        self._snapshot_test_helper(graph6)
+
+        # With `fork` and `concat`
+        graph7 = cdp1.concat(cdp2)
+        self._snapshot_test_helper(graph7)
+
 
 # class TestIterDataPipeFastForwardWithBuffer(TestCase):
 #
