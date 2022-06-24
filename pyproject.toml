@@ -14,6 +14,7 @@ requires = [
     "six",
     "requests",
     "dataclasses",
+    "usort",
 ]
 # Use legacy backend to import local packages in setup.py
 build-backend = "setuptools.build_meta:__legacy__"
@@ -23,3 +24,7 @@ build-backend = "setuptools.build_meta:__legacy__"
 # Uncomment if pyproject.toml worked fine to ensure consistency with flake8
 # line-length = 120
 target-version = ["py37", "py38", "py39", "py310"]
+
+
+[tool.usort]
+first_party_detection = false
