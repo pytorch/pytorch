@@ -7,7 +7,7 @@ namespace at {
 
 // these are from MPSAllocator
 namespace mps {
-  // to check the requeted non-aligned size of an MTL buffer
+  // to check the requested non-aligned size of an MTL buffer
   ssize_t get_requested_buffer_size(void* ptr);
   // to retrieve the shape of a base tensor from a view tensor
   IntArrayRef get_buffer_shape(void* ptr);
