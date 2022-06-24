@@ -995,7 +995,8 @@ def fetch_check_run_conclusions(repo: GitRepo, commit: str) -> Dict[str, Tuple[s
     if len(checks) == 0:
         raise MandatoryChecksMissingError("Refusing to merge as land check(s) are not yet run")
     for check_run in checks['check_runs']:
-        check_run_conclusions[check_run['name']] = (check_run['conclusion'].upper(), check_run['html_url'])
+        check_run_conclusions[check_run['name']] = (None if check_run['conclusion'] is None else check_run['conclusion'].upper(),
+                                                   check_run['html_url'])
     return check_run_conclusions
 
 def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
@@ -1041,7 +1042,7 @@ def merge(pr_num: int, repo: GitRepo,
         raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
 
     if land_checks:
-        commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
+        commit = pr.create_land_time_check_branch(repo, 'viable/strict2', force=force, comment_id=comment_id)
 
     start_time = time.time()
     last_exception = ''
