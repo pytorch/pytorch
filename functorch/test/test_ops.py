@@ -379,11 +379,6 @@ class TestOperators(TestCase):
         skip('svd_lowrank', ''),  # fails on cuda, runs okay on cpu
         skip('nn.functional.dropout2d', ''),  # fails on cuda, runs okay on cpu
 
-        # The following don't have a forward-mode AD formula in PyTorch core
-        # (check derivatives.yaml).
-        xfail('var_mean'),
-        xfail('std_mean'),
-
         # =============================================
         # NB: The above failures also fail using PyTorch core's
         #     forward-mode AD and vmap.
@@ -674,14 +669,11 @@ class TestOperators(TestCase):
         # skip because this is flaky depending on what the max_norm is!
         skip('nn.functional.embedding', ''),
         xfail('nn.functional.soft_margin_loss', ''),
-        xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('linalg.householder_product'),
         xfail('tensor_split'),
         xfail('quantile'),
-        xfail('var_mean'),
         xfail('as_strided'),
         xfail('nn.functional.gaussian_nll_loss'),
-        xfail('std_mean'),
         xfail('scatter'),
         xfail('matrix_exp'),
         xfail('nanquantile'),
@@ -765,6 +757,8 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_pool3d'),
         xfail('vdot'),
         xfail('linalg.cross'),
+        xfail('nanmean'),
+        xfail('nansum'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
@@ -782,7 +776,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.smooth_l1_loss', ''),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('nn.functional.soft_margin_loss', ''),
-        xfail('nn.functional.binary_cross_entropy_with_logits', ''),
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.embedding', ''),
         xfail('lu_unpack'),
@@ -1044,23 +1037,16 @@ class TestOperators(TestCase):
         # RuntimeError: Trying to set a forward gradient that has a different size than that of the original Tensor,
         # this is not supported. Tensor is of size [5, 2, 3] while the given forward gradient is of size [1, 2, 3].
         xfail('normal', ''),
-        xfail('_masked.amax', ''),
-        xfail('_masked.amin', ''),
         xfail('_masked.log_softmax', ''),
         xfail('_masked.softmax', ''),
         xfail('_masked.softmin', ''),
-        xfail('amax', ''),
-        xfail('amin', ''),
         xfail('cdist', ''),
         xfail('cholesky', ''),
         xfail('eig', ''),
         xfail('linalg.det', ''),
-        xfail('linalg.matrix_norm', ''),
         xfail('linalg.slogdet', ''),
         xfail('logcumsumexp', ''),
         xfail('logdet', ''),
-        xfail('nanmean', ''),
-        xfail('nansum', ''),
         xfail('nn.functional.embedding_bag', ''),
         xfail('nn.functional.grid_sample', ''),
         xfail('nn.functional.hardsigmoid', ''),
@@ -1070,9 +1056,7 @@ class TestOperators(TestCase):
         xfail('nn.functional.softmin', ''),
         xfail('nn.functional.softmin', 'with_dtype'),
         xfail('renorm', ''),
-        xfail('std_mean', ''),
         xfail('symeig', ''),
-        xfail('var_mean', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('nn.functional.kl_div', ''),
         xfail('pca_lowrank', ''),
@@ -1090,7 +1074,6 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', 'mean'),
         xfail('scatter_reduce', 'prod'),
         skip('linalg.householder_product', '', device_type='cuda'),  # flaky, I'm not sure why
-        xfail('nn.functional.binary_cross_entropy_with_logits'),
     }))
     def test_jvpvjp(self, device, dtype, op):
         if not op.supports_autograd:
