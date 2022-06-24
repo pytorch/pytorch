@@ -610,7 +610,7 @@ class TestNestedTensorDeviceType(TestCase):
         nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
         self.assertRaisesRegex(
             RuntimeError,
-            r"Nested matrices cannot be multiplied \(2x4 and 2x4\)",
+            r"0-th nested matrices in batch cannot be multiplied \(2x4 and 2x4\)",
             lambda: nt0.bmm(nt0)
         )
         # normal nested tensor

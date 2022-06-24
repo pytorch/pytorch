@@ -742,7 +742,7 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
     const int64_t& self_size0 = self_shape[0], & self_size1 = self_shape[1],
         & mat2_size0 = mat2_shape[0], & mat2_size1 = mat2_shape[1];
     TORCH_CHECK(self_size1 == mat2_size0,
-        "Nested matrices cannot be multiplied (",
+        i, "-th nested matrices in batch cannot be multiplied (",
         self_size0, "x", self_size1, " and ",
         mat2_size0, "x", mat2_size1, ")");
     out_sizemat_ptr[0] = self_size0;
@@ -753,10 +753,10 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
   }
   Tensor out_buffer = self_buffer.new_empty(out_offsets.back());
   // call tensor mm
-  // TODO: for cpu, maybe use `parallel_for`
-  //       to do that, have to merge `aten/src/ATen/native/cpu/LinearAlgebra.cpp/bmm_out_or_baddbmm_`
-  //       1. it has `parallel_for` and we cannot multi-thread in multi-thread
-  //       2. cannot dispatch in multi-thread (in this case mm_out)
+  // TODO: `padding nested tensor -> bmm -> remove padding` may be more efficient
+  //       until we have specialized nested tensor bmm kernel
+  //       useful resource: `aten/src/ATen/native/cpu/LinearAlgebra.cpp/bmm_out_or_baddbmm_`
+  //                        `aten/src/ATen/native/cuda/Blas.cpp/baddbmm_out_cuda_impl`
   for (int64_t i = 0; i < ntensors; i++) {
     Tensor out = out_buffer.slice(0, out_offsets[i], out_offsets[i + 1]).view(out_shapes[i]);
     at::mm_out(out,
