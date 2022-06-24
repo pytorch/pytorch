@@ -15,6 +15,9 @@ import test_c10d_common
 import weakref
 import tempfile
 from torch._C._distributed_c10d import _create_work_from_future
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+)
 
 def create_work(result):
     future = Future()
@@ -31,8 +34,6 @@ class MyWork(dist._Work):
 
     def wait(self, timeout):
         self.pg_().wait_count += 1
-
-
         return True
 
     def get_future(self):
@@ -93,9 +94,7 @@ class LonelyRankProcessGroup(dist.ProcessGroup):
 class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
     def setUp(self):
         super(AbstractDDPSingleRank, self).setUp()
-        # replicate what MultiProcessTest _spawn_proccess does
-        self.file_name = tempfile.NamedTemporaryFile(delete=False).name
-        self.rank = 0
+        self._spawn_processes()
 
     @property
     def world_size(self):
@@ -143,15 +142,15 @@ class AbstractDDPSingleRank(test_c10d_common.CommonDistributedDataParallelTest):
 
         self._test_ddp_with_process_group(pg, [torch.device("cpu")], device_ids=None, gradient_as_bucket_view=True)
 
-class TestDDPWithWorkSubclass(AbstractDDPSingleRank, TestCase):
-    def setUp(self):
-        super(TestDDPWithWorkSubclass, self).setUp()
-        self.use_wrapper = False
+class TestDDPWithWorkSubclass(AbstractDDPSingleRank, MultiProcessTestCase):
+    @property
+    def use_wrapper(self):
+        return False
 
-class TestDDPWithWorkWrapper(AbstractDDPSingleRank, TestCase):
-    def setUp(self):
-        super(TestDDPWithWorkWrapper, self).setUp()
-        self.use_wrapper = True
+class TestDDPWithWorkWrapper(AbstractDDPSingleRank, MultiProcessTestCase):
+    @property
+    def use_wrapper(self):
+        return True
 
 if __name__ == '__main__':
     run_tests()
