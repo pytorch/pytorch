@@ -248,7 +248,6 @@ jobs:
         ]}
 
   win-vs2019-cuda11_6-py3-build:
-    # don't run build twice on master
     if: github.event_name == 'pull_request'
     name: win-vs2019-cuda11.6-py3
     uses: ./.github/workflows/_win-build.yml

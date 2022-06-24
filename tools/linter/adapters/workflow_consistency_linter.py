@@ -93,7 +93,7 @@ if __name__ == "__main__":
             # remove the "if" field, which we allow to be different between jobs
             # (since you might have different triggering conditions on pull vs.
             # trunk, say.)
-            if hasattr(job, "if"):
+            if "if" in job:
                 del job["if"]
 
             tag_to_jobs[sync_tag].append((path, {job_id: job}))
