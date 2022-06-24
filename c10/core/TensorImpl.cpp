@@ -383,11 +383,6 @@ bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
       " do not have is_contiguous");
 }
 
-int64_t TensorImpl::size_custom(int64_t d) const {
-  // TODO: We could add support to Python dispatch here.
-  d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
-  return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
-}
 IntArrayRef TensorImpl::sizes_custom() const {
   if (is_python_dispatch()) {
     return load_pyobj_interpreter()->sizes(this);
