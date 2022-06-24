@@ -33,7 +33,6 @@ template <EventType>
 struct ExtraFields;
 
 struct TorchOpBasicFields {
-  uint64_t correlation_id_;
   int64_t sequence_number_;
   uint64_t forward_tid_;
   at::RecordScope scope_;
@@ -63,6 +62,7 @@ template <>
 struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   ExtraFields(
       TorchOpBasicFields&& f,
+      uint64_t correlation_id,
       time_t end_time_ns,
       Inputs&& inputs,
       jit_stack_t&& jit_stack,
@@ -70,13 +70,14 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
       extra_args_t&& extra_args,
       FallbackPair&& gpu_fallback)
       : TorchOpBasicFields(std::move(f)),
+        correlation_id_{correlation_id},
         end_time_ns_{end_time_ns},
         inputs_{std::move(inputs)},
         jit_stack_{std::move(jit_stack)},
         jit_modules_{std::move(jit_modules)},
         extra_args_{std::move(extra_args)},
         gpu_fallback_{std::move(gpu_fallback)} {}
-
+  uint64_t correlation_id_;
   time_t end_time_ns_;
   Inputs inputs_;
   jit_stack_t jit_stack_;
@@ -270,7 +271,8 @@ class InputOutputEncoder final {
   void push(const at::Tensor& t);
 
   AppendOnlyList<Tag, IO_ENCODER_DEFAULT_BLOCK_SIZE> tags_;
-  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_metadata_;
+  AppendOnlyList<TensorMetadata, IO_ENCODER_DEFAULT_BLOCK_SIZE>
+      tensor_metadata_;
   AppendOnlyList<int64_t, IO_ENCODER_DEFAULT_BLOCK_SIZE> tensor_sizes_;
 };
 
@@ -322,7 +324,7 @@ class TORCH_API ThreadLocalSubqueue {
  public:
   ThreadLocalSubqueue(const uint64_t tid, const ProfilerConfig& config);
 
-  std::unique_ptr<KinetoObserverContext> begin_op(const at::RecordFunction& fn, uint64_t correlation_id);
+  std::unique_ptr<KinetoObserverContext> begin_op(const at::RecordFunction& fn);
 
   template <class... Args>
   void emplace_backend_event(Args&&... args) {
@@ -355,14 +357,41 @@ class TORCH_API ThreadLocalSubqueue {
   friend class RecordQueue;
   // See `containers.h` for block size benchmarks.
   static constexpr size_t BlockSize = 512;
-  AppendOnlyList<KinetoObserverContext::Event, BlockSize> op_events_;
+
+  template <typename T, size_t ChunkSize>
+  class EventBlock : public std::array<T, ChunkSize> {
+   public:
+    EventBlock();
+    uint64_t correlation_id(const T* ptr) const {
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+          ptr >= this->data() && ptr < this->data() + ChunkSize);
+      return id_start_ + (ptr - this->data());
+    }
+
+   private:
+    uint64_t id_start_;
+  };
+
+  class OpList : public AppendOnlyList<
+                     KinetoObserverContext::Event,
+                     BlockSize,
+                     EventBlock> {
+   public:
+    template <class... Args>
+    std::pair<KinetoObserverContext::Event*, uint64_t> emplace_back(
+        Args&&... args);
+    static uint64_t correlationID(const OpList::Iterator& e);
+  };
+
+  OpList op_events_;
 
   // report_input_shapes
   InputOutputEncoder inputs_outputs_;
 
   // with_stack
   AppendOnlyList<jit_stack_t, BlockSize> jit_stack_;
-  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize> py_calls_;
+  AppendOnlyList<std::pair<python_tracer::TraceKey, approx_time_t>, BlockSize>
+      py_calls_;
 
   // with_modules
   AppendOnlyList<jit_modules_t, BlockSize> jit_modules_;
@@ -396,7 +425,8 @@ class TORCH_API RecordQueue {
   uint32_t id_;
   ProfilerConfig config_;
   std::set<ActivityType> activities_;
-  ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>> sub_queues_;
+  ska::flat_hash_map<uint64_t, std::unique_ptr<ThreadLocalSubqueue>>
+      sub_queues_;
   std::mutex sub_queue_mutex_;
 };
 
