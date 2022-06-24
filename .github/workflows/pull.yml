@@ -92,21 +92,20 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
         ]}
 
-
-  linux-xenial-py3_7-clang7-onnx-build:
-    name: linux-xenial-py3.7-clang7-onnx
+  linux-focal-py3_7-clang10-onnx-build:
+    name: linux-focal-py3.7-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-clang7-onnx
-      docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
+      build-environment: linux-focal-py3.7-clang10-onnx
+      docker-image-name: pytorch-linux-focal-py3-clang10-onnx
 
-  linux-xenial-py3_7-clang7-onnx-test:
-    name: linux-xenial-py3.7-clang7-onnx
+  linux-focal-py3_7-clang10-onnx-test:
+    name: linux-focal-py3.7-clang10-onnx
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-clang7-onnx-build
+    needs: linux-focal-py3_7-clang10-onnx-build
     with:
-      build-environment: linux-xenial-py3.7-clang7-onnx
-      docker-image: ${{ needs.linux-xenial-py3_7-clang7-onnx-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-clang10-onnx
+      docker-image: ${{ needs.linux-focal-py3_7-clang10-onnx-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -161,20 +160,20 @@ jobs:
           { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
-  linux-xenial-cuda11_3-py3_7-gcc7-build:
-    name: linux-xenial-cuda11.3-py3.7-gcc7
+  linux-bionic-cuda11_6-py3_7-gcc7-build:
+    name: linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
-  linux-xenial-cuda11_3-py3_7-gcc7-test:
-    name: linux-xenial-cuda11.3-py3.7-gcc7
+  linux-bionic-cuda11_6-py3_7-gcc7-test:
+    name: linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-cuda11_3-py3_7-gcc7-build
+    needs: linux-bionic-cuda11_6-py3_7-gcc7-build
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
-      docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
+      build-environment: linux-bionic-cuda11.6-py3.7-gcc7
+      docker-image: ${{ needs.linux-bionic-cuda11_6-py3_7-gcc7-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
@@ -209,6 +208,7 @@ jobs:
       build-generates-artifacts: false
 
   linux-bionic-py3_7-clang8-xla-build:
+    if: false
     name: linux-bionic-py3_7-clang8-xla
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -248,14 +248,14 @@ jobs:
         ]}
 
   # please ensure that this and its corresponding job in trunk.yml are in sync
-  win-vs2019-cuda11_3-py3-build:
+  win-vs2019-cuda11_6-py3-build:
     # don't run build twice on master
     if: github.event_name == 'pull_request'
-    name: win-vs2019-cuda11.3-py3
+    name: win-vs2019-cuda11.6-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2019-cuda11.3-py3
-      cuda-version: "11.3"
+      build-environment: win-vs2019-cuda11.6-py3
+      cuda-version: "11.6"
 
   linux-xenial-cuda11_3-py3_7-gcc7-bazel-test:
     name: linux-xenial-cuda11.3-py3.7-gcc7-bazel-test
@@ -306,3 +306,13 @@ jobs:
         { include: [
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
+
+  # please ensure that this and its corresponding job in trunk.yml are in sync
+  linux-bionic-rocm5_1-py3_7-build:
+    # don't run build twice on master
+    if: github.event_name == 'pull_request'
+    name: linux-bionic-rocm5.1-py3.7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-rocm5.1-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7

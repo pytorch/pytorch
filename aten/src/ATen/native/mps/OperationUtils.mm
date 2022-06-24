@@ -109,8 +109,10 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
       return MPSDataTypeInt64;
     case ScalarType::Short:
       return MPSDataTypeInt16;
-    case ScalarType::Byte:
+    case ScalarType::Char:
       return MPSDataTypeInt8;
+    case ScalarType::Byte:
+      return MPSDataTypeUInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
     case ScalarType::Double:
@@ -136,8 +138,10 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       return MPSDataTypeInt64;
     case ScalarType::Short:
       return MPSDataTypeInt16;
-    case ScalarType::Byte:
+    case ScalarType::Char:
       return MPSDataTypeInt8;
+    case ScalarType::Byte:
+      return MPSDataTypeUInt8;
     case ScalarType::Bool:
       return MPSDataTypeBool;
     default:
