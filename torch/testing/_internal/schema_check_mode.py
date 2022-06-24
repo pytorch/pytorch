@@ -45,7 +45,9 @@ class SchemaCheckMode(TorchDispatchMode):
             return False
 
         def has_aliased(lhs, rhs):
-            return torch._C._is_alias_of(lhs, rhs) if type(lhs) == torch.Tensor and type(rhs) == torch.Tensor else False
+            if type(lhs) == torch.Tensor and type(rhs) == torch.Tensor:
+                return torch._C._is_alias_of(lhs, rhs)
+            return False
 
         def is_mutable(arg_alias_pairs):
             for arg in arg_alias_pairs:
@@ -53,13 +55,18 @@ class SchemaCheckMode(TorchDispatchMode):
                     return True
             return False
 
-        def is_aliasing(output_alias_info, arg_alias_pairs):
+        def is_aliasing(output, arg_alias_pairs):
             for arg in arg_alias_pairs:
                 if arg.alias_info is not None:
                     if '*' in arg.alias_info.after_set:
-                        return True
-                    elif output_alias_info is not None and bool(len(output_alias_info.after_set & arg.alias_info.after_set)):
-                        return True
+                        same_types = output.type == arg.type
+                        elems_same_types = (isinstance(output.type, torch._C.ListType) and output.type.getElementType() == arg.type)
+                        if same_types or elems_same_types:
+                            return True
+                    elif output.alias_info is not None:
+                        share_aliasing_sets = bool(len(output.alias_info.after_set & arg.alias_info.after_set))
+                        if share_aliasing_sets:
+                            return True
             return False
 
         def are_args_aliasing(lhs, rhs):
@@ -78,8 +85,7 @@ class SchemaCheckMode(TorchDispatchMode):
                     return e.elem
                 except AttributeError as t:
                     return e
-            else:
-                return e
+            return e
 
         def parse_metadata(e):
             if isinstance(e, torch.Tensor):
@@ -88,11 +94,10 @@ class SchemaCheckMode(TorchDispatchMode):
                         current = e.elem
                         return (deepcopy(current.stride()), current.storage()._cdata)
                     except AttributeError as t:
-                        return e
+                        return None
                 else:
                     return (deepcopy(e.stride()), e.storage()._cdata)
-            else:
-                return e
+            return None
 
         self.ops.append(func._schema.name)
 
@@ -143,12 +148,13 @@ class SchemaCheckMode(TorchDispatchMode):
                     for i in range(len(u_out)):
                         for j in range(len(u_out[i])):
                             if has_aliased(v, u_out[i][j]):
-                                if not is_aliasing(func._schema.returns[i].alias_info, arg_alias_pairs):
+                                if not is_aliasing(func._schema.returns[i], arg_alias_pairs):
                                     raise RuntimeError(f'Argument {name} is not defined to alias output but was aliasing')
                                 else:
                                     self.aliasing.append(Aliasing(func._schema.name, name, f"output_{i}"))
                                     out_alias_pairs_map[i].add(name)
-                if any([has_mutated(i, j, k) for i, j, k in zip(before, after, md)]):
+                                    break
+                if any(has_mutated(i, j, k) for i, j, k in zip(before, after, md)):
                     if not is_mutable(arg_alias_pairs):
                         raise RuntimeError(f"Argument {name} is not defined as mutable but was mutated")
                     else:
@@ -156,7 +162,9 @@ class SchemaCheckMode(TorchDispatchMode):
 
         # Aliasing between outputs
         for i, j in combinations(range(len(func._schema.returns)), 2):
-            if are_args_aliasing(u_out[i], u_out[j]) and not bool(len(out_alias_pairs_map[i] & out_alias_pairs_map[j])):
-                raise RuntimeError(f'Outputs {i} and {j} alias unexpectedly')
+            if are_args_aliasing(u_out[i], u_out[j]):
+                share_aliasing_inputs = bool(len(out_alias_pairs_map[i] & out_alias_pairs_map[j]))
+                if (not share_aliasing_inputs):
+                    raise RuntimeError(f'Outputs {i} and {j} alias unexpectedly')
 
         return out
