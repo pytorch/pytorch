@@ -20,7 +20,7 @@ class TestQuantizer(unittest.TestCase):
         # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
 
-        # generate tensor with random fp values between 0 -> 1
+        # generate tensor with random fp values between 0 -> 1000
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
         observer = APoTObserver(b=4, k=1)
