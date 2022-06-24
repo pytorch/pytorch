@@ -1201,7 +1201,7 @@ def clamp_min(
     self: TensorLikeType,
     min: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    torch.clamp(self, min=min)
+    return torch.clamp(self, min=min)
 
 
 @out_wrapper
@@ -1213,7 +1213,7 @@ def clamp_max(
     self: TensorLikeType,
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    torch.clamp(self, max=max)
+    return torch.clamp(self, max=max)
 
 
 #
