@@ -139,8 +139,7 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block)
 
 BufferBlock* MPSHeapAllocatorImpl::get_allocated_buffer_block(void* ptr)
 {
-  id<MTLBuffer> buf = __builtin_bit_cast(id<MTLBuffer>, ptr);
-  auto it = m_allocated_buffers.find(buf);
+  auto it = m_allocated_buffers.find(ptr);
   if (it == m_allocated_buffers.end())
     return nullptr;
 
