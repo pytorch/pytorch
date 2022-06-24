@@ -21745,15 +21745,15 @@ class TestStateDictHooks(TestCase):
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
 
+    def _hook_with_module(self, *args, **kwargs):
+        pass
+
     def test_no_extra_ref_to_module(self):
         try:
             gc.disable()
             m = nn.Linear(10, 10)
 
-            def hook_with_module(*args, **kwargs):
-                pass
-
-            m._register_load_state_dict_pre_hook(hook_with_module, True)
+            m._register_load_state_dict_pre_hook(self._hook_with_module, True)
             weak_m = weakref.ref(m)
             del m
 
@@ -21761,13 +21761,10 @@ class TestStateDictHooks(TestCase):
         finally:
             gc.enable()
 
-    def _hook_with_module(self, *args, **kwargs):
-        pass
-
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
         m._register_load_state_dict_pre_hook(self._hook_with_module, True)
-        assert pickle.load(pickle.dumps(m)) == m
+        assert pickle.loads(pickle.dumps(m)) == m
 
     def test_load_state_dict_module_pre_hook(self):
         hook_called = 0
