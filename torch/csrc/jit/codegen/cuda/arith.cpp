@@ -949,6 +949,17 @@ static TensorView* newForReduction(
   return IrBuilder::create<TensorView>(td, data_type);
 }
 
+namespace {
+
+// PyTorch accepts reductions of zero-dimensional tensors, which are
+// just ignored.
+TensorView* reductionOpZeroDimTensor(TensorView* inp) {
+  TORCH_INTERNAL_ASSERT(inp->domain()->noReductions().size() == 0);
+  return set(inp);
+}
+
+} // namespace
+
 TensorView* reductionOp(
     BinaryOpType reduction_op_type,
     const std::vector<int>& axes,
@@ -964,9 +975,12 @@ TensorView* reductionOp(
       TensorDomain::sameAs(tv->getMaybeRFactorDomain(), tv->domain()->domain()),
       "Reducing a tensor once it's gone under transformations is not permitted at this time. Please set reductions before calling split/merge/computeAt.");
 
-  TORCH_CHECK(tv->nDims() > 0, "Tried to reduce a 0-dim tensor");
-
   TORCH_CHECK(axes.size() > 0, "No reduction axis specified");
+
+  // PyTorch allows reduction of 0-dim tensors
+  if (tv->domain()->noReductions().size() == 0) {
+    return reductionOpZeroDimTensor(tv);
+  }
 
   std::vector<unsigned int> uint_axes;
   const int ndims = tv->domain()->noReductions().size();
