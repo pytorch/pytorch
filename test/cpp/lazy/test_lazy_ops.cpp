@@ -7311,6 +7311,25 @@ TEST_F(LazyOpsTest, TestNarrowCopy) {
   }
 }
 
+TEST_F(LazyOpsTest, NonZeroNarrowCopy) {
+  FLAGS_ltc_enable_symbolic_shapes = true;
+  auto x_cpu = torch::rand({10});
+  auto y_cpu = torch::nonzero(x_cpu);
+  int64_t y0_cpu_size = y_cpu.sizes()[0];
+  auto b_cpu = torch::randn({10}); // a base tensor so we can compute with symint
+  auto z_cpu = b_cpu.narrow_copy(0, 0, y0_cpu_size);
+
+  // Same operations, but on LAZY tensor
+  auto x_lazy = x_cpu.to(kLazy);
+  auto y_lazy = torch::nonzero(x_lazy);
+  // y_lazy is a lazy tensor with the upper bound x_lazy.size(0)
+  SymInt y0_lazy_size = y_lazy.sym_sizes()[0];
+  auto b_lazy = b_cpu.to(kLazy);
+  auto z_lazy = b_lazy.narrow_copy_symint(0, 0, y0_lazy_size);
+  ASSERT_EQ(y_lazy.sizes()[0], 10);
+  FLAGS_ltc_enable_symbolic_shapes = false;
+}
+
 TEST_F(LazyOpsTest, TestViewAs) {
   torch::Tensor input = torch::rand(
       {32, 20, 4, 4},
