@@ -171,8 +171,10 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
 {
   IntArrayRef base_shape = get_buffer_shape(self.storage().data());
   if (base_shape.size() == 0) {
+    // IntArrayRef wouldn't own the data, so we use a static storage
+    static const int64_t shape_1d = 1;
     // self.sizes().size() could be zero
-    base_shape = self.sizes().size() ? self.sizes() : IntArrayRef({1});
+    base_shape = self.sizes().size() ? self.sizes() : IntArrayRef(&shape_1d, 1);
     // base_shape will be retained in MPSAllocator until buffer gets recycled
     if (self.storage().data())
       set_buffer_shape(self.storage().data(), base_shape);
