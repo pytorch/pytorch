@@ -2271,6 +2271,24 @@ def _var_nvfuser(
     return fd.Ops.var(a, dims, correction, keep_dims)
 
 
+def _amax_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.max(a, dims, keep_dims)
+
+
+def _amin_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.min(a, dims, keep_dims)
+
+
 var = _make_var_reduction_prim(
     name="var",
     impl_aten=torch.var,
@@ -2281,12 +2299,14 @@ var = _make_var_reduction_prim(
 amax = _make_reduction_prim(
     name="amax",
     impl_aten=torch.amax,
+    impl_nvfuser=_amax_nvfuser,
     doc=_amax_doc,
 )
 
 amin = _make_reduction_prim(
     name="amin",
     impl_aten=torch.amin,
+    impl_nvfuser=_amin_nvfuser,
     doc=_amin_doc,
 )
 
