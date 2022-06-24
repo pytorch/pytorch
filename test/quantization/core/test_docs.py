@@ -33,11 +33,10 @@ class TestQuantizationDocs(QuantizationTestCase):
 
         def get_correct_path(path_from_pytorch):
             r"""
-            Current working directory when CI is running test seems to vary (and the repo is
-            often not named pytorch), this function looks for docs and if it finds
-            it looks for the path to the file and if the file exists returns that
-            path, otherwise keeps looking. Will only work if cwd contains pytorch or docs
-            or a parent contains docs.
+            Current working directory when CI is running test seems to vary, this function
+            looks for docs and if it finds it looks for the path to the
+            file and if the file exists returns that path, otherwise keeps looking. Will
+            only work if cwd contains pytorch or docs or a parent contains docs.
             """
             # get cwd
             cur_dir_path = Path(".").resolve()
@@ -95,10 +94,7 @@ class TestQuantizationDocs(QuantizationTestCase):
                 )
             )
             return code
-<<<<<<< HEAD
 
-=======
->>>>>>> 6ef92627c98 ([ao][docs] tests for quantization docs)
         return None
 
     def _test_code(self, code, global_inputs=None):
