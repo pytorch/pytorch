@@ -992,6 +992,8 @@ def fetch_check_run_conclusions(repo: GitRepo, commit: str) -> Dict[str, Tuple[s
     [owner, name] = repo.gh_owner_and_name()
     checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
     check_run_conclusions = {}
+    if len(checks) == 0:
+        raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) are not yet run")
     for check_run in checks['check_runs']:
         check_run_conclusions[check_run['name']] = (check_run['conclusion'].upper(), check_run['html_url'])
     return check_run_conclusions
