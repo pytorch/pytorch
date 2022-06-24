@@ -34,10 +34,9 @@ from torch.testing._internal.common_cuda import (
     _get_torch_cuda_version, _get_magma_version)
 from torch.testing._internal.common_utils import \
     (is_iterable_of_tensors,
-     random_symmetric_matrix, random_symmetric_psd_matrix,
      make_fullrank_matrices_with_distinct_singular_values,
-     random_symmetric_pd_matrix, make_symmetric_matrices,
-     make_symmetric_pd_matrices, random_square_matrix_of_rank,
+     make_symmetric_matrices,
+     make_symmetric_pd_matrices,
      TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, IS_X86, TEST_SCIPY,
      torch_to_numpy_dtype_dict, TEST_WITH_ASAN,
      GRADCHECK_NONDET_TOL, slowTest, noncontiguous_like,
@@ -1455,31 +1454,15 @@ def sample_inputs_tensor_split(op_info, device, dtype, requires_grad, **kwargs):
 
 
 def sample_inputs_linalg_det(op_info, device, dtype, requires_grad, **kwargs):
-    kw = dict(device=device, dtype=dtype)
-    inputs = [
-        make_tensor((S, S), **kw),
-        make_tensor((1, 1), **kw),  # 1x1
-        random_symmetric_matrix(S, **kw),  # symmetric
-        random_symmetric_psd_matrix(S, **kw),  # symmetric_psd
-        random_symmetric_pd_matrix(S, **kw),  # symmetric_pd
+    make_fullrank = make_fullrank_matrices_with_distinct_singular_values
+    make_arg = partial(make_fullrank, dtype=dtype, device=device, requires_grad=requires_grad)
+    batches = [(), (0, ), (3, )]
+    ns = [0, 1, 5]
 
-        random_square_matrix_of_rank(S, S - 2, **kw),  # dim2_null
-        random_square_matrix_of_rank(S, 1, **kw),  # rank1
-        random_square_matrix_of_rank(S, 2, **kw),  # rank2
+    for batch, n, in product(batches, ns):
+        shape = batch + (n, n)
+        yield SampleInput(make_arg(*shape))
 
-        make_fullrank_matrices_with_distinct_singular_values(S, S, **kw),  # full rank
-        make_tensor((3, 3, S, S), **kw),  # batched
-        make_tensor((3, 3, 1, 1), **kw),  # batched_1x1
-        random_symmetric_matrix(S, 3, **kw),  # batched_symmetric
-        random_symmetric_psd_matrix(S, 3, **kw),  # batched_symmetric_psd
-        random_symmetric_pd_matrix(S, 3, **kw),  # batched_symmetric_pd
-        make_fullrank_matrices_with_distinct_singular_values(S, 3, 3, **kw),  # batched fullrank
-        make_tensor((0, 0), **kw),
-        make_tensor((0, S, S), **kw),
-    ]
-    for t in inputs:
-        t.requires_grad = requires_grad
-    return [SampleInput(t) for t in inputs]
 
 def sample_inputs_linalg_det_singular(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype)
@@ -12374,6 +12357,8 @@ op_db: List[OpInfo] = [
            aliases=('det',),
            dtypes=floating_and_complex_types(),
            backward_dtypes=floating_and_complex_types(),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack,
@@ -12386,6 +12371,8 @@ op_db: List[OpInfo] = [
            aliases=('det',),
            dtypes=double_types(),
            backward_dtypes=double_types(),
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
            aten_name='linalg_det',
            sample_inputs_func=sample_inputs_linalg_det_singular,
            decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack,
@@ -12393,9 +12380,7 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            supports_inplace_autograd=False,
            skips=(
-               # These tests started breaking after touching the SVD.
-               DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_grad', device_type='cpu',
-                            dtypes=(torch.complex128,), active_if=IS_WINDOWS),
+               DecorateInfo(unittest.skip("Skipped!"), "TestGradients", 'test_fn_fwgrad_bwgrad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestGradients', 'test_fn_gradgrad'),
                # dtypes are tested in the suite above, no need to repeat it for singular
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -20052,8 +20037,18 @@ python_ref_db = [
         torch_opinfo_name="asin",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.asinh",
+        torch_opinfo_name="asinh",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.atanh",
+        torch_opinfo_name="atanh",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
