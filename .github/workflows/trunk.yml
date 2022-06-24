@@ -261,5 +261,3 @@ jobs:
   android-emulator-build-test:
     name: android-emulator-build-test
     uses: ./.github/workflows/_run_android_tests.yml
-    with:
-      job-base-name: android-emulator-build-test
