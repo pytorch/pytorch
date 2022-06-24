@@ -8297,6 +8297,7 @@
   dispatch:
     CPU: cpu_equal
     CUDA: cuda_equal
+    MPS: mps_equal
     QuantizedCPU: equal_quantized_cpu
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
