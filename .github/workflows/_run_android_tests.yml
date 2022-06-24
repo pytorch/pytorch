@@ -2,6 +2,10 @@ name: android-tests
 
 on:
   workflow_call:
+    inputs:
+      job-base-name:
+        required: true
+        type: string
 
 defaults:
   run:
@@ -11,7 +15,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-latest
     env:
-      JOB_BASE_NAME: ubuntu-latest-android-tests
+      JOB_BASE_NAME: ${{ inputs.job-base-name }}
     steps:
       - name: Setup miniconda
         uses: conda-incubator/setup-miniconda@v2
