@@ -2792,6 +2792,9 @@
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
 
+- name: special_airy_ai(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_bessel_j0(Tensor self) -> Tensor
   self: non_differentiable
 
