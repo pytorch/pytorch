@@ -324,7 +324,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "conj_physical_",
     "_neg_view",
     "_reshape_alias",
-    "_linalg_det",
+    "_det_lu_based_helper",
     "lu_solve",
     "linalg_solve_triangular",
     "linalg_pinv",

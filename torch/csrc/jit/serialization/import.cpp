@@ -314,13 +314,6 @@ Module import_ir_module(
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
   in.seekg(0, in.beg);
-  // NOTE: Zipformat can be large files. So using stream version directly
-  // instead of reading the file all at once.
-  if (getFileFormat(in) != FileFormat::FlatbufferFileFormat) {
-    auto reader = torch::make_unique<PyTorchStreamReader>(&in);
-    ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-    return deserializer.deserialize(device, extra_files);
-  }
   std::shared_ptr<char> data;
   size_t size = 0;
   std::tie(data, size) = get_stream_content(in);
@@ -357,13 +350,6 @@ Module import_ir_module(
     const std::string& filename,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  // NOTE: Zipformat can be large files. So using stream version directly
-  // instead of reading the file all at once.
-  if (getFileFormat(filename) != FileFormat::FlatbufferFileFormat) {
-    auto reader = torch::make_unique<PyTorchStreamReader>(filename);
-    ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-    return deserializer.deserialize(device, extra_files);
-  }
   std::shared_ptr<char> data;
   size_t size = 0;
   std::tie(data, size) = get_file_content(filename.c_str());
@@ -392,9 +378,10 @@ Module import_ir_module(
     std::shared_ptr<ReadAdapterInterface> rai,
     c10::optional<at::Device> device,
     ExtraFilesMap& extra_files) {
-  auto reader = std::make_shared<PyTorchStreamReader>(std::move(rai));
-  ScriptModuleDeserializer deserializer(std::move(cu), std::move(reader));
-  return deserializer.deserialize(device, extra_files);
+  std::shared_ptr<char> data;
+  size_t size = 0;
+  std::tie(data, size) = get_rai_content(rai.get());
+  return _load_jit_module_from_bytes(data, size, cu, device, extra_files);
 }
 
 Module load(std::istream& in, c10::optional<at::Device> device) {

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import os
-import random
 import unittest
-from typing import Any, Mapping, Type
 
 import numpy as np
 import onnxruntime
@@ -33,27 +31,11 @@ pytorch_operator_dir = os.path.join(onnx_model_dir, "pytorch-operator")
 _ORT_PROVIDERS = ("CPUExecutionProvider",)
 
 
-def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
+def _run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
     kwargs["ort_providers"] = _ORT_PROVIDERS
     kwargs["opset_version"] = test_suite.opset_version
     kwargs["keep_initializers_as_inputs"] = test_suite.keep_initializers_as_inputs
     return verification.verify(*args, **kwargs)
-
-
-def parameterize_class_name(cls: Type, idx: int, input_dicts: Mapping[Any, Any]):
-    """Combine class name with the parameterized arguments.
-
-    This function is passed to `parameterized.parameterized_class` as the
-    `class_name_func` argument.
-    """
-    suffix = "_".join(f"{k}_{v}" for k, v in input_dicts.items())
-    return f"{cls.__name__}_{suffix}"
-
-
-def set_rng_seed(seed):
-    torch.manual_seed(seed)
-    random.seed(seed)
-    np.random.seed(seed)
 
 
 class _TestONNXRuntime(unittest.TestCase):
@@ -62,10 +44,11 @@ class _TestONNXRuntime(unittest.TestCase):
     is_script = False
 
     def setUp(self):
-        set_rng_seed(0)
+        torch.manual_seed(0)
         onnxruntime.set_seed(0)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(0)
+        np.random.seed(seed=0)
         os.environ["ALLOW_RELEASED_ONNX_OPSET_ONLY"] = "0"
         self.is_script_test_enabled = True
 
@@ -86,12 +69,12 @@ class _TestONNXRuntime(unittest.TestCase):
         input_names=None,
         output_names=None,
         fixed_batch_size=False,
-        training=torch.onnx.TrainingMode.EVAL,
+        training=None,
         remained_onnx_input_idx=None,
         verbose=False,
     ):
         def _run_test(m, remained_onnx_input_idx, flatten=True):
-            return run_model_test(
+            return _run_model_test(
                 self,
                 m,
                 input_args=input_args,

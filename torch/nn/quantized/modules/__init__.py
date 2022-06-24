@@ -10,7 +10,6 @@ from .conv import Conv1d, Conv2d, Conv3d
 from .conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .linear import Linear
 from .embedding_ops import Embedding, EmbeddingBag
-from .rnn import LSTM
 
 from .functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 
@@ -110,7 +109,6 @@ __all__ = [
     'LayerNorm',
     'LeakyReLU',
     'Linear',
-    'LSTM',
     'MaxPool2d',
     'Quantize',
     'ReLU6',

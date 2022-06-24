@@ -1444,14 +1444,6 @@ class TestMPS(TestCase):
                          torch.tensor(4, dtype=torch.int32))
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
-        # Cast int8 and uint8 to float and compare results
-        # See https://github.com/pytorch/pytorch/issues/80009 for more details
-        cpu_byte = torch.tensor([60, 160, 20, 220], dtype=torch.uint8)
-        cpu_char = torch.tensor([60, -60, 20, -120], dtype=torch.uint8)
-        for x_cpu in [cpu_byte, cpu_char]:
-            x_mps = x_cpu.to('mps')
-            self.assertEqual(x_mps.to(torch.float32), x_cpu.to(torch.float32))
-
 
     def test_setitem_scalar(self) -> None:
         device = 'mps'

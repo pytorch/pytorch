@@ -7770,17 +7770,16 @@ TEST(StaticRuntime, autogen_linalg_cond) {
 
 TEST(StaticRuntime, autogen_linalg_solve) {
   const std::string script = R"IR(
-    graph(%A: Tensor, %B: Tensor, %left: bool):
+    graph(%input: Tensor, %other: Tensor):
         %bias: None = prim::Constant()
-        %ret = aten::linalg_solve(%A, %B, %left)
+        %ret = aten::linalg_solve(%input, %other)
         %cloned = aten::clone(%ret, %bias)
         return (%cloned)
   )IR";
 
-  auto A0 = at::rand({6, 6, 6});
-  auto B0 = at::rand({6, 6, 6});
-  auto left0 = false;
-  std::vector<IValue> args{A0, B0, left0};
+  auto input0 = at::rand({6, 6, 6});
+  auto other0 = at::rand({6, 6, 6});
+  std::vector<IValue> args{input0, other0};
   testStaticRuntime(
       script,
       args,
@@ -7789,10 +7788,9 @@ TEST(StaticRuntime, autogen_linalg_solve) {
       /*use_equalnan=*/false,
       /*check_resize=*/true);
 
-  auto A1 = at::rand({22, 22, 22});
-  auto B1 = at::rand({22, 22, 22});
-  auto left1 = false;
-  std::vector<IValue> args2{A1, B1, left1};
+  auto input1 = at::rand({22, 22, 22});
+  auto other1 = at::rand({22, 22, 22});
+  std::vector<IValue> args2{input1, other1};
   testStaticRuntime(
       script,
       args,

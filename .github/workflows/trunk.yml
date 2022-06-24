@@ -234,7 +234,6 @@ jobs:
           { config: "force_on_cpu", shard: 1, num_shards: 1, runner: "windows.4xlarge" },
         ]}
 
-  # please ensure that this and its corresponding job in pull.yml are in sync
   linux-bionic-rocm5_1-py3_7-build:
     name: linux-bionic-rocm5.1-py3.7
     uses: ./.github/workflows/_linux-build.yml

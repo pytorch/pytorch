@@ -183,8 +183,12 @@ void FunctionalTensorWrapper::replace_(const Tensor& other) {
   value_ = other;
   // out= ops are allowed to resize the output tensors, mutating both the data and metadata of the tensor.
   // We need to propagate that metadata mutation to the wrapper (new size).
-  set_sizes_and_strides(value_.sizes(), value_.strides());
-  set_storage_offset(value_.storage_offset());
+  if (sizes() != value_.sizes() || strides() != value_.strides()) {
+    set_sizes_and_strides(value_.sizes(), value_.strides());
+  }
+  if (storage_offset() != value_.storage_offset()) {
+    set_storage_offset(value_.storage_offset());
+  }
   if (dtype() != value_.unsafeGetTensorImpl()->dtype() || layout() != value_.unsafeGetTensorImpl()->layout()) {
     value_ = value_.to(c10::TensorOptions().dtype(dtype()).layout(layout()));
   }
@@ -281,12 +285,7 @@ c10::intrusive_ptr<TensorImpl> FunctionalTensorWrapper::shallow_copy_and_detach_
       /*src_impl=*/this,
       /*dest_impl=*/impl.get(),
       /*version_counter=*/std::forward<VariableVersion>(version_counter),
-      // I want to confirm with someone that this is reasonable.
-      // The autograd kernel for detach() always creates a view of the output
-      // with "allow_tensor_metadata_changes" set to false.
-      // We *always* want this flag to be true for FunctionalTensorWrapper though,
-      // Since mutations later on can changes the size/stride metadata on the wrapper.
-      /*allow_tensor_metadata_change=*/true);
+      /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
   impl->refresh_numel();
   impl->refresh_contiguous();
   return impl;
