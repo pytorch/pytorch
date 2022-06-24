@@ -1,15 +1,15 @@
 // (c) Facebook, Inc. and its affiliates. Confidential and proprietary.
 
 #include <gtest/gtest.h>
-#include <torch/csrc/deploy/deploy.h>
+#include <multipy/runtime/deploy.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 
 using namespace ::testing;
 using namespace caffe2;
 
-const char* simple = "torch/csrc/deploy/example/generated/simple";
-const char* simpleJit = "torch/csrc/deploy/example/generated/simple_jit";
+const char* simple = "multipy/runtime/example/generated/simple";
+const char* simpleJit = "multipy/runtime/example/generated/simple_jit";
 
 // TODO(jwtan): Try unifying cmake and buck for getting the path.
 const char* path(const char* envname, const char* path) {
@@ -17,7 +17,7 @@ const char* path(const char* envname, const char* path) {
   return env ? env : path;
 }
 
-// Run `python torch/csrc/deploy/example/generate_examples.py` before running
+// Run `python multipy/runtime/example/generate_examples.py` before running
 // the following tests.
 // TODO(jwtan): Figure out a way to automate the above step for development. (CI
 // has it already.)
