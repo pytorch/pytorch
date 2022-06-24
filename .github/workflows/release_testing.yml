@@ -52,14 +52,14 @@ jobs:
           # echo "RESULT_DIR=${HOME}/release-testing/1.11.0" >> $GITHUB_ENV
           # link: https://anaconda.org/pytorch-test/pytorch
           # conda install -y -c pytorch-test pytorch=1.12.0 torchvision torchtext
-          # wget -q https://download.pytorch.org/whl/nightly/cu113/torch-1.12.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl -O pytorch.whl
-          # wget -q https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl -O torchvision.whl
-          # wget -q https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220512-cp38-cp38-linux_x86_64.whl -O torchtext.whl
-          # pip install ./pytorch.whl  ./torchvision.whl ./torchtext.whl
-          pip install https://download.pytorch.org/whl/nightly/cu113/torch-1.12.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl \
-          	      https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl \
-                      https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220512-cp38-cp38-linux_x86_64.whl
-          echo "RESULT_DIR=${HOME}/release-testing/20220512" >> $GITHUB_ENV
+          # pip install https://download.pytorch.org/whl/nightly/cu113/torch-1.12.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl \
+          # 	      https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl \
+          #             https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220512-cp38-cp38-linux_x86_64.whl
+          # echo "RESULT_DIR=${HOME}/release-testing/20220512" >> $GITHUB_ENV
+          pip install https://download.pytorch.org/whl/nightly/cu113/torch-1.12.0.dev20220425%2Bcu113-cp38-cp38-linux_x86_64.whl \
+                      https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220425%2Bcu113-cp38-cp38-linux_x86_64.whl \
+                      https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220425-cp38-cp38-linux_x86_64.whl
+          echo "RESULT_DIR=${HOME}/release-testing/20220425" >> $GITHUB_ENV
           python -c "import torch"
           python -c "import torchvision"
           python -c "import torchtext"
