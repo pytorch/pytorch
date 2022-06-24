@@ -45,7 +45,9 @@ __all__ = [
     "acos",
     "acosh",
     "asin",
+    "asinh",
     "atan",
+    "atanh",
     "cos",
     "cosh",
     "bessel_i0",
@@ -519,10 +521,24 @@ asin = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+asinh = _make_elementwise_unary_prim(
+    "asinh",
+    impl_aten=torch.asinh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 atan = _make_elementwise_unary_prim(
     "atan",
     impl_aten=torch.atan,
     impl_nvfuser=_atan_nvfuser,  # type: ignore[name-defined]
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+atanh = _make_elementwise_unary_prim(
+    "atanh",
+    impl_aten=torch.atanh,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
