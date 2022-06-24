@@ -1,10 +1,11 @@
-import os
 import fnmatch
-import warnings
 import inspect
+import os
+import warnings
 
 from io import IOBase
-from typing import Dict, Iterable, List, Tuple, Union, Optional, Callable
+from functools import partial
+from typing import Callable, Dict, Iterable, List, Tuple, Union, Optional
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
@@ -28,7 +29,7 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     Returns:
         None.
     Raises:
-        TypeError: If the function is not compatible with the input column.
+        ValueError: If the function is not compatible with the input column.
     """
     sig = inspect.signature(fn)
     if isinstance(input_col, (list, tuple)):
@@ -39,25 +40,52 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     if len(sig.parameters) > sz:
         non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
         if len(non_default_params) > sz:
+            fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
             raise ValueError(
-                f"The function {fn.__name__} takes {len(non_default_params)} "
+                f"The function {fn_name} takes {len(non_default_params)} "
                 f"non-default parameters, but {sz} are required for the given `input_col`."
             )
 
     if len(sig.parameters) < sz:
+        fn_name = fn.__name__ if hasattr(fn, "__name__") else str(fn)
         raise ValueError(
-            f"The function {fn.__name__} takes {len(sig.parameters)} "
+            f"The function {fn_name} takes {len(sig.parameters)} "
             f"parameters, but {sz} are required for the given `input_col`."
         )
 
 
-def _check_lambda_fn(fn):
-    # Partial object has no attribute '__name__', but can be pickled
-    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+def _is_local_fn(fn):
+    return fn.__code__.co_flags & inspect.CO_NESTED
+
+
+def _check_unpickable_fn(fn: Callable):
+    """
+    Checks function is pickable or not. If it is a lambda or local function, a UserWarning
+    will be raised. If it's not a callable function, a TypeError will be raised.
+    """
+    if not callable(fn):
+        raise TypeError(f"A callable function is expected, but {type(fn)} is provided.")
+
+    # Extract function from partial object
+    # Nested partial function is automatically expanded as a single partial object
+    if isinstance(fn, partial):
+        fn = fn.func
+
+    # Local function
+    if _is_local_fn(fn) and not DILL_AVAILABLE:
         warnings.warn(
-            "Lambda function is not supported for pickle, please use "
+            "Local function is not supported by pickle, please use "
             "regular python function or functools.partial instead."
         )
+        return
+
+    # Lambda function
+    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+        warnings.warn(
+            "Lambda function is not supported by pickle, please use "
+            "regular python function or functools.partial instead."
+        )
+        return
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
