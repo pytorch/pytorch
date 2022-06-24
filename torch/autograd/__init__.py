@@ -333,7 +333,7 @@ from torch._C._autograd import (DeviceType, ProfilerActivity, ProfilerState, Pro
                                 _supported_activities, _add_metadata_json, SavedTensor,
                                 _push_saved_tensors_default_hooks, _pop_saved_tensors_default_hooks)
 
-from torch._C._autograd import (_ProfilerResult, _KinetoEvent, _ProfilerEvent, _kineto_step,
+from torch._C._autograd import (_ProfilerResult, _KinetoEvent, _kineto_step,
                                 _prepare_profiler, _enable_profiler, _disable_profiler)
 
 from . import profiler

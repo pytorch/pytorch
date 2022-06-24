@@ -1194,17 +1194,17 @@ class TestExperimentalUtils(TestCase):
         ]
 
         cpu_events = [
-            MockProfilerEvent("CPU", 1, 0, 100000),
-            MockProfilerEvent("CPU", 2, 100001, 100000),
-            MockProfilerEvent("CPU", 3, 200001, 100000),
-            MockProfilerEvent("CPU", 4, 300001, 100000),
-            MockProfilerEvent("CPU", 5, 400001, 100000),
-            MockProfilerEvent("CPU", 6, 500001, 100000),
-            MockProfilerEvent("CPU", 7, 600001, 100000),
-            MockProfilerEvent("CPU", 8, 700001, 100000),
-            MockProfilerEvent("CPU", 9, 800001, 100000),
-            MockProfilerEvent("CPU", 10, 900001, 100000),
-            MockProfilerEvent("CPU", 11, 1000001, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 1, 0, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 2, 100001, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 3, 200001, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 4, 300001, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 5, 400001, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 6, 500001, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 7, 600001, 100000),
+            MockProfilerEvent("CPU (After GPU)", 8, 700001, 100000),
+            MockProfilerEvent("CPU (After GPU)", 9, 800001, 100000),
+            MockProfilerEvent("CPU (After GPU)", 10, 900001, 100000),
+            MockProfilerEvent("CPU (No Event)", 11, 1000001, 100000),
         ]
 
         profiler = unittest.mock.Mock()
@@ -1242,7 +1242,7 @@ class TestExperimentalUtils(TestCase):
                 res += f"{data.queue_depth} [{event.name()}]\n"
             return res
 
-        # We have to use Mock because time series data is too flakey to test
+        # We have to use Mock because time series data is too flaky to test
         profiler = self.generate_mock_profile()
         basic_evaluation = _utils.BasicEvaluation(profiler)
         self.assertExpectedInline(
@@ -1260,17 +1260,17 @@ class TestExperimentalUtils(TestCase):
                 basic_evaluation.metrics[k]
                 for k in basic_evaluation.event_keys
             ], basic_evaluation.events), """\
-0 [CPU]
-0 [CPU]
-0 [CPU]
-0 [CPU]
-1 [CPU]
-2 [CPU]
-3 [CPU]
-2 [CPU]
-1 [CPU]
-0 [CPU]
-0 [CPU]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+1 [CPU (After cudaLaunchKernel)]
+2 [CPU (After cudaLaunchKernel)]
+3 [CPU (After cudaLaunchKernel)]
+2 [CPU (After GPU)]
+1 [CPU (After GPU)]
+0 [CPU (After GPU)]
+0 [CPU (No Event)]
 """)
 
     def test_utils_compute_queue_depth_when_no_cuda_events(self):
