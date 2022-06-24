@@ -18,6 +18,7 @@ tag="${DOCKER_TAG}"
 
 registry="308535385114.dkr.ecr.us-east-1.amazonaws.com"
 image="${registry}/pytorch/${IMAGE_NAME}"
+ghcr_image="ghcr.io/pytorch/${IMAGE_NAME}"
 
 login() {
   aws ecr get-authorization-token --region us-east-1 --output text --query 'authorizationData[].authorizationToken' |
@@ -49,6 +50,13 @@ fi
 # Only push if `DOCKER_SKIP_PUSH` = false
 if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
   docker push "${image}:${tag}"
+
+  if [ "${BUILD_TYPE}" = "release" ]; then
+    # Push docker image to the ghcr.io
+    echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+    docker tag "${image}:${tag}" "${ghcr_image}:${tag}"
+    docker push "${ghcr_image}:${tag}"
+  fi
 fi
 
 if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then
