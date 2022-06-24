@@ -60,7 +60,7 @@ except ImportError:
 
 
 class TestProxyTensor(TestCase):
-    def test_make_fx(self, device):
+    def test_make_fx_simple(self, device):
         def f(x):
             return torch.sin(x)
         inp = torch.randn(3)
@@ -219,12 +219,12 @@ fake_tensor_failures = {
     xfail('mvlgamma', 'mvlgamma_p_5'),
     xfail('cholesky'),
     xfail('cholesky_inverse'),
-    # unknown
-    xfail('nn.functional.embedding_bag'),
+    # ASAN failures due to divide by 0
+    skip('nn.functional.nll_loss'),
 }
 
 
-def test_make_fx(self, device, dtype, op, use_fake):
+def _test_make_fx_helper(self, device, dtype, op, use_fake):
     def f(args, kwargs):
         return op.op(*args, **kwargs)
     sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
@@ -252,12 +252,12 @@ class TestProxyTensorOpInfo(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
     def test_make_fx_exhaustive(self, device, dtype, op):
-        test_make_fx(self, device, dtype, op, False)
+        _test_make_fx_helper(self, device, dtype, op, False)
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
-        test_make_fx(self, device, dtype, op, True)
+        _test_make_fx_helper(self, device, dtype, op, True)
 
 
 

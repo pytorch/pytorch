@@ -9,7 +9,6 @@ import torch
 from torch._C import _disabled_torch_function_impl
 import torch.utils._pytree as pytree
 from torch.fx import Tracer, GraphModule
-from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import FakeTensorMode
 import torch.fx as fx
 from torch.utils._mode_utils import no_dispatch
@@ -40,7 +39,7 @@ def enable_strict(val):
     global IS_STRICT
     IS_STRICT = val
 
-def wrap_output(real_out, proxy_out):
+def wrap_output(inner_res, proxy_res):
     def wrap_with_proxy(e, proxy):
         if isinstance(e, torch.Tensor):
             with no_dispatch():
@@ -51,21 +50,20 @@ def wrap_output(real_out, proxy_out):
     # Unfortunately, tree_map cannot directly be used here. As the resulting
     # object may be a proxy that represents a tuple, we may need to
     # explicitly unwrap the proxy by simulating the flattening operations.
-    if isinstance(real_out, tuple):
-        return tuple(wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out))
-    elif isinstance(real_out, list):
-        return list([wrap_with_proxy(e, proxy_out[idx]) for idx, e in enumerate(real_out)])
-    elif isinstance(real_out, torch.Tensor):
-        return wrap_with_proxy(real_out, proxy_out)
+    if isinstance(inner_res, tuple):
+        return tuple(wrap_with_proxy(e, proxy_res[idx]) for idx, e in enumerate(inner_res))
+    elif isinstance(inner_res, list):
+        return list([wrap_with_proxy(e, proxy_res[idx]) for idx, e in enumerate(inner_res)])
+    elif isinstance(inner_res, torch.Tensor):
+        return wrap_with_proxy(inner_res, proxy_res)
     else:
-        return real_out
+        return inner_res
 
 from torch.testing._internal.composite_compliance import check_metadata_consistency
 
 def proxy_call(func_overload, args, kwargs=None):
-    if func_overload == torch.ops.prim.device.default:
-        return args[0].fake_device
-
+    if kwargs is None:
+        kwargs = {}
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
@@ -85,20 +83,20 @@ def proxy_call(func_overload, args, kwargs=None):
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
 
-    proxy_out = func_overload(*proxy_args, **proxy_kwargs)
+    proxy_res = func_overload(*proxy_args, **proxy_kwargs)
 
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":
-        args[0].proxy = proxy_out
-        proxy_out.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
+        args[0].proxy = proxy_res
+        proxy_res.node.meta['tensor_meta'] = _extract_tensor_metadata(args[0])
 
-    real_out = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
-    # Seems like func isn't marked as inplace_view for some reason?
+    inner_res = func_overload(*pytree.tree_map(unwrap_elem, args), **pytree.tree_map(unwrap_elem, kwargs))
+    # Needed to sync up metadata for in-place operators that modify metadata
     if torch.Tag.inplace_view in func_overload.tags:  # type: ignore[attr-defined]
         with no_dispatch():
             func_overload(*args, **kwargs)
-    pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (real_out, args, kwargs))
-    return wrap_output(real_out, proxy_out)
+    pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
+    return wrap_output(inner_res, proxy_res)
 
 
 class ProxyTensor(torch.Tensor):
@@ -114,15 +112,15 @@ class ProxyTensor(torch.Tensor):
             requires_grad=requires_grad if requires_grad is not None else False, strides=elem.stride(),
             storage_offset=elem.storage_offset()
         )
+        return r
 
+    def __init__(self, elem, proxy, *, requires_grad=None):
         if elem.is_sparse:
             proxy.node.meta['tensor_meta'] = {}
         else:
-            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(r)
-        r.elem = elem
-        r.proxy = proxy
-
-        return r
+            proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(self)
+        self.elem = elem
+        self.proxy = proxy
 
     def __deepcopy__(self, memo):
         return self.clone()
@@ -135,8 +133,6 @@ class ProxyTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-        if func_overload == torch.ops.prim.device.default:
-            return args[0].fake_device
         return proxy_call(func_overload, args, kwargs)
 
 
@@ -217,17 +213,15 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func_overload, types, args=(), kwargs=None):
         func = func_overload.overloadpacket
-        if func_overload == torch.ops.prim.device.default:
-            return args[0].device
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
         else:
-            proxy_out = self.tracer.create_proxy('call_function', func, args, kwargs,
+            proxy_res = self.tracer.create_proxy('call_function', func, args, kwargs,
                                                  name=self.tracer.graph._target_to_str(func.__name__))
 
-            real_out = func_overload(*args, **kwargs)
+            inner_res = func_overload(*args, **kwargs)
 
-            return wrap_output(real_out, proxy_out)
+            return wrap_output(inner_res, proxy_res)
 
 
 def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=False):
@@ -243,17 +237,15 @@ def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=
 
         def wrap_fake(x):
             if isinstance(x, torch.Tensor):
-                return FakeTensor(fake_tensor_mode, x.to('meta'), x.device)
+                return fake_tensor_mode.from_tensor(x)  # type: ignore[attr-defined]
+
             return x
 
-        with decompose(decomposition_table):
-            with fake_tensor_mode:  # type: ignore[attr-defined]
-                with proxy_mode:  # type: ignore[attr-defined]
-                    if use_fake:  # type: ignore[attr-defined]
-                        with no_dispatch():
-                            args = pytree.tree_map(wrap_fake, args)
+        if use_fake:  # type: ignore[attr-defined]
+            args = pytree.tree_map(wrap_fake, args)
 
-                    t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
+        with decompose(decomposition_table), fake_tensor_mode, proxy_mode:  # type: ignore[attr-defined]
+            t = dispatch_trace(wrap_key(f, args), tracer=fx_tracer, concrete_args=tuple(phs))
         return t
 
     return wrapped
