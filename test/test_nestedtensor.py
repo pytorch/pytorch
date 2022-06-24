@@ -676,12 +676,14 @@ class TestNestedTensorAutograd(TestCase):
                                  torch.rand(1, 8)])
         self.assertEqual(a.size(0), 2)
         self.assertEqual(a.size(1), 1)
-        self.assertRaises(RuntimeError, lambda: a.size(2))
+        self.assertRaisesRegex(
+            RuntimeError, "Given dimension 2 is irregular and does not have a size", lambda: a.size(2))
 
         a = torch.nested_tensor([torch.rand(3, 4),
                                  torch.rand(5, 4)])
         self.assertEqual(a.size(0), 2)
-        self.assertRaises(RuntimeError, lambda: a.size(1))
+        self.assertRaisesRegex(
+            RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
         self.assertEqual(a.size(2), 4)
 
 
