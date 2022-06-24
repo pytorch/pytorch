@@ -76,36 +76,6 @@ void _spdiags_kernel_cpu(
       });
 }
 
-// Check offsets for out-of-bounds diagonals and compute nnz per diagonal
-void _spdiags_setup_cpu(
-    TensorIterator& iter,
-    int64_t n_row_out,
-    int64_t n_col_in,
-    int64_t n_col_out) {
-  const int64_t min_col_in_out = std::min(n_col_in, n_col_out);
-
-  cpu_kernel(iter, [&](int64_t offset) {
-    TORCH_CHECK(
-        ((-1 * n_row_out) < offset) && (offset < n_col_out),
-        "spdiags(): Diagonal ",
-        offset,
-        " does not exist in output shape (",
-        n_row_out,
-        ",",
-        n_col_out,
-        "). Valid offsets for this shape: [",
-        (-n_row_out) + 1,
-        ",",
-        n_col_out - 1,
-        "]");
-    if (offset >= 0) {
-      return std::max<int64_t>(std::min(min_col_in_out - offset, n_row_out), 0);
-    } else {
-      return std::max<int64_t>(std::min(min_col_in_out, n_row_out + offset), 0);
-    }
-  });
-}
-
 } // namespace
 
 Tensor spdiags_cpu(
@@ -114,12 +84,7 @@ Tensor spdiags_cpu(
     IntArrayRef shape,
     c10::optional<Layout> layout) {
   return impl::spdiags_impl(
-      diagonals,
-      offsets,
-      shape,
-      layout,
-      _spdiags_setup_cpu,
-      _spdiags_kernel_cpu);
+      diagonals, offsets, shape, layout, _spdiags_kernel_cpu);
 }
 } // namespace native
 } // namespace at
