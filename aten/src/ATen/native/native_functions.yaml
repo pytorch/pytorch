@@ -4348,6 +4348,9 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: softmax
+    NestedTensorCPU, NestedTensorCUDA: softmax
 
 - func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -4361,6 +4364,7 @@
   structured_delegate: _softmax.out
   dispatch:
     MkldnnCPU: mkldnn_softmax
+    NestedTensorCPU, NestedTensorCUDA: softmax_nested
 
 - func: _softmax.out(Tensor self, int dim, bool half_to_float, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
