@@ -6,6 +6,7 @@ from itertools import chain
 import warnings
 import functools
 
+__all__ = ['Optimizer']
 
 class _RequiredParameter(object):
     """Singleton class representing a required parameter for an Optimizer."""

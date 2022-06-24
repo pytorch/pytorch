@@ -3,6 +3,7 @@ from .. import functional as F
 
 from torch import Tensor
 
+__all__ = ['ChannelShuffle']
 
 class ChannelShuffle(Module):
     r"""Divide the channels in a tensor of shape :math:`(*, C , H, W)`

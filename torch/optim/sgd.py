@@ -3,6 +3,7 @@ from torch import Tensor
 from .optimizer import Optimizer, required
 from typing import List, Optional
 
+__all__ = ['SGD', 'sgd']
 
 class SGD(Optimizer):
     r"""Implements stochastic gradient descent (optionally with momentum).

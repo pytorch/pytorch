@@ -2,6 +2,7 @@ import torch
 from . import _functional as F
 from .optimizer import Optimizer
 
+__all__ = ['SparseAdam']
 
 class SparseAdam(Optimizer):
     r"""Implements lazy version of Adam algorithm suitable for sparse tensors.
