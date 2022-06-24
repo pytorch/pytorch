@@ -3725,6 +3725,92 @@ TEST_F(VulkanAPITest, lstm_mclareninputs_success) {
   ASSERT_TRUE(check_cell);
 }
 
+TEST_F(VulkanAPITest, lstm_prepack_success) {
+  // Guard
+  if (!at::is_vulkan_available()) {
+    return;
+  }
+
+  // Arrange
+  const int input_size = 81;
+  const int hidden_size = 10;
+  const int num_layers = 2;
+  const int L = 1;
+  const int N = 1;
+  const double lstm_dropout = .0;
+  const bool has_biases = true;
+  const bool train = false;
+  const bool bidirectional = false;
+  const bool batch_first = true;
+  const auto in_cpu = at::rand({N, L, input_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto h0_cpu = at::rand({num_layers, N, hidden_size}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto c0_cpu = at::rand({num_layers, N, hidden_size}, at::device(at::kCPU).dtype(at::kFloat));
+
+  c10::List<at::Tensor> weight_ih_l; // shape (4 * hidden_size, l == 0 ? input_size : hidden_size)
+  c10::List<at::Tensor> weight_hh_l; // shape (4 * hidden_size, hidden_size)
+  c10::List<at::Tensor> bias_ih_l;   // shape (4 * hidden_size)
+  c10::List<at::Tensor> bias_hh_l;   // shape (4 * hidden_size)
+  for (int l = 0; l < num_layers; ++l) {
+    if (l == 0) {
+      weight_ih_l.emplace_back(at::rand({4 * hidden_size, input_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    } else {
+      weight_ih_l.emplace_back(at::rand({4 * hidden_size, hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    }
+    weight_hh_l.emplace_back(at::rand({4 * hidden_size, hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_ih_l.emplace_back(at::rand({4 * hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+    bias_hh_l.emplace_back(at::rand({4 * hidden_size}, at::device(at::kCPU).dtype(at::kFloat)));
+  }
+
+  // put this guard here to run inference inststead of training
+  // to avoid the following error:
+  //     C++ exception with description "0INTERNAL ASSERT FAILED at "xplat/caffe2/aten/src/ATen/core/boxing/KernelFunction.cpp":31, please report a bug to PyTorch. aten::gru.input has kernels registered to both CompositeImplicitAutograd and a backend mapped to AutogradOther. This makes the backend kernel unreachable; the dispatcher will always prefer the CompositeImplicitAutograd lowering (see Note [Ambiguity in AutogradOther kernel]). If you want to override CompositeImplicitAutograd, please open an issue to request a dedicated Autograd dispatch key for the backend.
+  //     If you only want to run inference instead of training, add `c10::InferenceMode mode;` before model.forward(). Note this guard is only available in C++ but not Python at present.
+  c10::InferenceMode mode;
+
+  // Act
+  const auto out_cpu = at::lstm(in_cpu, {h0_cpu, c0_cpu},
+      { weight_ih_l[0], weight_hh_l[0], bias_ih_l[0], bias_hh_l[0],
+        weight_ih_l[1], weight_hh_l[1], bias_ih_l[1], bias_hh_l[1] },
+      has_biases, num_layers, lstm_dropout, train, bidirectional, batch_first);
+
+  auto prepack = callOpByName(
+      "vulkan_prepack::create_lstm_context",
+      "",
+      std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
+                                weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
+      has_biases, num_layers, lstm_dropout, train, bidirectional, batch_first);
+
+  auto out_vulkan = callOpByName(
+      "vulkan_prepack::run_lstm_context",
+      "",
+      in_cpu.vulkan(), h0_cpu.vulkan(), c0_cpu.vulkan(), prepack[0]);
+
+  auto cpu_output = std::get<0>(out_cpu);
+  auto cpu_hidden = std::get<1>(out_cpu);
+  auto cpu_cell = std::get<2>(out_cpu);
+  auto vulkan_output = out_vulkan[0].toTensor();
+  auto vulkan_hidden = out_vulkan[1].toTensor();
+  auto vulkan_cell = out_vulkan[2].toTensor();
+
+  // Assert
+  const auto check_output = almostEqual(cpu_output, vulkan_output.cpu());
+  if (!check_output) {
+    showRtol(cpu_output, vulkan_output.cpu());
+  }
+  ASSERT_TRUE(check_output);
+
+  const auto check_hidden = almostEqual(cpu_hidden, vulkan_hidden.cpu());
+  if (!check_hidden) {
+    showRtol(cpu_hidden, vulkan_hidden.cpu());
+  }
+  ASSERT_TRUE(check_hidden);
+
+  const auto check_cell = almostEqual(cpu_cell, vulkan_cell.cpu());
+  if (!check_cell) {
+    showRtol(cpu_cell, vulkan_cell.cpu());
+  }
+  ASSERT_TRUE(check_cell);
+}
 
 #if defined (__ANDROID__)  // to avoid `Undefined symbols for architecture arm64` error
 TEST_F(VulkanAPITest, profiling_invalideinputs_exceptions) {
