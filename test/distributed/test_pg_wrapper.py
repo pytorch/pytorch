@@ -302,7 +302,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                     wrapper_pg._reduce_scatter_base(output, input).wait()
             self._validate_error(
                 exception=cm.exception,
-                op_type="ALLGATHER_BASE" if self.rank == 0 else"REDUCE_SCATTER_BASE",
+                op_type="ALLGATHER_BASE" if self.rank == 0 else "REDUCE_SCATTER_BASE",
                 rank=self.rank,
                 tensor=input,
             )

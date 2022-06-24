@@ -113,7 +113,7 @@ class TORCH_API ProcessGroupWrapper : public ProcessGroup {
 
     c10::intrusive_ptr<ProcessGroup::Work> _reduce_scatter_base(
       at::Tensor& outputBuffer,
-      at::Tensor& inputBuffe,
+      at::Tensor& inputBuffer,
       const ReduceScatterOptions& opts) override;
 
   c10::intrusive_ptr<ProcessGroup> getWrappedPg() const;
