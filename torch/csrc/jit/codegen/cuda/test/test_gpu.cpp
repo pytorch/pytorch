@@ -23706,6 +23706,41 @@ TEST_F(NVFuserTest, FusionIgnoreZeroDimReduction_CUDA) {
       __FILE__);
 }
 
+// Repro of issue #1770
+TEST_F(NVFuserTest, FusionIssue1770Repro_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+  auto tv1 = makeSymbolicTensor(1);
+  fusion->addInput(tv1);
+
+  auto tv2 = ge(tv0, tv1);
+  auto tv3 =
+      where(tv2, IrBuilder::create<Double>(1), IrBuilder::create<Double>(2));
+  fusion->addOutput(tv3);
+
+  std::vector<int64_t> shape({999});
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  at::Tensor t0 = at::randn(shape, options);
+  at::Tensor t1 = at::randn(shape, options);
+  std::vector<IValue> aten_inputs({t0, t1});
+
+  FusionExecutorCache executor_cache(std::move(fusion));
+  auto cg_outputs = executor_cache.runFusionWithInputs(aten_inputs);
+
+  auto ref = where(t0 >= t1, 1.0, 2.0);
+
+  testValidate(
+      executor_cache.fusion(),
+      cg_outputs,
+      aten_inputs,
+      {ref},
+      __LINE__,
+      __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

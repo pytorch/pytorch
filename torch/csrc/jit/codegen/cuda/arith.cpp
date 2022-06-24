@@ -561,8 +561,9 @@ namespace {
 // Helper function to reduce repetitive code
 template <typename T1, typename T2>
 TensorView* arithOpOverloads(Val* (*func)(Val*, Val*), T1* v1, T2* v2) {
-  return func(v1->template as<Val>(), v2->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(v1->template as<Val>(), v2->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2>
@@ -571,9 +572,10 @@ TensorView* arithOpOverloads(
     T1* v1,
     T2* v2,
     DataType common_dtype) {
-  return binaryOp(
-             type, v1->template as<Val>(), v2->template as<Val>(), common_dtype)
-      ->template as<TensorView>();
+  Val* out = binaryOp(
+      type, v1->template as<Val>(), v2->template as<Val>(), common_dtype);
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2, typename T3>
@@ -583,11 +585,12 @@ TensorView* arithOpOverloads(
     T2* v2,
     T3* v3) {
   auto vals = maybeBroadcast({v1, v2, v3});
-  return func(
-             vals[0]->template as<Val>(),
-             vals[1]->template as<Val>(),
-             vals[2]->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(
+      vals[0]->template as<Val>(),
+      vals[1]->template as<Val>(),
+      vals[2]->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 template <typename T1, typename T2, typename T3, typename T4>
@@ -598,12 +601,13 @@ TensorView* arithOpOverloads(
     T3* v3,
     T4* v4) {
   auto vals = maybeBroadcast({v1, v2, v3, v4});
-  return func(
-             vals[0]->template as<Val>(),
-             vals[1]->template as<Val>(),
-             vals[2]->template as<Val>(),
-             vals[3]->template as<Val>())
-      ->template as<TensorView>();
+  Val* out = func(
+      vals[0]->template as<Val>(),
+      vals[1]->template as<Val>(),
+      vals[2]->template as<Val>(),
+      vals[3]->template as<Val>());
+  TORCH_INTERNAL_ASSERT(out->isA<TensorView>());
+  return out->as<TensorView>();
 }
 
 // Output type promotion logic for binary operators
@@ -1509,6 +1513,11 @@ Val* where(Val* c, Val* v1, Val* v2) {
       promote_type(v1->getDataType().value(), v2->getDataType().value());
   auto out_vtype =
       promote_type(v1->getValType().value(), v2->getValType().value());
+  // Even when v1 and v2 are scalar, the output is a tensor if the
+  // conditional input is a tensor.
+  if (c->getValType() == ValType::TensorView) {
+    out_vtype = ValType::TensorView;
+  }
   auto vals = maybeBroadcast({c, v1, v2});
   Val* out = nullptr;
   if (out_vtype == ValType::TensorView) {
