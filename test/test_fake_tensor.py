@@ -11,6 +11,7 @@ from torch._subclasses.fake_tensor import (
     DynamicOutputShapeException,
 )
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
+from torch import nn
 import unittest
 import torch._prims as prims
 import copy
@@ -137,20 +138,20 @@ class FakeTensorTest(TestCase):
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cpu_fallback(self):
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=False)):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_fallback_kernels=False)):
             filters = torch.randn(8, 4, 3, 3).cuda()
             inputs = torch.randn(1, 4, 5, 5).cuda()
             with self.assertRaises(NotImplementedError):
                 torch.nn.functional.conv2d(inputs, filters, padding=1)
 
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=True)):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_fallback_kernels=True)):
             # intentionally bad inputs
             filters = torch.randn(8, 20, 3, 3).cuda()
             inputs = torch.randn(1, 7, 10, 5).cuda()
             with self.assertRaises(RuntimeError):
                 torch.nn.functional.conv2d(inputs, filters, padding=1)
 
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_cpu_fallback=True)):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None, allow_fallback_kernels=True)):
             filters = torch.randn(8, 4, 3, 3).cuda()
             inputs = torch.randn(1, 4, 5, 5).cuda()
 
@@ -158,9 +159,24 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cuda")
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_fallback_memory_prop(self):
+        m = nn.Conv2d(16, 33, 3, stride=2, device="cuda", dtype=torch.half)
+        m = m.to(memory_format=torch.channels_last)
+        mode = FakeTensorMode(inner=None)
+        # TODO: module.to() doesn't work because it assigns .data, which is ignored
+        with torch._subclasses.fake_tensor.FakeCopyMode(mode):
+            mod_copied = copy.deepcopy(m)
+
+        with enable_torch_dispatch_mode(mode):
+            input = torch.rand(20, 16, 50, 100, dtype=torch.half, device="cuda").to(memory_format=torch.channels_last)
+            out = mod_copied(input)
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last))
+            self.checkType(out, "cuda", [20, 33, 24, 49])
+
     def test_data_dependent_operator(self):
         with enable_torch_dispatch_mode(
-            FakeTensorMode(inner=None, allow_cpu_fallback=False)
+            FakeTensorMode(inner=None, allow_fallback_kernels=False)
         ):
             x = torch.rand([10, 10])
 
