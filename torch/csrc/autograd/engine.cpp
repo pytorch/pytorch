@@ -21,8 +21,6 @@
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
-#include <c10/core/StreamGuard.h>
-#include <ATen/ops/sum_to_checked.h>
 
 #include <atomic>
 #include <chrono>
