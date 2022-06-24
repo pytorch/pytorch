@@ -4050,6 +4050,53 @@ Tensor linalg_matrix_exp_differential(
       self, grad, at::linalg_matrix_exp, /* adjoint */ adjoint);
 }
 
+template <typename F1, typename F2, typename... Ts>
+Tensor masked_fmap(
+    const Tensor& mask,
+    const F1& f1,
+    const F2& f2,
+    const Tensor& t,
+    const Ts&... ts) {
+  // This function takes two functions f1 and f2 and a (variadic) list of
+  // tensors, and creates a new tensor of the same shape as the first element of
+  // the list of tensors by applying the function f1 to the tensors for which
+  // the mask is true and f2 to the tensors for which the mask is false This
+  // function is used when we have a formula that works for, say, all
+  // non-singular inputs and another one for when the inputs are singular. See
+  // for example det_backward
+  auto n_true = mask.count_nonzero().item<int64_t>();
+  if (n_true == mask.numel()) {
+    return f1(t, ts...);
+  } else if (n_true == 0) {
+    return f2(t, ts...);
+  } else {
+    auto idx_true = at::native::toListOfOptionalTensors(mask);
+    auto idx_false = at::native::toListOfOptionalTensors(mask.logical_not());
+    // TODO can we do these index_put in place without screwing up the gradgrad?
+    return t.new_empty(t.sizes())
+        .index_put(idx_true, f1(t.index(idx_true), ts.index(idx_true)...))
+        .index_put(idx_false, f2(t.index(idx_false), ts.index(idx_false)...));
+  }
+}
+
+Tensor linalg_det_jvp(
+    const Tensor& dA,
+    const Tensor& det,
+    const Tensor& LU,
+    const Tensor& pivots,
+    const bool use_A_T) {
+  // (d det)_A(E) = tr(A^{-1}E)*det
+  // We use that the determinant is C^1 to approximate the gradient of singular
+  // inputs Since we never differentiate over forward AD, we don't need to deal
+  // with further gradients, as we do in grad_backward
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+  auto LU_ =
+      LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
+  auto AinvE =
+      at::linalg_lu_solve(LU_, pivots, dA, /*left=*/true, /*adjoint=*/use_A_T);
+  return AinvE.diagonal(0, -2, -1).sum(-1) * det;
+}
+
 Tensor linalg_det_backward(
     const Tensor& grad,
     const Tensor& det,
@@ -4057,7 +4104,8 @@ Tensor linalg_det_backward(
     const Tensor& LU,
     const Tensor& pivots) {
   at::NoTF32Guard disable_tf32;
-  if (!grad.defined()) {
+  // A.numel() == 0 necessary for the singular case
+  if (!grad.defined() || A.numel() == 0) {
     return {};
   }
 
@@ -4082,29 +4130,25 @@ Tensor linalg_det_backward(
     // If we want to compute further gradients, we need to recompute the LU
     // decomposition so that autograd computes the correct gradients wrt to A
     // (cf. solve_backward)
+    auto non_singular =
+        [](const Tensor& A, const Tensor& d, const Tensor& /*grad*/) {
+          return at::linalg_solve(A.mH(), d);
+        };
 
-    // TODO When the user wants higher derivatives, the trick above just does
-    // not cut it The proper way of doing this is doing `auto mask = det == 0.;`
-    // and then if any determinant is zero, use an SVD decomposition to compute
-    // the derivative in those inputs (not all inputs). The derivative may be
-    // then computed explicitly by noting that the gradient of the derivative of
-    // the determinant is given in terms of the adjugate of a matrix. Then, the
-    // adjugate of a singular matrix may be computed as per
-    // https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
-    // The code may be implemented as follows:
-    //
-    // Tensor U, S, Vh;
-    // std::tie(U, S, Vh) = at::linalg_svd(A);
-    // auto alpha = (at::linalg_det(U) * at::linalg_det(Vh)).conj() * grad;
-    // auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
-    // return (U * D.unsqueeze(-2)).matmul(Vh);
-    //
-    // The issue with this code is that the derivative given by autograd of
-    // prod_safe_zeros_backward is not the second derivative of the product.
-    // It is not clear to me how to implement the second derivative of the
-    // product efficently. Note that this is also currently a problem when we
-    // compute higher derivatives of `x.prod()` and `x` has more than one zero.
-    return at::linalg_solve(A.mH(), d);
+    // The derivative may be then computed explicitly by noting that the
+    // gradient of the derivative of the determinant is given in terms of the
+    // adjugate of a matrix. The adjugate of a singular matrix may be computed
+    // as per https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
+    auto singular = [](const Tensor& A,
+                       const Tensor& /*d*/,
+                       const Tensor& grad) {
+      Tensor U, S, Vh;
+      std::tie(U, S, Vh) = at::linalg_svd(A);
+      auto alpha = (at::linalg_det(U) * at::linalg_det(Vh)).conj() * grad;
+      auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
+      return (U * D.unsqueeze(-2)).matmul(Vh);
+    };
+    return masked_fmap(det == 0., non_singular, singular, A, d, grad);
   }
 }
 
