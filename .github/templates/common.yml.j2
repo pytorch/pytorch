@@ -219,26 +219,12 @@ on:
 {%- endmacro -%}
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
-      - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
+        uses: ./.github/actions/checkout
         with:
-      {%- if branch %}
-          ref: !{{ branch }}
-      {%- elif checkout_pr_head %}
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-      {%- endif %}
-          submodules: !{{ submodules }}
           repository: !{{ repository }}
-      {%- if directory %}
-          path: !{{ directory }}
-      {%- endif %}
-      - name: Clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }} checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-      {%- if directory%}
-        working-directory: !{{ directory }}
-      {%- endif %}
+          branch: !{{ branch }}
+          directory: !{{ directory }}
 {%- endmacro -%}
 
 {%- macro upload_downloaded_files(name, config=None, shard=None, num_shards=None, runner=None, artifact_name="", use_s3=True, when="always()") -%}
