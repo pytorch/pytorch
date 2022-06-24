@@ -1081,8 +1081,8 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
                                                                           dataType:MPSDataTypeFloat32];
                     MPSGraphTensor* halfTensor = [mpsGraph constantWithScalar:.5f
                                                                              shape:@[@1]
-                                                                          dataType:MPSDataTypeFloat32];      
-                    
+                                                                          dataType:MPSDataTypeFloat32];
+
                     MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor: inputTensor
                                                                         secondaryTensor: targetTensor
                                                                                    name: nil];
@@ -1099,7 +1099,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
                                                                             name: nil];
                     secondCondTensor = [mpsGraph subtractionWithPrimaryTensor: absDiffTensor
                                                                 secondaryTensor: secondCondTensor
-                                                                            name: nil];       
+                                                                            name: nil];
                     secondCondTensor = [mpsGraph multiplicationWithPrimaryTensor: deltaTensor
                                                                 secondaryTensor: secondCondTensor
                                                                             name: nil];
@@ -1109,7 +1109,7 @@ Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t re
                                                                  truePredicateTensor: firstCondTensor
                                                                 falsePredicateTensor: secondCondTensor
                                                                                 name:nil];
-                    
+
                     newCachedGraph->inputTensor_ = inputTensor;
                     newCachedGraph->targetTensor_ = targetTensor;
                     newCachedGraph->outputTensor_ = reduceTensor(outputTensor, reduction, mpsGraph, input.sizes().size());
@@ -1180,7 +1180,7 @@ Tensor& huber_loss_backward_out_mps(
         NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
         string key = "huber_loss_backward_out_mps:" + reductionToString(reduction) + ":" +
-                                            std::to_string(delta) + ":" + 
+                                            std::to_string(delta) + ":" +
                                             [ns_shape_key UTF8String] + ":" +
                                             getMPSTypeString(input.scalar_type()) + ":" +
                                             getMPSTypeString(target.scalar_type());
@@ -1210,7 +1210,7 @@ Tensor& huber_loss_backward_out_mps(
                                                                               name:nil];
                     MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta
                                                                           shape:getMPSShape(target)
-                                                                          dataType:MPSDataTypeFloat32];                                                 
+                                                                          dataType:MPSDataTypeFloat32];
                     MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
                                                                           secondaryTensor:targetTensor
                                                                                      name:nil];
@@ -1241,7 +1241,7 @@ Tensor& huber_loss_backward_out_mps(
                                                                    truePredicateTensor: firstCondTensor
                                                                   falsePredicateTensor: secondThirdTensor
                                                                                   name:nil];
-                    
+
                     //outputTensor = normGradOutputDeltaTensor;
                     newCachedGraph->gradOutputTensor_ = gradOutputTensor;
                     newCachedGraph->inputTensor_ = inputTensor;
