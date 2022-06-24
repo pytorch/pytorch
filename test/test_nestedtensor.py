@@ -578,6 +578,36 @@ class TestNestedTensorDeviceType(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt1, 0))
         self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt1, 1))
 
+    @dtypes(torch.float, torch.float16, torch.double)
+    @torch.inference_mode()
+    def test_bmm(self, device, dtype):
+        # error case: not 3D tensors
+        nt0 = torch.nested_tensor([])
+        nt1 = torch.nested_tensor([torch.randn(2), torch.randn(3)])
+        nt2 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
+        self.assertRaises(RuntimeError, lambda: nt0.bmm(nt0))
+        self.assertRaises(RuntimeError, lambda: nt0.bmm(nt1))
+        self.assertRaises(RuntimeError, lambda: nt0.bmm(nt2))
+        self.assertRaises(RuntimeError, lambda: nt1.bmm(nt0))
+        self.assertRaises(RuntimeError, lambda: nt1.bmm(nt1))
+        self.assertRaises(RuntimeError, lambda: nt1.bmm(nt2))
+        self.assertRaises(RuntimeError, lambda: nt2.bmm(nt0))
+        self.assertRaises(RuntimeError, lambda: nt2.bmm(nt1))
+        # error case: incompatible batch size
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
+        nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((4, 5)), torch.randn((4, 7))])
+        self.assertRaises(RuntimeError, lambda: nt0.bmm(nt1))
+        self.assertRaises(RuntimeError, lambda: nt1.bmm(nt0))
+        # error case: underlying matrices cannot be multiplied
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
+        self.assertRaises(RuntimeError, lambda: nt0.bmm(nt0))
+        # normal nested tensor
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
+        nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((4, 5))])
+        actual = nt0.bmm(nt1)
+        expect = nt0.to_padded_tensor(0.0).bmm(nt1.to_padded_tensor(0.0))
+        self.assertEqual(actual.to_padded_tensor(0.0), expect)
+
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
         self.assertEqual(nt1.dtype, nt2.dtype)

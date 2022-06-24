@@ -713,5 +713,59 @@ Tensor softmax_nested(const Tensor& input, const int64_t dim, const bool half_to
   return wrap_buffer(output_buffer, sizemat.clone());
 }
 
+Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
+  auto self_ptr = get_nested_tensor_impl(self),
+      mat2_ptr = get_nested_tensor_impl(mat2);
+  int64_t ntensors = self_ptr->size(0),
+      ntensors2 = mat2_ptr->size(0);
+  TORCH_CHECK(ntensors == ntensors2,
+      "Expected size for the 1st dimension of batch2 tensor to be: ", ntensors,
+      " but got: ", ntensors2, ".");
+  const Tensor& self_sizemat = self_ptr->get_nested_size_tensor(),
+      & mat2_sizemat = mat2_ptr->get_nested_size_tensor();
+  TORCH_CHECK(ntensors > 0 && self_sizemat.size(1) == 2, "batch1 must be a 3D tensor");
+  TORCH_CHECK(mat2_sizemat.size(1) == 2, "batch2 must be a 3D tensor");
+  std::vector<int64_t> self_offsets = NestedTensor_get_offsets(self_ptr),
+      mat2_offsets = NestedTensor_get_offsets(mat2_ptr);
+  std::vector<IntArrayRef> self_shapes = NestedTensor_get_shapes(self_ptr),
+      mat2_shapes = NestedTensor_get_shapes(mat2_ptr);
+  const Tensor& self_buffer = self_ptr->get_buffer(),
+      & mat2_buffer = mat2_ptr->get_buffer();
+  // determine output size
+  Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
+  int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
+  std::vector<int64_t> out_offsets(ntensors + 1);
+  std::vector<IntArrayRef> out_shapes(ntensors);
+  out_offsets[0] = 0;
+  for (int64_t i = 0; i < ntensors; i++) {
+    const IntArrayRef& self_shape = self_shapes[i],
+        & mat2_shape = mat2_shapes[i];
+    const int64_t& self_size0 = self_shape[0], & self_size1 = self_shape[1],
+        & mat2_size0 = mat2_shape[0], & mat2_size1 = mat2_shape[1];
+    TORCH_CHECK(self_size1 == mat2_size0,
+        "Nested matrices cannot be multiplied (",
+        self_size0, "x", self_size1, " and ",
+        mat2_size0, "x", mat2_size1, ")");
+    out_sizemat_ptr[0] = self_size0;
+    out_sizemat_ptr[1] = mat2_size1;
+    out_shapes[i] = IntArrayRef(out_sizemat_ptr, out_sizemat_ptr + 2);
+    out_sizemat_ptr += 2;
+    out_offsets[i + 1] = out_offsets[i] + self_size0 * mat2_size1;
+  }
+  Tensor out_buffer = self_buffer.new_empty(out_offsets.back());
+  // call tensor mm
+  // TODO: for cpu, maybe use `parallel_for`
+  //       to do that, have to merge `aten/src/ATen/native/cpu/LinearAlgebra.cpp/bmm_out_or_baddbmm_`
+  //       1. it has `parallel_for` and we cannot multi-thread in multi-thread
+  //       2. cannot dispatch in multi-thread (in this case mm_out)
+  for (int64_t i = 0; i < ntensors; i++) {
+    Tensor out = out_buffer.slice(0, out_offsets[i], out_offsets[i + 1]).view(out_shapes[i]);
+    at::mm_out(out,
+               self_buffer.slice(0, self_offsets[i], self_offsets[i + 1]).view(self_shapes[i]),
+               mat2_buffer.slice(0, mat2_offsets[i], mat2_offsets[i + 1]).view(mat2_shapes[i]));
+  }
+  return wrap_buffer(out_buffer, out_sizemat);
+}
+
 } // namespace native
 } // namespace at
