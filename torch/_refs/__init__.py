@@ -1180,7 +1180,7 @@ def clamp(
         condition = bitwise_or(ge(a, min), a_isnan)
         # we should also propagate `nan` coming from boundaries. However, that's
         # not necessary since `ge` would already `False` when either operands has
-        # a `nan`. So this is redundant 
+        # a `nan`. So this line below is redundant
         #   `condition = bitwise_and(condition, bitwise_not(isnan(min)))`
         a = prims.where(condition, a, min)
     if max is not None:
@@ -1201,7 +1201,7 @@ def clamp_min(
     self: TensorLikeType,
     min: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    return torch.clamp(self, min=min)
+    return clamp(self, min=min)
 
 
 @out_wrapper
@@ -1213,7 +1213,7 @@ def clamp_max(
     self: TensorLikeType,
     max: Optional[TensorOrNumberLikeType] = None,
 ) -> TensorLikeType:
-    return torch.clamp(self, max=max)
+    return clamp(self, max=max)
 
 
 #
