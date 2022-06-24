@@ -21761,13 +21761,12 @@ class TestStateDictHooks(TestCase):
         finally:
             gc.enable()
 
+    def _hook_with_module(*args, **kwargs):
+        pass
+
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
-
-        def hook_with_module(*args, **kwargs):
-            pass
-
-        m._register_load_state_dict_pre_hook(hook_with_module, True)
+        m._register_load_state_dict_pre_hook(self._hook_with_module, True)
         assert pickle.load(pickle.dumps(m)) == m
 
     def test_load_state_dict_module_pre_hook(self):
