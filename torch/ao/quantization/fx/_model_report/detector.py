@@ -551,6 +551,10 @@ class InputWeightEqualizationDetector(DetectorBase):
     INPUT_INFO_KEY = "input_range_info"
     WEIGHT_INFO_KEY = "weight_range_info"
 
+    # default weight and info strings
+    WEIGHT_STR = "weight"
+    INPUT_STR = "input"
+
     def __init__(self, ratio_threshold: float, ch_axis: int = 1):
         # ensure passed in inputs are valid
         if ratio_threshold <= 0 or ratio_threshold >= 1:
@@ -603,15 +607,6 @@ class InputWeightEqualizationDetector(DetectorBase):
                     "insert_observer": obs_ctr(ch_axis=self.ch_axis),
                     "insert_post": False,
                     "observer_args": targeted_node.args,
-                }
-
-                post_obs_fqn = fqn + "." + self.DEFAULT_POST_OBSERVER_NAME
-                # add entry for post observer
-                obs_fqn_to_info[post_obs_fqn] = {
-                    "target_node": targeted_node,
-                    "insert_observer": obs_ctr(ch_axis=self.ch_axis),
-                    "insert_post": True,
-                    "observer_args": (targeted_node,),
                 }
 
         return obs_fqn_to_info
@@ -700,12 +695,15 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         return weight_info
 
-    def _calculate_range_ratio(self, info_dict: Dict) -> torch.Tensor:
+    def _calculate_range_ratio(self, info_dict: Dict, info_str: str, module_fqn: str) -> torch.Tensor:
         r"""
         Takes in an info dict and calculates the s_c matrix.
 
         Args:
             info_dict (dict): A dictionary of either input or weight range info
+            info_str (str): A str describing whether currently looking at weight or input info
+                Either "weight" or "input"
+            module_fqn (str): The fqn of the module we are looking at
 
         Returns a tensor of values, where each value is the s_c stat for a different channel
         """
@@ -713,9 +711,13 @@ class InputWeightEqualizationDetector(DetectorBase):
         per_channel_range = info_dict[self.PER_CHANNEL_MAX_KEY] - info_dict[self.PER_CHANNEL_MIN_KEY]
         global_range = info_dict[self.GLOBAL_MAX_KEY] - info_dict[self.GLOBAL_MIN_KEY]
 
-        # if global range is 0, throw error
         if global_range == 0:
-            raise ValueError("The range of the info dict is 0")
+            range_zero_explanation = "We recommend removing this channel as it doesn't provide any useful information."
+            raise ValueError(
+                "The range of the {} data for module {} is 0, which means you have a constant value channel. {}".format(
+                    info_str, module_fqn, range_zero_explanation
+                )
+            )
 
         ratio = per_channel_range / global_range
 
@@ -741,11 +743,11 @@ class InputWeightEqualizationDetector(DetectorBase):
 
             # raise error if not in weight info
             if module_fqn not in weight_info:
-                raise KeyError("Both input_info and weight_info should have same keys")
+                raise KeyError("Unable to find weight range stats for module {}".format(module_fqn))
 
             # calculate the ratios of the weight info and input info
-            weight_ratio = self._calculate_range_ratio(weight_info[module_fqn])
-            input_ratio = self._calculate_range_ratio(input_info[module_fqn])
+            weight_ratio = self._calculate_range_ratio(weight_info[module_fqn], self.WEIGHT_STR, module_fqn)
+            input_ratio = self._calculate_range_ratio(input_info[module_fqn], self.INPUT_STR, module_fqn)
 
             # calculate the s metric per channel
             s = torch.sqrt(weight_ratio) / torch.sqrt(input_ratio)
