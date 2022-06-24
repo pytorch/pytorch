@@ -1,7 +1,7 @@
 import torch
 import operator
 from typing import Callable, Dict
-from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct  # type: ignore[import]
+from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct
 from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound  # type: ignore[import]
 from torch.fx.experimental.migrate_gradual_types.constraint import CalcMaxPool, CalcConv, Conj  # type: ignore[import]
 from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT, CanReshape  # type: ignore[import]
