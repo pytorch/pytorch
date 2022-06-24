@@ -1,9 +1,8 @@
 from torch import nn
-from typing import Dict, Any, Optional
 
 __all__ = ["module_to_fqn", "fqn_to_module", "get_arg_info_from_tensor_fqn", "FakeSparsity"]
 
-def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = '') -> Any:
+def module_to_fqn(model, module, prefix=''):
     for name, child in model.named_children():
         new_name = prefix + '.' + name
         if child is module:
@@ -13,14 +12,15 @@ def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = '') -> Any:
             return child_path
     return None
 
-def fqn_to_module(model: Optional[nn.Module], path: str) -> Optional[nn.Module]:
-    for name in path.split('.'):
+def fqn_to_module(model, path):
+    path = path.split('.')
+    for name in path:
         model = getattr(model, name, None)
         if model is None:
             return None
     return model
 
-def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> Dict[str, Any]:
+def get_arg_info_from_tensor_fqn(model, tensor_fqn):
     # remove starting '.' from tensor_fqn if it exists
     if tensor_fqn[0] == '.':
         tensor_fqn = tensor_fqn[1:]

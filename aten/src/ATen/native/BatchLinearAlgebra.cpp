@@ -504,27 +504,10 @@ TORCH_META_FUNC(linalg_lu_solve)(const Tensor& LU,
   set_output_strided(0, B_broadcast_size, result_strides, B.options(), {});
 }
 
-TORCH_META_FUNC(linalg_cholesky_ex)(const Tensor& A,
-                                    bool upper,
-                                    bool check_errors) {
-  at::native::squareCheckInputs(A, "linalg.cholesky");
-  at::native::checkFloatingOrComplex(A, "linalg.cholesky");
-
-  auto A_shape = A.sizes();
-  auto ndim = A_shape.size();
-
-  // L
-  auto L_strides = at::native::batched_matrix_contiguous_strides(A_shape, /*f-contig*=*/true);
-  set_output_strided(0, A_shape, L_strides, A.options(), {});
-
-  // info
-  set_output_contiguous(1, A_shape.slice(0, ndim - 2), A.options().dtype(ScalarType::Int));
-}
 
 TORCH_META_FUNC(linalg_qr)(const Tensor& A,
                            c10::string_view mode) {
   at::native::checkIsMatrix(A, "linalg.qr");
-  at::native::checkFloatingOrComplex(A, "linalg.qr");
   bool compute_q, reduced_mode;
   std::tie(compute_q, reduced_mode) = at::native::_parse_qr_mode(mode);
 
@@ -555,7 +538,6 @@ TORCH_META_FUNC(_linalg_svd)(const Tensor& A,
                              bool compute_uv,
                              c10::optional<c10::string_view> driver) {
   at::native::checkIsMatrix(A, "linalg.svd");
-  at::native::checkFloatingOrComplex(A, "linalg.svd");
 
   auto sizes = A.sizes().vec();
   const auto m = sizes.cend()[-2];
@@ -1792,44 +1774,132 @@ Tensor& cholesky_out(const Tensor &self, bool upper, Tensor &result) {
   return result;
 }
 
-TORCH_IMPL_FUNC(linalg_cholesky_ex_out)(const Tensor& A,
-                                        bool upper,
-                                        bool check_errors,
-                                        const Tensor& L,
-                                        const Tensor& info) {
-  // Nothing to do there
-  if (L.numel() == 0) {
-    info.zero_();
-    return;
+void linalg_cholesky_out_info(const Tensor& input, const Tensor& result, const Tensor& info, bool upper) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.size(-1) == input.size(-2));
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.scalar_type() == input.scalar_type());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.device() == input.device());
+
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.scalar_type() == at::kInt);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.device() == input.device());
+
+  // if result has no elements we can modify it
+  if (result.numel() == 0) {
+    at::native::resize_as_(result, input.mT(), MemoryFormat::Contiguous);
+    result.transpose_(-2, -1);
   }
 
-  L.copy_(A);
+  // result tensor must be in batched column major order (Fortran contiguous)
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.mT().is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.sizes().equals(input.sizes()));
 
-  cholesky_stub(L.device().type(), L, info, upper);
+  // cholesky_stub (apply_cholesky) performs calculations in-place and result must be a copy of input
+  result.copy_(input);
+
+  // if info has no elements we can modify it
+  auto expected_info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
+  if (info.numel() == 0) {
+    info.resize_(expected_info_shape);
+  }
+
+  // info must be contiguous
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(info.sizes().equals(expected_info_shape));
+  info.fill_(0);
+
+  cholesky_stub(result.device().type(), result, info, upper);
 
   if (upper) {
-    L.triu_();
+    result.triu_();
   } else {
-    L.tril_();
+    result.tril_();
+  }
+}
+
+std::tuple<Tensor&, Tensor&> linalg_cholesky_ex_out(const Tensor& input, bool upper, bool check_errors, Tensor& L, Tensor& info) {
+  squareCheckInputs(input, "linalg.cholesky_ex");
+  checkSameDevice("torch.linalg.cholesky_ex", L, input, "L");
+  checkLinalgCompatibleDtype("torch.linalg.cholesky_ex", L, input, "L");
+  checkSameDevice("torch.linalg.cholesky_ex", info, input, "info");
+
+  // Do not allow type promotion for the `info` tensor, it must be of Int dtype
+  // Int is used because current interface to LAPACK and its CUDA implementation use "int" type.
+  // https://github.com/pytorch/pytorch/pull/56724#discussion_r618916774
+  ScalarType info_output_type = ScalarType::Int;
+  TORCH_CHECK(
+      info.scalar_type() == info_output_type,
+      "torch.linalg.cholesky_ex: ",
+      "Expected info to have ", info_output_type, " dtype, but got info with dtype ", info.scalar_type());
+
+  bool L_input_same_type = (L.scalar_type() == input.scalar_type());
+  bool L_equal_expected_shape = L.sizes().equals(input.sizes());
+  bool is_L_batched_column_major = false;
+  if (L.dim() >= 2) {
+    is_L_batched_column_major = L.mT().is_contiguous();
+  }
+
+  // if L is not empty and not in batched column major format
+  bool copy_needed = (L.numel() != 0 && !is_L_batched_column_major);
+  copy_needed |= (L.numel() != 0 && !L_equal_expected_shape); // or L does not have the expected shape
+  copy_needed |= !L_input_same_type;  // or L does not have the same dtype as input
+  // we have to allocate a temporary tensor
+
+  // similar conditions for info tensor
+  auto expected_info_shape = IntArrayRef(input.sizes().cbegin(), input.sizes().cend() - 2); // input.shape[:-2]
+  copy_needed |= (info.numel() != 0 && !info.is_contiguous());
+  copy_needed |= (info.numel() != 0 && !(info.sizes().equals(expected_info_shape))); // or L does not have the expected shape
+
+  if (copy_needed) {
+    Tensor L_tmp = at::empty({0}, input.options());
+    Tensor info_tmp = at::empty({0}, input.options().dtype(kInt));
+    linalg_cholesky_out_info(input, L_tmp, info_tmp, upper);
+    at::native::resize_output(L, L_tmp.sizes());
+    L.copy_(L_tmp);
+    at::native::resize_output(info, info_tmp.sizes());
+    info.copy_(info_tmp);
+  } else {
+    // use "out" tensors' memory directly
+    linalg_cholesky_out_info(input, L, info, upper);
   }
 
   if (check_errors) {
-    at::_linalg_check_errors(info, "linalg.cholesky_ex", A.dim() == 2);
+    at::_linalg_check_errors(info, "torch.linalg.cholesky_ex", input.dim() == 2);
   }
+
+  return std::tuple<Tensor&, Tensor&>(L, info);
 }
 
-Tensor linalg_cholesky(const Tensor& A, bool upper) {
-  Tensor L, info;
-  std::tie(L, info) = at::linalg_cholesky_ex(A, upper, /*check_errors=*/false);
-  at::_linalg_check_errors(info, "linalg.cholesky", A.dim() == 2);
-  return L;
+std::tuple<Tensor, Tensor> linalg_cholesky_ex(const Tensor& input, bool upper, bool check_errors) {
+  Tensor L = at::empty({0}, input.options());
+  Tensor info = at::empty({0}, input.options().dtype(kInt));
+  std::tie(L, info) = at::native::linalg_cholesky_ex_out(input, upper, check_errors, L, info);
+  return std::make_tuple(L, info);
 }
 
-Tensor& linalg_cholesky_out(const Tensor& A, bool upper, Tensor& L) {
-  auto info = at::empty({0}, A.options().dtype(kInt));
-  at::linalg_cholesky_ex_out(L, info, A, upper, /*check_errors=*/false);
-  at::_linalg_check_errors(info, "linalg.cholesky", A.dim() == 2);
-  return L;
+Tensor linalg_cholesky(const Tensor &self, bool upper) {
+  Tensor result, info;
+  std::tie(result, info) = at::linalg_cholesky_ex(self, upper, /*check_errors=*/false);
+
+  // we pass check_errors=false above and do the check here
+  // so that the name of the function is correct in the error message
+  at::_linalg_check_errors(info, "torch.linalg_cholesky", self.dim() == 2);
+  return result;
+}
+
+Tensor& linalg_cholesky_out(const Tensor &self, bool upper, Tensor &result) {
+  // linalg_cholesky_ex_outf includes these checks, but we do it here
+  // so that the name of the function is correct in the error message
+  checkSameDevice("torch.linalg.cholesky", result, self);
+  checkLinalgCompatibleDtype("torch.linalg.cholesky", result, self);
+
+  Tensor info = at::empty({0}, self.options().dtype(kInt));
+  std::tie(result, info) = at::linalg_cholesky_ex_outf(self, upper, /*check_errors=*/false, result, info);
+
+  // we pass check_errors=false above and do the check here
+  // so that the name of the function is correct in the error message
+  at::_linalg_check_errors(info, "torch.linalg.cholesky", self.dim() == 2);
+  return result;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ cholesky_inverse ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1926,7 +1996,9 @@ TORCH_IMPL_FUNC(_linalg_solve_out)(const Tensor& A,
   at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU),
                               const_cast<Tensor&>(pivots),
                               const_cast<Tensor&>(info),
-                              use_A_T ? A.mT() : A);
+                              use_A_T ? A.mT() : A,
+                              /*pivot=*/true,
+                              /*check_errors=*/false);
   at::_linalg_check_errors(info, "torch.linalg.solve", A.dim() == 2);
 
   // [numpy-compat] Handle vectors on the rhs

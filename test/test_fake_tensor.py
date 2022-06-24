@@ -40,13 +40,6 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(y, torch.nn.Parameter))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_index_cuda_with_cpu(self):
-        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
-            x = torch.rand([2048], device='cuda')
-            out = x[torch.zeros([36], dtype=torch.int64)]
-            self.checkType(out, "cuda", [36])
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
         with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
             x = torch.empty(1, device="cpu")

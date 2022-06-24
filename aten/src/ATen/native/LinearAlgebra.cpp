@@ -109,24 +109,6 @@ TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord
   set_output_raw_strided(0, shape, {}, options);
 }
 
-TORCH_META_FUNC(_linalg_det)(const Tensor& A) {
-  at::native::squareCheckInputs(A, "linalg.det");
-  at::native::checkFloatingOrComplex(A, "linalg.det");
-
-  auto shape = A.sizes();
-  auto ndim = shape.size();
-
-  // det
-  set_output_contiguous(0, shape.slice(0, ndim - 2), A.options());
-
-  // LU
-  auto LU_strides = at::native::batched_matrix_contiguous_strides(shape, /*f-contig*=*/true);
-  set_output_strided(1, shape, LU_strides, A.options());
-
-  // pivots
-  set_output_contiguous(2, shape.slice(0, ndim - 1), A.options().dtype(kInt));
-}
-
 template <typename Meta>
 void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
@@ -188,44 +170,52 @@ namespace native {
 
 DEFINE_DISPATCH(addr_stub);
 
-
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg.det ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 // As P is a permutation matrix
 // det(P) = 1 if it's an even permutation and det(P) = -1 if it's an odd permutation
-Tensor lu_det_P(const Tensor& pivots) {
-  return (at::arange(1, pivots.size(-1) + 1, pivots.options()) != pivots)
+static inline Tensor _lu_det_P(const Tensor& lu, const Tensor& pivs) {
+  const auto n = lu.size(-1);
+  auto det_P = (at::arange(1, n + 1, pivs.options()) != pivs)
     .sum(-1, /*keepdim=*/false, /*dtype=*/at::kLong)
     .fmod_(2)
     // take 0 to 1 and 1 to -1
     .mul_(-2)
     .add_(1);
+  return det_P;
 }
 
-// Auxiliary function that returns the LU decomposition to use it in the backward
-TORCH_IMPL_FUNC(_linalg_det_out)(const Tensor& A, const Tensor& result, const Tensor& LU, const Tensor& pivots) {
-  // info is an aux tensor
-  auto info = at::empty({0}, A.options().dtype(kInt));
-  at::linalg_lu_factor_ex_out(const_cast<Tensor&>(LU), const_cast<Tensor&>(pivots), const_cast<Tensor&>(info), A);
+// Given a pivoted LU factorization A = P L U,
+// det(A) = det(P) * det(L) * det(U).
+std::tuple<Tensor, Tensor, Tensor> _det_lu_based_helper(const Tensor& self) {
+  Tensor pivs, lu;
+  std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
+  const auto det_P = _lu_det_P(lu, pivs);
+  auto det = det_P * at::prod(lu.diagonal(0, -2 ,-1), /*dim=*/-1);
 
-  // det = det_P * prod(diag(LU))
-  at::mul_out(const_cast<Tensor&>(result), lu_det_P(pivots), at::prod(LU.diagonal(0, -2 ,-1), /*dim=*/-1));
-}
-
-Tensor linalg_det(const Tensor& A) {
-  return std::get<0>(at::_linalg_det(A));
-}
-
-Tensor& linalg_det_out(const Tensor& A, Tensor& result) {
-  auto LU = at::empty({0}, A.options());
-  auto pivots = at::empty({0}, A.options().dtype(kInt));
-  at::_linalg_det_out(result, LU, pivots, A);
-  return result;
+  return std::make_tuple(std::move(det), std::move(lu), std::move(pivs));
 }
 
 // torch.det, alias for torch.linalg.det
 Tensor det(const Tensor& self) {
   return at::linalg_det(self);
+}
+
+Tensor linalg_det(const Tensor& self) {
+  squareCheckInputs(self, "linalg.det");
+  checkFloatingOrComplex(self, "linalg.det");
+
+  return std::get<0>(at::_det_lu_based_helper(self));
+}
+
+Tensor& linalg_det_out(const Tensor& self, Tensor& out) {
+  checkSameDevice("torch.linalg.det", out, self, "out");
+  checkLinalgCompatibleDtype("torch.linalg.det", out, self, "out");
+
+  IntArrayRef out_sizes(self.sizes().data(), self.dim() - 2);
+  at::native::resize_output(out, out_sizes);
+
+  auto det = at::native::linalg_det(self);
+  out.copy_(det);
+  return out;
 }
 
 Tensor logdet(const Tensor& self) {
@@ -234,7 +224,7 @@ Tensor logdet(const Tensor& self) {
 
   Tensor pivs, lu;
   std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = lu_det_P(pivs);
+  const auto det_P = _lu_det_P(lu, pivs);
   const auto diag_U = lu.diagonal(0, -2 ,-1);
   const auto det_sign = diag_U.sign().prod(-1).mul_(det_P);
 
@@ -260,7 +250,7 @@ std::tuple<Tensor, Tensor> linalg_slogdet(const Tensor& self) {
 
   Tensor pivs, lu;
   std::tie(lu, pivs, std::ignore) = at::linalg_lu_factor_ex(self);
-  const auto det_P = lu_det_P(pivs);
+  const auto det_P = _lu_det_P(lu, pivs);
   const auto diag_U = lu.diagonal(0, -2 ,-1);
   const auto det_sign = diag_U.sgn().prod(-1).mul_(det_P);
   // abslogdet_val is -inf if U is singular, in which case diag_U.abs_().log_().sum(-1) will return -inf.

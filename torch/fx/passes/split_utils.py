@@ -314,6 +314,6 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
     # then we need to make sure get_attr is copied to the new graph.
     for x in flatten(output_node.args[0]):
         if x.op == "get_attr":
-            setattr(main_root, x.name, getattr_recursive(gm, x.target))  # type: ignore[arg-type]
+            setattr(main_root, x.name, getattr(gm, x.target))  # type: ignore[arg-type]
 
     return torch.fx.GraphModule(main_root, main_g)

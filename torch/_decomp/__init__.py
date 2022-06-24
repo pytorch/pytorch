@@ -36,7 +36,6 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
     a Meta implementation, we will register it to the dispatcher.  Use
     `disable_meta` to disable this behavior.
     """
-
     def decomposition_decorator(f):
         nonlocal registry
         if registry is None:
@@ -64,11 +63,11 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                     # which don't have corresponding dispatcher entries, we need
                     # to filter those out
                     and torch._C._dispatch_has_kernel(name)
+                    and not torch._C._dispatch_has_kernel_for_dispatch_key(name, 'Meta')
                     # Don't register a meta kernel to any operator that has
                     # a CompositeImplicitAutograd kernel in core.
                     # Otherwise we won't be able to run autograd for that operator with the meta backend.
-                    and "CompositeImplicitAutograd" not in torch._C._dispatch_dump(name)
-                    and not torch._C._dispatch_has_kernel_for_dispatch_key(name, "Meta")
+                    and 'CompositeImplicitAutograd' not in torch._C._dispatch_dump(name)
                 ):
                     meta_lib.impl(op_overload, f)
 
@@ -104,7 +103,6 @@ def get_decompositions(
         elif isinstance(op, torch._ops.OpOverload) and op in decomposition_table:
             decompositions[op] = decomposition_table[op]
     return decompositions
-
 
 # populate the table
 import torch._decomp.decompositions

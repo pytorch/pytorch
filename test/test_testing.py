@@ -1774,6 +1774,7 @@ class TestImports(TestCase):
                            "torch.distributed.elastic.rendezvous",  # depps on etcd
                            "torch.backends._coreml",  # depends on pycoreml
                            "torch.contrib.",  # something weird
+                           "torch.testing._internal.common_fx2trt",  # needs fx
                            "torch.testing._internal.distributed.",  # just fails
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801

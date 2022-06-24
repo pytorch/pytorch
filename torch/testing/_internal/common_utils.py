@@ -2196,17 +2196,6 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
-    def assertEqualBroadcasting(self, x, y, *args, **kwargs) -> None:
-        r"""Tests if tensor x equals to y, if y to be broadcast to x.shape.
-        """
-        if not isinstance(y, Iterable):
-            # int, float, etc. or different shape tensors
-            y = torch.ones_like(x) * y
-        if not isinstance(y, torch.Tensor):
-            # iterable, but not a tensor
-            y = torch.ones_like(x) * torch.tensor(y)
-        return self.assertEqual(x, y, *args, **kwargs)
-
     def assertEqual(
             self,
             x,

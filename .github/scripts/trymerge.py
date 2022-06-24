@@ -302,7 +302,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 """
 
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
-RE_GHSTACK_DESC = re.compile(r'Stack.*:\r?\n(\* [^\r\n]+\r?\n)+', re.MULTILINE)
+RE_GHSTACK_SOURCE_ID = re.compile(r'^ghstack-source-id: (.+)\n?', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
     r'Pull Request resolved: '
     r'https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)',
@@ -564,11 +564,8 @@ class GitHubPR:
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
                     conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
-                has_failing_check = False
                 while checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
-                        if checkrun_node["conclusion"] == 'FAILURE':
-                            has_failing_check = True
                         conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
                         rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
@@ -581,9 +578,6 @@ class GitHubPR:
                         checkruns = last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
                     else:
                         checkruns = None
-                # Github doesn't set conclusion to failure if a job is still pending
-                if workflow_run is not None and has_failing_check:
-                    conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
 
         add_conclusions(checksuites["edges"])
         while bool(checksuites["pageInfo"]["hasNextPage"]):
@@ -708,30 +702,21 @@ class GitHubPR:
             if self.org != m.group('owner') or self.project != m.group('repo'):
                 raise RuntimeError(f"PR {m.group('number')} resolved to wrong owner/repo pair")
             pr_num = int(m.group('number'))
-            commit_msg = self.gen_commit_message(filter_ghstack=True)
             if pr_num != self.pr_num:
                 pr = GitHubPR(self.org, self.project, pr_num)
                 if pr.is_closed():
                     print(f"Skipping {idx+1} of {len(rev_list)} PR (#{pr_num}) as its already been merged")
                     continue
-                commit_msg = pr.gen_commit_message(filter_ghstack=True)
+                approved_by = pr.get_approved_by()
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(pr, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
 
+            # Adding the url here makes it clickable within the Github UI
+            approved_by_urls = ', '.join(prefix_with_github_url(login) for login in approved_by)
             repo.cherry_pick(rev)
-            repo.amend_commit_message(commit_msg)
-
-    def gen_commit_message(self, filter_ghstack: bool = False) -> str:
-        """ Fetches title and body from PR description
-            adds reviewed by, pull request resolved and optionally
-            filters out ghstack info """
-        # Adding the url here makes it clickable within the Github UI
-        approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
-        msg = self.get_title() + f" (#{self.pr_num})\n\n"
-        msg += self.get_body() if not filter_ghstack else re.sub(RE_GHSTACK_DESC, "", self.get_body())
-        msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
-        msg += f"Approved by: {approved_by_urls}\n"
-        return msg
+            msg = re.sub(RE_GHSTACK_SOURCE_ID, "", msg)
+            msg += f"\nApproved by: {approved_by_urls}\n"
+            repo.amend_commit_message(msg)
 
     def merge_into(self, repo: GitRepo, *, force: bool = False, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
         # Raises exception if matching rule is not found
@@ -739,7 +724,11 @@ class GitHubPR:
         if repo.current_branch() != self.default_branch():
             repo.checkout(self.default_branch())
         if not self.is_ghstack_pr():
-            msg = self.gen_commit_message()
+            # Adding the url here makes it clickable within the Github UI
+            approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
+            msg = self.get_title() + f" (#{self.pr_num})\n\n" + self.get_body()
+            msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
+            msg += f"Approved by: {approved_by_urls}\n"
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
             repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
@@ -748,6 +737,8 @@ class GitHubPR:
             self.merge_ghstack_into(repo, force, comment_id=comment_id)
 
         repo.push(self.default_branch(), dry_run)
+        gh_post_pr_comment(self.org, self.project, self.pr_num,
+                           f"@{self.get_pr_creator_login()} your PR has been successfully merged.", dry_run)
         if not dry_run:
             gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
 

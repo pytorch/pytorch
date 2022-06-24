@@ -203,15 +203,12 @@ class TransformerEncoder(Module):
         output = src
         convert_to_nested = False
         first_layer = self.layers[0]
-        src_key_padding_mask_for_layers = src_key_padding_mask
         if isinstance(first_layer, torch.nn.TransformerEncoderLayer):
             if (not first_layer.norm_first and not first_layer.training and
                     first_layer.self_attn.batch_first and
                     first_layer.self_attn._qkv_same_embed_dim and first_layer.activation_relu_or_gelu and
                     first_layer.norm1.eps == first_layer.norm2.eps and
-                    src.dim() == 3 and self.enable_nested_tensor and
-                    src_key_padding_mask is not None and
-                    torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
+                    src.dim() == 3 and self.enable_nested_tensor) :
                 if src_key_padding_mask is not None and not output.is_nested and mask is None:
                     tensor_args = (
                         src,
@@ -233,10 +230,12 @@ class TransformerEncoder(Module):
                             if output.is_cuda or 'cpu' in str(output.device):
                                 convert_to_nested = True
                                 output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
-                                src_key_padding_mask_for_layers = None
 
         for mod in self.layers:
-            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
+            if convert_to_nested:
+                output = mod(output, src_mask=mask)
+            else:
+                output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
 
         if convert_to_nested:
             output = output.to_padded_tensor(0.)

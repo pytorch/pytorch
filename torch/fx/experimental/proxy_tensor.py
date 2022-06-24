@@ -75,7 +75,7 @@ def proxy_call(func_overload, args, kwargs=None):
     proxy_args = pytree.tree_map(unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(unwrap_proxy, kwargs)
 
-    proxy_out = func_overload(*proxy_args, **proxy_kwargs)
+    proxy_out = func(*proxy_args, **proxy_kwargs)
 
     # Kind of a hacky way to test if an op is in-place or not
     if func.__name__[-1] == "_" and func.__name__[0] != "_":

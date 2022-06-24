@@ -70,7 +70,6 @@ DECLARE_DISPATCH(unary_fn, tanh_stub);
 DECLARE_DISPATCH(unary_fn, trigamma_stub);
 DECLARE_DISPATCH(unary_fn, trunc_stub);
 DECLARE_DISPATCH(unary_fn, lgamma_stub);
-DECLARE_DISPATCH(unary_fn, special_airy_ai_stub);
 DECLARE_DISPATCH(unary_fn, special_bessel_j0_stub);
 DECLARE_DISPATCH(unary_fn, special_bessel_j1_stub);
 DECLARE_DISPATCH(unary_fn, special_bessel_y0_stub);
