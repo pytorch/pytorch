@@ -50,7 +50,8 @@ class TestFSDPMisc(FSDPTest):
     def process_group(self):
         return dist.distributed_c10d._get_default_group()
 
-    def test_fsdp_module_no_compute_grad(self):
+    @parametrize("use_second_layer", [True, False])
+    def test_fsdp_module_no_compute_grad(self, use_second_layer):
         class MyModel(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -59,14 +60,27 @@ class TestFSDPMisc(FSDPTest):
 
             def forward(self, x, y):
                 out1 = self.a(x)
-                return out1
+                if use_second_layer:
+                    out2 = self.b(x)
+                    return out1, out2
+                else:
+                    return out1
 
         fsdp = FSDP(MyModel().cuda(), auto_wrap_policy=always_wrap_policy)
         x = torch.randn(10, 10, device='cuda')
         y = torch.randn(10, 10, device='cuda')
-        a = fsdp(x, y)
+        if use_second_layer:
+            a, b = fsdp(x, y)
+        else:
+            a = fsdp(x, y)
         loss = a.sum()
         loss.backward()
+
+        # self.a receives grad, self.b does not
+        a_grad = fsdp._fsdp_wrapped_module._fpw_module.a._fsdp_wrapped_module.flat_param.grad
+        b_grad = fsdp._fsdp_wrapped_module._fpw_module.b._fsdp_wrapped_module.flat_param.grad
+        self.assertTrue(a_grad is not None)
+        self.assertTrue(b_grad is None)
 
     @skip_if_lt_x_gpu(2)
     def test_device_id_auto_wrap(self):

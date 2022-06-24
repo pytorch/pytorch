@@ -3101,15 +3101,28 @@ class FullyShardedDataParallel(nn.Module):
         # Update root and nested FSDP's hooks and flags.
         for m in self.modules():  # includes self
             if isinstance(m, FullyShardedDataParallel):
-                _finalize_params(m)
-                m._pre_backward_hook_has_run = False
                 if any(p.requires_grad for p in m.parameters()):
                     # Check if the module has params and if any of them has
                     # the `requires_grad` field set. If `requires_grad=False` for
                     # all the params, the post_backward hook will not fire and the
                     # state will remain in `TrainingState_.BACKWARD_PRE`.
-                    if any([p.requires_grad for p in m.params]):
-                        m._assert_state(TrainingState_.BACKWARD_POST)
+                    managed_param_requires_grad = any(p.requires_grad for p in m.params)
+                    if managed_param_requires_grad:
+                        hook_called = any(
+                            getattr(p, '_post_backward_called', False) for p in m.params
+                        )
+                        if hook_called:
+                            m._assert_state(TrainingState_.BACKWARD_POST)
+                            # Delete attr so the logic works correctly next iteration
+                            for p in m.params:
+                                if hasattr(p, '_post_backward_called'):
+                                    delattr(p, '_post_backward_called')
+                        else:
+                            # post backward hook was not called, meaning param
+                            # did not have a gradient computed. It was either unused
+                            # in forward, or unused in loss computation so it did
+                            # not get gradient
+                            m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
                     else:
                         m._assert_state(TrainingState_.BACKWARD_PRE)
                 else:
@@ -3121,6 +3134,9 @@ class FullyShardedDataParallel(nn.Module):
                     # 2. output tensors are `requires_grad==False`. In this case,
                     # pre-backward hook is not registered, so it is in IDLE state.
                     m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
+
+                _finalize_params(m)
+                m._pre_backward_hook_has_run = False
                 m.training_state = TrainingState_.IDLE
 
                 if m._is_root:
