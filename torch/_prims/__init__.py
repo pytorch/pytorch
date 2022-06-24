@@ -441,7 +441,10 @@ def _elementwise_meta(
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
-            dtype = utils.corresponding_real_dtype(dtype)
+            if utils.is_complex_dtype(dtype):
+                dtype = utils.corresponding_real_dtype(dtype)
+            else:
+                dtype = dtype
 
         return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
 
@@ -2166,7 +2169,10 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
 
 
 def _var_reduction_meta(inp, dims, *, correction):
-    output_dtype = utils.corresponding_real_dtype(inp.dtype)
+    if utils.is_complex_dtype(inp.dtype):
+        output_dtype = utils.corresponding_real_dtype(inp.dtype)
+    else:
+        output_dtype = inp.dtype
     return _reduction_meta(inp, dims, output_dtype=output_dtype)
 
 
@@ -2266,6 +2272,24 @@ def _var_nvfuser(
     return fd.Ops.var(a, dims, correction, keep_dims)
 
 
+def _amax_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.max(a, dims, keep_dims)
+
+
+def _amin_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.min(a, dims, keep_dims)
+
+
 var = _make_var_reduction_prim(
     name="var",
     impl_aten=torch.var,
@@ -2276,15 +2300,16 @@ var = _make_var_reduction_prim(
 amax = _make_reduction_prim(
     name="amax",
     impl_aten=torch.amax,
+    impl_nvfuser=_amax_nvfuser,
     doc=_amax_doc,
 )
 
 amin = _make_reduction_prim(
     name="amin",
     impl_aten=torch.amin,
+    impl_nvfuser=_amin_nvfuser,
     doc=_amin_doc,
 )
-
 
 # TODO: layout, pin_memory, memory_format
 # TODO: model requires_grad on TensorMeta
@@ -2431,27 +2456,20 @@ full_like = _make_prim(
 def _svd_meta(
     A: TensorLikeType, *, full_matrices: bool
 ) -> Tuple[TensorLikeType, TensorLikeType, TensorLikeType]:
+    utils.check_is_matrix(A, "linalg.svd")
+    utils.check_fp_or_complex(A.dtype, "linalg.svd", allow_low_precision_dtypes=False)
+
     A_shape = A.shape
-    check(
-        len(A_shape) >= 2,
-        lambda: f"linalg.svd: input should have at least 2 dimensions, but has {A.ndim} dimensions instead",
-    )
     batch = A_shape[:-2]
     m, n = A_shape[-2:]
     k = min(m, n)
 
-    def contig_strides(shape, *, row_major):
-        if row_major:
-            return utils.make_contiguous_strides_for(shape)
-        else:  # row major
-            return utils.make_batched_column_major_strides_for(shape)
-
     shape_U = batch + (m, m if full_matrices else k)
-    strides_U = contig_strides(shape_U, row_major=False)
+    strides_U = utils.make_contiguous_strides_for(shape_U, row_major=False)
     U = TensorMeta(shape=shape_U, strides=strides_U, dtype=A.dtype, device=A.device)
 
     shape_S = batch + (k,)
-    strides_S = contig_strides(shape_S, row_major=True)
+    strides_S = utils.make_contiguous_strides_for(shape_S)
     S = TensorMeta(
         shape=shape_S,
         strides=strides_S,
@@ -2463,7 +2481,7 @@ def _svd_meta(
     # The CPU backend returns V, but the cuSolver backend returns V^H
     # TODO The MAGMA backend returns V, so this is wrong if used with the MAGMA backend
     is_cuda = A.device.type == "cuda"
-    strides_Vh = contig_strides(shape_Vh, row_major=is_cuda)
+    strides_Vh = utils.make_contiguous_strides_for(shape_Vh, row_major=is_cuda)
     Vh = TensorMeta(shape=shape_Vh, strides=strides_Vh, dtype=A.dtype, device=A.device)
     return U, S, Vh
 

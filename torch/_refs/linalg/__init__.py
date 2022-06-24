@@ -7,10 +7,10 @@ from torch._prims.wrappers import out_wrapper
 
 from torch._prims.utils import (
     check,
+    check_fp_or_complex,
     DimsType,
     TensorLikeType,
     NumberType,
-    corresponding_real_dtype,
     is_float_dtype,
     is_complex_dtype,
     get_computation_dtype,
@@ -19,7 +19,6 @@ from torch._prims.utils import (
     REDUCTION_OUTPUT_TYPE_KIND,
 )
 import torch._refs.linalg as linalg
-import torch._refs.linalg.utils
 
 from typing import Optional, List, Tuple
 from functools import partial
@@ -64,14 +63,12 @@ def vector_norm(
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     # Checks
-    linalg.utils.check_fp_or_complex(
-        x.dtype, "linalg.vector_norm", allow_low_precision_dtypes=True
-    )
+    check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
     if isinstance(dim, int):
         dim = [dim]  # type: ignore[assignment]
     elif not isinstance(dim, List) and dim is not None:
-        # refs.sum just accepts List rather than DimType
+        # refs.amin just accepts List rather than DimType (Tuple)
         dim = list(dim)  # type: ignore[assignment]
 
     if x.numel() == 0 and (ord < 0.0 or ord == float("inf")):
@@ -101,33 +98,22 @@ def vector_norm(
     if ord == 0.0:
         return refs.sum(refs.ne(x, 0.0), dim=dim, keepdim=keepdim, dtype=result_dtype)
     elif ord == float("inf"):
-        return to_result_dtype(refs.amax(prims.abs(x), dim=dim, keepdim=keepdim))
+        return to_result_dtype(refs.amax(torch.abs(x), dim=dim, keepdim=keepdim))
     elif ord == float("-inf"):
-        return to_result_dtype(refs.amin(prims.abs(x), dim=dim, keepdim=keepdim))
+        return to_result_dtype(refs.amin(torch.abs(x), dim=dim, keepdim=keepdim))
     else:
         # From here on the computation dtype is important as the reduction is non-trivial
         x = prims.convert_element_type(x, computation_dtype)
         reduce_sum = partial(refs.sum, dim=dim, keepdim=keepdim)
 
-        # This choice should be made in ref
-        def fast_pow(x, p):
-            if p == 1.0:
-                return x
-            elif p == 2.0:
-                return x * x
-            elif p == 0.5:
-                return prims.sqrt(x)
-            else:
-                return prims.pow(x, p)
-
         # Avoid computing a sqrt in abs and then squaring (more stable)
         # This could potentially be done for complex dtypes as
-        # x = prims.real(prims.mul(prims.conj(x), x))
+        # x = torch.real(torch.conj(x) * x))
         # and it should be more stable, but it's not clear whether it'll be faster on, say
         # CPU (abs is 1 vectorised operation), so leaving it just for real dtypes for now
         if not (ord % 2.0 == 0.0 and is_float_dtype(x.dtype)):
-            x = prims.abs(x)
-        return to_result_dtype(fast_pow(reduce_sum(fast_pow(x, ord)), 1.0 / ord))
+            x = torch.abs(x)
+        return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))
 
 
 # out_wrapper_multi is buggy (see the note in its definition), and so is the `linalg.svd` out behaviour
