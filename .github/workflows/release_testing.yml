@@ -72,6 +72,7 @@ jobs:
           # commit on 20220410
           git checkout f42bdff0166ef503c844353c32b6725391e440ac
           # git checkout release/1.11
+          git setup.py clean
           python setup.py install
           echo "RESULT_DIR=${HOME}/release-testing/20220410-src" >> $GITHUB_ENV
           popd; python -c "import torch; print(torch.__version__); print(torch.version.git_version)"
