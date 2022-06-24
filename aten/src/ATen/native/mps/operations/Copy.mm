@@ -288,7 +288,8 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
                   destinationOffset:dst_byte_offset
                                size:src_size];
         [blitEncoder endEncoding];
-        stream->commitAndWait();
+        // GPU to GPU copy needs flushing only, and no synchronization with CPU is necessary
+        stream->commit(true);
       }
     });
   } else {
