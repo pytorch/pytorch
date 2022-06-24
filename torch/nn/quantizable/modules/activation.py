@@ -222,30 +222,12 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     @classmethod
     def from_observed(cls, other):
-        converted = torch.ao.quantization.convert(other, mapping=None,
-                                                  inplace=False,
-                                                  remove_qconfig=True,
-                                                  convert_custom_config_dict=None)
-        # Remove the parameters for the bias_k and bias_v to quantize them
-        # TODO: This is a potential source of accuracy drop.
-        #       quantized cat takes the scale and zp of the first
-        #       element, which might lose the precision in the bias_k
-        #       and the bias_v (which are cat'ed with k/v being first).
-        if converted.bias_k is not None:
-            bias_k = converted._parameters.pop('bias_k')
-            sc, zp = torch._choose_qparams_per_tensor(bias_k,
-                                                      reduce_range=False)
-            bias_k = torch.quantize_per_tensor(bias_k, sc, zp, torch.quint8)
-            setattr(converted, 'bias_k', bias_k)  # noqa: B010
-
-        if converted.bias_v is not None:
-            bias_v = converted._parameters.pop('bias_v')
-            sc, zp = torch._choose_qparams_per_tensor(bias_k,
-                                                      reduce_range=False)
-            bias_v = torch.quantize_per_tensor(bias_v, sc, zp, torch.quint8)
-            setattr(converted, 'bias_v', bias_v)  # noqa: B010
-
-        return converted
+        # The whole flow is float -> observed -> quantized
+        # This class does float -> observed only
+        # See nn.quantized.MultiheadAttention
+        raise NotImplementedError("It looks like you are trying to prepare an "
+                                  "MHA module. Please, see "
+                                  "the examples on quantizable MHAs.")
 
     def forward(self,
                 query: Tensor,

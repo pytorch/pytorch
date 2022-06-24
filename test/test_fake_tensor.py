@@ -1,6 +1,6 @@
 # Owner(s): ["module: meta tensors"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef, skipIfRocm
 import torch
 import itertools
 from torch.testing._internal.jit_utils import RUN_CUDA
@@ -159,6 +159,7 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device.type, "cuda")
             self.assertEqual(list(out.size()), [1, 8, 5, 5])
 
+    @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_fallback_memory_prop(self):
         m = nn.Conv2d(16, 33, 3, stride=2, device="cuda", dtype=torch.half)
