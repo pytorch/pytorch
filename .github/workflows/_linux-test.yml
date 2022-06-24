@@ -3,18 +3,12 @@ name: linux-test
 on:
   workflow_call:
     inputs:
-      build-environment:
-        required: false
-        type: string
-        default: ""
-        description: Top-level label for what's being built/tested.
-      artifact-suffix:
-        required: false
+      build-artifact:
+        required: true
         type: string
         description: |
-          Name of the build artifacts to download.  Should match the
-          `artifact-suffix` of a `linux-build` job.
-          TODO
+          Name of the build artifacts to download. Should match the output of a
+          _linux-build job.
       test-matrix:
         required: true
         type: string
@@ -77,19 +71,22 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
+        if: ${{ !contains(matrix.config, 'nogpu') }}
         with:
           timeout_minutes: 10
           max_attempts: 3
           command: |
             set -ex
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            has_nvidia_driver=$(lspci | grep -i nvidia)
+            if [[ -n "${has_nvidia_driver}" ]]; then
+              bash .github/scripts/install_nvidia_utils_linux.sh
+              echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            fi
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
-          name: ${{ inputs.build-environment }}
+          name: ${{ inputs.build-artifact }}
 
       - name: Parse ref
         id: parse-ref
@@ -104,13 +101,11 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           NUM_TEST_SHARDS: ${{ matrix.num_shards }}
           PR_BODY: ${{ github.event.pull_request.body }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           XLA_CUDA: 0
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
@@ -140,7 +135,6 @@ jobs:
             -e AWS_DEFAULT_REGION \
             -e IN_WHEEL_TEST \
             -e SHARD_NUMBER \
-            -e JOB_BASE_NAME \
             -e TEST_CONFIG \
             -e NUM_TEST_SHARDS \
             -e PR_BODY \
@@ -157,7 +151,7 @@ jobs:
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
             --ipc=host \
-            --shm-size="${SHM_SIZE}" \
+            --shm-size=2g \
             --tty \
             --detach \
             --name="${container_name}" \
@@ -196,10 +190,8 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PYTORCH_RETRY_TEST_CASES: 1
           PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1

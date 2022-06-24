@@ -3,10 +3,12 @@ name: build docs
 on:
   workflow_call:
     inputs:
-      build-environment:
+      build-artifact:
         required: true
         type: string
-        description: Top-level label for what's being built/tested.
+        description: |
+          Name of the build artifacts to download. Should match the output of a
+          _linux-build job.
       docker-image:
         required: true
         type: string
@@ -51,7 +53,7 @@ jobs:
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
-          name: ${{ inputs.build-environment }}
+          name: ${{ inputs.build-artifact }}
 
       - name: Generate netrc (only for docs-push)
         if: inputs.push
@@ -68,7 +70,6 @@ jobs:
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
-          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
         run: |
           set -ex
           # Convert refs/tags/v1.12.0rc3 into 1.12
@@ -79,7 +80,6 @@ jobs:
           fi
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
-            -e BUILD_ENVIRONMENT \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
