@@ -1,16 +1,17 @@
+# mypy: ignore-errors
 
 import itertools
-from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj   # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import DGreatestUpperBound  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import CalcConv, CalcMaxPool  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import CalcProduct, CanReshape  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, Prod, F  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_precision, op_leq, op_matching  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_consistency, op_neq  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_mul, op_add, op_sub, op_div, op_mod  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar  # type: ignore[import]
+from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT
+from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj
+from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound
+from torch.fx.experimental.migrate_gradual_types.constraint import DGreatestUpperBound
+from torch.fx.experimental.migrate_gradual_types.constraint import CalcConv, CalcMaxPool
+from torch.fx.experimental.migrate_gradual_types.constraint import CalcProduct, CanReshape
+from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, Prod, F
+from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_precision, op_leq, op_matching
+from torch.fx.experimental.migrate_gradual_types.operation import op_consistency, op_neq
+from torch.fx.experimental.migrate_gradual_types.operation import op_mul, op_add, op_sub, op_div, op_mod
+from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar
 from torch.fx.tensor_type import TensorType, Dyn
 
 
@@ -635,8 +636,8 @@ def gen_consistency_constraints(constraint, counter):
 
         c_tensor_i = Conj([BinConstraintT(constraint.lhs, TensorType(new_dims_rhs_1), op_eq),
                            BinConstraintT(constraint.rhs, TensorType(new_dims_rhs_2), op_eq)] +
-                          [BinConstraintD(d1, d2, op_consistency) for d1, d2 in zip(new_dims_rhs_1, new_dims_rhs_2)] +
-                          nat_constraints)
+                          [BinConstraintD(d1, d2, op_consistency) for
+                           d1, d2 in zip(new_dims_rhs_1, new_dims_rhs_2)] + nat_constraints)
 
         all_constraints.append(c_tensor_i)
 
