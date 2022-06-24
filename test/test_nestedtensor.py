@@ -359,11 +359,7 @@ class TestNestedTensorDeviceType(TestCase):
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
-        self.assertRaisesRegex(
-            RuntimeError,
-            "cannot index an empty nested tensor",
-            lambda: nt0[0]
-        )
+        self.assertRaises(IndexError, lambda: nt0[0])
         # normal case
         x0 = torch.randn((2, 5), device=device, dtype=dtype)
         x1 = torch.randn((3, 4), device=device, dtype=dtype)
@@ -549,6 +545,38 @@ class TestNestedTensorDeviceType(TestCase):
                 else:
                     expect_tensor[j] /= 1.0 - p
         self.nt_equal(nt, expect)
+
+    # cannot test torch.float16 because: RuntimeError: "softmax_kernel_impl" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
+    @torch.inference_mode()
+    def test_softmax(self, device, dtype):
+        # normal nested tensor
+        ntensors = 4
+        nt = self.random_nt(device, dtype, ntensors, (4, 4))
+        # error case: softmax across nested dimension
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt, 0))
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt, -3))
+        # error case: dimension out of range
+        self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt, 3))
+        self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt, -4))
+        # normal case: should equal to padding -inf
+        softmaxer = torch.nn.Softmax(1)
+        y0 = softmaxer(nt)
+        y1 = torch.nn.functional.softmax(nt, 1)
+        self.nt_equal(y0, y1)
+        pt = nt.to_padded_tensor(float("-inf"))
+        # if an entire slice is padded, then softmax will return 0.0 / 0.0 = nan
+        # however, physically speaking that should be 0.0
+        expect = torch.nn.functional.softmax(pt, 1).nan_to_num_(0.0)
+        self.assertEqual(y0.to_padded_tensor(0.0), expect)
+        # edge case: empty nested tensor
+        nt0 = torch.nested_tensor([])
+        y = torch.nn.functional.softmax(nt0, 1)
+        self.nt_equal(nt0, y)
+        # edge case: nesting scalars
+        nt1 = torch.nested_tensor([torch.tensor(0.0), torch.tensor(1.0)])
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt1, 0))
+        self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt1, 1))
 
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
