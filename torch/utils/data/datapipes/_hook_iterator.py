@@ -58,6 +58,7 @@ def _check_iterator_valid(datapipe, iterator_id, next_method_exists=False) -> No
     elif hasattr(datapipe, "_is_child_datapipe") and datapipe._is_child_datapipe is True:
         if hasattr(datapipe, "_check_valid_iterator_id"):
             if not datapipe._check_valid_iterator_id(iterator_id):
+                print()
                 raise RuntimeError("This iterator has been invalidated, because a new iterator has been created "
                                    f"from one of the ChildDataPipes of "
                                    f"{_generate_iterdatapipe_msg(datapipe.main_datapipe)}." + _feedback_msg)

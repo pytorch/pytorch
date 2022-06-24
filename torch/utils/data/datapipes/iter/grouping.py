@@ -312,6 +312,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.guaranteed_group_size,
             self.drop_remaining,
             self.wrapper_class,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -324,6 +326,8 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
             self.guaranteed_group_size,
             self.drop_remaining,
             self.wrapper_class,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self.curr_buffer_size = 0
         self.buffer_elements = defaultdict(list)

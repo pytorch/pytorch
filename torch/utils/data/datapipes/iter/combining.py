@@ -77,14 +77,14 @@ class ConcaterIterDataPipe(IterDataPipe):
     def restore_snapshot(self, snapshot=None):
         pass
 
-    def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-        state = (self.datapipes, self.length)
-        return state
-
-    def __setstate__(self, state):
-        (self.datapipes, self.length) = state
+    # def __getstate__(self):
+    #     if IterDataPipe.getstate_hook is not None:
+    #         return IterDataPipe.getstate_hook(self)
+    #     state = (self.datapipes, self.length)
+    #     return state
+    #
+    # def __setstate__(self, state):
+    #     (self.datapipes, self.length) = state
 
 
 
@@ -192,6 +192,8 @@ class _ForkerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -200,6 +202,8 @@ class _ForkerIterDataPipe(IterDataPipe):
             self.main_datapipe,
             self.num_instances,
             self.buffer_size,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self._datapipe_iterator = None
         self.buffer = deque()
@@ -424,6 +428,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.buffer_size,
             self.classifier_fn,
             self.drop_none,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -434,6 +440,8 @@ class _DemultiplexerIterDataPipe(IterDataPipe):
             self.buffer_size,
             self.classifier_fn,
             self.drop_none,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self._datapipe_iterator = None
         self.current_buffer_usage = 0
@@ -501,6 +509,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
         state = (
             self.datapipes,
             self.length,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         )
         return state
 
@@ -508,6 +518,8 @@ class MultiplexerIterDataPipe(IterDataPipe):
         (
             self.datapipes,
             self.length,
+            self._valid_iterator_id,
+            self._number_of_samples_yielded,
         ) = state
         self.buffer = []
 
@@ -568,11 +580,11 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
     def restore_snapshot(self, snapshot=None):
         pass
 
-    def __getstate__(self):
-        if IterDataPipe.getstate_hook is not None:
-            return IterDataPipe.getstate_hook(self)
-        state = (self.datapipes, self.length)
-        return state
-
-    def __setstate__(self, state):
-        (self.datapipes, self.length) = state
+    # def __getstate__(self):
+    #     if IterDataPipe.getstate_hook is not None:
+    #         return IterDataPipe.getstate_hook(self)
+    #     state = (self.datapipes, self.length)
+    #     return state
+    #
+    # def __setstate__(self, state):
+    #     (self.datapipes, self.length) = state
