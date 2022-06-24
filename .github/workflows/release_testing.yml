@@ -67,6 +67,7 @@ jobs:
           conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
                            setuptools cmake=3.22 cffi typing_extensions \
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
+          rm -rf pytorch-src || true
           git clone https://github.com/pytorch/pytorch.git pytorch-src
           pushd pytorch-src
           # commit on 20220401
