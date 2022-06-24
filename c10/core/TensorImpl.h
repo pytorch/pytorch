@@ -581,7 +581,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
-      return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
+      return size_custom(d); // unchecked (maybe_wrap_dim enforces bounds)
     }
     return sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
   }
