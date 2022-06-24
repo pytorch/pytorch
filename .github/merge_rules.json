@@ -52,12 +52,26 @@
    },
    {
       "name": "CI Pinned Hashes",
-      "patterns": [".github/ci_commit_pins/**"],
+      "patterns": [
+         ".github/ci_commit_pins/vision.txt",
+         ".github/ci_commit_pins/torchdynamo.txt"
+      ],
       "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
       "mandatory_checks_name": [
          "Facebook CLA Check",
          "Lint",
          "pull"
+      ]
+   },
+   {
+      "name": "XLA hash pin update",
+      "patterns": [".github/ci_commit_pins/xla.txt"],
+      "approved_by": ["pytorchbot", "ezyang", "pytorch/pytorch-dev-infra"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull / linux-bionic-py3_7-clang8-xla / build",
+         "pull / linux-bionic-py3_7-clang8-xla / test (xla, 1, 1, linux.2xlarge)"
       ]
    },
    {
