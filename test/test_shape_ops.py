@@ -475,6 +475,7 @@ class TestShapeOps(TestCase):
 
     @onlyCUDA  # CPU is too slow
     @largeTensorTest('17GB')  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
+    @largeTensorTest("81GB", "cpu") # even for CUDA test, sufficient system memory is required
     def test_flip_large_tensor(self, device):
         t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
         torch_fn = partial(torch.flip, dims=(0,))
