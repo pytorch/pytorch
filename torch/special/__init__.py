@@ -3,6 +3,7 @@ from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
+    'airy_ai',
     'bessel_j0',
     'bessel_j1',
     'bessel_y0',
@@ -870,6 +871,20 @@ Example::
     >>> b = torch.special.gammainc(a1, a2) + torch.special.gammaincc(a1, a2)
     tensor([1., 1., 1.])
 
+""".format(**common_args))
+
+airy_ai = _add_docstr(_special.special_airy_ai,
+                      r"""
+airy_ai(input, *, out=None) -> Tensor
+
+Airy function :math:`\text{Ai}\left(\text{input}\right)`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
 """.format(**common_args))
 
 bessel_j0 = _add_docstr(_special.special_bessel_j0,
