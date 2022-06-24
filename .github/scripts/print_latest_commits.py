@@ -1,6 +1,5 @@
 from typing import Any, Dict, List, NamedTuple, Tuple
 from gitutils import _check_output
-
 import rockset  # type: ignore[import]
 import os
 import re
