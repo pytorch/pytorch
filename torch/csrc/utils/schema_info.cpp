@@ -3,6 +3,25 @@
 namespace torch {
 namespace utils {
 
+bool SchemaInfo::hasSideEffects() const {
+  static std::vector<std::string> side_effects_ops = {
+      "aten::warn",
+      "aten::save",
+      "aten::manual_seed",
+      "aten::wait",
+      "cuda::set_stream",
+      "cuda::_set_device",
+      "cuda::_current_device",
+      "cuda::synchronize",
+  };
+  return std::any_of(
+      side_effects_ops.begin(),
+      side_effects_ops.end(),
+      [this](const std::string& side_effect_op) {
+        return side_effect_op == this->schema_.name();
+      });
+}
+
 bool SchemaInfo::isDeterministic() const {
   static const std::vector<const char*> nondeterministic_ops = {
       "aten::dropout(Tensor input, float p, bool train) -> Tensor",

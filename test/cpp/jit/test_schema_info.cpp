@@ -4,6 +4,24 @@
 namespace torch {
 namespace utils {
 
+TEST(SchemaInfoHasSideEffectsTest, Basic) {
+  SchemaInfo no_side_effects_schema_info(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
+  SchemaInfo side_effects_schema_info(
+      "aten::warn(str message, int stacklevel=2) -> ()");
+  ASSERT_TRUE(side_effects_schema_info.hasSideEffects());
+  ASSERT_FALSE(no_side_effects_schema_info.hasSideEffects());
+}
+
+TEST(SchemaInfoIsDeterministicTest, Basic) {
+  SchemaInfo deterministic_schema_info(
+      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
+  SchemaInfo nondeterministic_schema_info(
+      "aten::dropout(Tensor input, float p, bool train) -> Tensor");
+  ASSERT_TRUE(deterministic_schema_info.isDeterministic());
+  ASSERT_FALSE(nondeterministic_schema_info.isDeterministic());
+}
+
 TEST(SchemaInfoIsMutableTest, Basic) {
   SchemaInfo schema_info(
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
@@ -44,13 +62,5 @@ TEST(SchemaInfoAreAliasingTest, InvalidArgument) {
       c10::Error);
 }
 
-TEST(SchemaInfoIsDeterministicTest, Basic) {
-  SchemaInfo deterministic_schema_info(
-      "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
-  SchemaInfo nondeterministic_schema_info(
-      "aten::dropout(Tensor input, float p, bool train) -> Tensor");
-  ASSERT_TRUE(deterministic_schema_info.isDeterministic());
-  ASSERT_FALSE(nondeterministic_schema_info.isDeterministic());
-}
 } // namespace utils
 } // namespace torch

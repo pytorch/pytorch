@@ -36,6 +36,8 @@ class TORCH_API SchemaInfo {
   SchemaInfo(const char* signature)
       : schema_(torch::jit::getOperatorForLiteral(signature)->schema()) {}
 
+  bool hasSideEffects() const;
+
   bool isDeterministic() const;
 
   bool isMutating(int index) const;
