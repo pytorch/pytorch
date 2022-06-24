@@ -7159,9 +7159,9 @@ class TestQuantizeFxModels(QuantizationTestCase):
     def test_model_dropout(self):
         from torchvision import models
         m = models.mobilenet_v3_small()
-        qconfig_dict = {'': torch.quantization.get_default_qat_qconfig('fbgemm')}
+        qconfig_mapping = torch.ao.quantization.get_default_qat_qconfig_mapping('fbgemm')
         example_inputs = (torch.randn(1, 3, 224, 224),)
-        mp = prepare_qat_fx(m, qconfig_dict, example_inputs=example_inputs)
+        mp = prepare_qat_fx(m, qconfig_mapping, example_inputs=example_inputs)
         mp(*example_inputs)
         mq = convert_fx(mp)
         res = mq(*example_inputs)

@@ -186,21 +186,6 @@
     "sorted_patterns_dict",
     "get_quantize_handler_cls"
   ],
-  "torch.ao.quantization.observer": [
-    "ABC",
-    "ABCMeta",
-    "Any",
-    "Dict",
-    "List",
-    "Optional",
-    "OrderedDict",
-    "Tuple",
-    "Union",
-    "abstractmethod",
-    "calculate_qmin_qmax",
-    "check_min_max_valid",
-    "partial"
-  ],
   "torch.ao.quantization.qconfig": [
     "Any",
     "FakeQuantize",
@@ -2022,60 +2007,6 @@
   "torch.nn.intrinsic.quantized.modules.conv_relu": [
     "fuse_conv_bn_weights"
   ],
-  "torch.nn.modules.activation": [
-    "Module",
-    "NonDynamicallyQuantizableLinear",
-    "Optional",
-    "Parameter",
-    "Tensor",
-    "Tuple",
-    "constant_",
-    "xavier_normal_",
-    "xavier_uniform_"
-  ],
-  "torch.nn.modules.adaptive": [
-    "Linear",
-    "List",
-    "Module",
-    "ModuleList",
-    "Sequence",
-    "Sequential",
-    "Tensor",
-    "log_softmax",
-    "namedtuple"
-  ],
-  "torch.nn.modules.batchnorm": [
-    "Any",
-    "LazyModuleMixin",
-    "Module",
-    "Optional",
-    "Parameter",
-    "Tensor",
-    "UninitializedBuffer",
-    "UninitializedParameter",
-    "sync_batch_norm"
-  ],
-  "torch.nn.modules.channelshuffle": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.container": [
-    "Any",
-    "Dict",
-    "Iterable",
-    "Iterator",
-    "Mapping",
-    "Module",
-    "Optional",
-    "OrderedDict",
-    "Parameter",
-    "Tuple",
-    "TypeVar",
-    "Union",
-    "chain",
-    "islice",
-    "overload"
-  ],
   "torch.nn.modules.conv": [
     "LazyModuleMixin",
     "List",
@@ -2404,94 +2335,6 @@
     "Optional",
     "TensorProtoDataType",
     "TrainingMode"
-  ],
-  "torch.optim.adadelta": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adagrad": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adamax": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adamw": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.asgd": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.lbfgs": [
-    "Optimizer",
-    "reduce"
-  ],
-  "torch.optim.lr_scheduler": [
-    "Counter",
-    "Optimizer",
-    "bisect_right",
-    "wraps"
-  ],
-  "torch.optim.nadam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.optimizer": [
-    "chain",
-    "deepcopy",
-    "defaultdict"
-  ],
-  "torch.optim.radam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.rmsprop": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.rprop": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.sgd": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.sparse_adam": [
-    "Optimizer"
-  ],
-  "torch.optim.swa_utils": [
-    "Module",
-    "deepcopy"
   ],
   "torch.overrides": [
     "BaseTorchFunctionMode",
@@ -2912,6 +2755,7 @@
     "polygamma",
     "psi",
     "round",
+    "scaled_modified_bessel_k1",
     "shifted_chebyshev_polynomial_t",
     "shifted_chebyshev_polynomial_u",
     "shifted_chebyshev_polynomial_v",
@@ -3175,7 +3019,6 @@
     "_cummax_helper",
     "_cummin_helper",
     "_debug_has_internal_overlap",
-    "_det_lu_based_helper",
     "_det_lu_based_helper_backward_helper",
     "_dim_arange",
     "_dirichlet_grad",
