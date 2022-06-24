@@ -3,16 +3,32 @@ from torch.fx.experimental.migrate_gradual_types.operation import op_leq  # type
 
 
 def gen_tvar(curr):
+    """
+    Generate a tensor variable
+    :param curr: The current counter
+    :return: a tensor variable and the updated counter
+    """
     curr += 1
     return TVar(curr), curr
 
 
 def gen_dvar(curr):
+    """
+    Generate a dimension variable
+    :param curr: the current counter
+    :return: a dimension variable and an updated counter
+    """
     curr += 1
     return DVar(curr), curr
 
 
 def gen_tensor_dims(n, curr):
+    """
+    Generate a list of tensor dimensions
+    :param n:  the number of dimensions
+    :param curr: the current counter
+    :return: a list of dimension variables and an updated counter
+    """
     dims = []
     for _ in range(n):
         dvar, curr = gen_dvar(curr)
