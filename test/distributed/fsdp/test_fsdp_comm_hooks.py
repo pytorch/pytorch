@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import copy
 import sys
 from typing import Optional
 
@@ -39,14 +38,13 @@ class TestCommunicationHooks(FSDPTest):
         """
         Tests FSDP's default communication hook's behaviour and correctness.
         Arguments:
-            has_wrapping (bool): Configures wrapping of a module.
             sharding_strategy (Optional[ShardingStrategy]): Configures the FSDP algorithm.
         """
-        m = torch.nn.Linear(1, 2, bias=False)
+        m = torch.nn.Linear(1, 5, bias=False)
         inpt = torch.tensor([self.rank]).float().cuda(self.rank)
 
         net_default_hook = FSDP(
-            copy.deepcopy(m),
+            m,
             device_id=torch.cuda.current_device(),
             sharding_strategy=sharding_strategy
         ).to(self.rank)
@@ -67,17 +65,15 @@ class TestCommunicationHooks(FSDPTest):
             loss.backward()
 
             # For each worker, the gradient on the weight should be worker_rank.
-            grad = [param.grad for param in net_default_hook.parameters()]
-
-            avg = copy.deepcopy(grad[0])
+            grad = net_default_hook.params[0].grad
             expected_grad = (
                 sum(i for i in range(dist.get_world_size())) / dist.get_world_size()
             )
             # Verify default hook produces expected gradients
             self.assertEqual(
-                avg[0].item(),
+                grad[0].item(),
                 expected_grad,
-                msg=f"Expected hook grad of {expected_grad} but got {avg[0].item()}")
+                msg=f"Expected hook grad of {expected_grad} but got {grad[0].item()}")
 
     @skip_if_lt_x_gpu(2)
     @parametrize("has_wrapping", [True, False])
@@ -93,7 +89,6 @@ class TestCommunicationHooks(FSDPTest):
         has_wrapping: bool,
         sharding_strategy: Optional[ShardingStrategy]
     ):
-
         """
         Tests FSDP's communication hook interface behaviour.
         Arguments:
@@ -112,7 +107,6 @@ class TestCommunicationHooks(FSDPTest):
 
         def dummy_hook(state: DummyState, grad: torch.Tensor):
             pass
-
 
         class Net(nn.Module):
 
@@ -158,16 +152,16 @@ class TestCommunicationHooks(FSDPTest):
         dummy_state = DummyState(process_group=None)
 
         # FSDP currently suports communication hooks for a NO_SHARD strategy
-        # Check that a `NotImplementedError`` is raised for other strategies
+        # Check that a `NotImplementedError` is raised for other strategies
         if sharding_strategy != ShardingStrategy.NO_SHARD:
             # Check that default hook is set to None
             for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
                 self.assertIsNone(entry.communication_hook)
                 self.assertIsNone(entry.communication_hook_state)
 
-            with self.assertRaises(
+            with self.assertRaisesRegex(
                 NotImplementedError,
-                msg="Communication hooks are currently only available for a NO_SHARD strategy."
+                '^Communication hooks are currently only available for a NO_SHARD strategy.$'
             ):
                 fsdp_model_with_hook.register_comm_hook(dummy_state, dummy_hook)
 
@@ -186,17 +180,17 @@ class TestCommunicationHooks(FSDPTest):
                     if not submodule.check_is_root()
                 ]
                 # Check that assertion is raised for registering a comm hook on a non-root
-                with self.assertRaises(AssertionError):
+                with self.assertRaisesRegex(AssertionError, '^register_comm_hook can only be called on a root instance.$'):
                     submodules[0].register_comm_hook(
                         dummy_state,
                         dummy_hook
                     )
 
                 # Simmulate a registretion of a hook on a submodule
-                submodules[1]._hook_registered = True
+                submodules[1].communication_hook = dummy_hook
 
                 # Check that an error is raised when some of submodules have a non-default hook assigned
-                with self.assertRaises(AssertionError):
+                with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
                     fsdp_model_with_hook.register_comm_hook(
                         dummy_state,
                         dummy_hook
@@ -208,7 +202,6 @@ class TestCommunicationHooks(FSDPTest):
                     device_id=torch.cuda.current_device(),
                     sharding_strategy=sharding_strategy
                 ).to(device)
-
 
             fsdp_model_with_hook.register_comm_hook(
                 dummy_state,
@@ -224,8 +217,8 @@ class TestCommunicationHooks(FSDPTest):
             # Check dummy hook was registered for the root and all submodules if any
             for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
                 self.assertEqual(
-                    entry.communication_hook.__qualname__,
-                    dummy_hook.__qualname__
+                    entry.communication_hook,
+                    dummy_hook
                 )
                 self.assertEqual(
                     entry.communication_hook_state,

@@ -930,7 +930,6 @@ class FullyShardedDataParallel(nn.Module):
         # setting communication hook to a default
         self.communication_hook = self._get_default_comm_hook()
         self.communication_hook_state = self._get_default_comm_hook_state()
-        self._hook_registered = False
 
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
@@ -2901,8 +2900,7 @@ class FullyShardedDataParallel(nn.Module):
                     # reduce_dtype matches the param dtype.
                     param.grad.data = param.grad.data.to(self.mixed_precision.reduce_dtype)
 
-                if self.gradient_predivide_factor > 1 and \
-                        self.communication_hook == self._get_default_comm_hook():
+                if self.gradient_predivide_factor > 1 and self.communication_hook is None:
                     # Average grad by world_size for consistency with PyTorch DDP.
                     param.grad.div_(self.gradient_predivide_factor)
 
@@ -3401,7 +3399,6 @@ class FullyShardedDataParallel(nn.Module):
                         f"parameters in `forward()` for {r2_param_names}"
                     )
             eod.param_order.append(param_index)
-
 
     @torch.no_grad()
     def _prep_grads_for_backward(self) -> None:
@@ -4047,9 +4044,10 @@ class FullyShardedDataParallel(nn.Module):
         Registers a communication hook which is an enhancement that provides a
         flexible hook to users where they can specify how FSDP aggregates gradients
         across multiple workers.
-        This hook can be used to implement several algorithms like GossipGrad
-        and gradient compression which involve different communication strategies for
-        parameter syncs while running Fully Sharded Data Parallel training.
+        This hook can be used to implement several algorithms like
+        `GossipGrad <https://arxiv.org/abs/1803.05880>`_ and gradient compression
+        which involve different communication strategies for
+        parameter syncs while training with :class:`FullyShardedDataParallel`.
 
         .. warning::
             FSDP only support communication hooks for a ``NO_SHARD`` strategy at this time.
@@ -4067,10 +4065,11 @@ class FullyShardedDataParallel(nn.Module):
                             and shared by all the gradient tensors on the worker.
             hook (callable): Callable with the following signature:
                             ``hook: Callable[torch.Tensor] -> None``:
-                            This function takes in a python tensor, which represents a gradient
-                            of a loss function with respect to variables of a model
-                            for the local batch that needs to be communicated across ranks.
-                            It then performs all neccessary processing and returns nothing.
+                            This function takes in a python tensor, which represents
+                            the full, flattened, unsharded gradient with respect to all variables
+                            corresponding to the model this FSDP unit is wrapping
+                            (that are not wrapped by other FSDP sub-units).
+                            It then performs all neccessary processing and returns ``None``.
 
         """
         assert self.check_is_root(), "register_comm_hook can only be called on a root instance."
@@ -4081,12 +4080,12 @@ class FullyShardedDataParallel(nn.Module):
         else:
             # register same hook for root and all submodules
             for submodule in self.fsdp_modules(self):
-                assert not submodule._hook_registered, "communication hook can be only registered once"
-                submodule._hook_registered = True
-                # registering hook only if it hasn't been already registered
-                if submodule.communication_hook == self._get_default_comm_hook():
-                    submodule.communication_hook_state = state
-                    submodule.communication_hook = hook
+                # if submodule's communication hook is not default,
+                # then it was assigned a comm hook before
+                assert submodule.communication_hook == self._get_default_comm_hook(),\
+                    "communication hook can be only registered once"
+                submodule.communication_hook_state = state
+                submodule.communication_hook = hook
 
 def _get_default_cuda_device(module: nn.Module) -> torch.device:
     """Try to infer CUDA device from module parameters."""

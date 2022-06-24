@@ -5,12 +5,12 @@ from torch.distributed import distributed_c10d
 
 class AllReduceState(object):
     r"""
-    Stores parameters, needed to perform ``all_reduce`` algorithm
+    Stores state needed to perform the ``all_reduce`` algorithm
     within a communication hook.
 
     Args:
         process_group (ProcessGroup): The process group to be used for all-reduce.
-        world_size (int): The number of nodes in a process group.
+        world_size (int): The number of workers in a process group.
             Determined based on a ``process_group``.
         gradient_predivide_factor (float): A factor for gradients' pre-division.
         gradient_postdivide_factor (float): A factor for gradients' post-division.
@@ -34,8 +34,8 @@ class AllReduceState(object):
         )
         self.gradient_postdivide_factor = self.world_size / self.gradient_predivide_factor
 
-    # setting two factors 'self.gradient_predivide_factor'
-    # and 'self.gradient_postdivide_factor' to avoid underflow and overflow
+    # setting two factors `self.gradient_predivide_factor`
+    # and `self.gradient_postdivide_factor` to avoid underflow and overflow
     def _get_gradient_predivide_factor(self, world_size: int) -> float:
         factor: int = 1
         while world_size % factor == 0 and world_size / factor > factor:
@@ -46,13 +46,13 @@ class AllReduceState(object):
 def allreduce_hook(state: AllReduceState, grad: torch.Tensor):
     r"""
     This FSDP communication hook implements ``all_reduce`` algorithm
-    and a neccessary post-division of gradients.
+    and a neccessary pre- and post-division of gradients.
 
     Args:
         state (AllReduceState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks.
     """
-    # `all_reduce` is a default hook and grad is already pre-divided
+    grad.div_(state.gradient_predivide_factor)
     dist.all_reduce(grad, group=state.process_group)
     if state.gradient_postdivide_factor > 1:
         # Average grad by world_size for consistency with PyTorch DDP.
