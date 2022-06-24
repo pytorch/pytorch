@@ -160,7 +160,7 @@ def adamax(params: List[Tensor],
     See :class:`~torch.optim.Adamax` for details.
     """
 
-    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:
