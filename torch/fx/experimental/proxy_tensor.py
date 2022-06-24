@@ -59,7 +59,6 @@ def wrap_output(inner_res, proxy_res):
     else:
         return inner_res
 
-from torch.testing._internal.composite_compliance import check_metadata_consistency
 
 def proxy_call(func_overload, args, kwargs=None):
     if kwargs is None:
@@ -95,7 +94,9 @@ def proxy_call(func_overload, args, kwargs=None):
     if torch.Tag.inplace_view in func_overload.tags:  # type: ignore[attr-defined]
         with no_dispatch():
             func_overload(*args, **kwargs)
-    pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
+
+    # TODO(chilli): Enable this after it's been refactored to work with wrapper tensor subclasses in general
+    # pytree.tree_map(lambda x: check_metadata_consistency(x, ProxyTensor), (inner_res, args, kwargs))
     return wrap_output(inner_res, proxy_res)
 
 

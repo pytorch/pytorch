@@ -113,6 +113,7 @@ class TestProxyTensor(TestCase):
 
     def test_inplace_metadata(self):
         def f(x):
+            x = x.clone()
             x.unsqueeze_(-1)
             assert x.shape[-1] == 1
             return x
@@ -201,8 +202,6 @@ make_fx_failures = {
     xfail('to_sparse'),
     # segfaults
     skip('block_diag'),
-    # needs inplace_view tag
-    xfail('resize_'),
 }
 
 fake_tensor_failures = {
