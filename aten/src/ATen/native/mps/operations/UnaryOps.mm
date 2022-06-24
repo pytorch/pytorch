@@ -125,7 +125,13 @@ CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
 
 CREATE_MPS_UNARY_TORCH_IMPL_FUNC(abs_out_mps, absolute)
-CREATE_MPS_UNARY_TORCH_IMPL_FUNC(logical_not_out_mps, not)
+
+Tensor& logical_not_out_mps(const Tensor& self, Tensor& output)
+{
+  auto bool_self = self.to(ScalarType::Bool);
+  mps::unary_op(bool_self, output, "logical_not_out_mps", [](MPSGraph* mpsGraph, MPSGraphTensor* inputTensor){ return [mpsGraph notWithTensor:inputTensor name:nil];});
+  return output;
+}
 
 TORCH_IMPL_FUNC(log1p_out_mps) (const Tensor& self, const Tensor& output)
 {

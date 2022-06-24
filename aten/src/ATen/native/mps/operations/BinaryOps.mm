@@ -36,6 +36,12 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
 
+  if (self.numel() > other.numel()){
+    output.resize_(self.sizes());
+  } else {
+    output.resize_(other.sizes());
+  }
+
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
     string key = op_name + getTensorsStringKey({self, other, output}, /*use_scalar_value*/ false);
@@ -167,7 +173,18 @@ void add_sub_template(const Tensor& self, const Tensor& other, const Scalar& alp
 
 } // namespace mps
 
-#define CREATE_MPS_BINARY_OP_FUNC(func_out, func_stub, other_type)                              \
+#define CREATE_MPS_BINARY_COMPARISON_OP_FUNC(func_out, func_stub, other_type)                              \
+Tensor& func_out (const Tensor& self, const other_type& other, Tensor& output) { \
+  mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
+    ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
+      MPSGraph* mpsGraph = cachedGraph->graph();                                                \
+      return [mpsGraph func_stub##WithPrimaryTensor:mps::castMPSTensor(mpsGraph, primaryCastTensor, ScalarType::Bool)     \
+                                    secondaryTensor:mps::castMPSTensor(mpsGraph, secondaryCastTensor, ScalarType::Bool)   \
+                                               name:nil]; });                                   \
+  return output;                                                                                \
+}
+
+#define CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(func_out, func_stub, other_type)                              \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
@@ -178,7 +195,7 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Te
 }
 
 // Boolean Ops require casting output to "MPSDataTypeBool"
-#define CREATE_MPS_BOOLEAN_OP_FUNC(func_out, func_stub, other_type)                             \
+#define CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(func_out, func_stub, other_type)                             \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
   mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
     ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
@@ -190,26 +207,30 @@ TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Te
 }
 
 // Boolean Binary Ops
-CREATE_MPS_BOOLEAN_OP_FUNC(eq_scalar_out_mps, equal, Scalar);
-CREATE_MPS_BOOLEAN_OP_FUNC(eq_tensor_out_mps, equal, Tensor);
-CREATE_MPS_BOOLEAN_OP_FUNC(ne_scalar_out_mps, notEqual, Scalar);
-CREATE_MPS_BOOLEAN_OP_FUNC(ne_tensor_out_mps, notEqual, Tensor);
-CREATE_MPS_BOOLEAN_OP_FUNC(le_scalar_out_mps, lessThanOrEqualTo, Scalar);
-CREATE_MPS_BOOLEAN_OP_FUNC(le_tensor_out_mps, lessThanOrEqualTo, Tensor);
-CREATE_MPS_BOOLEAN_OP_FUNC(lt_scalar_out_mps, lessThan, Scalar);
-CREATE_MPS_BOOLEAN_OP_FUNC(lt_tensor_out_mps, lessThan, Tensor);
-CREATE_MPS_BOOLEAN_OP_FUNC(ge_scalar_out_mps, greaterThanOrEqualTo, Scalar);
-CREATE_MPS_BOOLEAN_OP_FUNC(ge_tensor_out_mps, greaterThanOrEqualTo, Tensor);
-CREATE_MPS_BOOLEAN_OP_FUNC(gt_scalar_out_mps, greaterThan, Scalar);
-CREATE_MPS_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(eq_scalar_out_mps, equal, Scalar);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(eq_tensor_out_mps, equal, Tensor);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(ne_scalar_out_mps, notEqual, Scalar);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(ne_tensor_out_mps, notEqual, Tensor);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(le_scalar_out_mps, lessThanOrEqualTo, Scalar);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(le_tensor_out_mps, lessThanOrEqualTo, Tensor);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(lt_scalar_out_mps, lessThan, Scalar);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(lt_tensor_out_mps, lessThan, Tensor);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(ge_scalar_out_mps, greaterThanOrEqualTo, Scalar);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(ge_tensor_out_mps, greaterThanOrEqualTo, Tensor);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_scalar_out_mps, greaterThan, Scalar);
+CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
 
 // Arithmetic Binary Ops
-CREATE_MPS_BINARY_OP_FUNC(minimum_out_mps, minimum, Tensor);
-CREATE_MPS_BINARY_OP_FUNC(maximum_out_mps, maximum, Tensor);
-CREATE_MPS_BINARY_OP_FUNC(mul_out_mps, multiplication, Tensor);
-CREATE_MPS_BINARY_OP_FUNC(pow_tensor_scalar_out_mps, power, Scalar);
-CREATE_MPS_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
-CREATE_MPS_BINARY_OP_FUNC(atan2_mps_out, atan2, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimum, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximum, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(mul_out_mps, multiplication, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_scalar_out_mps, power, Scalar);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
+CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(atan2_mps_out, atan2, Tensor);
+
+CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
+CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
+CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_xor_out_mps, logicalXOR, Tensor);
 
 
 TORCH_IMPL_FUNC(div_out_mode_mps) (const Tensor& self, const Tensor& other, c10::optional<c10::string_view> rounding_mode, const Tensor& output) {
