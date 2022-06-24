@@ -362,6 +362,28 @@ Tensor sparse_compressed_to_dense(
     Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
     return dst.add_(self);
   }
+  // dense.add_ is not yet implemented for CSC.
+  // Once it is there, use add_ instead.
+  // It is easier to implement it like this for now,
+  // because add_ will be modified to work with
+  // dense dimensions once CSR/CSC support them.
+  if (self.layout() == kSparseCsc) {
+    const auto batch_ndim = self.ccol_indices().dim() - 1;
+    auto dst_transposed_sizes = self.sizes().vec();
+    std::swap(dst_transposed_sizes[batch_ndim], dst_transposed_sizes[batch_ndim + 1]);
+    // TODO: write a utility function, or use a transpose once view semantics are there
+    const auto to_transposed_csr = at::native::_sparse_csr_tensor_unsafe(
+        self.ccol_indices(),
+        self.row_indices(),
+        self.values(),
+        dst_transposed_sizes,
+        self.values().scalar_type(),
+        kSparseCsr,
+        self.values().device());
+    auto dst_transposed = at::zeros(dst_transposed_sizes, self.options().layout(kStrided));
+    dst_transposed.add_(to_transposed_csr);
+    return dst_transposed.transpose(batch_ndim, batch_ndim + 1);
+  }
   if (self.layout() == kSparseBsr) {
     TORCH_CHECK(self.dim() == 2, "Can only convert 2D SparseBsr to Strided.");
     Tensor indices = at::_convert_indices_from_csr_to_coo(

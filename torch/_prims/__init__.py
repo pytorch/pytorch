@@ -436,7 +436,10 @@ def _elementwise_meta(
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
-            dtype = utils.corresponding_real_dtype(dtype)
+            if utils.is_complex_dtype(dtype):
+                dtype = utils.corresponding_real_dtype(dtype)
+            else:
+                dtype = dtype
 
         return TensorMeta(device=device, shape=shape, strides=strides, dtype=dtype)
 
@@ -2161,7 +2164,10 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
 
 
 def _var_reduction_meta(inp, dims, *, correction):
-    output_dtype = utils.corresponding_real_dtype(inp.dtype)
+    if utils.is_complex_dtype(inp.dtype):
+        output_dtype = utils.corresponding_real_dtype(inp.dtype)
+    else:
+        output_dtype = inp.dtype
     return _reduction_meta(inp, dims, output_dtype=output_dtype)
 
 
@@ -2261,6 +2267,24 @@ def _var_nvfuser(
     return fd.Ops.var(a, dims, correction, keep_dims)
 
 
+def _amax_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.max(a, dims, keep_dims)
+
+
+def _amin_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.min(a, dims, keep_dims)
+
+
 var = _make_var_reduction_prim(
     name="var",
     impl_aten=torch.var,
@@ -2271,12 +2295,14 @@ var = _make_var_reduction_prim(
 amax = _make_reduction_prim(
     name="amax",
     impl_aten=torch.amax,
+    impl_nvfuser=_amax_nvfuser,
     doc=_amax_doc,
 )
 
 amin = _make_reduction_prim(
     name="amin",
     impl_aten=torch.amin,
+    impl_nvfuser=_amin_nvfuser,
     doc=_amin_doc,
 )
 
