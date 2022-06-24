@@ -4774,14 +4774,14 @@ class TestGatherScatter(TestCase):
             x_cpu = torch.tensor(tensor_data)
             x_mps = x_cpu.to('mps')
 
-            x_cpu[:,0] = 7
-            x_mps[:,0] = 7
+            x_cpu[:, 0] = 7
+            x_mps[:, 0] = 7
 
             self.assertEqual(x_cpu, x_mps)
 
-        _helper([[1,2,3],[4,5,6]])
-        _helper([[1,2,3],[4,5,6],[7,8,9]])
-        _helper([[1,2,3],[4,5,6],[7,8,9],[10,11,12]])
+        _helper([[1, 2, 3], [4, 5, 6]])
+        _helper([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+        _helper([[1, 2, 3], [4, 5, 6], [7, 8, 9], [10, 11, 12]])
 
     def test_inplace_scatter(self):
         # https://github.com/pytorch/pytorch/issues/79672
