@@ -1325,7 +1325,8 @@ inline Tensor& shifted_chebyshev_polynomial_w_out(
 
 /// Spherical Bessel function of the first kind of order 0.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_j0.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_j0.
 ///
 /// Example:
 ///
