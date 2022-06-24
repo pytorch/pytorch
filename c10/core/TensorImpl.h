@@ -674,7 +674,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual IntArrayRef strides_custom() const;
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
   // sizes_strides_policy_ >= CustomSizes
-  // Currently this method only exists to be overwritten by subclasses such as NestedTensorImpl.
+  // Currently this method only exists to be overwritten by subclasses such as
+  // NestedTensorImpl.
   virtual int64_t size_custom(int64_t d) const {
     // TODO: We could add support to Python dispatch here.
     // TODO: We could call into aten::size.int instead of
