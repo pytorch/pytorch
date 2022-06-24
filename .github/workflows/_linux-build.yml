@@ -79,11 +79,6 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
 
-      - name: Validate workflow inputs
-        env:
-          WORKFLOW_INPUTS: ${{ toJSON(inputs) }}
-        run: echo "${WORKFLOW_INPUTS}" | python3 .github/scripts/validate_workflow_inputs.py
-
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
