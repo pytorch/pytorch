@@ -4,6 +4,7 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
+__all__ = ['Adam', 'adam']
 
 class Adam(Optimizer):
     r"""Implements Adam algorithm.
