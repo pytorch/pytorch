@@ -21,18 +21,6 @@
 namespace at {
 namespace native {
 using namespace at::sparse;
-/******************************************************************************
- * Build sparse from diagonals
- ******************************************************************************/
-
-// --------------------------------------------------------------------
-// spdiags(D, O, (N,M)) -> S
-//
-// Take rows of D and place them on the diagonals specified by offsets O of a
-// new (NxM) sparse matrix S If D is (P x Q) then O must be a row vector (P, ).
-// It does not matter if Q values fit  on any diagonal of S, or if S has no
-// O[i]th diagonal (those values/diagonals are simply skipped)
-// --------------------------------------------------------------------
 
 namespace {
 void _spdiags_kernel_cpu(
