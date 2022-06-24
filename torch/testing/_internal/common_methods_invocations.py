@@ -12417,10 +12417,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           skips=(
-               # Strides are not the same!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-           ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],),
     OpInfo('linalg.cholesky_ex',
            aten_name='linalg_cholesky_ex',
@@ -12431,10 +12427,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_linalg_cholesky,
            gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
-           skips=(
-               # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
-           ),
            decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
            ),
     OpInfo('linalg.cond',
@@ -19591,6 +19583,27 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
         ),
+    ),
+    UnaryUfuncInfo(
+        'special.airy_ai',
+        decorators=(
+            precisionOverride(
+                {
+                    torch.float32: 1e-03,
+                    torch.float64: 1e-05,
+                },
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.airy(x)[0] if TEST_SCIPY else _NOTHING,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestUnaryUfuncs',
+                'test_reference_numerics_large',
+            ),
+        ),
+        supports_autograd=False,
     ),
     UnaryUfuncInfo(
         'special.bessel_j0',
