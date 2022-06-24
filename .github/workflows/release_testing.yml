@@ -69,8 +69,8 @@ jobs:
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
           git clone https://github.com/pytorch/pytorch.git pytorch-src
           pushd pytorch-src
-          # commit on 20220410
-          git checkout f42bdff0166ef503c844353c32b6725391e440ac
+          # commit on 20220401
+          git checkout c0a6add7eef8ab3715c0f4281b3b7a2a0f1e24b5
           # git checkout release/1.11
           git setup.py clean
           python setup.py install
