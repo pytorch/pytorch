@@ -289,11 +289,13 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             if preserve_cpu_scalar_tensors and utils.is_cpu_scalar_tensor(x):
                 return x
 
-            if tuple(x.shape) != common_shape:
+            if not utils.same_shape(x.shape, common_shape):
                 common_rank = len(common_shape) + 1
                 start = common_rank - (len(x.shape) + 1)
                 dims = tuple(range(start, len(x.shape) + start))
                 return prims.broadcast_in_dim(x, common_shape, dims)
+
+            return x
         else:
             raise RuntimeError(
                 "Unexpected type when broadcasting: " + str(type(x)) + "!"
@@ -820,6 +822,33 @@ eq = _make_elementwise_binary_reference(
     supports_lhs_python_scalar=False,
 )
 
+
+def _pow(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+) -> TensorLikeType:
+    assert isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)
+
+    # If b is a number. mypy doesn't like isinstance(b, NumberType)
+    if not isinstance(b, TensorLikeType):
+        if b == 1.0:
+            return a  # type: ignore[return-value]
+        elif b == 2.0:
+            return a * a  # type: ignore[return-value]
+        elif b == 0.5:
+            return torch.sqrt(a)  # type: ignore[arg-type]
+        elif b == 1.0 / 3.0:
+            return prims.cbrt(a)
+    return prims.pow(a, b)
+
+
+# TODO: add docstring
+pow = _make_elementwise_binary_reference(
+    _pow,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    aten_op=torch.ops.aten.pow,
+)
+
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 # NB: aten_op not registered because CompositeExplicitAutograd
@@ -850,7 +879,7 @@ def float_power(
         b = prims.to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
-    return prims.pow(a, b)
+    return pow(a, b)
 
 
 # TODO: add docstring
@@ -1089,12 +1118,6 @@ nextafter = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
-)
-
-# TODO: add docstring
-pow = _make_elementwise_binary_reference(
-    prims.pow,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
 )
 
 # TODO: add docstring
@@ -1658,10 +1681,10 @@ def atleast_1d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_1d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
     return res if len(res) > 1 else res[0]
@@ -1681,10 +1704,10 @@ def atleast_2d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
     res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
@@ -1695,10 +1718,10 @@ def atleast_3d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
     res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
