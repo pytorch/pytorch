@@ -63,18 +63,15 @@ def _all_aten_forward_schemas():
 
 def _symbolic_argument_count(func):
     params = []
-    sig = inspect.signature(func)
+    signature = inspect.signature(func)
     optional_params = []
-    has_var = False
-    for name, p in sig.parameters.items():
-        if p.kind.name == "VAR_POSITIONAL":
-            has_var = True
-        elif name == "_outputs" or name == "g":
+    for name, parameter in signature.parameters.items():
+        if name in {"_outputs", "g"}:
             continue
-        elif p.default != inspect._empty:  # type: ignore[attr-defined]
-            optional_params.append(p)
+        if parameter.default is parameter.empty:
+            optional_params.append(parameter)
         else:
-            params.append(str(p))
+            params.append(str(parameter))
     return params
 
 
@@ -97,15 +94,13 @@ def onnx_supported_ops():
     aten_schemas = _all_aten_forward_schemas()
     symbolic_schemas = _all_symbolics_schemas()
     torch_schemas = set(symbolic_schemas.values())
-    supported_ops, unsupported_ops = list(), list()
-    onnx_supported_ops = list()
+    supported_ops = []
+    onnx_supported = []
     for schema in aten_schemas:
         if schema in torch_schemas:
             opname = schema.name[6:]  # without "aten::" prefix
             opsets = symbolic_schemas[opname].opsets
             if schema not in supported_ops:
                 supported_ops.append(symbolic_schemas[opname])
-                onnx_supported_ops.append((opname, " ".join(str(o) for o in opsets)))
-        else:
-            unsupported_ops.append(schema)
-    return sorted(onnx_supported_ops, key=lambda x: x[0])
+                onnx_supported.append((opname, " ".join(str(o) for o in opsets)))
+    return sorted(onnx_supported, key=lambda x: x[0])
