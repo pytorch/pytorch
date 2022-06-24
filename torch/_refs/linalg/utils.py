@@ -9,7 +9,7 @@ from torch._prims.utils import (
 
 
 def check_fp_or_complex(
-    dtype: torch.dtype, fn_name: str, allow_low_precision_dtypes: bool = False
+    dtype: torch.dtype, fn_name: str, allow_low_precision_dtypes: bool = True
 ):
     """
     Checks whether the input is floating point or complex.
