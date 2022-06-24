@@ -263,8 +263,6 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
       // if we cannot gather, we make the the tensor contiguous implicitly, and keep
       // it in placeholder to be able to retrieve it when we return from constructor
       _tensor = src.contiguous();
-      // update the original tensor
-      const_cast<Tensor&>(src) = _tensor;
     }
     srcBuf = getMTLBufferStorage(_tensor);
   }
