@@ -78,3 +78,33 @@ test/test_type_promotion.py @mruberry @ngimel
 test/test_mps.py @kulinseth
 aten/src/ATen/mps/ @kulinseth
 aten/src/ATen/native/mps/ @kulinseth
+
+# Autocast
+torch/amp/ @leslie-fang-intel @CaoE
+aten/src/ATen/autocast_mode.* @leslie-fang-intel @CaoE
+torch/csrc/jit/passes/autocast.cpp @leslie-fang-intel @CaoE
+test/test_autocast.py @leslie-fang-intel @CaoE
+
+# NNC
+torch/csrc/jit/tensorexpr/ @EikanWang @chunyuan-w
+
+# CPU frontend
+torch/cpu/ @leslie-fang-intel @CaoE
+torch/utils/mkldnn.py @mingfeima @XiaobingSuper
+test/test_mkldnn.py @mingfeima @XiaobingSuper
+
+# CPU ATen backend
+aten/src/ATen/cpu/ @mingfeima @XiaobingSuper
+aten/src/ATen/native/cpu/ @mingfeima @XiaobingSuper
+aten/src/ATen/native/quantized/cpu/ @mingfeima @Xia-Weiwen
+aten/src/ATen/native/Convolution*.cpp @mingfeima @XiaobingSuper
+aten/src/ATen/native/mkldnn/ @mingfeima @XiaobingSuper
+
+# oneDNN graph integration
+torch/csrc/jit/codegen/onednn/ @sanchitintel @chunyuan-w
+test/test_jit_llga_fuser.py @sanchitintel @chunyuan-w
+
+# IDEEP (and Caffe2 integration)
+third-party/ideep/ @XiaobingSuper @yanbing-j
+caffe2/ideep/ @XiaobingSuper @yanbing-j
+caffe2/python/ideep/ @XiaobingSuper @yanbing-j
