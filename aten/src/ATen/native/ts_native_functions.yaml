@@ -150,6 +150,8 @@ full_codegen:
   - select_copy.int
   - detach_copy
   - slice_copy.Tensor
+  # Not implemented yet because LTC codegen doesn't currently work
+  # for ops that return lists of tensors.
   #- split_copy.Tensor
   #- split_with_sizes_copy
   #- unbind_copy.int

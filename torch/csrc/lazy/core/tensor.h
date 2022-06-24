@@ -242,9 +242,19 @@ TORCH_API LazyTensorPtr GetLtcTensorOrCreateForWrappedNumber(
 TORCH_API at::Tensor CreateAtenFromLtcTensor(const LazyTensorPtr& ltc_tensor);
 TORCH_API at::Tensor CreateAtenFromLtcTensor(LazyTensor&& ltc_tensor);
 
-// Given a non-lazy tensor, creates a lazy tensor on the specified (lazy)
-// device. The functionalize_output determines whether or not we should wrap the
-// output in a "functional wrapper".
+// Note [Lazy Tensor Functionalization]
+// The functionalization pass is implemented by wrapping all TensorImpl
+// objects in C++ with an extra FunctionalTensorWrapper object,
+// that knows how to perform functionalization
+//
+// Certain functions in the aten API serve as entry/exit points for
+// functionalization, where we need to perform the wrapping/unwrapping:
+// - aten::to.device
+// - aten::empty
+
+// Given a non-lazy tensor, this function creates a lazy tensor on the specified
+// (lazy) device. The functionalize_output determines whether or not we should
+// wrap the output in a "functional wrapper".
 //
 // How do you know whether to pass true/false for functionalize_output?
 //

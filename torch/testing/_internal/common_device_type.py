@@ -501,7 +501,7 @@ class LazyTestBase(DeviceTypeTestBase):
         import torch._lazy.ts_backend
         global lazy_ts_backend_init
         if not lazy_ts_backend_init:
-            # Nead to connect the TS backend to lazy key before running tests
+            # Need to connect the TS backend to lazy key before running tests
             torch._lazy.ts_backend.init()
             lazy_ts_backend_init = True
 

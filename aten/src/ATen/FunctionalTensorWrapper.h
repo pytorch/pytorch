@@ -294,10 +294,9 @@ struct _functionalize_aten_op<Op, ReturnType(ParameterTypes...)> final {
         c10::KernelFunction::make_boxed_function<functionalize_op_helper>,
         nullptr,
         op,
-        c10::DispatchKeySet(), // we know that the cpu_fallback doesn't use the
-                               // dispatch keyset.
-        // std::forward<ParameterTypes...>(args...)
-        // TODO: get std::forward<> to work
+        // BoxedKernelWrapper knows to ignore this keyset argument,
+        // because functionalize_op_helper doesn't take in a DispatchKeySet
+        c10::DispatchKeySet(),
         args...);
   }
 };
