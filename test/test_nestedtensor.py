@@ -614,8 +614,8 @@ class TestNestedTensorDeviceType(TestCase):
             lambda: nt0.bmm(nt0)
         )
         # normal nested tensor
-        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 4))])
-        nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((4, 5))])
+        nt0 = torch.nested_tensor([torch.randn((2, 4)), torch.randn((3, 7))])
+        nt1 = torch.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))])
         actual = nt0.bmm(nt1)
         expect = nt0.to_padded_tensor(0.0).bmm(nt1.to_padded_tensor(0.0))
         self.assertEqual(actual.to_padded_tensor(0.0), expect)
