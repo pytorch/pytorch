@@ -8,6 +8,20 @@ define_xnnpack()
 
 define_kineto()
 
+# a placeholder for libraries that are not implemented in OSS
+cxx_library(
+    name = "no-op",
+    visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "rt",
+    exported_platform_linker_flags = [
+        ("^linux-.*$", ["-lrt"]),
+    ],
+    visibility = ['PUBLIC'],
+)
+
 cxx_library(
     name = "fmt",
     srcs = ['fmt/src/format.cc'],
@@ -165,9 +179,9 @@ cxx_library(
 
 cxx_library(
     name = "miniz",
-    srcs = ["miniz-2.0.8/miniz.c"],
+    srcs = ["miniz-2.1.0/miniz.c"],
     header_namespace = "",
-    exported_headers = {"miniz.h": "miniz-2.0.8/miniz.h"},
+    exported_headers = {"miniz.h": "miniz-2.1.0/miniz.h"},
     exported_preprocessor_flags = [
         "-DMINIZ_DISABLE_ZIP_READER_CRC32_CHECKS",
     ],
