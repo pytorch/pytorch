@@ -255,7 +255,7 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
         if len(args) > 0 and isinstance(args[0], Number):
             dtype = utils.type_to_dtype(type(args[0]))
             args_ = list(args)
-            args_[0] = torch.scalar_tensor(args[0], dtype=dtype)
+            args_[0] = torch.tensor(args[0], dtype=dtype)
             result = fn(*args_, **kwargs)
             assert isinstance(result, torch.Tensor)
             return result.item()
