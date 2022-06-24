@@ -20,7 +20,11 @@ class TestQuantizedTensor(unittest.TestCase):
         qparams = observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
-        qtensor = quantize_APoT(tensor2quantize=tensor2quantize, qparams=qparams)
+        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
+                                alpha=qparams[0],
+                                gamma=qparams[1],
+                                quantization_levels=qparams[2],
+                                level_indices=qparams[3])
 
         qtensor_data = qtensor.int_repr().int()
 

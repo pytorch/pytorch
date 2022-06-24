@@ -48,3 +48,11 @@ based on quantization levels
 def apot_to_float(x_apot, levels, indices):
     idx = list(indices).index(x_apot)
     return levels[idx]
+
+r"""Clips value x based on alpha qparam
+"""
+def clip(x, alpha):
+    if abs(x) > alpha:
+        return alpha
+    else:
+        return x

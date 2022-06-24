@@ -145,7 +145,12 @@ class TestNonUniformObserver(unittest.TestCase):
 
         alpha = qparams[0]
 
-        self.assertEqual(alpha, torch.tensor([100.23]))
+        min_val = torch.min(X)
+        max_val = torch.max(X)
+
+        expected_alpha = torch.max(-min_val, max_val)
+
+        self.assertEqual(alpha, expected_alpha)
 
 
 if __name__ == '__main__':
