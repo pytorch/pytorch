@@ -58,7 +58,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
                 jobName=check['jobName'],
                 conclusion=check['conclusion'],
             )._asdict())
-            
+
     return workflow_checks
 
 def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
