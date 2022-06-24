@@ -4,9 +4,8 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.datapipes.utils.common import (
-    _check_unpickable_fn,
-    validate_input_col
-)
+    _check_lambda_fn,
+    validate_input_col)
 
 __all__ = [
     "CollatorIterDataPipe",
@@ -67,7 +66,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         super().__init__()
         self.datapipe = datapipe
 
-        _check_unpickable_fn(fn)
+        _check_lambda_fn(fn)
         self.fn = fn  # type: ignore[assignment]
 
         self.input_col = input_col
