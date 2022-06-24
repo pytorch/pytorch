@@ -10,7 +10,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
-from typing import cast, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Iterable, cast, Any, Callable, Dict, List, Optional, Tuple, Union
 from gitutils import get_git_remote_name, get_git_repo_dir, patterns_to_regex, GitRepo
 from functools import lru_cache
 from warnings import warn
@@ -879,21 +879,10 @@ def find_matching_merge_rule(pr: GitHubPR,
                 reject_reason = (f"Matched rule {rule_name}, but PR #{pr.pr_num} was not reviewed yet by any of: " +
                                  f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
-        if rule.mandatory_checks_name is not None:
-            pending_checks: List[Tuple[str, Optional[str]]] = []
-            failed_checks: List[Tuple[str, Optional[str]]] = []
-            checks = pr.get_checkrun_conclusions()
-            # HACK: We don't want to skip CLA check, even when forced
-            for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
-                if checkname not in checks:
-                    pending_checks.append((checkname, None))
-                elif checks[checkname][0] is None:
-                    pending_checks.append((checkname, checks[checkname][1]))
-                elif checks[checkname][0] != 'SUCCESS':
-                    failed_checks.append((checkname, checks[checkname][1]))
-
-        def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
-            return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
+        mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
+        checks = pr.get_checkrun_conclusions()
+        required_checks = filter(lambda x: force is False or "CLA Check" in x, mandatory_checks)
+        [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
@@ -914,6 +903,9 @@ def find_matching_merge_rule(pr: GitHubPR,
         raise MandatoryChecksMissingError(reject_reason)
     raise RuntimeError(reject_reason)
 
+
+def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
+    return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
 
 def pr_get_checks_with_lambda(pr: GitHubPR, status_check: Callable[[Optional[str]], bool]) -> List[Tuple[str, str]]:
     checks = pr.get_checkrun_conclusions()
@@ -999,26 +991,35 @@ def check_for_sev(org: str, project: str, force: bool) -> None:
                 )
     return
 
-def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
+def fetch_check_run_conclusions(repo: GitRepo, commit: str) -> Dict[str, Tuple[str, str]]:
     [owner, name] = repo.gh_owner_and_name()
     checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
-    if checks['total_count'] == 0:
-        raise MandatoryChecksMissingError("Refusing to merge as land time check(s) are not yet run")
-    check_runs = checks['check_runs']
-    pending_jobs = []
-    failed_jobs = []
-    for check_run in check_runs:
-        name = check_run['name']
-        conclusion = check_run['conclusion']
-        if conclusion == 'failure':
-            failed_jobs.append(name)
-        elif conclusion is None:
-            pending_jobs.append(name)
+    check_run_conclusions = {}
+    for check_run in checks['check_runs']:
+        check_run_conclusions[check_run['name']] = (check_run['conclusion'].upper(), check_run['html_url'])
+    return check_run_conclusions
 
-    if len(failed_jobs) > 0:
-        raise RuntimeError(f"Failed to merge; some land checks failed: {', '.join(failed_jobs)}")
-    if len(pending_jobs) > 0:
-        raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {', '.join(pending_jobs)} are not yet run")
+def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
+    checks = fetch_check_run_conclusions(repo, commit)
+    [pending_checks, failed_checks] = categorize_checks(checks, checks)
+
+    if len(failed_checks) > 0:
+        raise RuntimeError(f"Failed to merge; some land checks failed: {checks_to_str(failed_checks)}")
+    if len(pending_checks) > 0:
+        raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
+
+def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
+                      required_checks: Iterable[str]) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
+    pending_checks: List[Tuple[str, Optional[str]]] = []
+    failed_checks: List[Tuple[str, Optional[str]]] = []
+    for checkname in required_checks:
+        if checkname not in check_runs:
+            pending_checks.append((checkname, None))
+        elif check_runs[checkname][0] is None:
+            pending_checks.append((checkname, check_runs[checkname][1]))
+        elif check_runs[checkname][0] != 'SUCCESS' and check_runs[checkname][0] != 'SKIPPED':
+            failed_checks.append((checkname, check_runs[checkname][1]))
+    return (pending_checks, failed_checks)
 
 def merge(pr_num: int, repo: GitRepo,
           dry_run: bool = False,
