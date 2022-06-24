@@ -26,6 +26,10 @@ load(
     "libtorch_profiler_sources",
 )
 load(
+    ":pt_ops.bzl",
+    "USED_PT_BACKENDS",
+)
+load(
     ":pt_template_srcs.bzl",
     "METAL_MASKRCNN_SOURCE_LIST",
     "METAL_SOURCE_LIST",
@@ -234,12 +238,6 @@ def get_pt_preprocessor_flags():
     if _is_build_mode_dev():
         PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
     return PT_PREPROCESSOR_FLAGS
-
-USED_PT_BACKENDS = [
-    "CPU",
-    "QuantizedCPU",
-    "SparseCPU",  # brings ~20 kb size regression
-]
 
 # This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892
 PT_BACKEND_HEADERS = [
