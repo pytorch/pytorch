@@ -7,6 +7,13 @@ on:
         required: true
         type: string
         description: Top-level label for what's being built/tested.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 
 jobs:
