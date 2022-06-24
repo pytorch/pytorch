@@ -20,7 +20,7 @@ class TestQuantizer(unittest.TestCase):
         # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
 
-        # generate tensor with random fp values between 0 -> 1000
+        # generate tensor with random fp values between 0 -> 1
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
         observer = APoTObserver(b=4, k=1)
@@ -35,7 +35,7 @@ class TestQuantizer(unittest.TestCase):
                                 level_indices=qparams[3])
 
         # get uniform quantization quantized tensor result
-        uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
+        uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0.0, dtype=torch.quint8).int_repr()
 
         qtensor_data = qtensor.data.int()
         uniform_quantized_tensor = uniform_quantized.data.int()
@@ -63,9 +63,6 @@ class TestQuantizer(unittest.TestCase):
 
         # generate tensor with random fp values
         tensor2quantize = torch.tensor([0, 0.0215, 0.1692, 0.385, 1, 0.0391])
-
-        min_val = torch.min(tensor2quantize)
-        max_val = torch.max(tensor2quantize)
 
         observer = APoTObserver(b=4, k=2)
         observer.forward(tensor2quantize)
