@@ -257,3 +257,7 @@ jobs:
     secrets:
       AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
       AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
+
+  android-emulator-build-test:
+    name: android-emulator-build-test
+    uses: ./.github/workflows/_run_android_tests.yml
