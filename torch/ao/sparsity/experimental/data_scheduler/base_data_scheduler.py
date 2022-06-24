@@ -2,6 +2,7 @@ from torch.ao.sparsity import BaseDataSparsifier
 from functools import wraps
 import weakref
 import abc
+import warnings
 
 __all__ = ['BaseDataScheduler']
 
@@ -75,7 +76,8 @@ class BaseDataScheduler(object):
         self.verbose = verbose
 
         # Housekeeping
-        self._get_sp_called_within_step: bool = False
+        self._get_sp_called_within_step: bool = False  # sp -> schedule parameter
+        self.step()
 
     @abc.abstractmethod
     def get_schedule_param(self):
@@ -105,5 +107,48 @@ class BaseDataScheduler(object):
         format_string += ')'
         return format_string
 
-    def step(self, epoch=None):
-        pass
+    def get_last_param(self):
+        return self._last_param
+
+    def step(self):
+        # Raise warning if trying to call scheduler step before the sparsifier.
+        # https://github.com/pytorch/pytorch/issues/20124
+        if self._step_count == 1:
+            if not hasattr(self.data_sparsifier.step, "_with_counter"):
+                warnings.warn("Seems like `data_sparsifier.step()` has been overridden after sparsity scheduler "
+                              "initialization. Please, make sure to call `data_sparsifier.step()` before "
+                              "`scheduler.step()`.", UserWarning)
+
+            # Just check if there were two first scheduler.step() calls before sparsifier.step()
+            elif self.data_sparsifier._step_count < 1:  # type: ignore[attr-defined]
+                warnings.warn("Detected call of `scheduler.step()` before `data_sparsifier.step()`. "
+                              "You have to make sure you run the data_sparsifier.step() BEFORE any "
+                              "calls to the scheduer.step().", UserWarning)
+        self._step_count += 1
+
+        class _enable_get_sp_call:
+
+            def __init__(self, o):
+                self.o = o
+
+            def __enter__(self):
+                self.o._get_sp_called_within_step = True
+                return self
+
+            def __exit__(self, type, value, traceback):
+                self.o._get_sp_called_within_step = False
+
+        with _enable_get_sp_call(self):
+            self.last_epoch += 1
+            updated_scheduler_params = self.get_schedule_param()
+
+        for name, param in updated_scheduler_params.items():
+            self.data_sparsifier.data_groups[name][self.schedule_param] = param
+            if self.verbose:
+                print(f"Adjusting {self.schedule_param} for group {name} to {param}")
+
+        self._last_param = {
+            name: config.get(self.schedule_param, None)
+            for name, config in self.data_sparsifier.data_groups.items()
+        }
+        self.data_sparsifier.enable_mask_update = True
