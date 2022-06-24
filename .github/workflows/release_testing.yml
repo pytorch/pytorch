@@ -70,7 +70,9 @@ jobs:
           git clone https://github.com/pytorch/pytorch.git pytorch-src
           pushd pytorch-src
           # commit on 20220401
-          git checkout c0a6add7eef8ab3715c0f4281b3b7a2a0f1e24b5
+          # git checkout c0a6add7eef8ab3715c0f4281b3b7a2a0f1e24b5
+          # commit on 20220501
+          git checkout 201ddafc22e22c387b4cd654f397e05354d73d09
           git submodule update --recursive --init
           # git checkout release/1.11
           git setup.py clean
