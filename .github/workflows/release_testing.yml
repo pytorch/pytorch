@@ -67,7 +67,7 @@ jobs:
           git checkout release/1.11
           python setup.py install
           echo "RESULT_DIR=${HOME}/release-testing/1.11.0-src" >> $GITHUB_ENV
-          python -c "import torch"
+          python -c "import torch; print(torch.__version__); print(torch.version.git_version)"
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
           echo "Result dir: ${RESULT_DIR} "
       - name: Check machine tuned
