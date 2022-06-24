@@ -21761,7 +21761,7 @@ class TestStateDictHooks(TestCase):
         finally:
             gc.enable()
 
-    def _hook_with_module(*args, **kwargs):
+    def _hook_with_module(self, *args, **kwargs):
         pass
 
     def test_pickled_hook(self):
