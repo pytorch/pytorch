@@ -33,7 +33,8 @@ class APoTQuantizer():
         result = torch.tensor([])
 
         # clip tensor2quantize values based on alpha qparam
-        tensor2quantize = tensor2quantize.apply_(lambda x: clip(x, self.alpha))
+        tensor2quantize = torch.clamp(tensor2quantize, -self.alpha, self.alpha)
+
         # map float_to_apot over tensor2quantize elements
         result_data = tensor2quantize.apply_(lambda x: float_to_apot(x, self.quantization_levels, self.level_indices))
 
