@@ -141,13 +141,22 @@ class TestCommunicationHooks(FSDPTest):
             def forward(self, x):
                 return self.out(F.relu(self.net(x)))
 
+        def init_model(core, sharding_strategy=sharding_strategy):
+            return FSDP(
+                core,
+                device_id=torch.cuda.current_device(),
+                sharding_strategy=sharding_strategy
+            ).to(device)
+
+        def get_submodules(fsdp_net):
+            return [
+                submodule for submodule in FSDP.fsdp_modules(fsdp_net)
+                if not submodule.check_is_root()
+            ]
+
         # Initialize the model and inputs
         device = torch.device("cuda")
-        fsdp_model_with_hook = FSDP(
-            Net(has_wrapping),
-            device_id=torch.cuda.current_device(),
-            sharding_strategy=sharding_strategy
-        ).to(device)
+        fsdp_model_with_hook = init_model(Net(has_wrapping))
 
         dummy_state = DummyState(process_group=None)
 
@@ -175,38 +184,50 @@ class TestCommunicationHooks(FSDPTest):
 
             if has_wrapping:
                 # Creating a list of non-root submodules to test
-                submodules = [
-                    submodule for submodule in FSDP.fsdp_modules(fsdp_model_with_hook)
-                    if not submodule.check_is_root()
-                ]
+                submodules = get_submodules(fsdp_model_with_hook)
                 # Check that assertion is raised for registering a comm hook on a non-root
                 with self.assertRaisesRegex(AssertionError, '^register_comm_hook can only be called on a root instance.$'):
-                    submodules[0].register_comm_hook(
+                    submodules[1].register_comm_hook(
                         dummy_state,
                         dummy_hook
                     )
 
                 # Simmulate a registretion of a hook on a submodule
-                submodules[1].communication_hook = dummy_hook
+                submodules[1]._hook_registered = True
 
                 # Check that an error is raised when some of submodules have a non-default hook assigned
-                with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    '^communication hook can be only registered once$'
+                ):
                     fsdp_model_with_hook.register_comm_hook(
                         dummy_state,
                         dummy_hook
                     )
 
                 # Reinitialize model to default
-                fsdp_model_with_hook = FSDP(
-                    Net(has_wrapping),
-                    device_id=torch.cuda.current_device(),
-                    sharding_strategy=sharding_strategy
-                ).to(device)
+                fsdp_model_with_hook = init_model(Net(has_wrapping))
+                submodules = get_submodules(fsdp_model_with_hook)
+                submodules[1].communication_hook = dummy_hook
+
+                # Check that an error is raised when some of submodules have a non-default hook assigned
+                with self.assertRaisesRegex(
+                    AssertionError,
+                    f'^communication hook should be default, but it is {submodules[1].communication_hook.__name__} instead$'
+                ):
+                    fsdp_model_with_hook.register_comm_hook(
+                        dummy_state,
+                        dummy_hook
+                    )
+
+                # Reinitialize model to default
+                fsdp_model_with_hook = init_model(Net(has_wrapping))
 
             fsdp_model_with_hook.register_comm_hook(
                 dummy_state,
                 dummy_hook
             )
+
             # Check that we can't register comm hook twice
             with self.assertRaisesRegex(AssertionError, '^communication hook can be only registered once$'):
                 fsdp_model_with_hook.register_comm_hook(

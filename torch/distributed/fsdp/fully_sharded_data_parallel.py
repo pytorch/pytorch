@@ -930,6 +930,7 @@ class FullyShardedDataParallel(nn.Module):
         # setting communication hook to a default
         self.communication_hook = self._get_default_comm_hook()
         self.communication_hook_state = self._get_default_comm_hook_state()
+        self._hook_registered = False
 
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
@@ -4080,10 +4081,10 @@ class FullyShardedDataParallel(nn.Module):
         else:
             # register same hook for root and all submodules
             for submodule in self.fsdp_modules(self):
-                # if submodule's communication hook is not default,
-                # then it was assigned a comm hook before
+                assert not submodule._hook_registered, "communication hook can be only registered once"
+                submodule._hook_registered = True
                 assert submodule.communication_hook == self._get_default_comm_hook(),\
-                    "communication hook can be only registered once"
+                    f"communication hook should be default, but it is {submodule.communication_hook.__name__} instead"
                 submodule.communication_hook_state = state
                 submodule.communication_hook = hook
 
