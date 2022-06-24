@@ -1175,7 +1175,7 @@ class TestExperimentalUtils(TestCase):
             start_time_ns: int
             duration_time_ns: int
             children = []
-            Parent = None
+            parent = None
 
             @property
             def end_time_ns(self):
