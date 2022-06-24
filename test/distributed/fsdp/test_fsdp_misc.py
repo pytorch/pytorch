@@ -9,6 +9,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp.wrap import always_wrap_policy
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
@@ -48,6 +49,24 @@ class TestFSDPMisc(FSDPTest):
     @property
     def process_group(self):
         return dist.distributed_c10d._get_default_group()
+
+    def test_fsdp_module_no_compute_grad(self):
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(10, 10)
+                self.b = nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                out1 = self.a(x)
+                return out1
+
+        fsdp = FSDP(MyModel().cuda(), auto_wrap_policy=always_wrap_policy)
+        x = torch.randn(10, 10, device='cuda')
+        y = torch.randn(10, 10, device='cuda')
+        a = fsdp(x, y)
+        loss = a.sum()
+        loss.backward()
 
     @skip_if_lt_x_gpu(2)
     def test_device_id_auto_wrap(self):

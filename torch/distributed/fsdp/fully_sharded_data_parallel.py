@@ -2830,6 +2830,7 @@ class FullyShardedDataParallel(nn.Module):
         alignment is created by :func:`_shard_parameters`, which ensures that
         the local optimizer only sees the relevant parameter shard.
         """
+        param._post_backward_called = True
         with torch.autograd.profiler.record_function("FullyShardedDataParallel._post_backward_hook"):
             # First hook callback will see PRE state. If we have multiple params,
             # then subsequent hook callbacks will see POST state.
@@ -3089,11 +3090,13 @@ class FullyShardedDataParallel(nn.Module):
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
                     else:
                         p_assert(
-                            not p._is_sharded, "All sharded parameters should "
+                            not p._is_sharded or not getattr(p, '_post_backward_called', False), "All sharded parameters that received gradient should "
                             "use `_saved_grad_shard`"
                         )
                     if hasattr(p, "_saved_grad_shard"):
                         delattr(p, "_saved_grad_shard")
+                    if hasattr(p, '_post_backward_called'):
+                        delattr(p, '_post_backward_called')
 
         # Update root and nested FSDP's hooks and flags.
         for m in self.modules():  # includes self
