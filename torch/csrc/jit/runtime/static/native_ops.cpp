@@ -883,10 +883,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         case BlockRunPlan::kRunBothBlocks:
           return [](ProcessedNode* p_node) {
             auto condition = p_node->Input(0).toBool();
-            auto* block_runners = p_node->block_runners();
-            DCHECK(block_runners);
-            DCHECK_EQ(block_runners->size(), 2);
-            auto& runner = (*block_runners)[!condition];
+            auto* meta_data = p_node->meta_data();
+            DCHECK(meta_data);
+            auto& block_runners = meta_data->block_runners();
+            DCHECK_EQ(block_runners.size(), 2);
+            auto& runner = block_runners[!condition];
 
             auto output = runner({});
             if (!output.isTuple()) {
@@ -902,22 +903,24 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         case BlockRunPlan::kRunOnlyTrueBlock:
           return [](ProcessedNode* p_node) {
             auto condition = p_node->Input(0).toBool();
-            auto* block_runners = p_node->block_runners();
-            DCHECK(block_runners);
-            DCHECK_EQ(block_runners->size(), 2);
+            auto* meta_data = p_node->meta_data();
+            DCHECK(meta_data);
+            auto& block_runners = meta_data->block_runners();
+            DCHECK_EQ(block_runners.size(), 2);
             if (condition) {
-              auto output = block_runners->front()({});
+              auto output = block_runners.front()({});
               DCHECK(output.isNone());
             }
           };
         case BlockRunPlan::kRunOnlyFalseBlock:
           return [](ProcessedNode* p_node) {
             auto condition = p_node->Input(0).toBool();
-            auto* block_runners = p_node->block_runners();
-            DCHECK(block_runners);
-            DCHECK_EQ(block_runners->size(), 2);
+            auto* meta_data = p_node->meta_data();
+            DCHECK(meta_data);
+            auto& block_runners = meta_data->block_runners();
+            DCHECK_EQ(block_runners.size(), 2);
             if (!condition) {
-              auto output = block_runners->back()({});
+              auto output = block_runners.back()({});
               DCHECK(output.isNone());
             }
           };
@@ -1037,9 +1040,10 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
             createFutureTypeFromGraphOutput(forkedGraph);
         p_node->Output(0) = future;
 
-        TaskLauncher taskLauncher_ = at::launch;
         ForkedSubgraphSRLauncher runtime_launcher(smodule, args, future);
-        taskLauncher_(std::move(runtime_launcher));
+        auto* meta_data = p_node->meta_data();
+        DCHECK(meta_data);
+        (meta_data->launcher())(std::move(runtime_launcher));
       };
     });
 /*
@@ -1082,10 +1086,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto max_trip_count = p_node->Input(0).toInt();
         auto condition = p_node->Input(1).toBool();
 
-        auto* block_runners = p_node->block_runners();
-        DCHECK(block_runners);
-        DCHECK_EQ(block_runners->size(), 1);
-        auto& runner = (*block_runners)[0];
+        auto* meta_data = p_node->meta_data();
+        DCHECK(meta_data);
+        auto& block_runners = meta_data->block_runners();
+        DCHECK_EQ(block_runners.size(), 1);
+        auto& runner = block_runners[0];
 
         auto args = collectLoopSubBlockInputs(*p_node);
         int64_t loop_count = 0;
