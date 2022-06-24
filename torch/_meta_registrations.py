@@ -322,31 +322,6 @@ def meta_index_Tensor(self, indices):
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
-@out_wrapper_multi("L", "info")
-def meta_linalg_cholesky_ex(input, upper=False, check_errors=False):
-    check(
-        input.ndim >= 2,
-        lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor",
-    )
-    check(
-        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
-        lambda: f"expected float or complex tensor, but got {input.dtype}",
-    )
-    check(
-        input.size(-1) == input.size(-2),
-        lambda: f"expected square matrix but got {input.shape}",
-    )
-    L = input.new_empty(input.size())
-    L.transpose_(-2, -1)
-    info_sizes = input.size()[:-2]
-    info = input.new_empty(info_sizes, dtype=torch.int)
-    return L, info
-
-
-torch.library.impl(meta_lib, "linalg_cholesky_ex")(meta_linalg_cholesky_ex)
-torch.library.impl(meta_lib, "linalg_cholesky_ex.L")(meta_linalg_cholesky_ex)
-
-
 @torch.library.impl(meta_lib, "addbmm")
 @torch.library.impl(meta_lib, "addbmm.out")
 @out_wrapper
