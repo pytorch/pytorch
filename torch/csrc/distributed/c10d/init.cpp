@@ -1084,7 +1084,13 @@ Arguments:
 
           .def(
               "allgather",
-              &::c10d::ProcessGroup::allgather,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<std::vector<at::Tensor>>& output_tensors,
+                 const std::vector<at::Tensor>& input_tensor,
+                 ::c10d::AllgatherOptions opts) {
+                return ::c10d::ops::allgather(
+                    self, output_tensors, input_tensor, opts);
+              },
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -1100,13 +1106,13 @@ Arguments:
 
           .def(
               "allgather",
-              [](::c10d::ProcessGroup& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                  std::vector<at::Tensor>& output,
                  at::Tensor& input) {
                 std::vector<std::vector<at::Tensor>> outputs = {output};
                 std::vector<at::Tensor> inputs = {input};
-                return pg.allgather(
-                    outputs, inputs, ::c10d::AllgatherOptions());
+                return ::c10d::ops::allgather(
+                    pg, outputs, inputs, ::c10d::AllgatherOptions());
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),
