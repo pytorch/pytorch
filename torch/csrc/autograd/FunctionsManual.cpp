@@ -4072,10 +4072,9 @@ Tensor masked_fmap(
   } else {
     auto idx_true = at::native::toListOfOptionalTensors(mask);
     auto idx_false = at::native::toListOfOptionalTensors(mask.logical_not());
-    // TODO can we do these index_put in place without screwing up the gradgrad?
     return t.new_empty(t.sizes())
-        .index_put(idx_true, f1(t.index(idx_true), ts.index(idx_true)...))
-        .index_put(idx_false, f2(t.index(idx_false), ts.index(idx_false)...));
+        .index_put_(idx_true, f1(t.index(idx_true), ts.index(idx_true)...))
+        .index_put_(idx_false, f2(t.index(idx_false), ts.index(idx_false)...));
   }
 }
 
@@ -4114,20 +4113,20 @@ Tensor linalg_det_backward(
   auto d_diag = grad * det.conj();
   // Optimisation, Make it F-transposed as it's what lu_solve expects
   auto d = at::diag_embed(d_diag.unsqueeze(-1).expand_as(pivots)).mT();
+  auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
 
+  // Optimisation if we are not going to compute higher-order gradients
   if (!at::GradMode::is_enabled()) {
     // The formula is given by the solution of AX = det.conj() * det * I when A
-    // is invertible det is C^1, so if it's not invertible, we can wiggle the LU
-    // decomposition a bit and use the resulting matrix as a decent
-    // approximation
-    auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+    // is invertible det is C^1, so if it's not invertible, we can apply a perturbation
+    // to the LU decomposition and use the resulting matrix as a non-singular approximation
     auto LU_ =
         LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
     auto use_A_T = A.is_contiguous() && !A.is_complex();
     return at::linalg_lu_solve(
         LU_, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
-    // If we want to compute further gradients, we need to recompute the LU
+    // If we want to compute higher-order gradients, we need to recompute the LU
     // decomposition so that autograd computes the correct gradients wrt to A
     // (cf. solve_backward)
     auto non_singular =
@@ -4148,7 +4147,11 @@ Tensor linalg_det_backward(
       auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
       return (U * D.unsqueeze(-2)).matmul(Vh);
     };
-    return masked_fmap(det == 0., non_singular, singular, A, d, grad);
+
+    // We could use the singular formula for all inputs but we try to filter out
+    // some inputs via the masking, as computing an SVD is about 100 times slower
+    // than computing an lu_solve on GPU
+    return masked_fmap(det.abs() < 10. * eps, singular, non_singular, A, d, grad);
   }
 }
 
