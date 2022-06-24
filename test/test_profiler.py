@@ -1175,7 +1175,7 @@ class TestExperimentalUtils(TestCase):
             start_time_ns: int
             duration_time_ns: int
             children = []
-            Parent = None
+            parent = None
 
             @property
             def end_time_ns(self):
@@ -1233,6 +1233,14 @@ class TestExperimentalUtils(TestCase):
                     child.duration_time_ns
                     for child in event_key.event.children
                 ]))
+
+    def test_utils_compute_queue_depth_list(self):
+        profiler = self.generate_mock_profile()
+        basic_eval = _utils.BasicEvaluation(profiler)
+        golden_queue_depth_list = [1, 2, 3, 2, 1, 0]
+        for observed, golden in zip(basic_eval.compute_queue_depth(),
+                                    golden_queue_depth_list):
+            self.assertEqual(observed.queue_depth, golden)
 
     def test_utils_compute_queue_depth_when_no_cuda_events(self):
         # For traces with only cpu events, we expect empty queue depth list
