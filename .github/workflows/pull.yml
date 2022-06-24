@@ -19,6 +19,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
+      artifact-name: pytorch-linux-focal-py3.7-gcc7
 
   linux-focal-py3_7-gcc7-test:
     name: linux-focal-py3.7-gcc7
@@ -26,7 +27,7 @@ jobs:
     needs: linux-focal-py3_7-gcc7-build
     with:
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
-      build-artifact: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.build-artifact }}
+      artifact-name: pytorch-linux-focal-py3.7-gcc7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -43,14 +44,14 @@ jobs:
     needs: linux-focal-py3_7-gcc7-build
     with:
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
-      build-artifact: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.build-artifact }}
+      artifact-name: pytorch-linux-focal-py3.7-gcc7
 
   linux-focal-py3_7-gcc7-no-ops:
     name: linux-focal-py3.7-gcc7-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:
-      upload-artifacts: false
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
+      artifact-name: ""
       env-variables: |
         USE_PER_OPERATOR_HEADERS=0
 
@@ -59,7 +60,7 @@ jobs:
     name: linux-xenial-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      upload-artifacts: false
+      artifact-name: ""
       docker-image-name: pytorch-linux-xenial-py3.7-gcc7
 
   # TODO: remove after full migration off Xenial
@@ -67,8 +68,8 @@ jobs:
     name: linux-xenial-py3.7-clang7-asan
     uses: ./.github/workflows/_linux-build.yml
     with:
-      upload-artifacts: false
       docker-image-name: pytorch-linux-xenial-py3-clang7-asan
+      artifact-name: pytorch-linux-xenial-py3-clang7-asan
       script: .jenkins/pytorch/build-asan.sh
 
   linux-focal-py3_7-clang7-asan-build:
@@ -76,6 +77,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-focal-py3-clang7-asan
+      artifact-name: pytorch-linux-focal-py3-clang7-asan
       script: .jenkins/pytorch/build-asan.sh
 
   linux-focal-py3_7-clang7-asan-test:
@@ -99,6 +101,9 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
+      env-variables: |
+        BUILD_CAFFE2=ON
+      artifact-name: pytorch-linux-focal-py3-clang10-onnx
 
   linux-focal-py3_7-clang10-onnx-test:
     name: linux-focal-py3.7-clang10-onnx
@@ -119,6 +124,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
+      artifact-name: pytorch-linux-bionic-py3.7-clang9
 
   linux-bionic-py3_7-clang9-test:
     name: linux-bionic-py3.7-clang9
@@ -140,14 +146,15 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
+      artifact-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
 
   # TODO this does not yet properly use `script`
   linux-vulkan-bionic-py3_7-clang9-build:
     name: linux-vulkan-bionic-py3.7-clang9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      artifact-suffix: vulkan
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
+      artifact-name: pytorch-linux-bionic-py3.7-clang9-vulkan
 
   linux-vulkan-bionic-py3_7-clang9-test:
     name: linux-vulkan-bionic-py3.7-clang9
@@ -166,6 +173,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
+      artifact-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
 
   linux-bionic-cuda11_6-py3_7-gcc7-test:
     name: linux-bionic-cuda11.6-py3.7-gcc7
@@ -189,22 +197,22 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-xenial-py3-clang5-asan
-      upload-artifacts: false
+      artifact-name: ""
       script: .jenkins/pytorch/build-mobile.sh
 
   linux-jammy-cuda-11_6-cudnn8-py3_8-clang12-build:
     name: linux-jammy-cuda11.6-cudnn8-py3.8-clang12
     uses: ./.github/workflows/_linux-build.yml
     with:
-      upload-artifacts: false
       docker-image-name: pytorch-linux-jammy-cuda11.6-cudnn8-py3.8-clang12
+      artifact-name: ""
 
   linux-xenial-py3-clang5-mobile-custom-build-static:
     name: linux-xenial-py3-clang5-mobile-custom-build-static
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c
-      upload-artifacts: false
+      artifact-name: ""
       script: .jenkins/pytorch/build-mobile.sh
 
   linux-bionic-py3_7-clang8-xla-build:
@@ -213,6 +221,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: xla_base
+      artifact-name: linux-bionic-py3_7-clang8-xla
       force-docker-tag: v0.2
       # XLA test build fails when WERROR=1
       env-variables: WERROR=0
@@ -223,7 +232,7 @@ jobs:
     needs: linux-bionic-py3_7-clang8-xla-build
     with:
       docker-image: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.docker-image }}
-      build-artifact: ${{ needs.linux-bionic-py3_7-clang8-xla-build.outputs.build-artifact }}
+      artifact-name: xla_base
       test-matrix: |
         { include: [
           { config: "xla", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -286,15 +295,15 @@ jobs:
   #   uses: ./.github/workflows/_linux-build.yml
   #   with:
   #     docker-image-name: pytorch-linux-focal-py3.7-gcc7
-  #     build-generates-artifacts: false
+  #     artifact-name: ""
   #     script: .jenkins/pytorch/build-mobile.sh
 
   linux-xenial-cuda11_3-py3_7-gcc7-deploy-build:
     name: linux-xenial-cuda11_3-py3_7-gcc7-deploy
     uses: ./.github/workflows/_linux-build.yml
     with:
-      artifact-suffix: deploy
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      artifact-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7-deploy
       env-variables: USE_DEPLOY=1
 
   deploy-linux-xenial-cuda11_3-py3_7-gcc7-test:
@@ -317,4 +326,5 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+      artifact-name: pytorch-linux-bionic-rocm5.1-py3.7
       sync-tag: rocm-build

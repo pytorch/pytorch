@@ -5,7 +5,7 @@ from collections import defaultdict
 from copy import deepcopy
 from enum import Enum
 from pathlib import Path
-from typing import Any, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from yaml import CSafeLoader, dump, load
 
@@ -109,8 +109,6 @@ def do_sync_tags_check(workflows: List[Workflow]) -> None:
         for job in jobs:
             job_str = dump_no_if(job)
             if baseline_str != job_str:
-                print(baseline_str)
-                print(job_str)
                 print_lint_message(
                     job.workflow.path,
                     job.id,
@@ -132,26 +130,25 @@ def do_sync_tags_check(workflows: List[Workflow]) -> None:
 
 def do_build_artifact_uniqueness_check(workflows: List[Workflow]) -> None:
     """Check that all jobs that upload build artifacts produce a unique one."""
-    artifact_names = set()
     for workflow in workflows:
+        artifact_names: Dict[str, Job] = {}
         for job in workflow.jobs():
             if "_linux-build.yml" not in job.yaml.get("uses"):
                 continue
 
-            if job.yaml["with"].get("upload-artifacts", True) is False:
+            artifact_name = job.yaml["with"]["artifact-name"]
+            if artifact_name == "":
                 continue
-
-            artifact_name = job.yaml["with"].get("docker-image-name")
-            try:
-                artifact_name += f'-{job.yaml["with"]["artifact-suffix"]}'
-            except KeyError:
-                pass
 
             if artifact_name in artifact_names:
                 print_lint_message(
-                    workflow.path, job.id, "build-artifact-collision", "foo"
+                    workflow.path,
+                    job.id,
+                    "build-artifact-collision",
+                    "This job uploads a build artifact with the same name as:\n"
+                    f"  '{artifact_names[artifact_name].id}'",
                 )
-            artifact_names.add(artifact_name)
+            artifact_names[artifact_name] = job
 
 
 if __name__ == "__main__":

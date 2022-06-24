@@ -33,10 +33,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ ${BUILD_ENVIRONMENT} == *"caffe2"* || ${BUILD_ENVIRONMENT} == *"onnx"* ]]; then
-  export BUILD_CAFFE2=ON
-fi
-
 # TODO: Don't run this...
 pip_install -r requirements.txt || true
 

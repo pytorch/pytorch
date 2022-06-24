@@ -19,44 +19,47 @@ jobs:
     name: parallelnative-linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: parallelnative-linux-focal-py3.7-gcc7
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
+      artifact-name: parallelnative-linux-focal-py3.7-gcc7
+      env-variables: |
+        ATEN_THREADING=NATIVE
 
   parallelnative-linux-focal-py3_7-gcc7-test:
     name: parallelnative-linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-test.yml
     needs: parallelnative-linux-focal-py3_7-gcc7-build
     with:
-      build-environment: parallelnative-linux-focal-py3.7-gcc7
       docker-image: ${{ needs.parallelnative-linux-focal-py3_7-gcc7-build.outputs.docker-image }}
+      artifact-name: parallelnative-linux-focal-py3.7-gcc7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
-  # Build PyTorch with BUILD_CAFFE2=ON
   caffe2-linux-focal-py3_7-gcc7-build:
     name: caffe2-linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: caffe2-linux-focal-py3.7-gcc7
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
+      artifact-name: caffe2-pytorch-linux-focal-py3.7-gcc7
+      env-variables: |
+        BUILD_CAFFE2=ON
 
   linux-bionic-cuda10_2-py3_9-gcc7-build:
     name: linux-bionic-cuda10.2-py3.9-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
+      artifact-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
 
   linux-bionic-cuda10_2-py3_9-gcc7-test:
     name: linux-bionic-cuda10.2-py3.9-gcc7
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-cuda10_2-py3_9-gcc7-build
     with:
-      build-environment: linux-bionic-cuda10.2-py3.9-gcc7
       docker-image: ${{ needs.linux-bionic-cuda10_2-py3_9-gcc7-build.outputs.docker-image }}
+      artifact-name: pytorch-linux-bionic-cuda10.2-cudnn7-py3.9-gcc7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.4xlarge.nvidia.gpu" },
@@ -69,13 +72,14 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
 
+  # TODO(suo): libtorch builds are not set up yet as they have a lot of custom code
   libtorch-linux-xenial-cuda10_2-py3_7-gcc7-build:
     name: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
-      build-generates-artifacts: false
+      artifact-name: ""
 
   libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
@@ -83,15 +87,16 @@ jobs:
     with:
       build-environment: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
-      build-generates-artifacts: false
+      artifact-name: ""
 
-  # no-ops builds test USE_PER_OPERATOR_HEADERS=0 where ATen/ops is not generated
-  linux-xenial-cuda11_3-py3_7-gcc7-no-ops-build:
+  linux-xenial-cuda11_3-py3_7-gcc7-no-ops:
     name: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
       docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+      artifact-name: ""
+      env-variables: |
+        USE_PER_OPERATOR_HEADERS=0
 
   pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build:
     name: pytorch-linux-xenial-py3-clang5-android-ndk-r19c-build
@@ -110,16 +115,16 @@ jobs:
     name: linux-bionic-py3.7-clang9-slow
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-bionic-py3.7-clang9-slow
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
+      artifact-name: pytorch-linux-bionic-py3.7-clang9-slow
 
   linux-bionic-py3_7-clang9-slow-test:
     name: linux-bionic-py3.7-clang9-slow
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-bionic-py3_7-clang9-slow-build
     with:
-      build-environment: linux-bionic-py3.7-clang9-slow
       docker-image: ${{ needs.linux-bionic-py3_7-clang9-slow-build.outputs.docker-image }}
+      artifact-name: pytorch-linux-bionic-py3.7-clang9-slow
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
@@ -239,6 +244,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
+      artifact-name: pytorch-linux-bionic-rocm5.1-py3.7
       sync-tag: rocm-build
 
   linux-bionic-rocm5_1-py3_7-test:
@@ -246,8 +252,8 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-bionic-rocm5_1-py3_7-build
     with:
-      build-environment: linux-bionic-rocm5.1-py3.7
       docker-image: ${{ needs.linux-bionic-rocm5_1-py3_7-build.outputs.docker-image }}
+      artifact-name: pytorch-linux-bionic-rocm5.1-py3.7
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.rocm.gpu" },

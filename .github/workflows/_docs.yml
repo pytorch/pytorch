@@ -3,12 +3,12 @@ name: build docs
 on:
   workflow_call:
     inputs:
-      build-artifact:
+      artifact-name:
         required: true
         type: string
         description: |
-          Name of the build artifacts to download. Should match the output of a
-          _linux-build job.
+          Name of the build artifacts to download. Should match the
+          `artifact-name` from a build job.
       docker-image:
         required: true
         type: string
@@ -60,7 +60,7 @@ jobs:
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
-          name: ${{ inputs.build-artifact }}
+          name: ${{ inputs.artifact-name }}
 
       - name: Generate netrc (only for docs-push)
         if: inputs.push

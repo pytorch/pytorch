@@ -3,12 +3,12 @@ name: linux-test
 on:
   workflow_call:
     inputs:
-      build-artifact:
+      artifact-name:
         required: true
         type: string
         description: |
-          Name of the build artifacts to download. Should match the output of a
-          _linux-build job.
+          Name of the build artifacts to download. Should match the
+          `artifact-name` from a build job.
       test-matrix:
         required: true
         type: string
@@ -97,7 +97,7 @@ jobs:
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts
         with:
-          name: ${{ inputs.build-artifact }}
+          name: ${{ inputs.artifact-name }}
 
       - name: Parse ref
         id: parse-ref
