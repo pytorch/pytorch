@@ -195,7 +195,7 @@ def adam(params: List[Tensor],
     See :class:`~torch.optim.Adam` for details.
     """
 
-    if not all([isinstance(t, torch.Tensor) for t in state_steps]):
+    if not all(isinstance(t, torch.Tensor) for t in state_steps):
         raise RuntimeError("API has changed, `state_steps` argument must contain a list of singleton tensors")
 
     if foreach is None:
@@ -251,8 +251,6 @@ def _single_tensor_adam(params: List[Tensor],
 
         if capturable:
             assert param.is_cuda and step_t.is_cuda, "If capturable=True, params and state_steps must be CUDA tensors."
-        else:
-            assert not step_t.is_cuda, "If capturable=False, state_steps should not be CUDA tensors."
 
         # update step
         step_t += 1
@@ -330,9 +328,6 @@ def _multi_tensor_adam(params: List[Tensor],
     if capturable:
         assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
             "If capturable=True, params and state_steps must be CUDA tensors."
-    else:
-        assert all(not step.is_cuda for step in state_steps), \
-            "If capturable=False, state_steps should not be CUDA tensors."
 
     if maximize:
         grads = torch._foreach_neg(tuple(grads))  # type: ignore[assignment]
