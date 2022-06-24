@@ -62,6 +62,11 @@ jobs:
           # pip install https://download.pytorch.org/whl/cu113/torch-1.11.0%2Bcu113-cp38-cp38-linux_x86_64.whl \
           #             https://download.pytorch.org/whl/cu113/torchvision-0.12.0%2Bcu113-cp38-cp38-linux_x86_64.whl \
           #             https://download.pytorch.org/whl/torchtext-0.12.0-cp38-cp38-linux_x86_64.whl
+          # install build deps
+          NUMPY_VERSION="1.21.2"
+          conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
+                           setuptools cmake=3.22 cffi typing_extensions \
+                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
           git clone https://github.com/pytorch/pytorch.git pytorch-src
           pushd pytorch-src
           git checkout release/1.11
