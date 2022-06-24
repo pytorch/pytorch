@@ -5,7 +5,6 @@ import os
 import torch
 import torch.distributed as dist
 from torch.testing._internal.common_utils import (
-    TestCase,
     run_tests,
 )
 from torch.futures import Future
@@ -13,7 +12,6 @@ import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 import test_c10d_common
 import weakref
-import tempfile
 from torch._C._distributed_c10d import _create_work_from_future
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
