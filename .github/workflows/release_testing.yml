@@ -52,7 +52,8 @@ jobs:
           # conda install -y -c pytorch pytorch=1.11.0 torchvision torchtext
           # echo "RESULT_DIR=${HOME}/release-testing/1.11.0" >> $GITHUB_ENV
           # link: https://anaconda.org/pytorch-test/pytorch
-          # conda install -y -c pytorch-test pytorch=1.12.0 torchvision torchtext
+          conda install -y -c pytorch-test pytorch=1.12.0 torchvision torchtext
+          echo "RESULT_DIR=${HOME}/release-testing/1.12.0-rc7-avx2" >> $GITHUB_ENV
           # pip install https://download.pytorch.org/whl/nightly/cu113/torch-1.12.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl \
           # 	      https://download.pytorch.org/whl/nightly/cu113/torchvision-0.13.0.dev20220512%2Bcu113-cp38-cp38-linux_x86_64.whl \
           #             https://download.pytorch.org/whl/nightly/torchtext-0.13.0.dev20220512-cp38-cp38-linux_x86_64.whl
@@ -64,22 +65,22 @@ jobs:
           #             https://download.pytorch.org/whl/cu113/torchvision-0.12.0%2Bcu113-cp38-cp38-linux_x86_64.whl \
           #             https://download.pytorch.org/whl/torchtext-0.12.0-cp38-cp38-linux_x86_64.whl
           # install build deps
-          NUMPY_VERSION="1.21.2"
-          conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
-                           setuptools cmake=3.22 cffi typing_extensions \
-                           future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
-          rm -rf pytorch-src || true
-          git clone https://github.com/pytorch/pytorch.git pytorch-src
-          pushd pytorch-src
+          # NUMPY_VERSION="1.21.2"
+          # conda install -y numpy="${NUMPY_VERSION}" requests ninja pyyaml mkl mkl-include \
+          #                  setuptools cmake=3.22 cffi typing_extensions \
+          #                  future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
+          # rm -rf pytorch-src || true
+          # git clone https://github.com/pytorch/pytorch.git pytorch-src
+          # pushd pytorch-src
           # commit on 20220401
           # git checkout c0a6add7eef8ab3715c0f4281b3b7a2a0f1e24b5
           # commit on 20220501
-          git checkout 201ddafc22e22c387b4cd654f397e05354d73d09
-          git submodule update --recursive --init
+          # git checkout 201ddafc22e22c387b4cd654f397e05354d73d09
+          # git submodule update --recursive --init
           # git checkout release/1.11
-          git setup.py clean
-          python setup.py install
-          echo "RESULT_DIR=${HOME}/release-testing/20220501-src" >> $GITHUB_ENV
+          # git setup.py clean
+          # python setup.py install
+          # echo "RESULT_DIR=${HOME}/release-testing/1.12.0-rc7-avx2" >> $GITHUB_ENV
           popd; python -c "import torch; print(torch.__version__); print(torch.version.git_version)"
           # install build deps
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
@@ -143,7 +144,7 @@ jobs:
           pushd examples/word_language_model
           export LOG_FILE=${RESULT_DIR}/wlm_cpu_trans/result.log
           export MEM_FILE=${RESULT_DIR}/wlm_cpu_trans/result_mem.log
-          taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model Transformer
+          env ATEN_CPU_CAPABILITY=avx2 taskset -c $CORE_LIST bash ../../pytorch/.github/scripts/monitor_proc.sh python main.py --epochs 10 --model Transformer
       - name: Run GPU WLM Transformer
         run: |
           . activate reltest
