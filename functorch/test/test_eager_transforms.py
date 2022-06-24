@@ -3002,12 +3002,12 @@ class TestFunctionalize(TestCase):
 
 
 def forward(self, x_1) -> torch.Tensor:
-    view_copy = torch.ops.aten.view_copy(x_1, [4, 2])
+    view_copy_default = torch.ops.aten.view_copy.default(x_1, [4, 2])
     _tensor_constant0 = self._tensor_constant0
-    add = torch.ops.aten.add(view_copy, _tensor_constant0);  view_copy = _tensor_constant0 = None
-    view_copy_1 = torch.ops.aten.view_copy(add, [4, 2]);  add = None
-    copy_ = torch.ops.aten.copy_(x_1, view_copy_1);  x_1 = None
-    return view_copy_1
+    add_tensor = torch.ops.aten.add.Tensor(view_copy_default, _tensor_constant0);  view_copy_default = _tensor_constant0 = None
+    view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
+    copy__default = torch.ops.aten.copy_.default(x_1, view_copy_default_1);  x_1 = None
+    return view_copy_default_1
     """)
 
     def test_functionalize_fx_transpose_simple(self, device):
@@ -3021,8 +3021,8 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 def forward(self, x_1) -> torch.Tensor:
-    transpose_copy = torch.ops.aten.transpose_copy(x_1, 1, 0);  x_1 = None
-    return transpose_copy
+    transpose_copy_int = torch.ops.aten.transpose_copy.int(x_1, 1, 0);  x_1 = None
+    return transpose_copy_int
     """)
 
     def test_functionalize_fx_out_op(self, device):
@@ -3041,12 +3041,12 @@ def forward(self, x_1) -> torch.Tensor:
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    add = torch.ops.aten.add(inpt_1, inpt_1);  inpt_1 = None
-    view_copy = torch.ops.aten.view_copy(add, [4])
-    view_copy_1 = torch.ops.aten.view_copy(add, [4]);  add = None
-    add_1 = torch.ops.aten.add(view_copy_1, 1);  view_copy_1 = None
-    view_copy_2 = torch.ops.aten.view_copy(add_1, [4]);  add_1 = None
-    return view_copy_2
+    add_tensor = torch.ops.aten.add.Tensor(inpt_1, inpt_1);  inpt_1 = None
+    view_copy_default = torch.ops.aten.view_copy.default(add_tensor, [4])
+    view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4]);  add_tensor = None
+    add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1);  view_copy_default_1 = None
+    view_copy_default_2 = torch.ops.aten.view_copy.default(add_tensor_1, [4]);  add_tensor_1 = None
+    return view_copy_default_2
     """)
 
     def test_functionalize_fx_multi_out_op(self, device):
@@ -3066,12 +3066,12 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 
 def forward(self, inpt_1) -> torch.Tensor:
-    view_copy = torch.ops.aten.view_copy(inpt_1, [2, 4]);  inpt_1 = None
-    aminmax = torch.ops.aten.aminmax(view_copy, dim = 0);  view_copy = None
-    getitem = aminmax[0]
-    getitem_1 = aminmax[1];  aminmax = None
-    view_copy_1 = torch.ops.aten.view_copy(getitem_1, [2, 2]);  getitem_1 = None
-    return (view_copy_1, getitem)
+    view_copy_default = torch.ops.aten.view_copy.default(inpt_1, [2, 4]);  inpt_1 = None
+    aminmax_default = torch.ops.aten.aminmax.default(view_copy_default, dim = 0);  view_copy_default = None
+    getitem = aminmax_default[0]
+    getitem_1 = aminmax_default[1];  aminmax_default = None
+    view_copy_default_1 = torch.ops.aten.view_copy.default(getitem_1, [2, 2]);  getitem_1 = None
+    return (view_copy_default_1, getitem)
     """)
 
     def test_functionalize_fx_reapply_views_simple(self, device):
@@ -3088,12 +3088,12 @@ def forward(self, inpt_1) -> torch.Tensor:
 
 
 def forward(self, x_1) -> torch.Tensor:
-    view = torch.ops.aten.view(x_1, [4, 2])
+    view_default = torch.ops.aten.view.default(x_1, [4, 2])
     _tensor_constant0 = self._tensor_constant0
-    add = torch.ops.aten.add(view, _tensor_constant0);  view = _tensor_constant0 = None
-    view_1 = torch.ops.aten.view(add, [4, 2]);  add = None
-    copy_ = torch.ops.aten.copy_(x_1, view_1);  x_1 = None
-    return view_1
+    add_tensor = torch.ops.aten.add.Tensor(view_default, _tensor_constant0);  view_default = _tensor_constant0 = None
+    view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2]);  add_tensor = None
+    copy__default = torch.ops.aten.copy_.default(x_1, view_default_1);  x_1 = None
+    return view_default_1
     """)
 
     def test_functionalize_nonfunctional_output(self, device):
