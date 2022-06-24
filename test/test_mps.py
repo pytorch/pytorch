@@ -3748,7 +3748,6 @@ class TestNLLLoss(TestCase):
         # input.numel() == 0
         helper((0,), (0,))
 
-
     # Test index select
     def test_index_select(self):
         def helper(shape, dim, index, idx_dtype=torch.int32):
