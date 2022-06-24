@@ -69,10 +69,13 @@ jobs:
                            future six dataclasses pillow pytest tabulate gitpython git-lfs tqdm psutil
           git clone https://github.com/pytorch/pytorch.git pytorch-src
           pushd pytorch-src
-          git checkout release/1.11
+          # commit on 20220410
+          git checkout f42bdff0166ef503c844353c32b6725391e440ac
+          # git checkout release/1.11
           python setup.py install
-          echo "RESULT_DIR=${HOME}/release-testing/1.11.0-src" >> $GITHUB_ENV
-          python -c "import torch; print(torch.__version__); print(torch.version.git_version)"
+          echo "RESULT_DIR=${HOME}/release-testing/20220410-src" >> $GITHUB_ENV
+          popd; python -c "import torch; print(torch.__version__); print(torch.version.git_version)"
+          # install build deps
           sudo nvidia-smi -ac ${GPU_FREQUENCY}
           echo "Result dir: ${RESULT_DIR} "
       - name: Check machine tuned
