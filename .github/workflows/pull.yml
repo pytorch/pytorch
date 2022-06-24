@@ -76,6 +76,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-focal-py3-clang7-asan
+      script: .jenkins/pytorch/build-asan.sh
 
   linux-focal-py3_7-clang7-asan-test:
     name: linux-focal-py3.7-clang7-asan

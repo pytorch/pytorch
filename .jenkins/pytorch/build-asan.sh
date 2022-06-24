@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eux
+set -ex
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -32,7 +32,9 @@ CC="clang" CXX="clang++" LDSHARED="clang --shared" \
 python setup.py sdist
 mkdir -p /tmp/tmp
 pushd /tmp/tmp
-tar zxf "$(dirname "${BASH_SOURCE[0]}")/../../dist/"*.tar.gz
+
+dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+tar zxf "${dir}/../../dist/"*.tar.gz
 cd torch-*
 python setup.py build --cmake-only
 popd

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eux
+set -ex
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
