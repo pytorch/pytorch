@@ -212,7 +212,7 @@ Tensor binary_cross_entropy_with_logits_hack(
   const Tensor& pos_weight = c10::value_or_else(pos_weight_opt, [] {return Tensor();});
 
   Tensor loss;
-  auto max_val = (-input).clamp_min_(0);
+  auto max_val = (-input).clamp_min(0);
   if (pos_weight.defined()) {
     // pos_weight need to be broadcasted, thus mul(target) is not inplace.
     auto log_weight = (pos_weight - 1).mul(target).add_(1);
