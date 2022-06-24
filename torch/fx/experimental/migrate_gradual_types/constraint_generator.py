@@ -1,17 +1,11 @@
 import torch
 import operator
 from typing import Callable, Dict
-from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct
-from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import CalcMaxPool, CalcConv, Conj  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT, CanReshape  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintD  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_matching  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_consistency, op_leq  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_precision  # type: ignore[import]
+from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
+    Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD
+from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_matching, op_consistency, op_leq, op_precision
 from torch.fx.node import Target, Node
-from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.util import gen_dvar, gen_tvar  # type: ignore[import]
+from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar, gen_tvar
 from torch.fx.tensor_type import Dyn, TensorType
 from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.batchnorm import BatchNorm2d
