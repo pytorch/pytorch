@@ -577,7 +577,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * be faster
    */
   int64_t size(int64_t d) const {
-    d = maybe_wrap_dim(d, dim(), false);
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
@@ -674,6 +674,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual IntArrayRef strides_custom() const;
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
   // sizes_strides_policy_ >= CustomSizes
+  virtual int64_t size_custom(int64_t d) const;
   virtual IntArrayRef sizes_custom() const;
   virtual c10::SymIntArrayRef sym_sizes_custom() const;
   virtual Device device_custom() const;
