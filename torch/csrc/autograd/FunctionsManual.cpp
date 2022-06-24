@@ -4118,8 +4118,9 @@ Tensor linalg_det_backward(
   // Optimisation if we are not going to compute higher-order gradients
   if (!at::GradMode::is_enabled()) {
     // The formula is given by the solution of AX = det.conj() * det * I when A
-    // is invertible det is C^1, so if it's not invertible, we can apply a perturbation
-    // to the LU decomposition and use the resulting matrix as a non-singular approximation
+    // is invertible det is C^1, so if it's not invertible, we can apply a
+    // perturbation to the LU decomposition and use the resulting matrix as a
+    // non-singular approximation
     auto LU_ =
         LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
     auto use_A_T = A.is_contiguous() && !A.is_complex();
@@ -4149,9 +4150,10 @@ Tensor linalg_det_backward(
     };
 
     // We could use the singular formula for all inputs but we try to filter out
-    // some inputs via the masking, as computing an SVD is about 100 times slower
-    // than computing an lu_solve on GPU
-    return masked_fmap(det.abs() < 10. * eps, singular, non_singular, A, d, grad);
+    // some inputs via the masking, as computing an SVD is about 100 times
+    // slower than computing an lu_solve on GPU
+    return masked_fmap(
+        det.abs() < 10. * eps, singular, non_singular, A, d, grad);
   }
 }
 
