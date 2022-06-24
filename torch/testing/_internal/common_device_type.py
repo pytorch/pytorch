@@ -324,7 +324,7 @@ class DeviceTypeTestBase(TestCase):
     def _init_and_get_primary_device(cls):
         try:
             return cls.get_primary_device()
-        except RuntimeError:
+        except Exception:
             # For CUDATestBase, XLATestBase, and possibly others, the primary device won't be available
             # until setUpClass() sets it. Call that manually here if needed.
             if hasattr(cls, 'setUpClass'):
