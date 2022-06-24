@@ -94,10 +94,6 @@ jobs:
         run: |
           buck build :torch_mobile_core
 
-      - name: Build torch_mobile_all_ops
-        run: |
-          buck build :torch_mobile_all_ops
-
       - name: Build mobile benchmark
         run: |
           buck build :ptmobile_benchmark
