@@ -320,6 +320,17 @@ class DeviceTypeTestBase(TestCase):
     def get_primary_device(cls):
         return cls.device_type
 
+    @classmethod
+    def _init_and_get_primary_device(cls):
+        try:
+            return cls.get_primary_device()
+        except RuntimeError:
+            # For CUDATestBase, XLATestBase, and possibly others, the primary device won't be available
+            # until setUpClass() sets it. Call that manually here if needed.
+            if hasattr(cls, 'setUpClass'):
+                cls.setUpClass()
+            return cls.get_primary_device()
+
     # Returns a list of strings representing all available devices of this
     # device type. The primary device must be the first string in the list
     # and the list must contain no duplicates.
@@ -368,7 +379,7 @@ class DeviceTypeTestBase(TestCase):
             param_kwargs = {} if param_kwargs is None else param_kwargs
             test_sig_params = inspect.signature(test).parameters
             if 'device' in test_sig_params or 'devices' in test_sig_params:
-                device_arg: str = cls.get_primary_device()
+                device_arg: str = cls._init_and_get_primary_device()
                 if hasattr(test, 'num_required_devices'):
                     device_arg = cls.get_all_devices()
                 _update_param_kwargs(param_kwargs, 'device', device_arg)
