@@ -19,6 +19,7 @@ from typing import (
 
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
+from .symbolic_trace import TracingConfig
 
 
 __all__ = [
@@ -316,6 +317,7 @@ class ParamExecOrderWrapPolicy:
             within each transformer layer.
     """
     init_policy: Callable = always_wrap_policy
+    tracing_config: Optional[TracingConfig] = None
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
