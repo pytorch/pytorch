@@ -493,8 +493,8 @@
   self: deg2rad_backward(grad)
   result: auto_element_wise
 
-- name: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor lu, Tensor pivs)
-  self: _det_lu_based_helper_backward(grad, det, self, lu, pivs)
+- name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
+  A: _det_lu_based_helper_backward(grad, result, A, LU, pivots)
   output_differentiability: [True, False, False]
 
 - name: block_diag(Tensor[] tensors) -> Tensor
@@ -2796,6 +2796,9 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+
+- name: special_airy_ai(Tensor x) -> Tensor
+  x: non_differentiable
 
 - name: special_bessel_j0(Tensor self) -> Tensor
   self: non_differentiable

@@ -1660,10 +1660,10 @@ def atleast_1d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_1d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
     return res if len(res) > 1 else res[0]
@@ -1683,10 +1683,10 @@ def atleast_2d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
     res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
@@ -1697,10 +1697,10 @@ def atleast_3d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
     res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
