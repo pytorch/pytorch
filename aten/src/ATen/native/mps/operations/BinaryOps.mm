@@ -38,7 +38,7 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other, output}, /*use_scalar_value*/ false);
+    string key = op_name + getTensorsStringKey({self, other}, /*use_scalar_value*/ false);
     BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -62,9 +62,6 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
             secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
           }
           newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
-          if (output.scalar_type() != common_dtype) {
-            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, output.scalar_type());
-          }
         }
         return newCachedGraph;
       });
