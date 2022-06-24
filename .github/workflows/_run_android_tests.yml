@@ -6,6 +6,7 @@ on:
       job-base-name:
         required: true
         type: string
+        description: the base name of the job calling this workflow
 
 concurrency:
   group: run-android-tests-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
