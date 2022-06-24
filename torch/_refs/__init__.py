@@ -822,6 +822,33 @@ eq = _make_elementwise_binary_reference(
     supports_lhs_python_scalar=False,
 )
 
+
+def _pow(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+) -> TensorLikeType:
+    assert isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)
+
+    # If b is a number. mypy doesn't like isinstance(b, NumberType)
+    if not isinstance(b, TensorLikeType):
+        if b == 1.0:
+            return a  # type: ignore[return-value]
+        elif b == 2.0:
+            return a * a  # type: ignore[return-value]
+        elif b == 0.5:
+            return torch.sqrt(a)  # type: ignore[arg-type]
+        elif b == 1.0 / 3.0:
+            return prims.cbrt(a)
+    return prims.pow(a, b)
+
+
+# TODO: add docstring
+pow = _make_elementwise_binary_reference(
+    _pow,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
+    aten_op=torch.ops.aten.pow,
+)
+
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 # NB: aten_op not registered because CompositeExplicitAutograd
@@ -852,7 +879,7 @@ def float_power(
         b = prims.to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
-    return prims.pow(a, b)
+    return pow(a, b)
 
 
 # TODO: add docstring
@@ -1091,12 +1118,6 @@ nextafter = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
     supports_lhs_python_scalar=False,
     supports_rhs_python_scalar=False,
-)
-
-# TODO: add docstring
-pow = _make_elementwise_binary_reference(
-    prims.pow,
-    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
 )
 
 # TODO: add docstring
