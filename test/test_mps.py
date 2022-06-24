@@ -1477,6 +1477,21 @@ class TestMPS(TestCase):
         self.assertEqual(x.to("cpu").as_strided(size=(32, 3), stride=(1, 0)), z)
 
 
+class TestLogical(TestCase):
+    def test_logical_not(self):
+        def helper(shape):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+
+            result = torch.logical_not(x)
+            result_cpu = torch.logical_not(cpu_x)
+
+            self.assertEqual(result, result_cpu)
+
+        helper((2, 8, 4, 5))
+        helper((4, 5))
+
+
 class TestSmoothL1Loss(TestCase):
 
     def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):

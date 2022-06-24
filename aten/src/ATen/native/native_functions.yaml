@@ -1037,6 +1037,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_not_out
+    MPS: logical_not_out_mps
 
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
