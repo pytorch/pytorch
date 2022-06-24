@@ -318,5 +318,4 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       upload-artifacts: false
-      build-environment: linux-bionic-rocm5.1-py3.7
       docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
