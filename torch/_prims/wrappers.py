@@ -176,8 +176,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
     def _out_wrapper(fn: Callable) -> Callable:
         """
         Adds the out parameter to a Python reference.
-
-        Note that this currently only supports operations that return a single tensor.
         """
         out_type = (
             TensorLikeType
