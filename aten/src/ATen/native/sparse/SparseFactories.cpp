@@ -76,42 +76,7 @@ void _spdiags_kernel_cpu(
       });
 }
 
-// Check offsets for out-of-bounds diagonals and compute nnz per diagonal
-void _spdiags_setup_cpu(
-    TensorIterator& iter,
-    int64_t n_row_out,
-    int64_t n_col_in,
-    int64_t n_col_out) {
-  const int64_t min_col_in_out = std::min(n_col_in, n_col_out);
-
-  cpu_kernel(iter, [&](int64_t offset) {
-    TORCH_CHECK(
-        ((-1 * n_row_out) < offset) && (offset < n_col_out),
-        "spdiags(): Diagonal ",
-        offset,
-        " does not exist in output shape (",
-        n_row_out,
-        ",",
-        n_col_out,
-        "). Valid offsets for this shape: [",
-        (-n_row_out) + 1,
-        ",",
-        n_col_out - 1,
-        "]");
-    if (offset >= 0) {
-      return std::max<int64_t>(std::min(min_col_in_out - offset, n_row_out), 0);
-    } else {
-      return std::max<int64_t>(std::min(min_col_in_out, n_row_out + offset), 0);
-    }
-  });
-}
-
-void _spdiags_backward_kernel_cpu(
-    TensorIterator& iter,
-    const int64_t n_diag,
-    const int64_t offsets_stride,
-    IntArrayRef grad_in_strides,
-    IntArrayRef grad_in_shape) {
+void _spdiags_backward_kernel_cpu(TensorIterator& iter, Tensor& grad_in) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       at::ScalarType::BFloat16,
       at::ScalarType::Half,
@@ -120,47 +85,15 @@ void _spdiags_backward_kernel_cpu(
       iter.dtype(),
       "spdiags_backward_cpu",
       [&] {
-        auto loop = [&](char** data, const int64_t* strides, int64_t n) {
-          scalar_t* grad_in_data = reinterpret_cast<scalar_t*>(data[0]);
-          int64_t* offsets_data = reinterpret_cast<int64_t*>(data[1]);
-          // Search offsets for the given offset value and return the index,
-          // this is the row position in grad_in
-          auto find_row_idx = [&offsets_data, &offsets_stride, &n_diag](
-                                  int64_t offset) -> int64_t {
-            for (int64_t idx = 0; idx < n_diag; ++idx) {
-              if (offsets_data[idx * offsets_stride] == offset) {
-                return idx;
-              }
-            }
-            return -1;
-          };
-
-          auto* grad_out_values_bytes = data[2];
-          auto* grad_out_row_indices_bytes = data[3];
-          auto* grad_out_col_indices_bytes = data[4];
-
-          for (int64_t i = 0; i < n; ++i) {
-            auto value = *reinterpret_cast<scalar_t*>(grad_out_values_bytes);
-            auto row_out_idx =
-                *reinterpret_cast<int64_t*>(grad_out_row_indices_bytes);
-            auto col_idx =
-                *reinterpret_cast<int64_t*>(grad_out_col_indices_bytes);
-            auto comp_offset = col_idx - row_out_idx;
-            auto row_idx = find_row_idx(comp_offset);
-            if ((row_idx >= 0) && (row_idx < grad_in_shape[0]) &&
-                (col_idx < grad_in_shape[1])) {
-              grad_in_data
-                  [row_idx * grad_in_strides[0] +
-                   col_idx * grad_in_strides[1]] = value;
-            }
-            // Update nnz length inputs, grad_in/offsets are restrided and do
-            // not update
-            grad_out_values_bytes += strides[2];
-            grad_out_row_indices_bytes += strides[3];
-            grad_out_col_indices_bytes += strides[4];
-          }
-        };
-        iter.for_each(loop);
+        auto grad_in_accessor = grad_in.accessor<scalar_t, 2>();
+        cpu_kernel(
+            iter,
+            [&](scalar_t grad_out_value,
+                int64_t row_idx,
+                int64_t col_idx) -> scalar_t {
+              grad_in_accessor[row_idx][col_idx] = grad_out_value;
+              return scalar_t{0};
+            });
       });
 }
 } // namespace
@@ -171,12 +104,7 @@ Tensor spdiags_cpu(
     IntArrayRef shape,
     c10::optional<Layout> layout) {
   return impl::spdiags_impl(
-      diagonals,
-      offsets,
-      shape,
-      layout,
-      _spdiags_setup_cpu,
-      _spdiags_kernel_cpu);
+      diagonals, offsets, shape, layout, _spdiags_kernel_cpu);
 }
 
 Tensor spdiags_backward_cpu(

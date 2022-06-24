@@ -20,13 +20,12 @@ namespace at {
 namespace native {
 namespace impl {
 
-template <typename setup_func_t, typename kernel_func_t>
+template <typename kernel_func_t>
 Tensor spdiags_impl(
     const Tensor& diagonals,
     const Tensor& offsets,
     IntArrayRef shape,
     c10::optional<Layout> layout,
-    const setup_func_t& setup_func,
     const kernel_func_t& kernel_func) {
   auto diagonals_2d = diagonals.dim() == 1 ? diagonals.unsqueeze(0) : diagonals;
   TORCH_CHECK(diagonals_2d.dim() == 2, "Diagonals must be vector or matrix");
@@ -65,32 +64,58 @@ Tensor spdiags_impl(
           .equal(at::ones_like(offsets_1d)),
       "spdiags(): Offset tensor contains duplicate values");
 
-  const auto n_diag = offsets_1d.size(0);
+  // We are going to introduce some temporaries to compute nnz_per_diag and do
+  // the final check at onece, we induce a block scope to allow these
+  // intermediates to be cleaned up before we continue
+  auto nnz_per_diag = at::empty_like(offsets_1d);
+  {
+    auto n_col_out = at::scalar_tensor(shape[1], offsets_1d.options());
+    auto n_row_out = at::scalar_tensor(shape[0], offsets_1d.options());
+    auto out_of_bounds_mask =
+        offsets_1d.le(n_row_out.neg()).logical_and_(offsets_1d.ge(n_col_out));
 
-  auto nnz_per_diag = at::zeros_like(offsets_1d);
-
-  auto setup_iter = TensorIteratorConfig()
-                        .add_output(nnz_per_diag)
-                        .add_input(offsets_1d)
-                        .build();
-
-  // Checks offsets and computes nnz per diag
-  setup_func(setup_iter, shape[0], shape[1], diagonals_2d.size(1));
-
-  auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
-  // const auto nnz = nnz_per_diag_cumsum.select(0, -1).item<int64_t>();
-  // Note the above fails when no diagonals are provided, this case is allowed
-  // by scipy.
+    TORCH_CHECK(
+        out_of_bounds_mask.logical_not().all().item<bool>(),
+        "spdiags(): Detected the folowing diagonal offsets which are not supported by the output shape, ",
+        offsets.masked_select(out_of_bounds_mask),
+        ". Valid offsets are in the range [",
+        (-shape[0]) + 1,
+        ",",
+        shape[1] + 1,
+        ")");
+    auto min_cols = at::minimum(
+        n_col_out,
+        at::scalar_tensor(diagonals_2d.size(1), offsets_1d.options()));
+    auto zero = at::scalar_tensor(int64_t{0}, offsets_1d.options());
+    // Mask for offsets which are positive
+    auto offset_pos_mask = offsets_1d.ge(zero);
+    // Seed nnz per diag with the formula for negative offsets
+    nnz_per_diag =
+        at::minimum_out(nnz_per_diag, n_row_out.add(offsets_1d), min_cols);
+    // Compute the sizes for positive offsets
+    auto nnz_per_pos_offset_diag =
+        at::minimum(min_cols.sub(offsets_1d), n_row_out)
+            .masked_select(offset_pos_mask);
+    nnz_per_diag.index_put_({offset_pos_mask}, nnz_per_pos_offset_diag);
+    // Any negative offsets are clamped to zero
+    nnz_per_diag.clamp_min_(zero);
+  }
+  // auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
+  //  const auto nnz = nnz_per_diag_cumsum.select(0, -1).item<int64_t>();
+  //  Note the above fails when no diagonals are provided, this case is allowed
+  //  by scipy.
   const auto nnz = nnz_per_diag.sum(-1).item<int64_t>();
-  auto result_mem_offsets = nnz_per_diag_cumsum.sub_(nnz_per_diag);
-
+  // Offsets into nnz for each diagonal
+  auto result_mem_offsets = nnz_per_diag.cumsum(-1).sub_(nnz_per_diag);
+  // coo tensor guts
   auto indices = at::empty({2, nnz}, offsets_1d.options());
   auto values = at::empty({nnz}, diagonals_2d.options());
-
+  // We add this indexer to lookup the row of diagonals we are reading from at
+  // each iteration
+  const auto n_diag = offsets_1d.size(0);
   Tensor diag_index = at::arange(n_diag, offsets_1d.options());
   // cpu_kernel requires an output
   auto dummy = at::empty({1}, offsets_1d.options());
-
   auto iter = TensorIteratorConfig()
                   .add_output(dummy)
                   .add_input(diag_index)
@@ -98,7 +123,6 @@ Tensor spdiags_impl(
                   .add_input(result_mem_offsets)
                   .add_input(nnz_per_diag)
                   .build();
-
   kernel_func(iter, diagonals_2d, values, indices);
   auto result_coo = at::sparse_coo_tensor(indices, values, shape);
   if (layout) {
@@ -125,45 +149,34 @@ Tensor spdiags_backward_impl(
   AT_ASSERT(grad_out.dim() == 2);
   AT_ASSERT(offsets_1d.size(0) == n_diag);
   auto grad_in_options = grad_out.options().layout(Layout::Strided);
+  // zeros since we are only going to se the non-zero elements
   Tensor grad_in = at::zeros({n_diag, n_col_in}, grad_in_options);
   auto grad_out_coo =
       grad_out.layout() == Layout::Sparse ? grad_out : grad_out.to_sparse();
 
-  auto nnz = sparse::get_sparse_impl(grad_out_coo)->nnz();
-
-  // Restride tensors for TensorIterator
-  // here we restride n-diag dims to nnz
-  // We are going to iterate through values/indices, compute the diagonal the
-  // element is on, the col index already gives us a col position, and we search
-  // the offsets to find the row position.
-
-  // Grad_out and offsets need to be restrided
-  auto grad_in_restrided = grad_in.as_strided({nnz}, {0});
-  auto offsets_restrided = offsets_1d.as_strided({nnz}, {0});
-  // We will need these to compute assignment positions into grad_in
-  auto grad_in_strides = grad_in.strides();
-  // We will need these to ensure the computed position in bounds
-  auto grad_in_shape = grad_in.sizes();
-  // These do not need to be restrided if we take a view on row/col indiecs
-  // separately
   auto grad_out_values = sparse::get_sparse_impl(grad_out_coo)->values_;
   auto grad_out_indices = sparse::get_sparse_impl(grad_out_coo)->indices_;
   auto grad_out_row_indices = grad_out_indices[0];
   auto grad_out_col_indices = grad_out_indices[1];
 
+  // Precompute input row indices for each nnz
+  auto row_in_indices =
+      offsets_1d
+          .eq(grad_out_indices[1].sub(grad_out_indices[0]).reshape({-1, 1}))
+          .nonzero()
+          .permute({1, 0})[-1];
+
+  // dummy output required by cpu/gpu_kernel
+  auto dummy = at::empty({1}, grad_in.options());
   auto iter = TensorIteratorConfig()
-                  .set_check_mem_overlap(false)
                   .check_all_same_dtype(false)
-                  .resize_outputs(false)
-                  .add_output(grad_in_restrided)
-                  .add_input(offsets_restrided)
+                  .add_output(dummy)
                   .add_input(grad_out_values)
-                  .add_input(grad_out_row_indices)
+                  .add_input(row_in_indices)
                   .add_input(grad_out_col_indices)
                   .build();
 
-  kernel_func(
-      iter, n_diag, offsets_1d.stride(0), grad_in_strides, grad_in_shape);
+  kernel_func(iter, grad_in);
 
   return grad_in.reshape(input_shape);
 }
