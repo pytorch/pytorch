@@ -37,7 +37,7 @@ from quantization.core.test_workflow_module import TestHistogramObserver  # noqa
 from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
 from quantization.core.test_utils import TestUtils  # noqa: F401
-
+from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
 # using eager mode.
