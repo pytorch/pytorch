@@ -28,7 +28,7 @@ on:
       script:
         required: false
         type: string
-        default: ""
+        default: .jenkins/pytorch/test.sh
         description: |
           If set, override the build script to use. Will be run inside docker.
           If this is set, an `artifact-suffix` input is required, to avoid
@@ -89,8 +89,7 @@ jobs:
           max_attempts: 3
           command: |
             set -ex
-            has_nvidia_driver=$(lspci | grep -i nvidia)
-            if [[ -n "${has_nvidia_driver}" ]]; then
+            if [[ $(lspci | grep -i nvidia) ]]; then
               bash .github/scripts/install_nvidia_utils_linux.sh
               echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
             fi
