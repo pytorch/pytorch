@@ -11,6 +11,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
+script_dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
+
 echo "Clang version:"
 clang --version
 
@@ -33,8 +35,7 @@ python setup.py sdist
 mkdir -p /tmp/tmp
 pushd /tmp/tmp
 
-dir=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
-tar zxf "${dir}/../../dist/"*.tar.gz
+tar zxf "${script_dir}/../../dist/"*.tar.gz
 cd torch-*
 python setup.py build --cmake-only
 popd
