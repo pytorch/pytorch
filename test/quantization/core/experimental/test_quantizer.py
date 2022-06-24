@@ -54,8 +54,10 @@ class TestQuantizer(unittest.TestCase):
         r"""
         given b = 4, k = 2, alpha = 1.0, we know:
         (from APoT paper example: https://arxiv.org/pdf/1909.13144.pdf)
+
         quantization_levels = tensor([0.0000, 0.0208, 0.0417, 0.0625, 0.0833, 0.1250, 0.1667,
         0.1875, 0.2500, 0.3333, 0.3750, 0.5000, 0.6667, 0.6875, 0.7500, 1.0000])
+
         level_indices = tensor([ 0, 3, 12, 15,  2, 14,  8, 11, 10, 1, 13,  9,  4,  7,  6,  5]))
         """
 
