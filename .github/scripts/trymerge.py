@@ -747,9 +747,6 @@ class GitHubPR:
         find_matching_merge_rule(self, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
         self.merge_changes(repo, force, comment_id)
 
-        if repo.current_branch() != self.default_branch():
-            repo.checkout(self.default_branch())
-
         repo.push(self.default_branch(), dry_run)
         gh_post_pr_comment(self.org, self.project, self.pr_num,
                            f"@{self.get_pr_creator_login()} your PR has been successfully merged.", dry_run)
