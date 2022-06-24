@@ -24,7 +24,7 @@ def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Ten
 
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
-    return tensor.index_select(dim, permutation)
+    return _apply_permutation(dim, permutation)
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
