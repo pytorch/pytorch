@@ -1145,5 +1145,6 @@ Please take a look at `Limitations of Symbolic Tracing <https://docs-preview.pyt
 .. py:module:: torch.ao.sparsity.experimental
 .. py:module:: torch.ao.sparsity.experimental.pruner
 .. py:module:: torch.ao.sparsity.experimental.data_sparsifier
+.. py:module:: torch.ao.sparsity.experimental.data_scheduler
 .. py:module:: torch.ao.sparsity.scheduler
 .. py:module:: torch.ao.sparsity.sparsifier
