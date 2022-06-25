@@ -106,7 +106,7 @@ class CheckpointWrapperTest(TestCase):
 
         functional_reentrant = test(use_checkpointing=True, use_wrapper=False, use_reentrant=True)
         wrapper_reentrant = test(use_checkpointing=False, use_wrapper=True, use_reentrant=True)
-        self.assertEqual(functional_no_reentrant, wrapper_no_reentrant)
+        self.assertEqual(functional_reentrant, wrapper_reentrant)
 
     def test_forward_missing_attributes(self):
         lin = nn.Linear(1, 1)
