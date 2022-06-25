@@ -1444,6 +1444,14 @@ class TestMPS(TestCase):
                          torch.tensor(4, dtype=torch.int32))
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
+        # Cast int8 and uint8 to float and compare results
+        # See https://github.com/pytorch/pytorch/issues/80009 for more details
+        cpu_byte = torch.tensor([60, 160, 20, 220], dtype=torch.uint8)
+        cpu_char = torch.tensor([60, -60, 20, -120], dtype=torch.uint8)
+        for x_cpu in [cpu_byte, cpu_char]:
+            x_mps = x_cpu.to('mps')
+            self.assertEqual(x_mps.to(torch.float32), x_cpu.to(torch.float32))
+
 
     def test_setitem_scalar(self) -> None:
         device = 'mps'
@@ -1667,6 +1675,35 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
             self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
+
+    # L1 loss
+    def test_l1_loss(self):
+        def helper(shape, reduction):
+            # create the criterion
+            loss = torch.nn.L1Loss(reduction=reduction)
+
+            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            targetCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
+            targetMPS = targetCPU.detach().clone().to('mps')
+
+            # forward pass
+            outputCPU = loss(inputCPU, targetCPU)
+            outputMPS = loss(inputMPS, targetMPS)
+            self.assertEqual(outputCPU, outputMPS)
+
+            # backward pass
+            if reduction != 'none':
+                # chose 2 just to make the grad_output > 1 in backward pass
+                outputCPU.backward(gradient=torch.full_like(outputCPU, 2))
+                outputMPS.backward(gradient=torch.full_like(outputMPS, 2))
+                self.assertEqual(inputCPU.grad, inputMPS.grad)
+
+        helper([8, 5, 4], 'none')
+        helper([7, 5, 2, 4], 'sum')
+        # verify if changes in shape would cause cached graph lookup problems
+        helper([7, 5, 2, 4, 6], 'sum')
+        helper([8, 4, 5, 7, 6], 'mean')
 
     # Mean Squared Error
     def test_mse_loss(self):
