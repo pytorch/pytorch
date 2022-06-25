@@ -156,7 +156,7 @@ jobs:
       artifact-name: pytorch-linux-bionic-py3.7-clang9-vulkan
       env-variables: |
         USE_VULKAN=1
-      script: .github/jenkins/pytorch/build-vulkan.sh
+      script: .jenkins/pytorch/build-vulkan.sh
 
   linux-vulkan-bionic-py3_7-clang9-test:
     name: linux-vulkan-bionic-py3.7-clang9

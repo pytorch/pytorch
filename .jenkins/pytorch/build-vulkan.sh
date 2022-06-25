@@ -7,4 +7,3 @@ set -ex
 source /var/lib/jenkins/vulkansdk/setup-env.sh
 
 exec "$(dirname "${BASH_SOURCE[0]}")/build.sh" "$@"
-
