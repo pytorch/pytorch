@@ -11,7 +11,7 @@ namespace at {
 namespace native {
 namespace {
 
-void check_nested_tensor_matrix_constraints(
+inline void check_nested_tensor_matrix_constraints(
     const Tensor& nested_tensor,
     const Tensor& dense_matrix,
     c10::string_view caller) {
@@ -31,13 +31,22 @@ void check_nested_tensor_matrix_constraints(
       ". Dense tensor dim: ",
       dense_matrix.dim());
   const auto last_dim = get_consistent_last_dim_of_nested_tensor(*nt_input);
+  // We check check the second dimension for linear because it transposes before matrix multiply
+  int64_t dim_constraint = (caller == "Linear") ? 1 : 0;
+  auto dense_size = dense_matrix.size(dim_constraint);
   TORCH_CHECK(
-      last_dim == dense_matrix.size(1),
+      last_dim == dense_size,
       "Shape mismatch for NestedTensor ",
       caller,
-      ": Expected input's (a nested tensor) 'last_dim' to equal 'weight.size(1),",
-      " but got: last_dim = ", last_dim,", and weight.size(1) = ",
-      dense_matrix.size(1));
+      ": Expected input's (a nested tensor) 'last_dim' to equal 'weight.size(",
+      dim_constraint,
+      "),",
+      " but got: last_dim = ",
+      last_dim,
+      ", and weight.size(",
+      dim_constraint,
+      ") = ",
+      dense_size);
 }
 } // namespace
 
