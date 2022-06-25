@@ -9,7 +9,8 @@ from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 
 from torch.testing._internal.common_device_type import ops
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch._decomp import decomposition_table
+from torch.fx.experimental.proxy_tensor import make_fx, set_strict
 
 # Copied from functorch
 def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
@@ -134,6 +135,42 @@ class TestProxyTensor(TestCase):
                 for node in traced.graph.nodes
             )
         )
+
+    def test_make_fx_set_strict(self):
+        lib = torch.library.Library("fxtest", "DEF")
+
+        def control_flow_op(x):
+            if x.sum().item() < 2:
+                return x.sin()
+            return x.cos()
+
+        def control_flow_op_decomp(x):
+            print("!!", x.sum().item())
+            if x.sum() > 0:
+                return x.sin()
+            return x.cos()
+
+        lib.define("control_flow_op(Tensor self) -> Tensor")
+        lib.impl('fxtest::control_flow_op', control_flow_op, "CPU")
+
+        def fn(x):
+            return torch.ops.fxtest.control_flow_op(x)
+
+        x = torch.rand((2, 2))
+
+        decomp = dict(decomposition_table)
+        decomp[torch.ops.fxtest.control_flow_op.default] = control_flow_op_decomp
+
+        with set_strict(True):
+            with self.assertRaisesRegex(
+                    RuntimeError,
+                    "It appears that you're trying to get value out of a tracing tensor - erroring out!"):
+                make_fx(fn, decomposition_table=decomp)(x)
+
+        with set_strict(False):
+            make_fx(fn, decomposition_table=decomposition_table)(x)
+
+        del lib
 
 make_fx_failures = {
     xfail('allclose'),

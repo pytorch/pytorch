@@ -16,7 +16,7 @@ from contextlib import contextmanager
 
 from torch.utils._python_dispatch import push_torch_dispatch_mode, TorchDispatchMode
 
-__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict"]
+__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "set_strict"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
@@ -38,6 +38,16 @@ IS_STRICT = True
 def enable_strict(val):
     global IS_STRICT
     IS_STRICT = val
+
+@contextmanager
+def set_strict(val: bool):
+    global IS_STRICT
+    old_val = IS_STRICT
+    try:
+        IS_STRICT = val
+        yield
+    finally:
+        IS_STRICT = old_val
 
 def wrap_output(real_out, proxy_out):
     def wrap_with_proxy(e, proxy):
@@ -61,10 +71,13 @@ def wrap_output(real_out, proxy_out):
 
 
 def proxy_call(func_overload, args, kwargs=None):
+    print("PROXY_CALL ", func_overload)
     func = func_overload.overloadpacket
     if func_overload in CURRENT_DECOMPOSITION_TABLE:
         return CURRENT_DECOMPOSITION_TABLE[func_overload](*args, **kwargs)
-    if func_overload == aten._local_scalar_dense.default:
+
+    global IS_STRICT
+    if IS_STRICT and func_overload == aten._local_scalar_dense.default:
         raise RuntimeError("It appears that you're trying to get value out of a tracing tensor - erroring out! "
                            "It's likely that this is caused by data-dependent control flow or similar."
                            "Try torch.fx.experimental.proxy_tensor.enable_strict(False) to disable this check")
