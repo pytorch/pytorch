@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/qint8.h>
 #include <array>
 
@@ -24,8 +24,8 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
-// iterations.
+// point operations will be carried out in a loop over
+// Vectorized<T>::float_num_vecs iterations.
 
 namespace at {
 namespace vec {
@@ -239,7 +239,8 @@ struct Vectorized<c10::qint8> {
     return {vec0, vec1};
   }
 
-  Vectorized<c10::qint8> C10_ALWAYS_INLINE relu(Vectorized<c10::qint8> zero_point) const {
+  Vectorized<c10::qint8> C10_ALWAYS_INLINE
+  relu(Vectorized<c10::qint8> zero_point) const {
     return {vec_max(_vec0, zero_point._vec0), vec_max(_vec1, zero_point._vec1)};
   }
 
@@ -391,6 +392,6 @@ Vectorized<c10::qint8> inline minimum(
     const Vectorized<c10::qint8>& b) {
   return a.minimum(b);
 }
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

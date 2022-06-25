@@ -1,14 +1,15 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/cuda/CUDAConfig.h>
 #if AT_CUDNN_ENABLED()
-  #include <ATen/cudnn/Descriptors.h>
+#include <ATen/cudnn/Descriptors.h>
 #endif
 
 #if (!AT_CUDNN_ENABLED()) || (CUDNN_VERSION < 7600)
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
@@ -21,11 +22,19 @@ bool _use_cudnn_ctc_loss(
   return false;
 }
 
-std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor& targets, IntArrayRef input_lengths, IntArrayRef target_lengths, int64_t BLANK, bool deterministic, bool zero_infinity) {
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
+    const Tensor& log_probs,
+    const Tensor& targets,
+    IntArrayRef input_lengths,
+    IntArrayRef target_lengths,
+    int64_t BLANK,
+    bool deterministic,
+    bool zero_infinity) {
   AT_ERROR("cudnn_ctc_loss: ATen not compiled with cuDNN >= 7 support");
 }
 
-}}
+} // namespace native
+} // namespace at
 
 #else // AT_CUDNN_ENABLED
 
@@ -36,7 +45,8 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs, const Tensor
 #include <ATen/TensorUtils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 bool _use_cudnn_ctc_loss(
     const Tensor& log_probs,
@@ -68,11 +78,18 @@ bool _use_cudnn_ctc_loss(
   return use_cudnn;
 }
 
-std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tensor& targets_t, IntArrayRef input_lengths_, IntArrayRef target_lengths_, int64_t BLANK, bool deterministic, bool zero_infinity) {
+std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
+    const Tensor& log_probs_t,
+    const Tensor& targets_t,
+    IntArrayRef input_lengths_,
+    IntArrayRef target_lengths_,
+    int64_t BLANK,
+    bool deterministic,
+    bool zero_infinity) {
   (void)zero_infinity; // only used for backward
   const CheckedFrom c = "cudnn_ctc_loss";
-  const TensorArg log_probs { log_probs_t, "log_probs", 1 };
-  const TensorArg targets { targets_t, "targets", 2 };
+  const TensorArg log_probs{log_probs_t, "log_probs", 1};
+  const TensorArg targets{targets_t, "targets", 2};
   checkDim(c, log_probs, 3);
   checkScalarType(c, log_probs, kFloat);
   checkDim(c, targets, 1);
@@ -81,11 +98,16 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   checkBackend(c, {*log_probs}, Backend::CUDA);
   checkBackend(c, {*targets}, Backend::CPU);
   const auto batch_size = log_probs->size(1);
-  TORCH_CHECK(static_cast<int64_t>(input_lengths_.size()) == batch_size, "input_lengths needs to have size to match batch_size");
-  TORCH_CHECK(static_cast<int64_t>(target_lengths_.size()) == batch_size, "target_lengths needs to have size to match batch_size");
+  TORCH_CHECK(
+      static_cast<int64_t>(input_lengths_.size()) == batch_size,
+      "input_lengths needs to have size to match batch_size");
+  TORCH_CHECK(
+      static_cast<int64_t>(target_lengths_.size()) == batch_size,
+      "target_lengths needs to have size to match batch_size");
 
   std::vector<int> input_lengths(input_lengths_.begin(), input_lengths_.end());
-  std::vector<int> target_lengths(target_lengths_.begin(), target_lengths_.end());
+  std::vector<int> target_lengths(
+      target_lengths_.begin(), target_lengths_.end());
 
   TORCH_CHECK(BLANK == 0, "blank must be label 0 for cudnn_ctc_loss");
   // checked in dispatch:
@@ -94,7 +116,9 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
 
   const auto handle = getCudnnHandle();
 
-  const cudnnCTCLossAlgo_t algo = (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
+  const cudnnCTCLossAlgo_t algo =
+      (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC
+                     : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
 
   CTCLossDescriptor ctc_loss_desc;
 
@@ -118,7 +142,8 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
       ctc_loss_desc.desc(),
       &workspace_size));
 
-  Tensor workspace = at::empty(workspace_size, log_probs->options().dtype(kByte));
+  Tensor workspace =
+      at::empty(workspace_size, log_probs->options().dtype(kByte));
   Tensor costs = at::empty({log_probs->size(1)}, log_probs->options());
 
   AT_CUDNN_CHECK(cudnnCTCLoss(
@@ -138,7 +163,7 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(const Tensor& log_probs_t, const Tens
   return std::make_tuple(costs, grad);
 }
 
-
-}}  // namespace at::native
+} // namespace native
+} // namespace at
 
 #endif

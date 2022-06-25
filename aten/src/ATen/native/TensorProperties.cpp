@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorProperties.h>
-#include <ATen/NamedTensorUtils.h>
-#include <torch/library.h>
 #include <ATen/native/nested/NestedTensorMath.h>
+#include <torch/library.h>
 
 #include <ATen/Config.h>
 #include <c10/util/irange.h>
@@ -18,9 +18,10 @@ bool nested_is_same_size(const Tensor& self, const Tensor& other) {
   TORCH_CHECK(
       self.is_nested() && other.is_nested(),
       "Expected both self and other to be nested tensors. ",
-      "Self ", self.is_nested()? "is " : "is not ",
+      "Self ",
+      self.is_nested() ? "is " : "is not ",
       "nested. While Other ",
-      other.is_nested()? "is " : "is not ",
+      other.is_nested() ? "is " : "is not ",
       "nested.")
   const auto self_nt_size = get_nested_size_tensor(self);
   const auto other_nt_size = get_nested_size_tensor(other);
@@ -45,16 +46,21 @@ int64_t stride(const Tensor& self, Dimname dim) {
 }
 
 bool cudnn_is_acceptable(const TensorBase& self) {
-  if (!globalContext().userEnabledCuDNN()) return false;
-  if (!self.is_cuda()) return false;
+  if (!globalContext().userEnabledCuDNN())
+    return false;
+  if (!self.is_cuda())
+    return false;
   auto st = self.scalar_type();
-  if (!(st == kDouble || st == kFloat || st == kHalf)) return false;
-  if (!detail::getCUDAHooks().compiledWithCuDNN()) return false;
+  if (!(st == kDouble || st == kFloat || st == kHalf))
+    return false;
+  if (!detail::getCUDAHooks().compiledWithCuDNN())
+    return false;
   // cuDNN functions like grid_sampler returns CUDNN_STATUS_BAD_PARAM on empty
   // tensors. Maybe some cuDNN functions actually support empty tensors, but
   // native/THNN kernels shouldn't be much slower because the output is also
   // likely empty.
-  if (self.numel() == 0) return false;
+  if (self.numel() == 0)
+    return false;
   // NB: In the old Python code, there was also a test to see if the
   // cuDNN library was actually dynamically linked or not.  I'm not
   // sure if we can actually test this.
@@ -65,13 +71,14 @@ bool cudnn_is_acceptable(const Tensor& self) {
   return cudnn_is_acceptable(static_cast<const TensorBase&>(self));
 }
 
-Tensor & detach_(Tensor & self) {
-  // this just exists to give us a hook in VariableType and an entry in Declarations.yaml
-  //AT_ERROR("detach_ is not implemented for Tensor");
+Tensor& detach_(Tensor& self) {
+  // this just exists to give us a hook in VariableType and an entry in
+  // Declarations.yaml
+  // AT_ERROR("detach_ is not implemented for Tensor");
   return self;
 }
 
-Tensor contiguous(const Tensor & self) {
+Tensor contiguous(const Tensor& self) {
   return contiguous(self, MemoryFormat::Contiguous);
 }
 
@@ -87,7 +94,8 @@ Tensor contiguous(const Tensor& self, MemoryFormat memory_format) {
 }
 
 bool is_set_to(const Tensor& self, const Tensor& src) {
-  if (self.storage().unsafeGetStorageImpl() == src.storage().unsafeGetStorageImpl() &&
+  if (self.storage().unsafeGetStorageImpl() ==
+          src.storage().unsafeGetStorageImpl() &&
       self.storage_offset() == src.storage_offset() &&
       self.dim() == src.dim()) {
     for (const auto d : c10::irange(self.dim())) {

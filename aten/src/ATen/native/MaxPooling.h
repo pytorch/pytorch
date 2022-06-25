@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/DispatchStub.h>
 
 namespace at {
@@ -25,7 +25,8 @@ struct PoolingParams1D {
 
   // Return index of first output within bounds for this kernel index
   inline int64_t valid_output_start(int64_t kj) const {
-    int64_t ij = index(kj, 0);;
+    int64_t ij = index(kj, 0);
+    ;
     return ij < 0 ? at::divup(-ij, SJ) : 0;
   }
 

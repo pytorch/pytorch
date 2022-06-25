@@ -1,14 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -19,13 +19,17 @@ DEFINE_DISPATCH(qsigmoid_stub);
 
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_sigmoid(
-    Tensor input, double output_scale, int64_t output_zero_point) {
-  TORCH_CHECK(input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
-  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
-               "qnnpack_sigmoid(): Expected input data type ",
-               toString(c10::kQUInt8),
-               " but got ",
-               toString(input.scalar_type()));
+    Tensor input,
+    double output_scale,
+    int64_t output_zero_point) {
+  TORCH_CHECK(
+      input.ndimension() > 0, "qnnpack_sigmoid(): Got empty input tensor");
+  TORCH_CHECK(
+      input.scalar_type() == c10::kQUInt8,
+      "qnnpack_sigmoid(): Expected input data type ",
+      toString(c10::kQUInt8),
+      " but got ",
+      toString(input.scalar_type()));
 
   Tensor qy;
   initQNNPACK();
@@ -41,51 +45,53 @@ Tensor qnnpack_sigmoid(
 
   pytorch_qnnp_operator_t sigmoid_op{nullptr};
   const pytorch_qnnp_status createStatus = pytorch_qnnp_create_sigmoid_nc_q8(
-    num_elems /* channels */,
-    zero_point /* input zero point */,
-    scale /* input scale */,
-    output_zero_point /* output zero point */,
-    // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
-    output_scale /* output scale */,
-    std::numeric_limits<uint8_t>::min() /* output min */,
-    std::numeric_limits<uint8_t>::max() /* output max */,
-    0 /* flags */,
-    &sigmoid_op);
+      num_elems /* channels */,
+      zero_point /* input zero point */,
+      scale /* input scale */,
+      output_zero_point /* output zero point */,
+      // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
+      output_scale /* output scale */,
+      std::numeric_limits<uint8_t>::min() /* output min */,
+      std::numeric_limits<uint8_t>::max() /* output max */,
+      0 /* flags */,
+      &sigmoid_op);
 
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
       qnnpack_uniq_ptr(sigmoid_op);
 
-  TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
-                        "failed to create QNNPACK sigmoid operator");
+  TORCH_INTERNAL_ASSERT(
+      createStatus == pytorch_qnnp_status_success,
+      "failed to create QNNPACK sigmoid operator");
   qy = at::_empty_affine_quantized(
-    input_contig.sizes(),
-    at::device(kCPU).dtype(input_contig.dtype()),
-    output_scale,
-    output_zero_point,
-    input_contig.suggest_memory_format());
+      input_contig.sizes(),
+      at::device(kCPU).dtype(input_contig.dtype()),
+      output_scale,
+      output_zero_point,
+      input_contig.suggest_memory_format());
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_sigmoid_nc_q8(
-    sigmoid_op,
-    input_contig.size(0) /* batch size */,
-    (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
-    num_elems /* input stride */,
-    (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
-    num_elems /* output stride */);
-  TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
-                        "failed to setup QNNPACK sigmoid operator");
+      sigmoid_op,
+      input_contig.size(0) /* batch size */,
+      (uint8_t*)input_contig.data_ptr<c10::quint8>() /* input data */,
+      num_elems /* input stride */,
+      (uint8_t*)qy.data_ptr<c10::quint8>() /* output data */,
+      num_elems /* output stride */);
+  TORCH_INTERNAL_ASSERT(
+      setupStatus == pytorch_qnnp_status_success,
+      "failed to setup QNNPACK sigmoid operator");
 
   pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
-    pytorch_qnnp_run_operator(sigmoid_op, threadpool);
+      pytorch_qnnp_run_operator(sigmoid_op, threadpool);
 
   TORCH_INTERNAL_ASSERT(
-    runStatus == pytorch_qnnp_status_success,
-    "failed to run QNNPACK sigmoid operator");
+      runStatus == pytorch_qnnp_status_success,
+      "failed to run QNNPACK sigmoid operator");
   return qy;
 }
 
-#endif  // USE_PYTORCH_QNNPACK
+#endif // USE_PYTORCH_QNNPACK
 
 // This ALWAYS outputs scale=1.0/256, dtype=quint8
 // The zero_point is 0 for qint32 and quint8, but -128 for qint8.
@@ -97,7 +103,7 @@ Tensor sigmoid_quantized_cpu(const Tensor& qx) {
     constexpr int64_t output_zero_point = 0;
     return qnnpack_sigmoid(qx, output_scale, output_zero_point);
   }
-#endif  // USE_PYTORCH_QNNPACK
+#endif // USE_PYTORCH_QNNPACK
   Tensor qy;
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qsigmoid", [&]() {
     // Naive implemenentation: uses dequantize/execute/quantize routine
@@ -106,11 +112,11 @@ Tensor sigmoid_quantized_cpu(const Tensor& qx) {
     // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
     // See https://stackoverflow.com/a/34448562/3606192 for potential
     // optimizations
-    double output_scale = 0.00390625;  // 1.0 / 2^8
+    double output_scale = 0.00390625; // 1.0 / 2^8
     int64_t output_zero_point = 0;
     // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     if (SCALAR_TYPE == at::kQInt32) {
-      output_scale = 2.3283064365386963e-10;  // 1.0 / 2^32
+      output_scale = 2.3283064365386963e-10; // 1.0 / 2^32
     } else if (SCALAR_TYPE == at::kQInt8) {
       output_zero_point = -128;
     }
@@ -125,14 +131,14 @@ class QSigmoid final {
  public:
   static Tensor run(Tensor qx, double output_scale, int64_t output_zero_point) {
 #ifdef USE_PYTORCH_QNNPACK
-  if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
-      qx.scalar_type() == kQUInt8) {
-    return qnnpack_sigmoid(qx, output_scale, output_zero_point);
-  }
-#endif  // USE_PYTORCH_QNNPACK
-  Tensor qy;
-  qsigmoid_stub(qx.device().type(), qx, qy, output_scale, output_zero_point);
-  return qy;
+    if (at::globalContext().qEngine() == at::QEngine::QNNPACK &&
+        qx.scalar_type() == kQUInt8) {
+      return qnnpack_sigmoid(qx, output_scale, output_zero_point);
+    }
+#endif // USE_PYTORCH_QNNPACK
+    Tensor qy;
+    qsigmoid_stub(qx.device().type(), qx, qy, output_scale, output_zero_point);
+    return qy;
   }
 };
 
@@ -141,4 +147,5 @@ TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
 }
 } // namespace
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

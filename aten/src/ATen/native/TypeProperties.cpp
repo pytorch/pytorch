@@ -4,7 +4,8 @@
 #include <ATen/native/TypeProperties.h>
 #include <type_traits>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 bool is_cuda(const Tensor& self) {
   return self.is_cuda();
@@ -26,7 +27,7 @@ bool is_inference(const Tensor& self) {
   return self.is_inference();
 }
 
-bool is_signed(const Tensor &self) {
+bool is_signed(const Tensor& self) {
   return self.is_signed();
 }
 
@@ -75,10 +76,11 @@ static inline ScalarType promote_skip_undefined(ScalarType a, ScalarType b) {
   return promoteTypes(a, b);
 }
 
-
-static inline ScalarType combine_categories(ScalarType higher, ScalarType lower) {
+static inline ScalarType combine_categories(
+    ScalarType higher,
+    ScalarType lower) {
   // NOLINTNEXTLINE(bugprone-branch-clone)
-  if(isComplexType(higher)) {
+  if (isComplexType(higher)) {
     return higher;
   } else if (isComplexType(lower)) {
     // preserve value type of higher if it is floating type.
@@ -100,31 +102,35 @@ static inline ScalarType combine_categories(ScalarType higher, ScalarType lower)
   return lower;
 }
 
-ResultTypeState update_result_type_state(const Tensor& tensor, const ResultTypeState& in_state) {
+ResultTypeState update_result_type_state(
+    const Tensor& tensor,
+    const ResultTypeState& in_state) {
   if (!tensor.defined()) {
     return in_state;
   }
   ResultTypeState new_state = in_state;
   ScalarType current = tensor.scalar_type();
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-    if(isComplexType(current)) {
+    if (isComplexType(current)) {
       current = typeMetaToScalarType(at::get_default_complex_dtype());
-    }
-    else if(isFloatingType(current)) {
+    } else if (isFloatingType(current)) {
       current = typeMetaToScalarType(at::get_default_dtype());
     }
   }
-  if ( tensor.dim() > 0 ) {
+  if (tensor.dim() > 0) {
     new_state.dimResult = promote_skip_undefined(in_state.dimResult, current);
   } else if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-    new_state.wrappedResult = promote_skip_undefined(in_state.wrappedResult, current);
+    new_state.wrappedResult =
+        promote_skip_undefined(in_state.wrappedResult, current);
   } else {
     new_state.zeroResult = promote_skip_undefined(in_state.zeroResult, current);
   }
   return new_state;
 }
 
-ResultTypeState update_result_type_state(const Scalar& scalar, const ResultTypeState& in_state) {
+ResultTypeState update_result_type_state(
+    const Scalar& scalar,
+    const ResultTypeState& in_state) {
   ResultTypeState new_state = in_state;
   ScalarType current = scalar.type();
   if (isComplexType(current)) {
@@ -132,12 +138,15 @@ ResultTypeState update_result_type_state(const Scalar& scalar, const ResultTypeS
   } else if (isFloatingType(current)) {
     current = typeMetaToScalarType(at::get_default_dtype());
   }
-  new_state.wrappedResult = promote_skip_undefined(in_state.wrappedResult, current);
+  new_state.wrappedResult =
+      promote_skip_undefined(in_state.wrappedResult, current);
   return new_state;
 }
 
 ScalarType result_type(const ResultTypeState& in_state) {
-  return combine_categories(in_state.dimResult, combine_categories(in_state.zeroResult, in_state.wrappedResult));
+  return combine_categories(
+      in_state.dimResult,
+      combine_categories(in_state.zeroResult, in_state.wrappedResult));
 }
 
 ScalarType result_type(ITensorListRef tensors) {
@@ -148,20 +157,20 @@ ScalarType result_type(ITensorListRef tensors) {
   return result_type(state);
 }
 
-ScalarType result_type(const Tensor &tensor, const Tensor &other) {
+ScalarType result_type(const Tensor& tensor, const Tensor& other) {
   // NOLINTNEXTLINE(performance-move-const-arg)
   std::vector<Tensor> tensors{std::move(tensor), std::move(other)};
   return native::result_type(tensors);
 }
 
-ScalarType result_type(const Tensor &tensor, const Scalar& other) {
+ScalarType result_type(const Tensor& tensor, const Scalar& other) {
   ResultTypeState state = {};
   state = update_result_type_state(tensor, state);
   state = update_result_type_state(other, state);
   return result_type(state);
 }
 
-ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
+ScalarType result_type(const Scalar& scalar, const Tensor& tensor) {
   return at::result_type(tensor, scalar);
 }
 
@@ -178,8 +187,15 @@ bool can_cast(const at::ScalarType from, const at::ScalarType to) {
 
 ScalarType promote_types(ScalarType type1, ScalarType type2) {
   ScalarType ret = promoteTypes(type1, type2);
-  TORCH_CHECK(ret != ScalarType::Undefined, "Promotion from ", type1, " and ", type2, " is unsupported.");
+  TORCH_CHECK(
+      ret != ScalarType::Undefined,
+      "Promotion from ",
+      type1,
+      " and ",
+      type2,
+      " is unsupported.");
   return ret;
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

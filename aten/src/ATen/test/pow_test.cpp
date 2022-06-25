@@ -7,8 +7,8 @@
 #include <torch/utils.h>
 
 #include <iostream>
-#include <vector>
 #include <type_traits>
+#include <vector>
 
 #ifdef _WIN32
 #define DISABLED_ON_WINDOWS(x) DISABLED_##x
@@ -31,63 +31,95 @@ const auto double_lowest = std::numeric_limits<double>::lowest();
 const auto double_min = std::numeric_limits<double>::min();
 const auto double_max = std::numeric_limits<double>::max();
 
-const std::vector<int> ints {
-  int_min,
-  int_min + 1,
-  int_min + 2,
-  static_cast<int>(-sqrt(static_cast<double>(int_max))),
-  -3, -2, -1, 0, 1, 2, 3,
-  static_cast<int>(sqrt(static_cast<double>(int_max))),
-  int_max - 2,
-  int_max - 1,
-  int_max
+const std::vector<int> ints{
+    int_min,
+    int_min + 1,
+    int_min + 2,
+    static_cast<int>(-sqrt(static_cast<double>(int_max))),
+    -3,
+    -2,
+    -1,
+    0,
+    1,
+    2,
+    3,
+    static_cast<int>(sqrt(static_cast<double>(int_max))),
+    int_max - 2,
+    int_max - 1,
+    int_max};
+const std::vector<int> non_neg_ints{
+    0,
+    1,
+    2,
+    3,
+    static_cast<int>(sqrt(static_cast<double>(int_max))),
+    int_max - 2,
+    int_max - 1,
+    int_max};
+const std::vector<int64_t> longs{
+    long_min,
+    long_min + 1,
+    long_min + 2,
+    static_cast<int64_t>(-sqrt(static_cast<double>(long_max))),
+    -3,
+    -2,
+    -1,
+    0,
+    1,
+    2,
+    3,
+    static_cast<int64_t>(sqrt(static_cast<double>(long_max))),
+    long_max - 2,
+    long_max - 1,
+    long_max};
+const std::vector<int64_t> non_neg_longs{
+    0,
+    1,
+    2,
+    3,
+    static_cast<int64_t>(sqrt(static_cast<double>(long_max))),
+    long_max - 2,
+    long_max - 1,
+    long_max};
+const std::vector<float> floats{
+    float_lowest,
+    -3.0f,
+    -2.0f,
+    -1.0f,
+    -1.0f / 2.0f,
+    -1.0f / 3.0f,
+    -float_min,
+    0.0,
+    float_min,
+    1.0f / 3.0f,
+    1.0f / 2.0f,
+    1.0f,
+    2.0f,
+    3.0f,
+    float_max,
 };
-const std::vector<int> non_neg_ints {
-  0, 1, 2, 3,
-  static_cast<int>(sqrt(static_cast<double>(int_max))),
-  int_max - 2,
-  int_max - 1,
-  int_max
-};
-const std::vector<int64_t> longs {
-  long_min,
-  long_min + 1,
-  long_min + 2,
-  static_cast<int64_t>(-sqrt(static_cast<double>(long_max))),
-  -3, -2, -1, 0, 1, 2, 3,
-  static_cast<int64_t>(sqrt(static_cast<double>(long_max))),
-  long_max - 2,
-  long_max - 1,
-  long_max
-};
-const std::vector<int64_t> non_neg_longs {
-  0, 1, 2, 3,
-  static_cast<int64_t>(sqrt(static_cast<double>(long_max))),
-  long_max - 2,
-  long_max - 1,
-  long_max
-};
-const std::vector<float> floats {
-  float_lowest,
-  -3.0f, -2.0f, -1.0f, -1.0f/2.0f, -1.0f/3.0f,
-  -float_min,
-  0.0,
-  float_min,
-  1.0f/3.0f, 1.0f/2.0f, 1.0f, 2.0f, 3.0f,
-  float_max,
-};
-const std::vector<double> doubles {
-  double_lowest,
-  -3.0, -2.0, -1.0, -1.0/2.0, -1.0/3.0,
-  -double_min,
-  0.0,
-  double_min,
-  1.0/3.0, 1.0/2.0, 1.0, 2.0, 3.0,
-  double_max,
+const std::vector<double> doubles{
+    double_lowest,
+    -3.0,
+    -2.0,
+    -1.0,
+    -1.0 / 2.0,
+    -1.0 / 3.0,
+    -double_min,
+    0.0,
+    double_min,
+    1.0 / 3.0,
+    1.0 / 2.0,
+    1.0,
+    2.0,
+    3.0,
+    double_max,
 };
 
-template <class T,
-  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+template <
+    class T,
+    typename std::enable_if<std::is_floating_point<T>::value, T>::type* =
+        nullptr>
 void assert_eq(T val, T act, T exp) {
   if (std::isnan(act) || std::isnan(exp)) {
     return;
@@ -95,8 +127,9 @@ void assert_eq(T val, T act, T exp) {
   ASSERT_FLOAT_EQ(act, exp);
 }
 
-template <class T,
-  typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
+template <
+    class T,
+    typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
 void assert_eq(T val, T act, T exp) {
   if (val != 0 && act == 0) {
     return;
@@ -111,24 +144,32 @@ void assert_eq(T val, T act, T exp) {
   ASSERT_EQ(act, exp);
 }
 
-template <class T,
-  typename std::enable_if<std::is_floating_point<T>::value,T>::type* = nullptr>
+template <
+    class T,
+    typename std::enable_if<std::is_floating_point<T>::value, T>::type* =
+        nullptr>
 T typed_pow(T base, T exp) {
   return std::pow(base, exp);
 }
-template <class T,
-  typename std::enable_if<std::is_integral<T>::value,T>::type* = nullptr>
+template <
+    class T,
+    typename std::enable_if<std::is_integral<T>::value, T>::type* = nullptr>
 T typed_pow(T base, T exp) {
   return native::powi(base, exp);
 }
 
-template<typename Vals, typename Pows>
-void tensor_pow_scalar(const Vals vals, const Pows pows, const torch::ScalarType valsDtype, const torch::ScalarType dtype) {
+template <typename Vals, typename Pows>
+void tensor_pow_scalar(
+    const Vals vals,
+    const Pows pows,
+    const torch::ScalarType valsDtype,
+    const torch::ScalarType dtype) {
   const auto tensor = torch::tensor(vals, valsDtype);
 
   for (const auto pow : pows) {
     // NOLINTNEXTLINE(clang-diagnostic-implicit-const-int-float-conversion)
-    if ( dtype == kInt && pow > static_cast<float>(std::numeric_limits<int>::max())) {
+    if (dtype == kInt &&
+        pow > static_cast<float>(std::numeric_limits<int>::max())) {
       // value cannot be converted to type int without overflow
       // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
       EXPECT_THROW(tensor.pow(pow), std::runtime_error);
@@ -147,18 +188,24 @@ void tensor_pow_scalar(const Vals vals, const Pows pows, const torch::ScalarType
 
     int i = 0;
     for (const auto val : vals) {
-      const auto exp = torch::pow(torch::tensor({val}, dtype), torch::tensor(pow, dtype)).template item<double>();
+      const auto exp =
+          torch::pow(torch::tensor({val}, dtype), torch::tensor(pow, dtype))
+              .template item<double>();
 
-      const auto act_pow = actual_pow[i].to(at::kDouble).template item<double>();
+      const auto act_pow =
+          actual_pow[i].to(at::kDouble).template item<double>();
       assert_eq<long double>(val, act_pow, exp);
 
-      const auto act_pow_ = actual_pow_[i].to(at::kDouble).template item<double>();
+      const auto act_pow_ =
+          actual_pow_[i].to(at::kDouble).template item<double>();
       assert_eq<long double>(val, act_pow_, exp);
 
-      const auto act_pow_out = actual_pow_out[i].to(at::kDouble).template item<double>();
+      const auto act_pow_out =
+          actual_pow_out[i].to(at::kDouble).template item<double>();
       assert_eq<long double>(val, act_pow_out, exp);
 
-      const auto act_torch_pow = actual_torch_pow[i].to(at::kDouble).template item<double>();
+      const auto act_torch_pow =
+          actual_torch_pow[i].to(at::kDouble).template item<double>();
       assert_eq<long double>(val, act_torch_pow, exp);
 
       i++;
@@ -166,8 +213,12 @@ void tensor_pow_scalar(const Vals vals, const Pows pows, const torch::ScalarType
   }
 }
 
-template<typename Vals, typename Pows>
-void scalar_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, const Pows pows, c10::ScalarType pows_dtype) {
+template <typename Vals, typename Pows>
+void scalar_pow_tensor(
+    const Vals vals,
+    c10::ScalarType vals_dtype,
+    const Pows pows,
+    c10::ScalarType pows_dtype) {
   using T = typename Pows::value_type;
 
   const auto pow_tensor = torch::tensor(pows, pows_dtype);
@@ -176,7 +227,7 @@ void scalar_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, const Pows p
     const auto actual_pow = torch::pow(val, pow_tensor);
     auto actual_pow_out1 = torch::empty_like(actual_pow);
     const auto actual_pow_out2 =
-      torch::pow_out(actual_pow_out1, val, pow_tensor);
+        torch::pow_out(actual_pow_out1, val, pow_tensor);
 
     int i = 0;
     for (const auto pow : pows) {
@@ -196,11 +247,15 @@ void scalar_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, const Pows p
   }
 }
 
-template<typename Vals, typename Pows>
-void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c10::ScalarType pows_dtype) {
+template <typename Vals, typename Pows>
+void tensor_pow_tensor(
+    const Vals vals,
+    c10::ScalarType vals_dtype,
+    Pows pows,
+    c10::ScalarType pows_dtype) {
   using T = typename Vals::value_type;
 
-  typedef std::numeric_limits< double > dbl;
+  typedef std::numeric_limits<double> dbl;
   std::cout.precision(dbl::max_digits10);
 
   const auto vals_tensor = torch::tensor(vals, vals_dtype);
@@ -241,33 +296,33 @@ void tensor_pow_tensor(const Vals vals, c10::ScalarType vals_dtype, Pows pows, c
   }
 }
 
-template<typename T>
+template <typename T>
 void test_pow_one(const std::vector<T> vals) {
   for (const auto val : vals) {
     ASSERT_EQ(native::powi(val, T(1)), val);
   }
 }
 
-template<typename T>
+template <typename T>
 void test_squared(const std::vector<T> vals) {
   for (const auto val : vals) {
     ASSERT_EQ(native::powi(val, T(2)), val * val);
   }
 }
 
-template<typename T>
+template <typename T>
 void test_cubed(const std::vector<T> vals) {
   for (const auto val : vals) {
     ASSERT_EQ(native::powi(val, T(3)), val * val * val);
   }
 }
-template<typename T>
+template <typename T>
 void test_inverse(const std::vector<T> vals) {
   for (const auto val : vals) {
     // 1 has special checks below
-    if ( val != 1 && val != -1) {
+    if (val != 1 && val != -1) {
       ASSERT_EQ(native::powi(val, T(-4)), 0);
-      ASSERT_EQ(native::powi(val, T(-1)), val==1);
+      ASSERT_EQ(native::powi(val, T(-1)), val == 1);
     }
   }
   T neg1 = -1;
@@ -283,10 +338,9 @@ void test_inverse(const std::vector<T> vals) {
   ASSERT_EQ(native::powi(one, T(-2)), 1);
   ASSERT_EQ(native::powi(one, T(-3)), 1);
   ASSERT_EQ(native::powi(one, T(-4)), 1);
-
 }
 
-}
+} // namespace
 
 TEST(PowTest, IntTensorPowAllScalars) {
   tensor_pow_scalar(ints, non_neg_ints, kInt, kInt);

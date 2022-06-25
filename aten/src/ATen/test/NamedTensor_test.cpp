@@ -3,8 +3,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorNames.h>
-#include <c10/util/Exception.h>
 #include <c10/util/C++17.h>
+#include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
 using at::Dimname;
@@ -30,7 +30,7 @@ TEST(NamedTensorTest, isNamed) {
   auto C = dimnameFromString("C");
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
-  std::vector<Dimname> names = { N, C, H, W };
+  std::vector<Dimname> names = {N, C, H, W};
   at::internal_set_names_inplace(tensor, names);
   ASSERT_TRUE(tensor.has_names());
 }
@@ -42,7 +42,8 @@ static bool dimnames_equal(at::DimnameList names, at::DimnameList other) {
   for (const auto i : c10::irange(names.size())) {
     const auto& name = names[i];
     const auto& other_name = other[i];
-    if (name.type() != other_name.type() || name.symbol() != other_name.symbol()) {
+    if (name.type() != other_name.type() ||
+        name.symbol() != other_name.symbol()) {
       return false;
     }
   }
@@ -55,7 +56,7 @@ TEST(NamedTensorTest, attachMetadata) {
   auto C = dimnameFromString("C");
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
-  std::vector<Dimname> names = { N, C, H, W };
+  std::vector<Dimname> names = {N, C, H, W};
 
   at::internal_set_names_inplace(tensor, names);
 
@@ -73,7 +74,7 @@ TEST(NamedTensorTest, internalSetNamesInplace) {
   auto C = dimnameFromString("C");
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
-  std::vector<Dimname> names = { N, C, H, W };
+  std::vector<Dimname> names = {N, C, H, W};
   ASSERT_FALSE(tensor.has_names());
 
   // Set names
@@ -92,7 +93,7 @@ TEST(NamedTensorTest, empty) {
   auto C = Dimname::fromSymbol(Symbol::dimname("C"));
   auto H = Dimname::fromSymbol(Symbol::dimname("H"));
   auto W = Dimname::fromSymbol(Symbol::dimname("W"));
-  std::vector<Dimname> names = { N, C, H, W };
+  std::vector<Dimname> names = {N, C, H, W};
 
   auto tensor = at::empty({});
   ASSERT_EQ(tensor.opt_names(), at::nullopt);
@@ -112,7 +113,7 @@ TEST(NamedTensorTest, dimnameToPosition) {
   auto C = dimnameFromString("C");
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
-  std::vector<Dimname> names = { N, C, H, W };
+  std::vector<Dimname> names = {N, C, H, W};
 
   auto tensor = at::empty({1, 1, 1});
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
@@ -161,34 +162,35 @@ TEST(NamedTensorTest, unifyFromRight) {
   auto W = dimnameFromString("W");
   auto None = dimnameFromString("*");
 
-  std::vector<Dimname> names = { N, C };
+  std::vector<Dimname> names = {N, C};
 
-  check_unify({ N, C, H, W }, { N, C, H, W }, { N, C, H, W });
-  check_unify({ W }, { C, H, W }, { C, H, W });
-  check_unify({ None, W }, { C, H, W }, { C, H, W });
-  check_unify({ None, None, H, None }, { C, None, W }, { None, C, H, W });
+  check_unify({N, C, H, W}, {N, C, H, W}, {N, C, H, W});
+  check_unify({W}, {C, H, W}, {C, H, W});
+  check_unify({None, W}, {C, H, W}, {C, H, W});
+  check_unify({None, None, H, None}, {C, None, W}, {None, C, H, W});
 
-  check_unify_error({ W, H }, { W, C });
-  check_unify_error({ W, H }, { C, H });
-  check_unify_error({ None, H }, { H, None });
-  check_unify_error({ H, None, C }, { H });
+  check_unify_error({W, H}, {W, C});
+  check_unify_error({W, H}, {C, H});
+  check_unify_error({None, H}, {H, None});
+  check_unify_error({H, None, C}, {H});
 }
 
 TEST(NamedTensorTest, alias) {
   // tensor.alias is not exposed in Python so we test its name propagation here
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
-  std::vector<Dimname> names = { N, C };
+  std::vector<Dimname> names = {N, C};
 
-  auto tensor = at::empty({2, 3}, std::vector<Dimname>{ N, C });
+  auto tensor = at::empty({2, 3}, std::vector<Dimname>{N, C});
   auto aliased = tensor.alias();
-  ASSERT_TRUE(dimnames_equal(tensor.opt_names().value(), aliased.opt_names().value()));
+  ASSERT_TRUE(
+      dimnames_equal(tensor.opt_names().value(), aliased.opt_names().value()));
 }
 
 TEST(NamedTensorTest, NoNamesGuard) {
   auto N = dimnameFromString("N");
   auto C = dimnameFromString("C");
-  std::vector<Dimname> names = { N, C };
+  std::vector<Dimname> names = {N, C};
 
   auto tensor = at::empty({2, 3}, names);
   ASSERT_TRUE(at::NamesMode::is_enabled());
@@ -206,22 +208,18 @@ static std::vector<Dimname> nchw() {
   auto C = dimnameFromString("C");
   auto H = dimnameFromString("H");
   auto W = dimnameFromString("W");
-  return { N, C, H, W };
+  return {N, C, H, W};
 }
 
 TEST(NamedTensorTest, TensorNamePrint) {
   auto names = nchw();
   {
     auto N = TensorName(names, 0);
-    ASSERT_EQ(
-        c10::str(N),
-        "'N' (index 0 of ['N', 'C', 'H', 'W'])");
+    ASSERT_EQ(c10::str(N), "'N' (index 0 of ['N', 'C', 'H', 'W'])");
   }
   {
     auto H = TensorName(names, 2);
-    ASSERT_EQ(
-        c10::str(H),
-        "'H' (index 2 of ['N', 'C', 'H', 'W'])");
+    ASSERT_EQ(c10::str(H), "'H' (index 2 of ['N', 'C', 'H', 'W'])");
   }
 }
 
@@ -232,7 +230,7 @@ TEST(NamedTensorTest, TensorNamesCheckUnique) {
     TensorNames(names).checkUnique("op_name");
   }
   {
-    std::vector<Dimname> nchh = { names[0], names[1], names[2], names[2] };
+    std::vector<Dimname> nchh = {names[0], names[1], names[2], names[2]};
     auto tensornames = TensorNames(nchh);
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(tensornames.checkUnique("op_name"), c10::Error);

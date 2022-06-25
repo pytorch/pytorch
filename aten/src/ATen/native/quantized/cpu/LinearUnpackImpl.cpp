@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/cpp_custom_type_hack.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
@@ -76,7 +76,8 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightFp16::
 #endif // USE_FBGEMM
 
 #if AT_MKLDNN_ENABLED()
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsOnednn::unpack() {
+std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightsOnednn::
+    unpack() {
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(
       orig_weight_, orig_bias_);
 }

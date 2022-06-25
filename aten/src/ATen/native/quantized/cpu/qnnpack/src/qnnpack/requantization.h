@@ -30,8 +30,8 @@ pytorch_qnnp_compute_scalar_requantization_params(
   const uint32_t scale_bits = fp32_to_bits(scale);
 
   /* Multiplier is in [0x40000000, 0x7FFFFF80] range */
-  const int32_t multiplier = (int32_t)(
-      ((scale_bits & UINT32_C(0x007FFFFF)) | UINT32_C(0x00800000)) << 7);
+  const int32_t multiplier =
+      (int32_t)(((scale_bits & UINT32_C(0x007FFFFF)) | UINT32_C(0x00800000)) << 7);
   assert(multiplier >= INT32_C(0x40000000));
   assert(multiplier <= INT32_C(0x7FFFFF80));
 
@@ -61,19 +61,18 @@ pytorch_qnnp_compute_scalar_fp32_requantization_params(
     uint8_t zero_point,
     uint8_t min,
     uint8_t max) {
-
   union pytorch_qnnp_fp32_requantization_params params;
   params.scalar.scales = scales;
   params.scalar.output_zero_point = zero_point;
   params.scalar.output_max = max;
   params.scalar.output_min = min;
-  params.scalar.min_less_zero_point = ((float)((int32_t)(uint32_t)min -
-      (int32_t)(uint32_t)zero_point));
-  params.scalar.max_less_zero_point = ((float)((int32_t)(uint32_t)max -
-      (int32_t)(uint32_t)zero_point));
+  params.scalar.min_less_zero_point =
+      ((float)((int32_t)(uint32_t)min - (int32_t)(uint32_t)zero_point));
+  params.scalar.max_less_zero_point =
+      ((float)((int32_t)(uint32_t)max - (int32_t)(uint32_t)zero_point));
   params.scalar.magic = 12582912.0f;
-  params.scalar.magic_less_zero_point = (INT32_C(0x4B400000) -
-      (int32_t)(uint32_t)zero_point);
+  params.scalar.magic_less_zero_point =
+      (INT32_C(0x4B400000) - (int32_t)(uint32_t)zero_point);
   return params;
 }
 
@@ -87,8 +86,8 @@ pytorch_qnnp_compute_requantization_params(
   const uint32_t scale_bits = fp32_to_bits(scale);
 
   /* Multiplier is in [0x40000000, 0x7FFFFF80] range */
-  const int32_t multiplier = (int32_t)(
-      ((scale_bits & UINT32_C(0x007FFFFF)) | UINT32_C(0x00800000)) << 7);
+  const int32_t multiplier =
+      (int32_t)(((scale_bits & UINT32_C(0x007FFFFF)) | UINT32_C(0x00800000)) << 7);
   assert(multiplier >= INT32_C(0x40000000));
   assert(multiplier <= INT32_C(0x7FFFFF80));
 
@@ -154,7 +153,6 @@ pytorch_qnnp_compute_conv_quantization_params(
     uint8_t output_zero_point,
     uint8_t output_min,
     uint8_t output_max) {
-
   union pytorch_qnnp_conv_quantization_params params;
 #if CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64
   params.sse2.kernel_zero_points = kernel_zero_points;
@@ -176,13 +174,13 @@ pytorch_qnnp_compute_conv_quantization_params(
   params.neon.output_zero_point = (int16_t)(uint16_t)output_zero_point;
   params.neon.output_max = output_max;
   params.neon.output_min = output_min;
-  params.neon.vfmin = ((float)((int32_t)(uint32_t)output_min -
-      (int32_t)(uint32_t)output_zero_point));
-  params.neon.vfmax = ((float)((int32_t)(uint32_t)output_max -
-      (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmin = ((
+      float)((int32_t)(uint32_t)output_min - (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmax = ((
+      float)((int32_t)(uint32_t)output_max - (int32_t)(uint32_t)output_zero_point));
   params.neon.vfmagic = 12582912.0f;
-  params.neon.vimagic = (INT32_C(0x4B400000) -
-      (int32_t)(uint32_t)output_zero_point);
+  params.neon.vimagic =
+      (INT32_C(0x4B400000) - (int32_t)(uint32_t)output_zero_point);
 #else
   params.scalar.input_zero_point = (int32_t)(uint32_t)input_zero_point;
   params.scalar.kernel_zero_points = kernel_zero_points;
@@ -230,13 +228,13 @@ pytorch_qnnp_compute_avgpool_quantization_params(
   params.neon.output_zero_point = (int16_t)(uint16_t)output_zero_point;
   params.neon.output_max = output_max;
   params.neon.output_min = output_min;
-  params.neon.vfmin = ((float)((int32_t)(uint32_t)output_min -
-      (int32_t)(uint32_t)output_zero_point));
-  params.neon.vfmax = ((float)((int32_t)(uint32_t)output_max -
-      (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmin = ((
+      float)((int32_t)(uint32_t)output_min - (int32_t)(uint32_t)output_zero_point));
+  params.neon.vfmax = ((
+      float)((int32_t)(uint32_t)output_max - (int32_t)(uint32_t)output_zero_point));
   params.neon.vfmagic = 12582912.0f;
-  params.neon.vimagic = (INT32_C(0x4B400000) -
-      (int32_t)(uint32_t)output_zero_point);
+  params.neon.vimagic =
+      (INT32_C(0x4B400000) - (int32_t)(uint32_t)output_zero_point);
 #else
   params.scalar.bias = bias;
   params.scalar.scale = scale;
@@ -466,7 +464,6 @@ static inline uint8_t pytorch_qnnp_fp32_requantize(
     int32_t n,
     union pytorch_qnnp_fp32_requantization_params params,
     int32_t output_channel_index) {
-
   const long lmin =
       (long)((int32_t)(uint32_t)params.scalar.output_min -
           (int32_t)(uint32_t)params.scalar.output_zero_point);
@@ -488,15 +485,15 @@ static inline uint8_t pytorch_qnnp_fp32_requantize_magic(
     int32_t n,
     union pytorch_qnnp_fp32_requantization_params params,
     int32_t output_channel_index) {
-
   const float fmin = params.scalar.min_less_zero_point;
   const float fmax = params.scalar.max_less_zero_point;
   const float fmagic = params.scalar.magic;
   const int32_t imagic = params.scalar.magic_less_zero_point;
 
   const float n_scaled = (float)n * params.scalar.scales[output_channel_index];
-  const float n_clamped =
-      n_scaled < fmin ? fmin : n_scaled > fmax ? fmax : n_scaled;
+  const float n_clamped = n_scaled < fmin ? fmin
+      : n_scaled > fmax                   ? fmax
+                                          : n_scaled;
   const int32_t n_biased = (int32_t)fp32_to_bits(n_clamped + fmagic) - imagic;
 
   return (uint8_t)n_biased;
@@ -505,17 +502,14 @@ static inline uint8_t pytorch_qnnp_fp32_requantize_magic(
 static inline uint8_t pytorch_qnnp_avgpool_quantize(
     int32_t n,
     union pytorch_qnnp_avgpool_quantization_params params) {
+  const float scaled_n = ((float)n) * params.scalar.scale;
+  int32_t n_rounded =
+      (int32_t)lrintf(scaled_n) + params.scalar.output_zero_point;
 
-  const float scaled_n = ((float)n)*params.scalar.scale;
-  int32_t n_rounded = (int32_t)lrintf(scaled_n) + params.scalar.output_zero_point;
+  const int32_t lmin = (int32_t)(uint32_t)params.scalar.output_min;
+  const int32_t lmax = (int32_t)(uint32_t)params.scalar.output_max;
 
-  const int32_t lmin =
-      (int32_t)(uint32_t)params.scalar.output_min;
-  const int32_t lmax =
-      (int32_t)(uint32_t)params.scalar.output_max;
-
-  n_rounded = (
-      n_rounded < lmin ? lmin : n_rounded > lmax ? lmax : n_rounded);
+  n_rounded = (n_rounded < lmin ? lmin : n_rounded > lmax ? lmax : n_rounded);
 
   return (uint8_t)n_rounded;
 }

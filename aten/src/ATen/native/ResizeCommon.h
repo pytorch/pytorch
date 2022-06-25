@@ -1,13 +1,15 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 inline int64_t storage_size_for(IntArrayRef size, IntArrayRef stride) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(size.size() == stride.size(),
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      size.size() == stride.size(),
       "storage_size_for(size, stride) requires that size and stride ",
       "have the same size as a precondition.");
   int64_t storage_size = 1;
@@ -43,4 +45,5 @@ inline const Tensor& resize_named_tensor_(
       optional_memory_format.value());
   return self;
 }
-}}
+} // namespace native
+} // namespace at

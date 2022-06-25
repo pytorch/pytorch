@@ -476,7 +476,9 @@ TORCH_LIBRARY_IMPL(aten, Named, m) {
   m.impl("tanh_", CppFunction::makeFallthrough());
   m.impl("tensor_split.indices", CppFunction::makeFallthrough());
   m.impl("tensor_split.sections", CppFunction::makeFallthrough());
-  m.impl("tensor_split.tensor_indices_or_sections", CppFunction::makeFallthrough());
+  m.impl(
+      "tensor_split.tensor_indices_or_sections",
+      CppFunction::makeFallthrough());
   m.impl("threshold", CppFunction::makeFallthrough());
   m.impl("threshold.out", CppFunction::makeFallthrough());
   m.impl("threshold_", CppFunction::makeFallthrough());

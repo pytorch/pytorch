@@ -18,9 +18,9 @@ Tensor view_internal(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    shape,
-    self.options(),
+      context,
+      shape,
+      self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -31,24 +31,18 @@ Tensor view_internal(
     command_buffer.copy(
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
-        v_self.buffer(
-            command_buffer,
-            vTensor::Stage::Transfer),
+        v_self.buffer(command_buffer, vTensor::Stage::Transfer),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.buffer(
-            command_buffer,
-            vTensor::Stage::Transfer,
-            vTensor::Access::Write));
+            command_buffer, vTensor::Stage::Transfer, vTensor::Access::Write));
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 
   return convert(v_output);
 }
 
-inline Tensor view(
-    const Tensor& self_arg,
-    const IntArrayRef shape) {
+inline Tensor view(const Tensor& self_arg, const IntArrayRef shape) {
   return view_internal(self_arg, shape, "aten::view");
 }
 
@@ -63,7 +57,8 @@ Tensor _reshape_alias(
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::view"), TORCH_FN(view));
-  m.impl(TORCH_SELECTIVE_NAME("aten::_reshape_alias"), TORCH_FN(_reshape_alias));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::_reshape_alias"), TORCH_FN(_reshape_alias));
 }
 
 #endif /* USE_VULKAN_API */

@@ -1,6 +1,6 @@
 // #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -67,7 +67,7 @@ namespace native {
 namespace {
 
 template <typename Ufunc>
-Tensor coalesced_unary_ufunc(const Tensor &self, const Ufunc &ufunc) {
+Tensor coalesced_unary_ufunc(const Tensor& self, const Ufunc& ufunc) {
   TORCH_INTERNAL_ASSERT(self.is_sparse());
   const auto input = self.coalesce();
   Tensor out_values = ufunc(input.values());
@@ -83,7 +83,7 @@ Tensor coalesced_unary_ufunc(const Tensor &self, const Ufunc &ufunc) {
 }
 
 template <typename Ufunc>
-Tensor& coalesced_unary_ufunc_(Tensor &self, const Ufunc &ufunc) {
+Tensor& coalesced_unary_ufunc_(Tensor& self, const Ufunc& ufunc) {
   TORCH_INTERNAL_ASSERT(self.is_sparse());
   auto values = self._values();
   ufunc(values);
@@ -91,9 +91,13 @@ Tensor& coalesced_unary_ufunc_(Tensor &self, const Ufunc &ufunc) {
 }
 
 template <typename Ufunc>
-Tensor& coalesced_unary_ufunc_out(const Tensor &self, Tensor &result, const Ufunc &ufunc) {
+Tensor& coalesced_unary_ufunc_out(
+    const Tensor& self,
+    Tensor& result,
+    const Ufunc& ufunc) {
   if (self.is_same(result)) {
-    TORCH_CHECK(self.is_coalesced(), "expected coalesced tensor for inplace operation");
+    TORCH_CHECK(
+        self.is_coalesced(), "expected coalesced tensor for inplace operation");
     auto values = self._values();
     ufunc(values, values);
     return result;
@@ -102,8 +106,8 @@ Tensor& coalesced_unary_ufunc_out(const Tensor &self, Tensor &result, const Ufun
   TORCH_CHECK(self.is_sparse() && result.is_sparse());
   const auto input = self.coalesce();
   sparse_resize_(result, input.sizes(), input.sparse_dim(), input.dense_dim());
-  auto *input_impl = sparse::get_sparse_impl(input);
-  auto *result_impl = sparse::get_sparse_impl(result);
+  auto* input_impl = sparse::get_sparse_impl(input);
+  auto* result_impl = sparse::get_sparse_impl(result);
 
   auto input_values = input_impl->values();
   auto result_values = result_impl->values();
@@ -118,7 +122,7 @@ Tensor& coalesced_unary_ufunc_out(const Tensor &self, Tensor &result, const Ufun
   return result;
 }
 
-}  // namespace (anonymous)
+} // namespace
 
 // Generic formulation for unary operators which map 0 -> 0 so
 // we can just transform self.values() and preserve the sparsity pattern.
@@ -127,32 +131,27 @@ Tensor& coalesced_unary_ufunc_out(const Tensor &self, Tensor &result, const Ufun
 // we can calculate the result. This also means inplace calculations
 // are only possible on coalesced tensors.
 
-#define COALESCED_UNARY_UFUNC_FUNCTIONAL(op_name)   \
-  Tensor op_name##_sparse(const Tensor &self) {     \
-    return coalesced_unary_ufunc(                   \
-        self, [](const Tensor &t) {                 \
-          return at::op_name(t);                    \
-        });                                         \
+#define COALESCED_UNARY_UFUNC_FUNCTIONAL(op_name)              \
+  Tensor op_name##_sparse(const Tensor& self) {                \
+    return coalesced_unary_ufunc(                              \
+        self, [](const Tensor& t) { return at::op_name(t); }); \
   }
 
-#define COALESCED_UNARY_UFUNC_NO_INPLACE(op_name)                       \
-  COALESCED_UNARY_UFUNC_FUNCTIONAL(op_name)                             \
-  Tensor& op_name##_sparse_out(const Tensor &self,                      \
-                               Tensor &out) {                           \
-    return coalesced_unary_ufunc_out(                                   \
-        self, out, [](const Tensor &t, Tensor &out) {                   \
-          return at::op_name##_outf(t, out);                            \
-        });                                                             \
+#define COALESCED_UNARY_UFUNC_NO_INPLACE(op_name)                 \
+  COALESCED_UNARY_UFUNC_FUNCTIONAL(op_name)                       \
+  Tensor& op_name##_sparse_out(const Tensor& self, Tensor& out) { \
+    return coalesced_unary_ufunc_out(                             \
+        self, out, [](const Tensor& t, Tensor& out) {             \
+          return at::op_name##_outf(t, out);                      \
+        });                                                       \
   }
 
-#define COALESCED_UNARY_UFUNC(op_name)                                  \
-  COALESCED_UNARY_UFUNC_NO_INPLACE(op_name)                             \
-  Tensor& op_name##_sparse_(Tensor &self) {                             \
-    TORCH_CHECK(self.is_coalesced(),                                    \
-                #op_name "_ requires coalesced input");                 \
-    return coalesced_unary_ufunc_(self, [](Tensor &t) {                 \
-      return t.op_name##_();                                            \
-    });                                                                 \
+#define COALESCED_UNARY_UFUNC(op_name)                                       \
+  COALESCED_UNARY_UFUNC_NO_INPLACE(op_name)                                  \
+  Tensor& op_name##_sparse_(Tensor& self) {                                  \
+    TORCH_CHECK(self.is_coalesced(), #op_name "_ requires coalesced input"); \
+    return coalesced_unary_ufunc_(                                           \
+        self, [](Tensor& t) { return t.op_name##_(); });                     \
   }
 
 COALESCED_UNARY_UFUNC(abs);
@@ -184,27 +183,33 @@ COALESCED_UNARY_UFUNC_FUNCTIONAL(isnan);
 COALESCED_UNARY_UFUNC_FUNCTIONAL(isinf);
 
 Tensor nan_to_num_sparse(
-    const Tensor &self, c10::optional<double> nan,
-    c10::optional<double> posinf, c10::optional<double> neginf) {
-  return coalesced_unary_ufunc(
-      self, [&](const Tensor &t) {
-        return at::nan_to_num(t, nan, posinf, neginf);
-      });
+    const Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> posinf,
+    c10::optional<double> neginf) {
+  return coalesced_unary_ufunc(self, [&](const Tensor& t) {
+    return at::nan_to_num(t, nan, posinf, neginf);
+  });
 }
 Tensor& nan_to_num_sparse_out(
-    const Tensor &self, c10::optional<double> nan,
-    c10::optional<double> posinf, c10::optional<double> neginf,
-    Tensor &out) {
+    const Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> posinf,
+    c10::optional<double> neginf,
+    Tensor& out) {
   return coalesced_unary_ufunc_out(
-      self, out, [&](const Tensor &t, Tensor &out) {
+      self, out, [&](const Tensor& t, Tensor& out) {
         return at::nan_to_num_outf(t, nan, posinf, neginf, out);
       });
 }
 Tensor& nan_to_num_sparse_(
-    Tensor &self, c10::optional<double> nan,
-    c10::optional<double> posinf, c10::optional<double> neginf) {
+    Tensor& self,
+    c10::optional<double> nan,
+    c10::optional<double> posinf,
+    c10::optional<double> neginf) {
   TORCH_CHECK(self.is_coalesced(), "nan_to_num_ requires coalesced input");
   return nan_to_num_sparse_out(self, nan, posinf, neginf, self);
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

@@ -1,20 +1,20 @@
 #include <ATen/core/Dict.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/dynamic_type.h>
-#include <ATen/core/function_schema.h>
 #include <ATen/core/enum_type.h>
+#include <ATen/core/function.h>
 #include <ATen/core/function_schema.h>
+#include <ATen/core/grad_mode.h>
 #include <ATen/core/jit_type.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/core/function.h>
 #include <iostream>
 
 namespace std {
-template<>
+template <>
 struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
-  size_t operator()(std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
+  size_t operator()(
+      std::tuple<std::string, c10::TypePtr, c10::TypePtr> const& t) const {
     // This hashing is all hidden behind a static initializer so it
     // doesn't have to be optimal
     auto hash = std::hash<std::string>()(std::get<0>(t));
@@ -23,7 +23,7 @@ struct hash<std::tuple<std::string, c10::TypePtr, c10::TypePtr>> {
     return hash;
   }
 };
-template<>
+template <>
 struct hash<std::tuple<std::string, c10::TypePtr>> {
   size_t operator()(std::tuple<std::string, c10::TypePtr> const& t) const {
     auto hash = std::hash<std::string>()(std::get<0>(t));
@@ -36,22 +36,26 @@ struct hash<std::tuple<std::string, c10::TypePtr>> {
 namespace c10 {
 
 static_assert(
-    sizeof(SingletonOrSharedTypePtr<void>) == sizeof(std::shared_ptr<void>) && sizeof(std::shared_ptr<void>) == 2 * sizeof(void*),
+    sizeof(SingletonOrSharedTypePtr<void>) == sizeof(std::shared_ptr<void>) &&
+        sizeof(std::shared_ptr<void>) == 2 * sizeof(void*),
     "std::shared_ptr has an unexpected representation on this platform!");
 static_assert(
-    std::is_same<decltype(getTypePtr<std::tuple<int64_t, int64_t>>()), const TupleTypePtr&>::value,
+    std::is_same<
+        decltype(getTypePtr<std::tuple<int64_t, int64_t>>()),
+        const TupleTypePtr&>::value,
     "getTypePtr<std::tuple<int64_t, int64_t>> not returning const ref!");
 
 TypeVerbosity type_verbosity() {
   static const char* c_verbosity = std::getenv("PYTORCH_JIT_TYPE_VERBOSITY");
-  static TypeVerbosity verbosity = c_verbosity ?
-    static_cast<TypeVerbosity>(c10::stoi(c_verbosity)) : TypeVerbosity::Default;
+  static TypeVerbosity verbosity = c_verbosity
+      ? static_cast<TypeVerbosity>(c10::stoi(c_verbosity))
+      : TypeVerbosity::Default;
   return verbosity;
 }
 
-std::ostream& operator<<(std::ostream & out, const Type & t) {
+std::ostream& operator<<(std::ostream& out, const Type& t) {
   if (auto value = t.cast<TensorType>()) {
-    if  (value->scalarType().has_value()) {
+    if (value->scalarType().has_value()) {
       out << toString(*value->scalarType());
       if (!value->sizes().size().has_value()) {
         out << "Tensor";
@@ -124,25 +128,25 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     if (value->undefined() && *value->undefined()) {
       out << "[Undefined]";
     }
-  } else if(t.kind() == TypeKind::ListType) {
+  } else if (t.kind() == TypeKind::ListType) {
     auto prim = t.castRaw<ListType>()->getElementType();
     out << *prim << "[]";
   } else if (t.kind() == TypeKind::OptionalType) {
     auto prim = t.castRaw<OptionalType>()->getElementType();
     out << *prim << "?";
-  } else if(t.kind() == TypeKind::FutureType) {
+  } else if (t.kind() == TypeKind::FutureType) {
     auto elem = t.castRaw<FutureType>()->getElementType();
     out << "Future[" << *elem << "]";
-  } else if(t.kind() == TypeKind::RRefType) {
+  } else if (t.kind() == TypeKind::RRefType) {
     auto elem = t.castRaw<RRefType>()->getElementType();
     out << "RRef[" << *elem << "]";
-  } else if(auto tup = t.cast<TupleType>()) {
+  } else if (auto tup = t.cast<TupleType>()) {
     if (tup->schema()) {
       out << "NamedTuple";
     }
     out << "(";
-    for(size_t i = 0; i < tup->elements().size(); ++i) {
-      if(i > 0)
+    for (size_t i = 0; i < tup->elements().size(); ++i) {
+      if (i > 0)
         out << ", ";
       if (tup->schema()) {
         auto arg = tup->schema()->arguments()[i];
@@ -151,8 +155,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
         if (arg.default_value()) {
           out << " = " << *arg.default_value();
         }
-      }
-      else {
+      } else {
         out << *(tup->elements()[i]);
       }
     }
@@ -160,7 +163,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   } else if (t.kind() == TypeKind::FunctionType) {
     out << "Function";
   } else {
-     out << t.str();
+    out << t.str();
   }
   return out;
 }
@@ -223,16 +226,16 @@ StreamObjTypePtr StreamObjType::get() {
   return value;
 }
 ScalarTypeTypePtr ScalarTypeType::get() {
-static ScalarTypeTypePtr value(new ScalarTypeType());
-return value;
+  static ScalarTypeTypePtr value(new ScalarTypeType());
+  return value;
 }
 LayoutTypePtr LayoutType::get() {
-static LayoutTypePtr value(new LayoutType());
-return value;
+  static LayoutTypePtr value(new LayoutType());
+  return value;
 }
 MemoryFormatTypePtr MemoryFormatType::get() {
-static MemoryFormatTypePtr value(new MemoryFormatType());
-return value;
+  static MemoryFormatTypePtr value(new MemoryFormatType());
+  return value;
 }
 PyObjectTypePtr PyObjectType::get() {
   static PyObjectTypePtr value(new PyObjectType());
@@ -277,7 +280,8 @@ TypePtr OptionalType::get(TypePtr inner) {
 }
 
 TypePtr ListType::get(std::string identifier, TypePtr inner) {
-  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr> containerTypePtrs;
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr>, TypePtr>
+      containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
   // a static initializer; it should only be called once per type.
@@ -291,7 +295,8 @@ TypePtr ListType::get(std::string identifier, TypePtr inner) {
 }
 
 TypePtr DictType::get(std::string identifier, TypePtr key, TypePtr value) {
-  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr> containerTypePtrs;
+  static ska::flat_hash_map<std::tuple<std::string, TypePtr, TypePtr>, TypePtr>
+      containerTypePtrs;
   static std::mutex mutex;
   // Perf from the lock is ok because this function is guarded behind
   // a static initializer; it should only be called once per type.
@@ -329,7 +334,11 @@ SymIntTypePtr SymIntType::get() {
   return value;
 }
 
-c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool default_to_union=false, TypePtr type_hint=nullptr) {
+c10::optional<TypePtr> unifyTypesImpl(
+    const TypePtr& t1,
+    const TypePtr& t2,
+    bool default_to_union = false,
+    TypePtr type_hint = nullptr) {
   // check direct subtyping relation
   if (t1->isSubtypeOf(*t2)) {
     return t2;
@@ -344,7 +353,8 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
 
   if (t1->isSubtypeOf(*NoneType::get()) && !t2->isSubtypeOf(*NoneType::get())) {
     return OptionalType::create(t2);
-  } else if (t2->isSubtypeOf(*NoneType::get()) && !t1->isSubtypeOf(*NoneType::get())) {
+  } else if (
+      t2->isSubtypeOf(*NoneType::get()) && !t1->isSubtypeOf(*NoneType::get())) {
     return OptionalType::create(t1);
   }
 
@@ -372,7 +382,10 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
     }
     std::vector<TypePtr> elements;
     for (size_t i = 0; i < tuple1->elements().size(); i++) {
-      if (auto elem = unifyTypes(tuple1->elements().at(i), tuple2->elements().at(i), default_to_union)) {
+      if (auto elem = unifyTypes(
+              tuple1->elements().at(i),
+              tuple2->elements().at(i),
+              default_to_union)) {
         elements.push_back(*std::move(elem));
       } else {
         return c10::nullopt;
@@ -390,8 +403,8 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
   }
 
   // Check direct subtyping relations again with Unshaped Types,
-  // to handle unification of mutable container types which might contain two different
-  // specialized tensors (ListType / DictType)
+  // to handle unification of mutable container types which might contain two
+  // different specialized tensors (ListType / DictType)
   auto t1_unshaped = unshapedType(t1);
   auto t2_unshaped = unshapedType(t2);
 
@@ -411,7 +424,11 @@ c10::optional<TypePtr> unifyTypesImpl(const TypePtr& t1, const TypePtr& t2, bool
   return c10::nullopt;
 }
 
-c10::optional<TypePtr> unifyTypes(const TypePtr& t1, const TypePtr& t2, bool default_to_union, TypePtr type_hint) {
+c10::optional<TypePtr> unifyTypes(
+    const TypePtr& t1,
+    const TypePtr& t2,
+    bool default_to_union,
+    TypePtr type_hint) {
   auto unified = unifyTypesImpl(t1, t2, default_to_union, std::move(type_hint));
 
   if (default_to_union && !unified) {
@@ -433,12 +450,13 @@ c10::optional<TypePtr> unifyTypeList(
 
   TypePtr ret_type = elements.at(0);
   for (size_t i = 1; i < elements.size() && ret_type; ++i) {
-    c10::optional<TypePtr> maybe_unified = unifyTypes(ret_type, elements.at(i), default_to_union, type_hint);
+    c10::optional<TypePtr> maybe_unified =
+        unifyTypes(ret_type, elements.at(i), default_to_union, type_hint);
     if (!maybe_unified) {
       why_not << "Could not unify type list since element " << i << " of type "
               << elements.at(i)->repr_str()
-              << " did not match the types before it ("
-              << ret_type->repr_str() << ")";
+              << " did not match the types before it (" << ret_type->repr_str()
+              << ")";
       return c10::nullopt;
     }
     ret_type = *maybe_unified;
@@ -585,7 +603,9 @@ MatchTypeReturn matchTypeVariables(
 }
 
 // change return types like List[List[t]] into List[List[int]]
-TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<std::string, TypePtr>& type_env) {
+TORCH_API TypePtr tryEvalTypeVariables(
+    const TypePtr& type,
+    std::unordered_map<std::string, TypePtr>& type_env) {
   if (!type->hasFreeVariables()) {
     if (auto dyn = type->castRaw<c10::DynamicType>()) {
       return tryEvalTypeVariables(dyn->fallback(), type_env);
@@ -618,9 +638,9 @@ TORCH_API TypePtr tryEvalTypeVariables(const TypePtr& type, std::unordered_map<s
 }
 
 TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
-  if (elem_type->kind() == UnionType::Kind
-      || elem_type->kind() == OptionalType::Kind
-      || elem_type->kind() == NumberType::Kind) {
+  if (elem_type->kind() == UnionType::Kind ||
+      elem_type->kind() == OptionalType::Kind ||
+      elem_type->kind() == NumberType::Kind) {
     // Builtin Union types
     return false;
   }
@@ -636,11 +656,11 @@ TORCH_API bool elementTypeCanBeInferredFromMembers(const TypePtr& elem_type) {
   return true;
 }
 
-const char * typeKindToString(TypeKind kind) {
-#define CASE_TYPE(T) case TypeKind::T: return #T;
-  switch(kind) {
-    C10_FORALL_TYPES(CASE_TYPE)
-  }
+const char* typeKindToString(TypeKind kind) {
+#define CASE_TYPE(T) \
+  case TypeKind::T:  \
+    return #T;
+  switch (kind) { C10_FORALL_TYPES(CASE_TYPE) }
 #undef CASE_TYPE
   return "";
 }
@@ -654,11 +674,12 @@ bool Type::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   }
   if (auto union_rhs = rhs.castRaw<UnionType>()) {
     // Check if `this` is a subtype of any of the types within the Union
-    return std::any_of(union_rhs->containedTypes().begin(),
-                       union_rhs->containedTypes().end(),
-                       [&](const TypePtr& inner) {
-                         return this->isSubtypeOfExt(*inner, why_not);
-                       });
+    return std::any_of(
+        union_rhs->containedTypes().begin(),
+        union_rhs->containedTypes().end(),
+        [&](const TypePtr& inner) {
+          return this->isSubtypeOfExt(*inner, why_not);
+        });
   }
   if (auto dyn = rhs.castRaw<DynamicType>()) {
     return DynamicType::create(*this)->isSubtypeOf(*dyn);
@@ -675,7 +696,8 @@ TupleTypePtr TupleType::createNamed(
     const std::vector<std::string>& field_names,
     const std::vector<TypePtr>& field_types) {
   std::vector<IValue> empty_defaults;
-  return TupleType::createNamed(qualName, field_names, field_types, empty_defaults);
+  return TupleType::createNamed(
+      qualName, field_names, field_types, empty_defaults);
 }
 
 TupleTypePtr TupleType::createNamed(
@@ -695,7 +717,8 @@ TupleTypePtr TupleType::createNamed(
 }
 
 template <typename S>
-TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& qualName,
+TupleTypePtr TupleType::createWithSpec(
+    const c10::optional<c10::QualifiedName>& qualName,
     const std::vector<S>& field_names,
     const std::vector<TypePtr>& field_types,
     std::vector<IValue>& field_defaults) {
@@ -711,13 +734,14 @@ TupleTypePtr TupleType::createWithSpec(const c10::optional<c10::QualifiedName>& 
           /*type=*/field_types[i],
           /*N=*/i};
       arguments.emplace_back(std::move(arg));
-    }
-    else {
+    } else {
       size_t j = i - min_default_idx;
-      TORCH_CHECK(field_defaults[j].tagKind() != "Tensor", "Tensors are "
-                  "not supported as default NamedTuple fields. Their "
-                  "mutability could lead to potential memory aliasing "
-                  "problems");
+      TORCH_CHECK(
+          field_defaults[j].tagKind() != "Tensor",
+          "Tensors are "
+          "not supported as default NamedTuple fields. Their "
+          "mutability could lead to potential memory aliasing "
+          "problems");
       Argument arg{
           /*name=*/std::string{field_names[i]},
           /*type=*/field_types[i],
@@ -747,7 +771,7 @@ c10::optional<std::vector<c10::string_view>> TupleType::names() const {
   return ret;
 }
 
-bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const {
+bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   if (rhs.kind() == OptionalType::Kind) {
     return true;
   }
@@ -756,7 +780,8 @@ bool NoneType::isSubtypeOfExt(const Type& rhs, std::ostream *why_not) const {
 
 bool NumberType::equals(const Type& rhs) const {
   if (auto union_type = rhs.cast<UnionType>()) {
-    return union_type->containedTypes().size() == 3 && union_type->canHoldType(*NumberType::get());
+    return union_type->containedTypes().size() == 3 &&
+        union_type->canHoldType(*NumberType::get());
   } else {
     return rhs.kind() == this->kind();
   }
@@ -805,7 +830,8 @@ bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   if (!schema() && rhs->schema())
     return false;
   // namedtuple may be a subtype of unnamed tuple
-  auto test_names_match = [&](const std::shared_ptr<FunctionSchema>& lhs, const std::shared_ptr<FunctionSchema>& rhs) {
+  auto test_names_match = [&](const std::shared_ptr<FunctionSchema>& lhs,
+                              const std::shared_ptr<FunctionSchema>& rhs) {
     const auto& args_lhs = lhs->arguments();
     const auto& args_rhs = rhs->arguments();
     if (args_lhs.size() != args_rhs.size()) {
@@ -819,11 +845,12 @@ bool TupleType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
     }
     return true;
   };
-  bool names_match = !rhs->schema() || test_names_match(schema(), rhs->schema());
+  bool names_match =
+      !rhs->schema() || test_names_match(schema(), rhs->schema());
   // co-variant rules for tuples
   return names_match && compare(*rhs, [&](const Type& a, const Type& b) {
-    return a.isSubtypeOfExt(b, why_not);
-  });
+           return a.isSubtypeOfExt(b, why_not);
+         });
 }
 
 bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
@@ -836,11 +863,11 @@ bool ListType::isSubtypeOfExt(const Type& rhs_, std::ostream* why_not) const {
   return false;
 }
 
- bool TupleType::equals(const Type& rhs) const {
-   bool typesSame =
-       compare(rhs, [](const Type& a, const Type& b) { return a == b; });
-   if (!typesSame) {
-     return false;
+bool TupleType::equals(const Type& rhs) const {
+  bool typesSame =
+      compare(rhs, [](const Type& a, const Type& b) { return a == b; });
+  if (!typesSame) {
+    return false;
   }
 
   // `compare` guarantees that rhs is always a TupleType.
@@ -860,8 +887,8 @@ std::string TupleType::str() const {
     ss << name()->qualifiedName();
   } else {
     ss << "(";
-    for(size_t i = 0; i < elements().size(); ++i) {
-      if(i > 0)
+    for (size_t i = 0; i < elements().size(); ++i) {
+      if (i > 0)
         ss << ", ";
       ss << elements()[i]->str();
     }
@@ -892,14 +919,16 @@ std::string TupleType::annotation_str_impl(TypePrinter printer) const {
   return ss.str();
 }
 
-InterfaceTypePtr InterfaceType::create(QualifiedName qualifiedName, bool is_module) {
+InterfaceTypePtr InterfaceType::create(
+    QualifiedName qualifiedName,
+    bool is_module) {
   return InterfaceTypePtr(
       new InterfaceType(std::move(qualifiedName), is_module));
 }
 
 FunctionType::FunctionType(torch::jit::Function* function)
-  : NamedType(TypeKind::FunctionType, function->qualname()),
-    function_(function) {}
+    : NamedType(TypeKind::FunctionType, function->qualname()),
+      function_(function) {}
 
 bool InterfaceType::isSubTypeImpl(
     const InterfaceType& lhs,
@@ -912,33 +941,34 @@ bool InterfaceType::isSubTypeImpl(
     }
     return false;
   }
-    for (const FunctionSchema& schema : *rhs.methods_) {
-      auto self_schema = lhs.getMethod(schema.name());
-      if (!self_schema) {
-        if (why_not) {
-          *why_not << "Interface '" << lhs.repr_str()
-                   << "' does not have method '" << schema.name() << "' but interface '"
-                   << rhs.repr_str() << "' does.\n";
-        }
-        return false;
+  for (const FunctionSchema& schema : *rhs.methods_) {
+    auto self_schema = lhs.getMethod(schema.name());
+    if (!self_schema) {
+      if (why_not) {
+        *why_not << "Interface '" << lhs.repr_str()
+                 << "' does not have method '" << schema.name()
+                 << "' but interface '" << rhs.repr_str() << "' does.\n";
       }
-      // NOLINTNEXTLINE(bugprone-argument-comment)
-      if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
-        if (why_not) {
-          *why_not << "Method on interface '" << lhs.repr_str()
-                   << "' (1) is not compatible with interface '"
-                   << rhs.repr_str() << "' (2)\n"
-                   << "  (1) " << *self_schema << "\n"
-                   << "  (2) " << schema << "\n";
-          return false;
-        }
-        return false;
-      }
+      return false;
     }
-    return true;
+    // NOLINTNEXTLINE(bugprone-argument-comment)
+    if (!self_schema->isSubtypeOf(schema, /*is_method=*/true, why_not)) {
+      if (why_not) {
+        *why_not << "Method on interface '" << lhs.repr_str()
+                 << "' (1) is not compatible with interface '" << rhs.repr_str()
+                 << "' (2)\n"
+                 << "  (1) " << *self_schema << "\n"
+                 << "  (2) " << schema << "\n";
+        return false;
+      }
+      return false;
+    }
+  }
+  return true;
 }
 
-bool InterfaceType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
+bool InterfaceType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not)
+    const {
   // to improve performance this check can be cached
   if (auto iface = rhs.castRaw<InterfaceType>()) {
     return isSubTypeImpl(*this, *iface, why_not);
@@ -965,7 +995,7 @@ InterfaceType::InterfaceType(QualifiedName name, bool is_module)
 InterfaceType::~InterfaceType() = default;
 
 bool containsAnyType(const TypePtr& type) {
-  std::vector<TypePtr> to_scan = { type };
+  std::vector<TypePtr> to_scan = {type};
   while (!to_scan.empty()) {
     const auto typ = to_scan.back();
     to_scan.pop_back();
@@ -979,7 +1009,11 @@ bool containsAnyType(const TypePtr& type) {
   return false;
 }
 
-void checkNoAny(const Type& base, const char* what, const std::string& attrname, const TypePtr& attrtype) {
+void checkNoAny(
+    const Type& base,
+    const char* what,
+    const std::string& attrname,
+    const TypePtr& attrtype) {
   TORCH_CHECK(
       !containsAnyType(attrtype),
       "attempting to add ",
@@ -1010,8 +1044,7 @@ void SymbolicShape::dump() const {
 
 bool EnumType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   return rhs.kind() == TypeKind::AnyType ||
-      rhs.kind() == TypeKind::AnyEnumType ||
-      *this == rhs ||
+      rhs.kind() == TypeKind::AnyEnumType || *this == rhs ||
       Type::isSubtypeOfExt(rhs, why_not);
 }
 

@@ -1,10 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/cuda/TensorModeKernel.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
+#include <ATen/native/cuda/TensorModeKernel.h>
 
 constexpr int MAX_BLOCK_SIZE = AT_ROCM_ENABLED() ? 256 : 1024;
 

@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
+#include <ATen/test/test_assert.h>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <sstream>
-#include <cmath>
 #include <type_traits>
-#include <ATen/test/test_assert.h>
 
 using namespace at;
 

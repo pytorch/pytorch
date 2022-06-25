@@ -2,9 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Utils.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/Utils.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
 
@@ -17,11 +17,12 @@ Tensor& fill_out(Tensor& self, const Scalar& value) {
     return at::detail::scalar_fill(self, value);
   }
   auto iter = TensorIteratorConfig()
-    .set_check_mem_overlap(false)  // Fill is idempotent, so overlap is okay
-    .check_all_same_dtype(false)
-    .add_output(self)
-    .resize_outputs(false)
-    .build();
+                  .set_check_mem_overlap(
+                      false) // Fill is idempotent, so overlap is okay
+                  .check_all_same_dtype(false)
+                  .add_output(self)
+                  .resize_outputs(false)
+                  .build();
   fill_stub(iter.device_type(), iter, value);
   return self;
 }
@@ -43,12 +44,20 @@ Tensor& fill_quantized_(Tensor& self, const Scalar& value) {
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  TORCH_CHECK(
+      value.dim() == 0,
+      "fill_ only supports 0-dimension value tensor but got tensor with ",
+      value.dim(),
+      " dimensions.");
   return fill_out(self, value.item());
 }
 
 Tensor& fill_quantized_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  TORCH_CHECK(
+      value.dim() == 0,
+      "fill_ only supports 0-dimension value tensor but got tensor with ",
+      value.dim(),
+      " dimensions.");
   return fill_out_quantized(self, value.item());
 }
 
@@ -57,7 +66,11 @@ Tensor& fill_meta_(Tensor& self, const Scalar& value) {
 }
 
 Tensor& fill_meta_(Tensor& self, const Tensor& value) {
-  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  TORCH_CHECK(
+      value.dim() == 0,
+      "fill_ only supports 0-dimension value tensor but got tensor with ",
+      value.dim(),
+      " dimensions.");
   return self;
 }
 
@@ -71,7 +84,8 @@ Tensor fill(const Tensor& self, const Tensor& value) {
 
 DEFINE_DISPATCH(fill_stub);
 
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill_diagonal
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
   int64_t nDims = self.dim();
@@ -113,14 +127,15 @@ Tensor& fill_diagonal_(Tensor& self, const Scalar& fill_value, bool wrap) {
 
     int64_t offset = self.stride(0) * (width + 1);
 
-    auto wrap_diag = self.as_strided(wrap_sizes, strides, storage_offset + offset);
+    auto wrap_diag =
+        self.as_strided(wrap_sizes, strides, storage_offset + offset);
     wrap_diag.fill_(fill_value);
   }
 
   return self;
 }
 
-Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
+Tensor& zero_cpu_(Tensor& self, int64_t nelements) {
   void* ptr = self.data_ptr();
   if (nullptr == ptr) {
     return self.fill_(0);
@@ -132,10 +147,9 @@ Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
   return self;
 }
 
-Tensor& zero_(Tensor &self) {
+Tensor& zero_(Tensor& self) {
   int64_t nelements = c10::multiply_integers(self.sizes());
-  if (self.device() == at::kCPU &&
-      self.is_non_overlapping_and_dense() &&
+  if (self.device() == at::kCPU && self.is_non_overlapping_and_dense() &&
       nelements < internal::GRAIN_SIZE) {
     return zero_cpu_(self, nelements);
   }

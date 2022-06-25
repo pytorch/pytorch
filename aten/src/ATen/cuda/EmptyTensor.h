@@ -18,9 +18,8 @@ TORCH_CUDA_CPP_API TensorBase empty_cuda(
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt);
 
-TORCH_CUDA_CPP_API TensorBase empty_cuda(
-    IntArrayRef size,
-    const TensorOptions &options);
+TORCH_CUDA_CPP_API TensorBase
+empty_cuda(IntArrayRef size, const TensorOptions& options);
 
 TORCH_CUDA_CPP_API TensorBase empty_strided_cuda(
     IntArrayRef size,
@@ -39,7 +38,7 @@ TORCH_CUDA_CPP_API TensorBase empty_strided_cuda(
 TORCH_CUDA_CPP_API TensorBase empty_strided_cuda(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options);
+    const TensorOptions& options);
 
-
-}}  // namespace at::detail
+} // namespace detail
+} // namespace at

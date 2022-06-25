@@ -7,15 +7,14 @@
 // TODO: Refacto QnnpackUtils.h so as to separate code
 // needed for quantized op from the generic qnnpack specific
 // quantization utilities.
+#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <pack_block_sparse.h>
-#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 
 namespace ao {
 namespace sparse {
 
-struct TORCH_API PackedLinearWeightQnnp
-    : public LinearPackedParamsBase {
+struct TORCH_API PackedLinearWeightQnnp : public LinearPackedParamsBase {
   PackedLinearWeightQnnp(const at::Tensor& weight, const c10::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
   at::Tensor orig_weight_;
   c10::optional<at::Tensor> orig_bias_;
@@ -73,6 +72,7 @@ struct TORCH_API PackedLinearWeightQnnp
   at::Tensor apply_dynamic_impl(const at::Tensor& input);
 };
 
-}}  // namespace ao::sparse
+} // namespace sparse
+} // namespace ao
 
 #endif // USE_PYTORCH_QNNPACK

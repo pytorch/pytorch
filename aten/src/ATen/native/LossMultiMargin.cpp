@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
-#include <ATen/Dispatch.h>
 #include <ATen/AccumulateType.h>
+#include <ATen/Dispatch.h>
 #include <ATen/native/LossMulti.h>
 #include <c10/util/irange.h>
 
@@ -254,10 +254,12 @@ Tensor multi_margin_loss_cpu(
     const Tensor& input,
     const Tensor& target,
     const Scalar& p,
-    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    const Scalar& margin,
+    const c10::optional<Tensor>& weight_opt,
     int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   auto output = at::empty({0}, input.options());
@@ -266,14 +268,17 @@ Tensor multi_margin_loss_cpu(
   return output;
 }
 
-Tensor& multi_margin_loss_cpu_out(const Tensor& input,
+Tensor& multi_margin_loss_cpu_out(
+    const Tensor& input,
     const Tensor& target,
     const Scalar& p,
-    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    const Scalar& margin,
+    const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     Tensor& output) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   multi_margin_loss_out_cpu_template(
@@ -286,10 +291,12 @@ Tensor multi_margin_loss_cpu_backward(
     const Tensor& input,
     const Tensor& target,
     const Scalar& p,
-    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    const Scalar& margin,
+    const c10::optional<Tensor>& weight_opt,
     int64_t reduction) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   auto grad_input = at::empty({0}, input.options());
@@ -305,15 +312,18 @@ Tensor multi_margin_loss_cpu_backward(
   return grad_input;
 }
 
-Tensor& multi_margin_loss_cpu_backward_out(const Tensor& grad_output,
+Tensor& multi_margin_loss_cpu_backward_out(
+    const Tensor& grad_output,
     const Tensor& input,
     const Tensor& target,
     const Scalar& p,
-    const Scalar& margin, const c10::optional<Tensor>& weight_opt,
+    const Scalar& margin,
+    const c10::optional<Tensor>& weight_opt,
     int64_t reduction,
     Tensor& grad_input) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  c10::MaybeOwned<Tensor> weight_maybe_owned =
+      at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
 
   multi_margin_loss_backward_out_cpu_template(

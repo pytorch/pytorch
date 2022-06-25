@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <ATen/Utils.h>
 #include <ATen/CPUGeneratorImpl.h>
+#include <ATen/Utils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <c10/util/irange.h>
-#include <thread>
 #include <limits>
 #include <random>
+#include <thread>
 
 using namespace at;
 
@@ -113,7 +113,7 @@ TEST(CPUGeneratorImpl, TestMultithreadingGetSetCurrentSeed) {
   t0.join();
   t1.join();
   t2.join();
-  ASSERT_EQ(gen1.current_seed(), initial_seed+3);
+  ASSERT_EQ(gen1.current_seed(), initial_seed + 3);
 }
 
 TEST(CPUGeneratorImpl, TestRNGForking) {
@@ -125,13 +125,15 @@ TEST(CPUGeneratorImpl, TestRNGForking) {
   auto current_gen = at::detail::createCPUGenerator();
   {
     std::lock_guard<std::mutex> lock(default_gen.mutex());
-    current_gen = default_gen.clone(); // capture the current state of default generator
+    current_gen =
+        default_gen.clone(); // capture the current state of default generator
   }
   auto target_value = at::randn({1000});
   // Dramatically alter the internal state of the main generator
   auto x = at::randn({100000});
   auto forked_value = at::randn({1000}, current_gen);
-  ASSERT_EQ(target_value.sum().item<double>(), forked_value.sum().item<double>());
+  ASSERT_EQ(
+      target_value.sum().item<double>(), forked_value.sum().item<double>());
 }
 
 /**
@@ -245,5 +247,4 @@ TEST(CPUGeneratorImpl, TestMT19937EngineReproducibility) {
     (void)i; // Suppress unused variable warning
     ASSERT_EQ(engine1(), engine2());
   }
-
 }

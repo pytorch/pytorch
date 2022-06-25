@@ -41,7 +41,8 @@ init_command = [
 [[linter]]
 code = 'CLANGFORMAT'
 include_patterns = [
-    'aten/src/ATen/*.h',
+    'aten/src/ATen/**/*.h',
+    'aten/src/ATen/**/*.cpp',
     'c10/**/*.h',
     'c10/**/*.cpp',
     'torch/csrc/**/*.h',

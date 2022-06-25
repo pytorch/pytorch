@@ -7,15 +7,14 @@
     }                                           \
   }
 
-#define VK_DELETER_NON_DISPATCHABLE_DEFINE(Handle)                    \
-  destroy_##Handle::destroy_##Handle(const VkDevice device)           \
-    : device_(device) {                                               \
-  }                                                                   \
-                                                                      \
-  void destroy_##Handle::operator()(const Vk##Handle handle) const {  \
-    if (C10_LIKELY(VK_NULL_HANDLE != handle)) {                       \
-      vkDestroy##Handle(device_, handle, nullptr);                    \
-    }                                                                 \
+#define VK_DELETER_NON_DISPATCHABLE_DEFINE(Handle)                   \
+  destroy_##Handle::destroy_##Handle(const VkDevice device)          \
+      : device_(device) {}                                           \
+                                                                     \
+  void destroy_##Handle::operator()(const Vk##Handle handle) const { \
+    if (C10_LIKELY(VK_NULL_HANDLE != handle)) {                      \
+      vkDestroy##Handle(device_, handle, nullptr);                   \
+    }                                                                \
   }
 
 namespace at {

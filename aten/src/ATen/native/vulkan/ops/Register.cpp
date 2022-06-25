@@ -4,8 +4,8 @@
 #include <ATen/native/vulkan/ops/Convolution.h>
 #include <ATen/native/vulkan/ops/Gru.h>
 #include <ATen/native/vulkan/ops/Lstm.h>
-#include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/vulkan/ops/Mm.h>
+#include <ATen/native/vulkan/ops/TransposeConvolution2d.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
@@ -25,10 +25,8 @@ TORCH_LIBRARY(vulkan, m) {
           },
           // __setstate__
           [](VulkanOpContext::State state) {
-            return c10::make_intrusive<VulkanOpContext>(
-              VulkanOpContext::create(
-                std::get<0>(state),
-                std::get<1>(state)));
+            return c10::make_intrusive<VulkanOpContext>(VulkanOpContext::create(
+                std::get<0>(state), std::get<1>(state)));
           });
   // To maintain backwards compatibility.
   m.class_<Conv2dOpContext>("Conv2dOpContext")
@@ -189,27 +187,65 @@ TORCH_LIBRARY(vulkan_prepack, m) {
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_conv2d_clamp_context"), TORCH_FN(create_conv2d_clamp_context));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_clamp_prepack"), TORCH_FN(conv2d_clamp_prepack)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_conv2d_transpose_clamp_context"), TORCH_FN(create_conv2d_transpose_clamp_context));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_prepack"), TORCH_FN(conv2d_transpose_clamp_prepack)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_linear_context"), TORCH_FN(create_linear_context));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"), TORCH_FN(linear_prepack)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_gru_context"), TORCH_FN(create_gru_context));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_prepack"), TORCH_FN(gru_prepack)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::create_lstm_context"), TORCH_FN(create_lstm_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::create_conv2d_clamp_context"),
+      TORCH_FN(create_conv2d_clamp_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_clamp_prepack"),
+      TORCH_FN(conv2d_clamp_prepack)); // Backwards compatibility
+  m.impl(
+      TORCH_SELECTIVE_NAME(
+          "vulkan_prepack::create_conv2d_transpose_clamp_context"),
+      TORCH_FN(create_conv2d_transpose_clamp_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_prepack"),
+      TORCH_FN(conv2d_transpose_clamp_prepack)); // Backwards compatibility
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::create_linear_context"),
+      TORCH_FN(create_linear_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::linear_prepack"),
+      TORCH_FN(linear_prepack)); // Backwards compatibility
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::create_gru_context"),
+      TORCH_FN(create_gru_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::gru_prepack"),
+      TORCH_FN(gru_prepack)); // Backwards compatibility
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::create_lstm_context"),
+      TORCH_FN(create_lstm_context));
 }
 
 TORCH_LIBRARY_IMPL(vulkan_prepack, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_conv2d_clamp_context"), TORCH_FN(run_conv2d_clamp_context));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_clamp_run"), TORCH_FN(conv2d_clamp_run)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_conv2d_transpose_clamp_context"), TORCH_FN(run_conv2d_transpose_clamp_context));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_run"), TORCH_FN(conv2d_transpose_clamp_run)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_linear_context"), TORCH_FN(run_linear_context));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::linear_run"), TORCH_FN(linear_run)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_gru_context"), TORCH_FN(run_gru_context));
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::gru_run"), TORCH_FN(gru_run)); // Backwards compatibility
-  m.impl(TORCH_SELECTIVE_NAME("vulkan_prepack::run_lstm_context"), TORCH_FN(run_lstm_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_conv2d_clamp_context"),
+      TORCH_FN(run_conv2d_clamp_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_clamp_run"),
+      TORCH_FN(conv2d_clamp_run)); // Backwards compatibility
+  m.impl(
+      TORCH_SELECTIVE_NAME(
+          "vulkan_prepack::run_conv2d_transpose_clamp_context"),
+      TORCH_FN(run_conv2d_transpose_clamp_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::conv2d_transpose_clamp_run"),
+      TORCH_FN(conv2d_transpose_clamp_run)); // Backwards compatibility
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_linear_context"),
+      TORCH_FN(run_linear_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::linear_run"),
+      TORCH_FN(linear_run)); // Backwards compatibility
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_gru_context"),
+      TORCH_FN(run_gru_context));
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::gru_run"),
+      TORCH_FN(gru_run)); // Backwards compatibility
+  m.impl(
+      TORCH_SELECTIVE_NAME("vulkan_prepack::run_lstm_context"),
+      TORCH_FN(run_lstm_context));
 }
 
 Tensor convolution(
@@ -224,17 +260,9 @@ Tensor convolution(
     const int64_t groups) {
   if (transposed) {
     VulkanOpContext vulkan_context = conv2d_transpose_context_create(
-        weight,
-        bias,
-        stride,
-        padding,
-        output_padding,
-        dilation,
-        groups);
+        weight, bias, stride, padding, output_padding, dilation, groups);
     return conv2d_transpose_context_run(
-      input,
-      vulkan_context.get_packed(),
-      vulkan_context.get_unpacked());
+        input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
   }
   VulkanOpContext vulkan_context = conv2d_context_create(
       weight,
@@ -246,9 +274,7 @@ Tensor convolution(
       output_padding,
       groups);
   return conv2d_context_run(
-    input,
-    vulkan_context.get_packed(),
-    vulkan_context.get_unpacked());
+      input, vulkan_context.get_packed(), vulkan_context.get_unpacked());
 }
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {

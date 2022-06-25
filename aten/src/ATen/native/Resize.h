@@ -1,20 +1,21 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
-#include <ATen/native/ResizeCommon.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/native/ResizeCommon.h>
 
 #include <c10/core/CPUAllocator.h>
 
-
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // TODO: make all operations that resize given outputs use this function
 //   for consistency and maintainability.
 //   Some operations like `cat` might not be able to make the use of
-//   resize_output directly. For more details to understand how it works in `cat`,
-//   see https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
+//   resize_output directly. For more details to understand how it works in
+//   `cat`, see
+//   https://github.com/pytorch/pytorch/pull/62560#discussion_r687363362
 // Resizes outputs
 // Functions accepting output tensors, like with the "out" kwarg, should
 //   call this function to handle resizing their output tensor.
@@ -31,7 +32,9 @@ TORCH_API bool resize_output_check(const Tensor& output, IntArrayRef shape);
 
 TORCH_API void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes);
 
-static inline void maybe_resize_storage_cpu(TensorImpl* self, size_t new_size_bytes) {
+static inline void maybe_resize_storage_cpu(
+    TensorImpl* self,
+    size_t new_size_bytes) {
   // It does not make sense to try to resize a storage
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
@@ -114,20 +117,34 @@ static inline void checkInBoundsForStorage(
       new_storage_size_bytes);
 }
 
-static inline void checkSetStorage(Tensor& result, Storage storage, int64_t storage_offset,
-                                   IntArrayRef size, IntArrayRef stride) {
+static inline void checkSetStorage(
+    Tensor& result,
+    Storage storage,
+    int64_t storage_offset,
+    IntArrayRef size,
+    IntArrayRef stride) {
   // FIXME: stride should be optional
   if (stride.data()) {
-    TORCH_CHECK(size.size() == stride.size(), "unequal size length (", size.size(),
-                                              ") and stride length (", stride.size(), ")");
+    TORCH_CHECK(
+        size.size() == stride.size(),
+        "unequal size length (",
+        size.size(),
+        ") and stride length (",
+        stride.size(),
+        ")");
   }
 
 #ifdef DEBUG
-  TORCH_CHECK(size.size() <= INT_MAX, "size length (", size.size(), ") greater than INT_MAX");
+  TORCH_CHECK(
+      size.size() <= INT_MAX,
+      "size length (",
+      size.size(),
+      ") greater than INT_MAX");
 #endif
 
-  // storage: note this can't be replaced with result.set_(storage) as the semantics of that
-  // function is to set the tensor size to be equal to the size of the storage.
+  // storage: note this can't be replaced with result.set_(storage) as the
+  // semantics of that function is to set the tensor size to be equal to the
+  // size of the storage.
   if (!result.storage().is_alias_of(storage)) {
     // Caffe2 might have tensors whose storages are null, but we
     // don't allow it in PyTorch.
@@ -136,15 +153,19 @@ static inline void checkSetStorage(Tensor& result, Storage storage, int64_t stor
 
     // We used to allow this, but this breaks device caching.
     // Let's put an actual error message for this one.
-    TORCH_CHECK(result.storage().device() == storage.device(),
-                "Attempted to set the storage of a tensor on device \"", result.storage().device(),
-                "\" to a storage on different device \"", storage.device(),
-                "\".  This is no longer allowed; the devices must match.");
+    TORCH_CHECK(
+        result.storage().device() == storage.device(),
+        "Attempted to set the storage of a tensor on device \"",
+        result.storage().device(),
+        "\" to a storage on different device \"",
+        storage.device(),
+        "\".  This is no longer allowed; the devices must match.");
     result.unsafeGetTensorImpl()->set_storage_keep_dtype(storage);
   }
 
   // storageOffset
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+  TORCH_CHECK(
+      storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
 }
 
 /**
@@ -156,11 +177,14 @@ inline void setStrided(
     IntArrayRef size,
     IntArrayRef stride,
     int64_t storage_offset) {
-  TORCH_CHECK(size.size() == stride.size(), "mismatch in length of strides and shape");
+  TORCH_CHECK(
+      size.size() == stride.size(), "mismatch in length of strides and shape");
   for (auto val : stride) {
-    TORCH_CHECK(val >= 0,
-                "as_strided: Negative strides are not supported at the moment, "
-                "got strides: ", stride);
+    TORCH_CHECK(
+        val >= 0,
+        "as_strided: Negative strides are not supported at the moment, "
+        "got strides: ",
+        stride);
   }
 
   auto* self_ = self.unsafeGetTensorImpl();
@@ -168,7 +192,8 @@ inline void setStrided(
       size, stride, storage_offset, self_->dtype(), self_->storage());
 
   /* storage offset */
-  TORCH_CHECK(storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
+  TORCH_CHECK(
+      storage_offset >= 0, "Tensor: invalid storage offset ", storage_offset);
   self_->set_storage_offset(storage_offset);
 
   /* size and stride */
@@ -178,4 +203,5 @@ inline void setStrided(
   self_->set_sizes_and_strides(size, stride);
 }
 
-}}
+} // namespace native
+} // namespace at

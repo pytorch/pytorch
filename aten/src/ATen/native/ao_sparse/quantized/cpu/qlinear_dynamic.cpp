@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
+#include <c10/util/accumulate.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
-#include <c10/util/accumulate.h>
 
 #include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
@@ -33,7 +33,8 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       input.dim() >= 2,
       "quantized_sparse_linear(): Input tensor rank should be >= 2");
 
-  const auto rows_input = c10::multiply_integers(input.sizes().begin(), input.sizes().end() - 1);
+  const auto rows_input =
+      c10::multiply_integers(input.sizes().begin(), input.sizes().end() - 1);
   const auto cols_input = static_cast<int64_t>(input.size(input.dim() - 1));
   TORCH_CHECK(
       cols_input == orig_weight_.size(1),
@@ -66,7 +67,10 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
     // is owned by this module. The pointer is then passed to qnnpack backend.
     generate_requantization_scales(
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-        w_scales_, q_input_contig.q_scale(), 1.f, requantization_scales_);
+        w_scales_,
+        q_input_contig.q_scale(),
+        1.f,
+        requantization_scales_);
     input_scale_ = q_input_contig.q_scale();
     pytorch_qnnp_operator_t sparse_linear_op{nullptr};
     pytorch_qnnp_status status =
@@ -102,7 +106,10 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
   if (input_scale_ != q_input_contig.q_scale()) {
     generate_requantization_scales(
         // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-        w_scales_, q_input_contig.q_scale(), 1.f, requantization_scales_);
+        w_scales_,
+        q_input_contig.q_scale(),
+        1.f,
+        requantization_scales_);
   }
   // Update input related quantization params in the operator.
   sparse_linear_op_->dynamic_conv_quantization_params.input_zero_point =
@@ -140,13 +147,11 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
   return output;
 }
 
-at::Tensor PackedLinearWeightQnnp::apply_dynamic(
-    const at::Tensor& input) {
+at::Tensor PackedLinearWeightQnnp::apply_dynamic(const at::Tensor& input) {
   return apply_dynamic_impl<false>(input);
 }
 
-at::Tensor PackedLinearWeightQnnp::apply_dynamic_relu(
-    const at::Tensor& input) {
+at::Tensor PackedLinearWeightQnnp::apply_dynamic_relu(const at::Tensor& input) {
   return apply_dynamic_impl<true>(input);
 }
 
@@ -187,4 +192,5 @@ TORCH_LIBRARY_IMPL(sparse, CPU, m) {
 }
 
 } // namespace
-}} // namespace ao::sparse
+} // namespace sparse
+} // namespace ao

@@ -1,12 +1,13 @@
 #include <torch/library.h>
 
-#include <torch/custom_class.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
+#include <torch/custom_class.h>
 
 namespace ao {
 namespace sparse {
 int register_linear_params();
-}}
+}
+} // namespace ao
 
 // Register operators
 TORCH_LIBRARY(sparse, m) {

@@ -8,44 +8,51 @@ namespace native {
 
 namespace {
 
-template<bool inplace>
+template <bool inplace>
 using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
 
 Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
-  TORCH_CHECK(input.dim() >= 2, "Feature dropout requires at least 2 dimensions in the input");
+  TORCH_CHECK(
+      input.dim() >= 2,
+      "Feature dropout requires at least 2 dimensions in the input");
   std::vector<int64_t> sizes;
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
   for (const auto i : c10::irange(2, input.dim())) {
-    (void)i; //Suppress unused variable warning
+    (void)i; // Suppress unused variable warning
     sizes.push_back(1);
   }
   return input.new_empty(sizes);
 }
 
 bool is_fused_kernel_acceptable(const Tensor& input, double p) {
-  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 && p < 1 && input.numel() > 0;
+  return (input.is_cuda() || input.is_xpu() || input.is_lazy()) && p > 0 &&
+      p < 1 && input.numel() > 0;
 }
 
-// NB: sure, we could have used different overloads here, but I would feel insecure
-// knowing that this dispatch depends only on the constness of the references
-template<bool inplace>
+// NB: sure, we could have used different overloads here, but I would feel
+// insecure knowing that this dispatch depends only on the constness of the
+// references
+template <bool inplace>
 Tensor& multiply(Tensor& input, const Tensor& noise) {
   static_assert(inplace, "Wrong multiply overload triggered in Dropout.cpp");
   return input.mul_(noise);
 }
 
-template<bool inplace>
+template <bool inplace>
 Tensor multiply(const Tensor& input, const Tensor& noise) {
   static_assert(!inplace, "Wrong multiply overload triggered in Dropout.cpp");
   return input.mul(noise);
 }
 
-template<bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
+template <bool feature_dropout, bool alpha_dropout, bool inplace, typename T>
 Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
-  TORCH_CHECK(p >= 0 && p <= 1, "dropout probability has to be between 0 and 1, but got ", p);
+  TORCH_CHECK(
+      p >= 0 && p <= 1,
+      "dropout probability has to be between 0 and 1, but got ",
+      p);
   if (p == 0 || !train || input.numel() == 0) {
     return input;
   }
@@ -55,7 +62,9 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   }
 
   at::Tensor b; // used for alpha_dropout only
-  auto noise = feature_dropout ? make_feature_noise(input) : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  auto noise = feature_dropout
+      ? make_feature_noise(input)
+      : at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   noise.bernoulli_(1 - p);
   if (alpha_dropout) {
     constexpr double alpha = 1.7580993408473766;
@@ -73,21 +82,24 @@ Ctype<inplace> _dropout_impl(T& input, double p, bool train) {
   }
 }
 
-#define ALIAS_SPECIALIZATION(ALIAS_NAME, IS_FEATURE, IS_ALPHA)                      \
-template <bool inplace, typename... Args>                                           \
-Ctype<inplace> ALIAS_NAME(Args&&... args) {                                         \
-  return _dropout_impl<IS_FEATURE, IS_ALPHA, inplace>(std::forward<Args>(args)...); \
-}
+#define ALIAS_SPECIALIZATION(ALIAS_NAME, IS_FEATURE, IS_ALPHA) \
+  template <bool inplace, typename... Args>                    \
+  Ctype<inplace> ALIAS_NAME(Args&&... args) {                  \
+    return _dropout_impl<IS_FEATURE, IS_ALPHA, inplace>(       \
+        std::forward<Args>(args)...);                          \
+  }
 
-ALIAS_SPECIALIZATION(_dropout,               false, false)
-ALIAS_SPECIALIZATION(_feature_dropout,       true,  false)
-ALIAS_SPECIALIZATION(_alpha_dropout,         false, true )
-ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
+ALIAS_SPECIALIZATION(_dropout, false, false)
+ALIAS_SPECIALIZATION(_feature_dropout, true, false)
+ALIAS_SPECIALIZATION(_alpha_dropout, false, true)
+ALIAS_SPECIALIZATION(_feature_alpha_dropout, true, true)
 
-} // anomymous namepsace
+} // namespace
 
-std::tuple<Tensor,Tensor>
-native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
+std::tuple<Tensor, Tensor> native_dropout_cpu(
+    const Tensor& input,
+    double p,
+    c10::optional<bool> train) {
   if (input.numel() == 0) {
     return std::make_tuple(input, at::empty_like(input, input.options()));
   }
@@ -99,17 +111,22 @@ native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
     double p1m = 1. - p;
     // Check for probability of zero to avoid divide by zero and NaN results
     double scale = p1m == 0 ? 0. : 1. / p1m;
-    mask = at::empty_like(input, input.options().dtype(c10::CppTypeToScalarType<bool>::value));
+    mask = at::empty_like(
+        input, input.options().dtype(c10::CppTypeToScalarType<bool>::value));
     mask.bernoulli_(p1m);
     output = input.mul(mask).mul_(scale);
   } else {
-    mask = at::ones_like(input, input.options().dtype(c10::CppTypeToScalarType<bool>::value));
+    mask = at::ones_like(
+        input, input.options().dtype(c10::CppTypeToScalarType<bool>::value));
     output = input.clone();
   }
   return std::make_tuple(output, mask);
 }
 
-Tensor native_dropout_backward_cpu(const Tensor& grad, const Tensor& mask, double scale) {
+Tensor native_dropout_backward_cpu(
+    const Tensor& grad,
+    const Tensor& mask,
+    double scale) {
   Tensor result = grad * mask * scale;
   return result;
 }

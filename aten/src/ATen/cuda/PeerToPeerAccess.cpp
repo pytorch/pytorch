@@ -3,8 +3,8 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
-#include <vector>
 #include <algorithm>
+#include <vector>
 
 namespace at {
 namespace cuda {
@@ -29,16 +29,17 @@ void init_p2p_access_cache(int64_t num_devices) {
   }
 }
 
-}  // namespace detail
+} // namespace detail
 
 bool get_p2p_access(int dev, int dev_to_access) {
-  TORCH_CHECK(dev >= 0 || dev < num_devices_,
-              dev, " is not a device");
-  TORCH_CHECK(dev_to_access >= 0 || dev_to_access < num_devices_,
-              dev_to_access, " is not a device");
+  TORCH_CHECK(dev >= 0 || dev < num_devices_, dev, " is not a device");
+  TORCH_CHECK(
+      dev_to_access >= 0 || dev_to_access < num_devices_,
+      dev_to_access,
+      " is not a device");
   TORCH_INTERNAL_ASSERT(num_devices_ >= 0, "p2p access cache not initialized");
 
-  auto &cache = p2pAccessEnabled_[dev * num_devices_ + dev_to_access];
+  auto& cache = p2pAccessEnabled_[dev * num_devices_ + dev_to_access];
 
   if (cache != -1) {
     return cache;
@@ -63,4 +64,5 @@ bool get_p2p_access(int dev, int dev_to_access) {
   return cache;
 }
 
-}}  // namespace at::cuda::detail
+} // namespace cuda
+} // namespace at

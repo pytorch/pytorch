@@ -123,7 +123,8 @@ struct pytorch_qnnp_operator {
   // Sparsity support
   sparse_matrix_t sparse_matrix;
   const void* bias;
-  struct pytorch_qnnp_conv_dynamic_quantization_params dynamic_conv_quantization_params;
+  struct pytorch_qnnp_conv_dynamic_quantization_params
+      dynamic_conv_quantization_params;
   uint8_t* prepacked_a;
 };
 

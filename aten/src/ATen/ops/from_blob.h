@@ -16,9 +16,8 @@ TORCH_API inline void noopDelete(void*) {}
 ///
 ///     at::Tensor tensor = at::for_blob(data, sizes)
 ///             .strides(strides)
-///             .context(context, [](void *ctx) { delete static_cast<Ctx*>(ctx); })
-///             .options(...)
-///             .make_tensor();
+///             .context(context, [](void *ctx) { delete static_cast<Ctx*>(ctx);
+///             }) .options(...) .make_tensor();
 ///
 class TORCH_API TensorMaker {
   friend TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept;
@@ -128,10 +127,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     const std::function<void(void*)>& deleter,
     const TensorOptions& options = {}) {
-  return for_blob(data, sizes)
-      .deleter(deleter)
-      .options(options)
-      .make_tensor();
+  return for_blob(data, sizes).deleter(deleter).options(options).make_tensor();
 }
 
 inline Tensor from_blob(
@@ -139,10 +135,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const TensorOptions& options = {}) {
-  return for_blob(data, sizes)
-      .strides(strides)
-      .options(options)
-      .make_tensor();
+  return for_blob(data, sizes).strides(strides).options(options).make_tensor();
 }
 
 inline Tensor from_blob(
@@ -152,4 +145,4 @@ inline Tensor from_blob(
   return for_blob(data, sizes).options(options).make_tensor();
 }
 
-}  // namespace at
+} // namespace at

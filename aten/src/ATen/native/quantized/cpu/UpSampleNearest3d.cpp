@@ -8,7 +8,6 @@
 
 #include <cstring>
 
-
 namespace at {
 namespace native {
 
@@ -16,7 +15,9 @@ namespace native {
 typedef int64_t (*nn_compute_source_index_fn_t)(const float, int64_t, int64_t);
 
 // at::native functions for the native_functions.yaml
-template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
+template <
+    typename scalar_t,
+    nn_compute_source_index_fn_t nn_compute_source_index_fn>
 static void upsample_nearest3d_out_frame(
     scalar_t* odata,
     scalar_t* idata,
@@ -31,26 +32,34 @@ static void upsample_nearest3d_out_frame(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
-  float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
-  float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
+  float depth_scale =
+      compute_scales_value<float>(scales_d, input_depth, output_depth);
+  float height_scale =
+      compute_scales_value<float>(scales_h, input_height, output_height);
+  float width_scale =
+      compute_scales_value<float>(scales_w, input_width, output_width);
 
   channels = channels * nbatch;
-  if (channels == 0 || output_depth == 0 || output_height == 0 || output_width == 0) {
+  if (channels == 0 || output_depth == 0 || output_height == 0 ||
+      output_width == 0) {
     return;
   }
   auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
   // special case: just copy
-  if (input_depth == output_depth && input_height == output_height && input_width == output_width) {
-    std::memcpy(o_p, i_p, channels * input_depth * input_height * input_width * sizeof(typename scalar_t::underlying));
+  if (input_depth == output_depth && input_height == output_height &&
+      input_width == output_width) {
+    std::memcpy(
+        o_p,
+        i_p,
+        channels * input_depth * input_height * input_width *
+            sizeof(typename scalar_t::underlying));
     return;
   }
 
   for (const auto d2 : c10::irange(output_depth)) {
-    const int64_t d1 =
-          nn_compute_source_index_fn(depth_scale, d2, input_depth);
+    const int64_t d1 = nn_compute_source_index_fn(depth_scale, d2, input_depth);
 
     for (const auto h2 : c10::irange(output_height)) {
       const int64_t h1 =
@@ -60,11 +69,13 @@ static void upsample_nearest3d_out_frame(
         const int64_t w1 =
             nn_compute_source_index_fn(width_scale, w2, input_width);
 
-        const auto* pos1 = &i_p[d1 * input_height * input_width + h1 * input_width + w1];
-        auto* pos2 = &o_p[d2 * output_height * output_width + h2 * output_width + w2];
+        const auto* pos1 =
+            &i_p[d1 * input_height * input_width + h1 * input_width + w1];
+        auto* pos2 =
+            &o_p[d2 * output_height * output_width + h2 * output_width + w2];
 
         for (const auto c : c10::irange(channels)) {
-          (void)c; //Suppress unused variable warning
+          (void)c; // Suppress unused variable warning
           pos2[0] = pos1[0];
           pos1 += input_depth * input_height * input_width;
           pos2 += output_depth * output_height * output_width;
@@ -74,7 +85,9 @@ static void upsample_nearest3d_out_frame(
   }
 }
 
-template <typename scalar_t, nn_compute_source_index_fn_t nn_compute_source_index_fn>
+template <
+    typename scalar_t,
+    nn_compute_source_index_fn_t nn_compute_source_index_fn>
 static void upsample_nearest3d_out_frame_nhwc(
     scalar_t* odata,
     scalar_t* idata,
@@ -89,16 +102,26 @@ static void upsample_nearest3d_out_frame_nhwc(
     c10::optional<double> scales_d,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  float depth_scale = compute_scales_value<float>(scales_d, input_depth, output_depth);
-  float height_scale = compute_scales_value<float>(scales_h, input_height, output_height);
-  float width_scale = compute_scales_value<float>(scales_w, input_width, output_width);
+  float depth_scale =
+      compute_scales_value<float>(scales_d, input_depth, output_depth);
+  float height_scale =
+      compute_scales_value<float>(scales_h, input_height, output_height);
+  float width_scale =
+      compute_scales_value<float>(scales_w, input_width, output_width);
 
   for (const auto b : c10::irange(nbatch)) {
-    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata + b * input_depth * input_height * input_width * channels);
-    auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata + b * output_depth * output_height * output_width * channels);
+    auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(
+        idata + b * input_depth * input_height * input_width * channels);
+    auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(
+        odata + b * output_depth * output_height * output_width * channels);
     // special case: just copy
-    if (input_depth == output_depth && input_height == output_height && input_width == output_width) {
-      std::memcpy(o_p, i_p, channels * input_depth * input_height * input_width * sizeof(typename scalar_t::underlying));
+    if (input_depth == output_depth && input_height == output_height &&
+        input_width == output_width) {
+      std::memcpy(
+          o_p,
+          i_p,
+          channels * input_depth * input_height * input_width *
+              sizeof(typename scalar_t::underlying));
       return;
     }
 
@@ -113,9 +136,16 @@ static void upsample_nearest3d_out_frame_nhwc(
           const int64_t w1 =
               nn_compute_source_index_fn(width_scale, w2, input_width);
 
-          const auto* pos1 = &i_p[(d1 * input_height * input_width + h1 * input_width + w1)*channels];
-          auto* pos2 = &o_p[(d2 * output_height * output_width + h2 * output_width + w2)*channels];
-          std::memcpy(pos2, pos1, channels * sizeof(typename scalar_t::underlying));
+          const auto* pos1 =
+              &i_p
+                  [(d1 * input_height * input_width + h1 * input_width + w1) *
+                   channels];
+          auto* pos2 = &o_p
+                           [(d2 * output_height * output_width +
+                             h2 * output_width + w2) *
+                            channels];
+          std::memcpy(
+              pos2, pos1, channels * sizeof(typename scalar_t::underlying));
         }
       }
     }
@@ -185,24 +215,25 @@ Tensor _upsample_nearest3d_quantized_cpu(
 
     auto input_contig = input.contiguous();
 
-    AT_DISPATCH_QINT_TYPES(input_contig.scalar_type(), "upsample_nearest3d", [&] {
-      auto* idata = static_cast<scalar_t*>(input_contig.data_ptr());
-      auto* odata = static_cast<scalar_t*>(output.data_ptr());
-      upsample_nearest3d_out_frame<scalar_t, nn_compute_source_index_fn>(
-          odata,
-          idata,
-          input_depth,
-          input_height,
-          input_width,
-          output_depth,
-          output_height,
-          output_width,
-          nbatch,
-          channels,
-          scales_d,
-          scales_h,
-          scales_w);
-    });
+    AT_DISPATCH_QINT_TYPES(
+        input_contig.scalar_type(), "upsample_nearest3d", [&] {
+          auto* idata = static_cast<scalar_t*>(input_contig.data_ptr());
+          auto* odata = static_cast<scalar_t*>(output.data_ptr());
+          upsample_nearest3d_out_frame<scalar_t, nn_compute_source_index_fn>(
+              odata,
+              idata,
+              input_depth,
+              input_height,
+              input_width,
+              output_depth,
+              output_height,
+              output_width,
+              nbatch,
+              channels,
+              scales_d,
+              scales_h,
+              scales_w);
+        });
     return output;
   }
 }
@@ -216,7 +247,8 @@ Tensor upsample_nearest3d_quantized_cpu(
     c10::optional<double> scale_d,
     c10::optional<double> scale_h,
     c10::optional<double> scale_w) {
-  return _upsample_nearest3d_quantized_cpu<nearest_neighbor_compute_source_index>(
+  return _upsample_nearest3d_quantized_cpu<
+      nearest_neighbor_compute_source_index>(
       input, osize, scale_d, scale_h, scale_w);
 }
 
@@ -226,7 +258,8 @@ Tensor _upsample_nearest_exact3d_quantized_cpu(
     c10::optional<double> scale_d,
     c10::optional<double> scale_h,
     c10::optional<double> scale_w) {
-  return _upsample_nearest3d_quantized_cpu<nearest_neighbor_exact_compute_source_index>(
+  return _upsample_nearest3d_quantized_cpu<
+      nearest_neighbor_exact_compute_source_index>(
       input, osize, scale_d, scale_h, scale_w);
 }
 
@@ -238,7 +271,8 @@ Tensor upsample_nearest3d_quantized_cpu(
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  return upsample_nearest3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
+  return upsample_nearest3d_quantized_cpu(
+      input, osize, scale_d, scale_h, scale_w);
 }
 
 Tensor _upsample_nearest_exact3d_quantized_cpu(
@@ -249,7 +283,8 @@ Tensor _upsample_nearest_exact3d_quantized_cpu(
   auto scale_d = get_scale_value(scale_factors, 0);
   auto scale_h = get_scale_value(scale_factors, 1);
   auto scale_w = get_scale_value(scale_factors, 2);
-  return _upsample_nearest_exact3d_quantized_cpu(input, osize, scale_d, scale_h, scale_w);
+  return _upsample_nearest_exact3d_quantized_cpu(
+      input, osize, scale_d, scale_h, scale_w);
 }
 
 } // namespace native

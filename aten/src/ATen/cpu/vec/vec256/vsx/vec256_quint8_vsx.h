@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 
 #include <c10/util/irange.h>
 #include <c10/util/quint8.h>
@@ -26,8 +26,8 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
-// iterations.
+// point operations will be carried out in a loop over
+// Vectorized<T>::float_num_vecs iterations.
 
 namespace at {
 namespace vec {
@@ -239,12 +239,14 @@ struct Vectorized<c10::quint8> {
     return {vec0, vec1};
   }
 
-  Vectorized<c10::quint8> C10_ALWAYS_INLINE relu(Vectorized<c10::quint8> zero_point) const {
+  Vectorized<c10::quint8> C10_ALWAYS_INLINE
+  relu(Vectorized<c10::quint8> zero_point) const {
     return {vec_max(_vec0, zero_point._vec0), vec_max(_vec1, zero_point._vec1)};
   }
 
-  Vectorized<c10::quint8> C10_ALWAYS_INLINE
-  relu6(Vectorized<c10::quint8> zero_point, Vectorized<c10::quint8> q_six) const {
+  Vectorized<c10::quint8> C10_ALWAYS_INLINE relu6(
+      Vectorized<c10::quint8> zero_point,
+      Vectorized<c10::quint8> q_six) const {
     vuint8 max0 = vec_max(_vec0, zero_point._vec0);
     vuint8 max1 = vec_max(_vec1, zero_point._vec1);
     return {vec_min(max0, q_six._vec0), vec_min(max1, q_six._vec1)};
@@ -402,6 +404,6 @@ Vectorized<c10::quint8> inline minimum(
   return a.minimum(b);
 }
 
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

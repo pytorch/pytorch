@@ -2,9 +2,9 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Adapter.h>
 #include <ATen/native/vulkan/api/Command.h>
+#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Resource.h>
@@ -46,7 +46,7 @@ class Context final {
   Resource& resource();
 
   // GPU RPC
-  template<typename... Arguments>
+  template <typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
       const Shader::Layout::Signature& shader_layout_signature,
@@ -62,7 +62,8 @@ class Context final {
   void flush();
 
   // Use this function only for debugging and testing when you want to make sure
-  // all GPU operations get finished before calling flush(). Otherwise, it may crash.
+  // all GPU operations get finished before calling flush(). Otherwise, it may
+  // crash.
   void wait(const at::Tensor& src);
 
  private:
@@ -94,11 +95,11 @@ inline GPU Context::gpu() {
   // A GPU is simply a (physical device, logical device, device queue) trio.
   const Adapter* p_adapter = runtime()->get_adapter_p(adapter_i_);
   return {
-    instance_,
-    p_adapter,
-    device_,
-    queue_.family_index,
-    queue_.handle,
+      instance_,
+      p_adapter,
+      device_,
+      queue_.family_index,
+      queue_.handle,
   };
 }
 
@@ -136,22 +137,20 @@ inline VkQueue Context::queue() {
 
 namespace detail {
 
-template<
-    size_t...Indices,
-    typename ...Arguments>
+template <size_t... Indices, typename... Arguments>
 inline void bind(
     Descriptor::Set& descriptor_set,
     const std::index_sequence<Indices...>,
-    Arguments&&...arguments) {
+    Arguments&&... arguments) {
   C10_UNUSED const int _[]{
-    0,
-    (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
+      0,
+      (descriptor_set.bind(Indices, std::forward<Arguments>(arguments)), 0)...,
   };
 }
 
 } // namespace detail
 
-template<typename... Arguments>
+template <typename... Arguments>
 inline void Context::dispatch(
     Command::Buffer& command_buffer,
     const Shader::Layout::Signature& shader_layout_signature,
@@ -180,15 +179,10 @@ inline void Context::dispatch(
 
   // Forward declaration
   void dispatch_epilogue(
-      Command::Buffer&,
-      const Descriptor::Set&,
-      const Shader::WorkGroup&);
+      Command::Buffer&, const Descriptor::Set&, const Shader::WorkGroup&);
 
   // Factor out template parameter independent code to minimize code bloat.
-  dispatch_epilogue(
-      command_buffer,
-      descriptor_set,
-      global_work_group);
+  dispatch_epilogue(command_buffer, descriptor_set, global_work_group);
 }
 
 } // namespace api

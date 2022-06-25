@@ -22,7 +22,7 @@ namespace api {
 // distinction.
 //
 
-template<typename Factory>
+template <typename Factory>
 class Cache final {
  public:
   explicit Cache(Factory factory);
@@ -40,10 +40,11 @@ class Cache final {
 
   // Create or retrieve a resource.
   //
-  // This operation is a simple cache lookup and returns the Handle corresponding
-  // to the descriptor if the object is already present in the cache.  Otherwise,
-  // Factory is used to create the object, after which point the object is added
-  // to the cache.  Regardless, this function returns with the object in the cache.
+  // This operation is a simple cache lookup and returns the Handle
+  // corresponding to the descriptor if the object is already present in the
+  // cache.  Otherwise, Factory is used to create the object, after which point
+  // the object is added to the cache.  Regardless, this function returns with
+  // the object in the cache.
 
   auto retrieve(const Descriptor& descriptor);
 
@@ -66,24 +67,22 @@ class Cache final {
 // Impl
 //
 
-template<typename Factory>
-inline Cache<Factory>::Cache(Factory factory)
-  : factory_(std::move(factory)) {
-    cache_.reserve(Configuration::kReserve);
+template <typename Factory>
+inline Cache<Factory>::Cache(Factory factory) : factory_(std::move(factory)) {
+  cache_.reserve(Configuration::kReserve);
 }
 
-template<typename Factory>
-inline auto Cache<Factory>::retrieve(
-    const Descriptor& descriptor) {
+template <typename Factory>
+inline auto Cache<Factory>::retrieve(const Descriptor& descriptor) {
   auto iterator = cache_.find(descriptor);
-  if C10_UNLIKELY(cache_.cend() == iterator) {
+  if C10_UNLIKELY (cache_.cend() == iterator) {
     iterator = cache_.insert({descriptor, factory_(descriptor)}).first;
   }
 
   return iterator->second.get();
 }
 
-template<typename Factory>
+template <typename Factory>
 inline void Cache<Factory>::purge() {
   cache_.clear();
 }

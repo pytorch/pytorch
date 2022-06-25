@@ -20,12 +20,14 @@ Tensor empty_affine_quantized(
     int64_t zero_point,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options_ =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
+      !(options_.has_memory_format() && optional_memory_format.has_value()),
+      "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+      "the redundant setter.");
   auto options = options_.merge_memory_format(optional_memory_format);
   TORCH_CHECK(
       options.has_dtype(),
@@ -48,22 +50,24 @@ Tensor empty_per_channel_affine_quantized(
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options_ =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
+      !(options_.has_memory_format() && optional_memory_format.has_value()),
+      "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+      "the redundant setter.");
   auto options = options_.merge_memory_format(optional_memory_format);
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
   QuantizerPtr quantizer = make_per_channel_affine_quantizer(
-          scales.to(options.device()), zero_points.to(options.device()), axis, typeMetaToScalarType(options.dtype()));
-  return new_qtensor(
-      size,
-      options,
-      quantizer);
+      scales.to(options.device()),
+      zero_points.to(options.device()),
+      axis,
+      typeMetaToScalarType(options.dtype()));
+  return new_qtensor(size, options, quantizer);
 }
 
 Tensor empty_unknown_quantized(
@@ -74,17 +78,20 @@ Tensor empty_unknown_quantized(
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options_ =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
+      !(options_.has_memory_format() && optional_memory_format.has_value()),
+      "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+      "the redundant setter.");
   auto options = options_.merge_memory_format(optional_memory_format);
   TORCH_CHECK(
       options.has_dtype(),
       "Must provide data type for Tensor creation functions.");
-  QuantizerPtr quantizer = make_unknown_quantizer(typeMetaToScalarType(options.dtype()));
+  QuantizerPtr quantizer =
+      make_unknown_quantizer(typeMetaToScalarType(options.dtype()));
   return new_qtensor(size, options, quantizer);
 }
 
@@ -94,9 +101,11 @@ Tensor empty_strided_unknown_quantized(
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
-    c10::optional<bool> pin_memory) {
+    c10::optional<bool> pin_memory){
 
-  TORCH_CHECK(false, "empty_strided not supported on quantized tensors yet see https://github.com/pytorch/pytorch/issues/74540")
+    TORCH_CHECK(
+        false,
+        "empty_strided not supported on quantized tensors yet see https://github.com/pytorch/pytorch/issues/74540")
 
 }
 
@@ -110,7 +119,9 @@ Tensor empty_affine_quantized_other_backends_stub(
     double,
     int64_t,
     c10::optional<c10::MemoryFormat>) {
-  TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
+  TORCH_CHECK(
+      false,
+      "Creation of quantized tensor requires quantized dtype like torch.quint8");
 }
 
 Tensor empty_per_channel_affine_quantized_other_backends_stub(
@@ -123,7 +134,9 @@ Tensor empty_per_channel_affine_quantized_other_backends_stub(
     c10::optional<Device>,
     c10::optional<bool>,
     c10::optional<c10::MemoryFormat>) {
-  TORCH_CHECK(false, "Creation of quantized tensor requires quantized dtype like torch.quint8");
+  TORCH_CHECK(
+      false,
+      "Creation of quantized tensor requires quantized dtype like torch.quint8");
 }
 
 // Create an empty quantized Tensor with size, based on the options
@@ -137,7 +150,8 @@ Tensor empty_quantized(
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> memory_format) {
   TensorOptions specified_options =
-      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   TORCH_CHECK(
       !(specified_options.has_memory_format() && memory_format.has_value()),

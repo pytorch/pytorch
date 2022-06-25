@@ -10,9 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <string>
 #include <ATen/cuda/llvm_jit_strings.h>
-
+#include <string>
 
 namespace at {
 namespace cuda {
@@ -617,12 +616,11 @@ struct alignas(2) complex<at::Half> {
 }
 )ESCAPE";
 
-
-const std::string &get_complex_body_string() {
+const std::string& get_complex_body_string() {
   return complex_body;
 }
 
-const std::string &get_complex_half_body_string() {
+const std::string& get_complex_half_body_string() {
   return complex_half_body;
 }
 
@@ -1145,8 +1143,9 @@ inline namespace literals
 
 )ESCAPE";
 
-const std::string &get_complex_math_string() {
+const std::string& get_complex_math_string() {
   return complex_math;
 }
 
-}} // namespace at::cuda
+} // namespace cuda
+} // namespace at

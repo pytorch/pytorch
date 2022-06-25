@@ -125,7 +125,8 @@ class RequantizationTester {
    * produces exactly i, provided that ((i - zero point) * 2**s) does not
    * overflow.
    */
-  void testDivideByPO2WithRoundingUp(pytorch_requantization_function requantize) {
+  void testDivideByPO2WithRoundingUp(
+      pytorch_requantization_function requantize) {
     ASSERT_GE(zeroPoint(), 0);
     ASSERT_LE(zeroPoint(), 255);
 
@@ -170,7 +171,8 @@ class RequantizationTester {
    * produces exactly i, provided that ((i - zero point) * 2**s) does not
    * overflow.
    */
-  void testDivideByPO2WithRoundingDown(pytorch_requantization_function requantize) {
+  void testDivideByPO2WithRoundingDown(
+      pytorch_requantization_function requantize) {
     ASSERT_GE(zeroPoint(), 0);
     ASSERT_LE(zeroPoint(), 255);
 
@@ -206,7 +208,8 @@ class RequantizationTester {
     }
   }
 
-  void testDivideByPO2WithRoundingAway(pytorch_requantization_function requantize) {
+  void testDivideByPO2WithRoundingAway(
+      pytorch_requantization_function requantize) {
     ASSERT_GE(zeroPoint(), 0);
     ASSERT_LE(zeroPoint(), 255);
 

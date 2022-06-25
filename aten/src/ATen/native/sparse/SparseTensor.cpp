@@ -1,18 +1,18 @@
 // Basic functions on sparse tensors
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
+#include <ATen/NamedTensorUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/IndexingUtils.h>
-#include <ATen/NamedTensorUtils.h>
 
-#include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/Copy.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -205,15 +205,19 @@ Tensor empty_sparse(
 }
 
 /* Shape init */
-Tensor sparse_coo_tensor(IntArrayRef size,
+Tensor sparse_coo_tensor(
+    IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
-  return at::_sparse_coo_tensor_with_dims(size.size(), 0, size, options.layout(at::kSparse));
+  return at::_sparse_coo_tensor_with_dims(
+      size.size(), 0, size, options.layout(at::kSparse));
 }
 
 /* Pointer-copy init */
@@ -231,13 +235,17 @@ static inline Tensor expand_values_if_needed(const Tensor& values) {
 }
 } // namespace
 
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values_,
+Tensor sparse_coo_tensor(
+    const Tensor& indices,
+    const Tensor& values_,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   Tensor values = expand_values_if_needed(values_);
 
@@ -380,13 +388,18 @@ void _validate_sparse_coo_tensor_args(
 
 // NB: Got rid of the sizes == NULL case
 
-Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRef size,
+Tensor sparse_coo_tensor(
+    const Tensor& indices,
+    const Tensor& values,
+    IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory) {
   // See [Note: hacky wrapper removal for TensorOptions]
-  TensorOptions options = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
   // arg checking
   TORCH_CHECK(
       !options.has_layout() || options.layout() == kSparse,
@@ -405,12 +418,15 @@ Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, IntArrayRe
 }
 
 // NOTE: _sparse_coo_tensor_unsafe() differs from sparse_coo_tensor()
-// in that we don't check whether any indices are out of boundaries of `size`, thus avoiding a
-// copy from CUDA to CPU. However, this function should ONLY be used where we know that the indices
-// are guaranteed to be within bounds or if the caller is going to call
-// _validate_sparse_coo_tensor_args before using the tensor.
-// NB: Got rid of the size == NULL case
-Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, IntArrayRef size,
+// in that we don't check whether any indices are out of boundaries of `size`,
+// thus avoiding a copy from CUDA to CPU. However, this function should ONLY be
+// used where we know that the indices are guaranteed to be within bounds or if
+// the caller is going to call _validate_sparse_coo_tensor_args before using the
+// tensor. NB: Got rid of the size == NULL case
+Tensor _sparse_coo_tensor_unsafe(
+    const Tensor& indices,
+    const Tensor& values_,
+    IntArrayRef size,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
@@ -484,7 +500,9 @@ bool _is_same_size_as_sparse(
 } // namespace
 
 // Invoked from native/Resize.cpp (no dynamic dispatch necessary)
-const SparseTensor& resize_as_sparse_(const SparseTensor& self, const SparseTensor& src) {
+const SparseTensor& resize_as_sparse_(
+    const SparseTensor& self,
+    const SparseTensor& src) {
   if (!_is_same_size_as_sparse(self, src)) {
     sparse_resize_(self, src.sizes(), src.sparse_dim(), src.dense_dim());
   }
@@ -594,8 +612,9 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   AT_ASSERT(self.is_sparse());
   TORCH_INTERNAL_ASSERT(!self.is_coalesced());
 
-  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is false,
-  // we should keep the original tensor intact and do coalesce on a copy of the tensor
+  // NOTE: Since `coalesce` is not an in-place operation when `is_coalesced` is
+  // false, we should keep the original tensor intact and do coalesce on a copy
+  // of the tensor
   if (self._nnz() < 2) {
     SparseTensor dst = self.clone();
     dst._coalesced_(true);
@@ -633,44 +652,49 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
 
   int64_t i = -1;
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool,
-      values.scalar_type(), "coalesce", [&] {
-    int64_t prev = -1;
-    int64_t blockSize = values.stride(0);
-    scalar_t* values_ptr = values.data_ptr<scalar_t>();
-    scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
-    for (const auto j : c10::irange(nnz)) {
-      int64_t pos = indicesPermutationAccessor[j];
-      int64_t curr = indicesBufferAccessor[j];
-      if (curr == prev) {
-        if (values.numel() >
-            0) { // if values is an empty tensor, there are no elements to copy
-          at::native::cpublas::axpy<scalar_t>(
-              blockSize,
-              static_cast<scalar_t>(1),
-              values_ptr + pos * blockSize,
-              1,
-              newValues_ptr + i * blockSize,
-              1);
+      at::ScalarType::ComplexHalf,
+      at::ScalarType::BFloat16,
+      at::ScalarType::Half,
+      at::ScalarType::Bool,
+      values.scalar_type(),
+      "coalesce",
+      [&] {
+        int64_t prev = -1;
+        int64_t blockSize = values.stride(0);
+        scalar_t* values_ptr = values.data_ptr<scalar_t>();
+        scalar_t* newValues_ptr = newValues.data_ptr<scalar_t>();
+        for (const auto j : c10::irange(nnz)) {
+          int64_t pos = indicesPermutationAccessor[j];
+          int64_t curr = indicesBufferAccessor[j];
+          if (curr == prev) {
+            if (values.numel() > 0) { // if values is an empty tensor, there are
+                                      // no elements to copy
+              at::native::cpublas::axpy<scalar_t>(
+                  blockSize,
+                  static_cast<scalar_t>(1),
+                  values_ptr + pos * blockSize,
+                  1,
+                  newValues_ptr + i * blockSize,
+                  1);
+            }
+          } else {
+            ++i;
+            for (const auto d : c10::irange(sparse_dim)) {
+              newIndicesAccessor[d][i] = indicesAccessor[d][pos];
+            }
+            if (values.numel() > 0) { // if values is an empty tensor, there are
+                                      // no elements to copy
+              at::native::cpublas::copy<scalar_t>(
+                  blockSize,
+                  values_ptr + pos * blockSize,
+                  1,
+                  newValues_ptr + i * blockSize,
+                  1);
+            }
+          }
+          prev = curr;
         }
-      } else {
-        ++i;
-        for (const auto d : c10::irange(sparse_dim)) {
-          newIndicesAccessor[d][i] = indicesAccessor[d][pos];
-        }
-        if (values.numel() >
-            0) { // if values is an empty tensor, there are no elements to copy
-          at::native::cpublas::copy<scalar_t>(
-              blockSize,
-              values_ptr + pos * blockSize,
-              1,
-              newValues_ptr + i * blockSize,
-              1);
-        }
-      }
-      prev = curr;
-    }
-  });
+      });
 
   dst._coalesced_(true);
   get_sparse_impl(dst)->set_nnz_and_narrow(i + 1);
@@ -763,10 +787,11 @@ SparseTensor& sparse_mask_out_cpu(
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
-      sparse_mask_out_cpu_kernel<scalar_t>(
-          r_values, t, r_nnz, sparse_dim, mask_indices);
-    });
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(
+        at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
+          sparse_mask_out_cpu_kernel<scalar_t>(
+              r_values, t, r_nnz, sparse_dim, mask_indices);
+        });
   }
   return r;
 }
@@ -830,18 +855,20 @@ Tensor sparse_mask_helper_cpu(
   auto flattened_mask_indices =
       at::sparse::flatten_indices(mask_indices, full_size);
 
-  const auto copy_iter = TensorIteratorConfig()
-    .add_output(r_values)
-    .add_input(t_v)
-    .resize_outputs(false)
-    .declare_static_shape(r_values.sizes(), /*squash_dims=*/0)
-    .build();
+  const auto copy_iter =
+      TensorIteratorConfig()
+          .add_output(r_values)
+          .add_input(t_v)
+          .resize_outputs(false)
+          .declare_static_shape(r_values.sizes(), /*squash_dims=*/0)
+          .build();
 
   at::parallel_for(0, r_nnz, 0, [&](int64_t start, int64_t end) {
     TensorIterator copy_iter_local(copy_iter);
     const auto r_values_data = reinterpret_cast<char*>(r_values.data_ptr());
     const auto t_values_data = reinterpret_cast<char*>(t_v.data_ptr());
-    const auto r_values_stride = r_values.strides()[0] * r_values.element_size();
+    const auto r_values_stride =
+        r_values.strides()[0] * r_values.element_size();
     const auto t_values_stride = t_v.strides()[0] * t_v.element_size();
 
     for (const auto i : c10::irange(start, end)) {
@@ -867,21 +894,20 @@ Tensor empty_like_sparse_coo(
     c10::optional<Device> device,
     c10::optional<bool> pin_memory,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  TensorOptions options_ = TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(pin_memory);
+  TensorOptions options_ =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   TORCH_CHECK(
-    !(options_.has_memory_format() && optional_memory_format.has_value()),
-    "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
-    "the redundant setter.");
+      !(options_.has_memory_format() && optional_memory_format.has_value()),
+      "Cannot set memory_format both in TensorOptions and explicit argument; please delete "
+      "the redundant setter.");
 
-  TensorOptions options =
-      self.options()
-          .merge_in(options_)
-          .merge_memory_format(optional_memory_format);
+  TensorOptions options = self.options().merge_in(options_).merge_memory_format(
+      optional_memory_format);
 
   TORCH_CHECK(
-      !(options.layout() != kStrided &&
-          optional_memory_format.has_value()),
+      !(options.layout() != kStrided && optional_memory_format.has_value()),
       "memory format option is only supported by strided tensors");
 
   if (options.layout() == kSparse) {
@@ -890,7 +916,8 @@ Tensor empty_like_sparse_coo(
         self.sizes(), self.sparse_dim(), self.dense_dim());
     return result;
   } else {
-    return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
+    return at::native::empty_like(
+        self, dtype, layout, device, pin_memory, optional_memory_format);
   }
 }
 

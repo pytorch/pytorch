@@ -11,7 +11,10 @@ namespace {
 
 using namespace api::utils;
 
-Tensor pad2d(const Tensor& self_arg, IntArrayRef padding, const api::Shader::Descriptor& shader_descriptor,
+Tensor pad2d(
+    const Tensor& self_arg,
+    IntArrayRef padding,
+    const api::Shader::Descriptor& shader_descriptor,
     const std::string& op_name) {
   const int pad_dim = padding.size();
   const IntArrayRef input_size = self_arg.sizes();
@@ -67,12 +70,10 @@ Tensor pad2d(const Tensor& self_arg, IntArrayRef padding, const api::Shader::Des
       } block{
           v_output.extents(),
           0u,
-          {
-            safe_downcast<uint32_t>(pad_left),
-            safe_downcast<uint32_t>(pad_right),
-            safe_downcast<uint32_t>(pad_top),
-            safe_downcast<uint32_t>(pad_bottom)
-          },
+          {safe_downcast<uint32_t>(pad_left),
+           safe_downcast<uint32_t>(pad_right),
+           safe_downcast<uint32_t>(pad_top),
+           safe_downcast<uint32_t>(pad_bottom)},
       };
 
       context->dispatch(
@@ -105,18 +106,27 @@ Tensor pad2d(const Tensor& self_arg, IntArrayRef padding, const api::Shader::Des
 }
 
 Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
-  return pad2d(self_arg, padding, VK_KERNEL(reflection_pad2d), "aten::reflection_pad2d");
+  return pad2d(
+      self_arg, padding, VK_KERNEL(reflection_pad2d), "aten::reflection_pad2d");
 }
 
 Tensor replication_pad2d(const Tensor& self_arg, IntArrayRef padding) {
-  return pad2d(self_arg, padding, VK_KERNEL(replication_pad2d), "aten::replication_pad2d");
+  return pad2d(
+      self_arg,
+      padding,
+      VK_KERNEL(replication_pad2d),
+      "aten::replication_pad2d");
 }
 
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::reflection_pad2d"), TORCH_FN(reflection_pad2d));
-  m.impl(TORCH_SELECTIVE_NAME("aten::replication_pad2d"), TORCH_FN(replication_pad2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::reflection_pad2d"),
+      TORCH_FN(reflection_pad2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::replication_pad2d"),
+      TORCH_FN(replication_pad2d));
 }
 
 #endif /* USE_VULKAN_API */

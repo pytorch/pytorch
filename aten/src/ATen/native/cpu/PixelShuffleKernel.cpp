@@ -1,12 +1,13 @@
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/cpu/utils.h>
-#include <ATen/native/cpu/PixelShuffleKernel.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/PixelShuffleKernel.h>
+#include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -38,14 +39,16 @@ void cpu_pixel_shuffle(
   // output tensor shape of [n, c, h, s1, w, s2]
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
     int64_t n{0}, c{0}, h{0}, s1{0}, w{0}, s2{0};
-    data_index_init(begin, n, nbatch, c, sub_channels, h, height, s1, S, w, width, s2, S);
+    data_index_init(
+        begin, n, nbatch, c, sub_channels, h, height, s1, S, w, width, s2, S);
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + c * stride_c + s1 * stride_s1 +
           s2 * stride_s2 + h * stride_h + w;
       output_data[i] = input_data[input_offset];
 
-      data_index_step(n, nbatch, c, sub_channels, h, height, s1, S, w, width, s2, S);
+      data_index_step(
+          n, nbatch, c, sub_channels, h, height, s1, S, w, width, s2, S);
     }
   });
 }
@@ -55,8 +58,9 @@ void cpu_pixel_shuffle_channels_last(
     Tensor& output,
     const Tensor& input,
     int64_t upscale_factor) {
-  TORCH_CHECK(input.ndimension() == 4,
-              "pixel shuffle with channels last format supports tensors with 4 dims");
+  TORCH_CHECK(
+      input.ndimension() == 4,
+      "pixel shuffle with channels last format supports tensors with 4 dims");
   auto input_data = input.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
@@ -72,24 +76,27 @@ void cpu_pixel_shuffle_channels_last(
   using Vec = vec::Vectorized<scalar_t>;
   at::parallel_for(0, nbatch * height, 0, [&](int64_t begin, int64_t end) {
     // temp buffer holding each channel lane
-    std::unique_ptr<scalar_t []> buffer(new scalar_t[channels]);
+    std::unique_ptr<scalar_t[]> buffer(new scalar_t[channels]);
     scalar_t* buffer_ptr = buffer.get();
 
     int64_t n{0}, h{0};
     data_index_init(begin, n, nbatch, h, height);
     for (const auto i : c10::irange(begin, end)) {
       for (const auto w : c10::irange(width)) {
-        scalar_t* input_ptr = input_data + n * height * width * channels + h * width * channels + w * channels;
+        scalar_t* input_ptr = input_data + n * height * width * channels +
+            h * width * channels + w * channels;
 
         // step 1: transpose each channel lane
         //   from: [c, s1*s2]
         //   to:   [s1*s2, c]
-        utils::transpose(sub_channels, S * S, input_ptr, S * S, buffer_ptr, sub_channels);
+        utils::transpose(
+            sub_channels, S * S, input_ptr, S * S, buffer_ptr, sub_channels);
 
         // step 2: copy from temp buffer to output
         for (const auto s1 : c10::irange(S)) {
           scalar_t* x_ptr = buffer_ptr + s1 * S * sub_channels;
-          scalar_t* y_ptr = output_data + i * width * channels + s1 * width * S * sub_channels + w * S * sub_channels;
+          scalar_t* y_ptr = output_data + i * width * channels +
+              s1 * width * S * sub_channels + w * S * sub_channels;
 
           int64_t size = S * sub_channels;
           int64_t d = 0;
@@ -137,14 +144,16 @@ void cpu_pixel_unshuffle(
   // output tensor shape of [n, c, s1, s2, h, w]
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
     int64_t n{0}, c{0}, s1{0}, s2{0}, h{0}, w{0};
-    data_index_init(begin, n, nbatch, c, sub_channels, s1, S, s2, S, h, height, w, width);
+    data_index_init(
+        begin, n, nbatch, c, sub_channels, s1, S, s2, S, h, height, w, width);
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + c * stride_c + h * stride_h +
           s1 * stride_s1 + w * stride_w + s2 * stride_s2;
       output_data[i] = input_data[input_offset];
 
-      data_index_step(n, nbatch, c, sub_channels, s1, S, s2, S, h, height, w, width);
+      data_index_step(
+          n, nbatch, c, sub_channels, s1, S, s2, S, h, height, w, width);
     }
   });
 }
@@ -154,8 +163,9 @@ void cpu_pixel_unshuffle_channels_last(
     Tensor& output,
     const Tensor& input,
     int64_t downscale_factor) {
-  TORCH_CHECK(input.ndimension() == 4,
-              "pixel unshuffle with channels last format supports tensors with 4 dims");
+  TORCH_CHECK(
+      input.ndimension() == 4,
+      "pixel unshuffle with channels last format supports tensors with 4 dims");
   auto input_data = input.data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
@@ -179,14 +189,16 @@ void cpu_pixel_unshuffle_channels_last(
   // output tensor shape of [n, h, w, c, s1, s2]
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
     int64_t n{0}, h{0}, w{0}, c{0}, s1{0}, s2{0};
-    data_index_init(begin, n, nbatch, h, height, w, width, c, sub_channels, s1, S, s2, S);
+    data_index_init(
+        begin, n, nbatch, h, height, w, width, c, sub_channels, s1, S, s2, S);
 
     for (const auto i : c10::irange(begin, end)) {
       int64_t input_offset = n * stride_n + h * stride_h + s1 * stride_s1 +
           w * stride_w + s2 * stride_s2 + c * stride_c;
       output_data[i] = input_data[input_offset];
 
-      data_index_step(n, nbatch, h, height, w, width, c, sub_channels, s1, S, s2, S);
+      data_index_step(
+          n, nbatch, h, height, w, width, c, sub_channels, s1, S, s2, S);
     }
   });
 }
@@ -197,21 +209,32 @@ void pixel_shuffle_kernel_impl(
     int64_t upscale_factor) {
   switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
-          input.scalar_type(), "pixel_shuffle", [&] {
-        cpu_pixel_shuffle<scalar_t>(output, input, upscale_factor);
-      });
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+          ScalarType::Bool,
+          ScalarType::BFloat16,
+          ScalarType::Half,
+          input.scalar_type(),
+          "pixel_shuffle",
+          [&] { cpu_pixel_shuffle<scalar_t>(output, input, upscale_factor); });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
-          input.scalar_type(), "pixel_shuffle_channels_last", [&] {
-        cpu_pixel_shuffle_channels_last<scalar_t>(output, input, upscale_factor);
-      });
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+          ScalarType::Bool,
+          ScalarType::BFloat16,
+          ScalarType::Half,
+          input.scalar_type(),
+          "pixel_shuffle_channels_last",
+          [&] {
+            cpu_pixel_shuffle_channels_last<scalar_t>(
+                output, input, upscale_factor);
+          });
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -223,23 +246,36 @@ void pixel_unshuffle_kernel_impl(
     case at::MemoryFormat::Contiguous: {
       // input tensor shape of [N, C, Hr, Wr]
       // output tensor shape of [N, Crr, H, W]
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
-          input.scalar_type(), "pixel_unshuffle", [&] {
-        cpu_pixel_unshuffle<scalar_t>(output, input, downscale_factor);
-      });
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+          ScalarType::Bool,
+          ScalarType::BFloat16,
+          ScalarType::Half,
+          input.scalar_type(),
+          "pixel_unshuffle",
+          [&] {
+            cpu_pixel_unshuffle<scalar_t>(output, input, downscale_factor);
+          });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
       // input tensor shape of [N, Hr, Wr, C]
       // output tensor shape of [N, H, W, Crr]
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half,
-          input.scalar_type(), "pixel_unshuffle_channels_last", [&] {
-        cpu_pixel_unshuffle_channels_last<scalar_t>(output, input, downscale_factor);
-      });
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+          ScalarType::Bool,
+          ScalarType::BFloat16,
+          ScalarType::Half,
+          input.scalar_type(),
+          "pixel_unshuffle_channels_last",
+          [&] {
+            cpu_pixel_unshuffle_channels_last<scalar_t>(
+                output, input, downscale_factor);
+          });
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -248,4 +284,5 @@ void pixel_unshuffle_kernel_impl(
 REGISTER_DISPATCH(pixel_shuffle_kernel, &pixel_shuffle_kernel_impl);
 REGISTER_DISPATCH(pixel_unshuffle_kernel, &pixel_unshuffle_kernel_impl);
 
-}} // at::native
+} // namespace native
+} // namespace at

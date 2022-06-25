@@ -1,10 +1,10 @@
 #pragma once
 
-#include <c10/macros/Macros.h>
-#include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
+#include <torch/library.h>
 
 namespace at {
 namespace impl {
@@ -19,7 +19,6 @@ bool dispatch_mode_enabled();
 bool tensor_has_dispatch(const at::Tensor& t);
 bool tensorlist_has_dispatch(const at::TensorList& li);
 bool tensorlist_has_dispatch(const c10::List<c10::optional<at::Tensor>>& li);
-
 
 } // namespace impl
 } // namespace at

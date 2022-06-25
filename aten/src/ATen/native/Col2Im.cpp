@@ -137,8 +137,8 @@ static void col2im_out_cpu_template(
   output.resize_({batch_size, n_output_plane, output_height, output_width});
   output.zero_();
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf,
-      input.scalar_type(), "col2im_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+      kBFloat16, kHalf, input.scalar_type(), "col2im_out_cpu", [&] {
         Tensor input_n = Tensor();
         Tensor output_n = Tensor();
 
@@ -193,7 +193,8 @@ void col2im_backward_out_cpu_template(
 
 } // namespace
 
-Tensor& col2im_out_cpu(const Tensor& input,
+Tensor& col2im_out_cpu(
+    const Tensor& input,
     IntArrayRef output_size,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
@@ -219,7 +220,8 @@ Tensor col2im_cpu(
   return output;
 }
 
-Tensor& col2im_backward_out_cpu(const Tensor& grad_output,
+Tensor& col2im_backward_out_cpu(
+    const Tensor& grad_output,
     IntArrayRef kernel_size,
     IntArrayRef dilation,
     IntArrayRef padding,
@@ -236,7 +238,8 @@ Tensor col2im_backward_cpu(
     IntArrayRef dilation,
     IntArrayRef padding,
     IntArrayRef stride) {
-  Tensor grad_input = at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  Tensor grad_input =
+      at::empty_like(grad_output, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
   col2im_backward_out_cpu_template(
       grad_input, grad_output, kernel_size, dilation, padding, stride);

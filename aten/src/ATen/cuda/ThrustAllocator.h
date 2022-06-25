@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstddef>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <cstddef>
 
 namespace at {
 namespace cuda {
@@ -9,7 +9,7 @@ namespace cuda {
 /// Allocator for Thrust to re-route its internal device allocations
 /// to the THC allocator
 class ThrustAllocator {
-public:
+ public:
   typedef char value_type;
 
   char* allocate(std::ptrdiff_t size) {
@@ -21,5 +21,5 @@ public:
   }
 };
 
-}
-}
+} // namespace cuda
+} // namespace at

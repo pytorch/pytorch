@@ -1,8 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/util/irange.h>
@@ -23,9 +23,12 @@ static int64_t override_call_count = 0;
 
 // Mode implementation
 
-void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void generic_mode_fallback(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) {
   override_call_count++;
-  c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
+  c10::impl::ExcludeDispatchKeyGuard guard(
+      DispatchKey::TESTING_ONLY_GenericMode);
   op.callBoxed(stack);
 }
 
@@ -33,18 +36,20 @@ void generic_mode_fallback(const c10::OperatorHandle& op, torch::jit::Stack* sta
 
 struct GenericWrapperTensorImpl : public c10::TensorImpl {
   explicit GenericWrapperTensorImpl(at::Tensor rep)
-    : TensorImpl(
-        c10::DispatchKeySet(c10::DispatchKey::TESTING_ONLY_GenericWrapper),
-        rep.dtype(),
-        rep.device()
-        // TODO: propagate size!
-      )
-    , rep_(std::move(rep)) {}
+      : TensorImpl(
+            c10::DispatchKeySet(c10::DispatchKey::TESTING_ONLY_GenericWrapper),
+            rep.dtype(),
+            rep.device()
+            // TODO: propagate size!
+            ),
+        rep_(std::move(rep)) {}
 
   at::Tensor rep_;
 };
 
-void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
+void generic_wrapper_fallback(
+    const c10::OperatorHandle& op,
+    torch::jit::Stack* stack) {
   override_call_count++;
 
   auto num_arguments = op.schema().arguments().size();
@@ -58,7 +63,7 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
       auto* impl = args[i].unsafeToTensorImpl();
       if (impl->key_set().has(DispatchKey::TESTING_ONLY_GenericWrapper)) {
         auto* wrapper = static_cast<GenericWrapperTensorImpl*>(impl);
-        torch::jit::push(*stack, wrapper->rep_);  // no move!
+        torch::jit::push(*stack, wrapper->rep_); // no move!
       } else {
         torch::jit::push(*stack, std::move(args[i]));
       }
@@ -74,7 +79,10 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
   for (const auto i : c10::irange(num_returns)) {
     // TODO: Handle tensor list
     if (rets[i].isTensor()) {
-      torch::jit::push(*stack, at::detail::make_tensor<GenericWrapperTensorImpl>(std::move(rets[i]).toTensor()));  // yes move!
+      torch::jit::push(
+          *stack,
+          at::detail::make_tensor<GenericWrapperTensorImpl>(
+              std::move(rets[i]).toTensor())); // yes move!
     } else {
       torch::jit::push(*stack, std::move(rets[i]));
     }
@@ -84,9 +92,11 @@ void generic_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* 
 #ifndef ATEN_CPU_STATIC_DISPATCH
 TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+  m.fallback(
+      torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
 
-  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
+  c10::impl::IncludeDispatchKeyGuard guard(
+      DispatchKey::TESTING_ONLY_GenericMode);
 
   override_call_count = 0;
   Tensor a = ones({5, 5}, kDouble);
@@ -96,22 +106,27 @@ TEST(BackendFallbackTest, TestBackendFallbackWithMode) {
 
 TEST(BackendFallbackTest, TestBackendFallbackWithWrapper) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericWrapper);
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&generic_wrapper_fallback>());
+  m.fallback(
+      torch::CppFunction::makeFromBoxedFunction<&generic_wrapper_fallback>());
 
   override_call_count = 0;
-  Tensor a = at::detail::make_tensor<GenericWrapperTensorImpl>(ones({5, 5}, kDouble));
+  Tensor a =
+      at::detail::make_tensor<GenericWrapperTensorImpl>(ones({5, 5}, kDouble));
   Tensor b = batch_norm(a, {}, {}, {}, {}, true, 0.1, 1e-05, false);
   ASSERT_EQ(override_call_count, 1);
 }
 
 TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
   auto m = MAKE_TORCH_LIBRARY_IMPL(aten, TESTING_ONLY_GenericMode);
-  m.impl("mul.Tensor", torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
+  m.impl(
+      "mul.Tensor",
+      torch::CppFunction::makeFromBoxedFunction<&generic_mode_fallback>());
 
   auto gm = MAKE_TORCH_LIBRARY_IMPL(_, TESTING_ONLY_GenericMode);
   gm.fallback(torch::CppFunction::makeFallthrough());
 
-  c10::impl::IncludeDispatchKeyGuard guard(DispatchKey::TESTING_ONLY_GenericMode);
+  c10::impl::IncludeDispatchKeyGuard guard(
+      DispatchKey::TESTING_ONLY_GenericMode);
 
   override_call_count = 0;
   // Doesn't trigger, as we fallthrough
@@ -123,4 +138,4 @@ TEST(BackendFallbackTest, TestFallthroughBackendFallback) {
 }
 #endif // ATEN_CPU_STATIC_DISPATCH
 
-}
+} // namespace

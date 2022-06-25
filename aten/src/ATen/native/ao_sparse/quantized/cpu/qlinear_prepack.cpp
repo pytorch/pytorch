@@ -2,10 +2,10 @@
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 
-#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/qnnpack_utils.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
 
 #include <algorithm>
 
@@ -41,12 +41,11 @@ void calc_col_offsets_transpose(
 }
 } // namespace
 
-c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
-    prepack(
-        const at::Tensor& weight,
-        const c10::optional<at::Tensor>& bias,
-        const int64_t out_features_block_size,
-        const int64_t in_features_block_size) {
+c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::prepack(
+    const at::Tensor& weight,
+    const c10::optional<at::Tensor>& bias,
+    const int64_t out_features_block_size,
+    const int64_t in_features_block_size) {
   TORCH_CHECK(
       weight.dim() == 2,
       "The weight tensor for ao::sparse::qlinear_prepack (fbgemm) should"
@@ -121,12 +120,11 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
 #endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
-c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightQnnp::
-    prepack(
-        const at::Tensor& weight,
-        const c10::optional<at::Tensor>& bias,
-        const int64_t out_features_block_size,
-        const int64_t in_features_block_size) {
+c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightQnnp::prepack(
+    const at::Tensor& weight,
+    const c10::optional<at::Tensor>& bias,
+    const int64_t out_features_block_size,
+    const int64_t in_features_block_size) {
   at::native::initQNNPACK();
   return c10::make_intrusive<PackedLinearWeightQnnp>(
       weight, bias, out_features_block_size, in_features_block_size);
@@ -138,9 +136,7 @@ PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     const c10::optional<at::Tensor>& bias,
     const int64_t out_features_block_size,
     const int64_t in_features_block_size)
-    : LinearPackedParamsBase(
-          out_features_block_size,
-          in_features_block_size),
+    : LinearPackedParamsBase(out_features_block_size, in_features_block_size),
       orig_weight_(weight),
       orig_bias_(bias) {
   TORCH_CHECK(
@@ -231,5 +227,6 @@ TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
       TORCH_SELECTIVE_NAME("sparse::qlinear_prepack"),
       TORCH_FN(QLinearPackWeightInt8::run));
 }
-}  // namespace
-}}  // namespace ao::sparse
+} // namespace
+} // namespace sparse
+} // namespace ao

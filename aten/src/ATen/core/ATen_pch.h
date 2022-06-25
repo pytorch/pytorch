@@ -17,12 +17,14 @@
 
 // To generate the initial list:
 // 1. Build pytorch from scratch with all build caching disabled
-// 2. Generate a build trace with ninjatracing (https://github.com/nico/ninjatracing)
+// 2. Generate a build trace with ninjatracing
+// (https://github.com/nico/ninjatracing)
 //    $ ninjatracing /path/to/pytorch/build/.ninja_log > trace_all.json
 // 3. Run pch_gen.py from https://github.com/peterbell10/build_analysis/
-//    $ python pch_gen.py --threshold .80 --target torch_cpu --build_dir /path/to/pytorch/build --trace trace_all.json
-//    Where the threshold can be tweaked until c10 and some of ATen
-//    core are included but TORCH_ASSERT_NO_OPERATORS still passes.
+//    $ python pch_gen.py --threshold .80 --target torch_cpu --build_dir
+//    /path/to/pytorch/build --trace trace_all.json Where the threshold can be
+//    tweaked until c10 and some of ATen core are included but
+//    TORCH_ASSERT_NO_OPERATORS still passes.
 
 #include <cassert>
 #include <cctype>

@@ -9,11 +9,18 @@ namespace at {
 namespace native {
 
 void launch_fused_mode_kernel(
-    const TensorBase &values, const TensorBase &indices,
-    const TensorBase &self, int64_t slice_size, int64_t slices);
+    const TensorBase& values,
+    const TensorBase& indices,
+    const TensorBase& self,
+    int64_t slice_size,
+    int64_t slices);
 
 void launch_apply_mode_kernel(
-    const TensorBase &values, const TensorBase &indices,
-    const TensorBase &self, int64_t dim, int64_t ndim);
+    const TensorBase& values,
+    const TensorBase& indices,
+    const TensorBase& self,
+    int64_t dim,
+    int64_t ndim);
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

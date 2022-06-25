@@ -4,8 +4,8 @@
 
 #ifdef USE_XNNPACK
 
-#include <xnnpack.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <xnnpack.h>
 
 namespace at {
 namespace native {
@@ -55,18 +55,17 @@ struct ContextConv2D final {
       std::array<int64_t, 2> dilation,
       bool transposed,
       int64_t groups)
-      :  op(std::move(o)),
-         weight_size_(weight_size),
-         padding_(padding),
-         output_padding_(output_padding),
-         stride_(stride),
-         dilation_(dilation),
-         transposed_(transposed),
-         groups_(groups) {}
+      : op(std::move(o)),
+        weight_size_(weight_size),
+        padding_(padding),
+        output_padding_(output_padding),
+        stride_(stride),
+        dilation_(dilation),
+        transposed_(transposed),
+        groups_(groups) {}
   static constexpr float kMin = -std::numeric_limits<float>::infinity();
   static constexpr float kMax = std::numeric_limits<float>::infinity();
 };
-
 
 bool available();
 
@@ -83,9 +82,10 @@ struct Layout final {
 
   // ND Activation Maps
   struct ActivationND final {
-    // Some operators may not be limited to 4 dimensional tensors. In that scenario,
-    // XNNPACK denotes that operator with an _nc suffix and expects all dimensions,
-    // except channels, to be flattened into one argument: batch_size.
+    // Some operators may not be limited to 4 dimensional tensors. In that
+    // scenario, XNNPACK denotes that operator with an _nc suffix and expects
+    // all dimensions, except channels, to be flattened into one argument:
+    // batch_size.
     static int64_t batch(const IntArrayRef tensor) {
       if (C10_UNLIKELY(tensor.empty())) {
         return -1;

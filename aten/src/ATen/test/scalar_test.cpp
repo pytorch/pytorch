@@ -17,7 +17,7 @@ using namespace at;
 
 constexpr auto Float = ScalarType::Float;
 
-template<typename scalar_type>
+template <typename scalar_type>
 struct Foo {
   static void apply(Tensor a, Tensor b) {
     scalar_type s = 1;
@@ -27,7 +27,7 @@ struct Foo {
     (void)data;
   }
 };
-template<>
+template <>
 struct Foo<Half> {
   static void apply(Tensor a, Tensor b) {}
 };
@@ -102,8 +102,11 @@ TEST(TestScalar, TestScalar) {
   test_overflow();
 
   if (at::hasCUDA()) {
-    auto r = next_h.to(at::Device(kCUDA), kFloat, /*non_blocking=*/ false, /*copy=*/ true);
-    ASSERT_TRUE(r.to(at::Device(kCPU), kFloat, /*non_blocking=*/ false, /*copy=*/ true).equal(next_h));
+    auto r = next_h.to(
+        at::Device(kCUDA), kFloat, /*non_blocking=*/false, /*copy=*/true);
+    ASSERT_TRUE(
+        r.to(at::Device(kCPU), kFloat, /*non_blocking=*/false, /*copy=*/true)
+            .equal(next_h));
   }
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(randn({10, 10, 2}, options));
@@ -118,8 +121,7 @@ TEST(TestScalar, TestScalar) {
       scalar_t s = 1;
       std::stringstream ss;
       // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
-      ASSERT_NO_THROW(
-          ss << "hello, dispatch" << x.toString() << s << "\n");
+      ASSERT_NO_THROW(ss << "hello, dispatch" << x.toString() << s << "\n");
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
     });
@@ -144,7 +146,8 @@ TEST(TestScalar, TestConj) {
 
   ASSERT_EQ(int_scalar.conj().toInt(), 257);
   ASSERT_EQ(float_scalar.conj().toDouble(), 3.0);
-  ASSERT_EQ(complex_scalar.conj().toComplexDouble(), c10::complex<double>(2.3, -3.5));
+  ASSERT_EQ(
+      complex_scalar.conj().toComplexDouble(), c10::complex<double>(2.3, -3.5));
 }
 
 TEST(TestScalar, TestEqual) {
@@ -153,7 +156,8 @@ TEST(TestScalar, TestEqual) {
   ASSERT_FALSE(Scalar(true).equal(1.0));
   ASSERT_TRUE(Scalar(true).equal(true));
 
-  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 5.0}).equal(c10::complex<double>{2.0, 5.0}));
+  ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 5.0})
+                  .equal(c10::complex<double>{2.0, 5.0}));
   ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 0}).equal(2.0));
   ASSERT_TRUE(Scalar(c10::complex<double>{2.0, 0}).equal(2));
 
@@ -168,7 +172,7 @@ TEST(TestScalar, TestEqual) {
 }
 
 TEST(TestScalar, TestFormatting) {
-  auto format = [] (Scalar a) {
+  auto format = [](Scalar a) {
     std::ostringstream str;
     str << a;
     return str.str();

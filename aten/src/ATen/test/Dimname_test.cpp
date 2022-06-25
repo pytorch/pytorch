@@ -4,9 +4,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 
+using at::Dimname;
 using at::NameType;
 using at::Symbol;
-using at::Dimname;
 
 TEST(DimnameTest, isValidIdentifier) {
   ASSERT_TRUE(Dimname::isValidName("a"));

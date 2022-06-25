@@ -7,14 +7,12 @@
 namespace at {
 
 BatchedTensorImpl::BatchedTensorImpl(Tensor value, BatchDims bdims)
-  : TensorImpl(
-      c10::DispatchKeySet(DispatchKey::Batched),
-      value.dtype(),
-      value.device()
-    )
-  , value_(std::move(value))
-  , bdims_(std::move(bdims))
-{
+    : TensorImpl(
+          c10::DispatchKeySet(DispatchKey::Batched),
+          value.dtype(),
+          value.device()),
+      value_(std::move(value)),
+      bdims_(std::move(bdims)) {
   TORCH_INTERNAL_ASSERT(value_.defined());
   set_storage_access_should_throw();
   set_sizes_strides_policy(SizesStridesPolicy::CustomStrides);
@@ -42,10 +40,10 @@ int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   auto is_bdim = createBatchDimBitset(bdims_);
 
   // Example: assume dim = 3, and is_bdim = 10010011000...
-  // The 1's are batch dims and 0's are normal dims of the underlying value_ Tensor.
-  // actualDim gives us the index of `dim` in the `value_` Tensor, which is equivalent
-  // to asking "where does the 3rd (0-indexed) zero occur in the bitset?".
-  // The answer to that is index 5.
+  // The 1's are batch dims and 0's are normal dims of the underlying value_
+  // Tensor. actualDim gives us the index of `dim` in the `value_` Tensor, which
+  // is equivalent to asking "where does the 3rd (0-indexed) zero occur in the
+  // bitset?". The answer to that is index 5.
   //
   // TODO(rzou): the PDEP instruction does exactly this
   // (https://stackoverflow.com/questions/7669057/find-nth-set-bit-in-an-int)
@@ -84,8 +82,10 @@ IntArrayRef BatchedTensorImpl::strides_custom() const {
 
 // TODO: implement proper contiguity on batched tensor, then put
 // sizes_strides_policy back to Default
-bool BatchedTensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  TORCH_CHECK(memory_format == MemoryFormat::Contiguous,
+bool BatchedTensorImpl::is_contiguous_custom(
+    at::MemoryFormat memory_format) const {
+  TORCH_CHECK(
+      memory_format == MemoryFormat::Contiguous,
       "NYI: querying is_contiguous inside of vmap for memory_format ",
       "other than torch.contiguous_format");
   return is_contiguous_;
@@ -100,11 +100,13 @@ void BatchedTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
   TORCH_INTERNAL_ASSERT(false, "Can't set_stride for BatchedTensorImpl");
 }
 void BatchedTensorImpl::set_storage_offset(int64_t storage_offset) {
-  TORCH_INTERNAL_ASSERT(false, "Can't set_storage_offset for BatchedTensorImpl");
+  TORCH_INTERNAL_ASSERT(
+      false, "Can't set_storage_offset for BatchedTensorImpl");
 }
 #ifdef DEBUG
 bool BatchedTensorImpl::has_storage() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "BatchedTensorImpl assumes that storage_ is never set");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !storage_, "BatchedTensorImpl assumes that storage_ is never set");
   return false;
 }
 #endif
@@ -118,12 +120,18 @@ Tensor makeBatched(const Tensor& tensor, BatchDims bdims) {
   auto tensor_dim = tensor.dim();
   TORCH_CHECK(
       tensor_dim <= kVmapMaxTensorDims,
-      "vmap only supports tensors of dimensionality up to ", kVmapMaxTensorDims,
-      "; got a tensor with dim ", tensor_dim);
+      "vmap only supports tensors of dimensionality up to ",
+      kVmapMaxTensorDims,
+      "; got a tensor with dim ",
+      tensor_dim);
   TORCH_INTERNAL_ASSERT(
-      std::all_of(bdims.begin(), bdims.end(),
+      std::all_of(
+          bdims.begin(),
+          bdims.end(),
           [](const BatchDim& bdim) { return bdim.level() < kVmapNumLevels; }),
-      "We only support up to ", kVmapNumLevels, " nested vmaps");
+      "We only support up to ",
+      kVmapNumLevels,
+      " nested vmaps");
   return at::detail::make_tensor<BatchedTensorImpl>(tensor, std::move(bdims));
 }
 

@@ -1,8 +1,8 @@
 
 #pragma once
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
 
@@ -40,8 +40,10 @@ class Vectorized<ComplexFlt> {
 
   C10_ALWAYS_INLINE Vectorized(vfloat32 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vfloat32 v1, vfloat32 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vfloat32 v1, vfloat32 v2)
+      : _vec0{v1}, _vec1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2)
+      : _vecb0{v1}, _vecb1{v2} {}
 
   Vectorized(ComplexFlt val) {
     float real_value = val.real();
@@ -50,7 +52,11 @@ class Vectorized<ComplexFlt> {
     _vec1 = vfloat32{real_value, imag_value, real_value, imag_value};
   }
 
-  Vectorized(ComplexFlt val1, ComplexFlt val2, ComplexFlt val3, ComplexFlt val4) {
+  Vectorized(
+      ComplexFlt val1,
+      ComplexFlt val2,
+      ComplexFlt val3,
+      ComplexFlt val4) {
     _vec0 = vfloat32{val1.real(), val1.imag(), val2.real(), val2.imag()};
     _vec1 = vfloat32{val3.real(), val3.imag(), val4.real(), val4.imag()};
   }
@@ -451,7 +457,8 @@ class Vectorized<ComplexFlt> {
     return Vectorized(pi_2) - asin();
   }
 
-  Vectorized<ComplexFlt> inline operator*(const Vectorized<ComplexFlt>& b) const {
+  Vectorized<ComplexFlt> inline operator*(
+      const Vectorized<ComplexFlt>& b) const {
     //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
 
 #if 1
@@ -476,7 +483,8 @@ class Vectorized<ComplexFlt> {
 #endif
   }
 
-  Vectorized<ComplexFlt> inline operator/(const Vectorized<ComplexFlt>& b) const {
+  Vectorized<ComplexFlt> inline operator/(
+      const Vectorized<ComplexFlt>& b) const {
     // re + im*i = (a + bi)  / (c + di)
     // re = (ac + bd)/abs_2()
     // im = (bc - ad)/abs_2()
@@ -543,11 +551,11 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> hypot(const Vectorized<ComplexFlt>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexFlt> nextafter(const Vectorized<ComplexFlt>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexFlt> igamma(const Vectorized<ComplexFlt>& x) const {
@@ -559,21 +567,21 @@ class Vectorized<ComplexFlt> {
   }
 
   Vectorized<ComplexFlt> atan2(const Vectorized<ComplexFlt>& b) const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<ComplexFlt> erf() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<ComplexFlt> erfc() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexFlt> log1p() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexFlt> expm1() const {
-    TORCH_CHECK(false,"not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexFlt> operator<(const Vectorized<ComplexFlt>& other) const {
@@ -658,6 +666,6 @@ Vectorized<ComplexFlt> inline minimum(
   // return _mm256_or_ps(min, isnan);
 }
 
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

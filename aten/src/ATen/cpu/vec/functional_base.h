@@ -6,7 +6,8 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace vec {
+namespace at {
+namespace vec {
 
 // slow path
 template <typename scalar_t, typename Op>
@@ -29,12 +30,15 @@ inline scalar_t vec_reduce_all(
 
 template <typename scalar_t, typename Op>
 struct VecReduceAllSIMD {
-  static inline scalar_t apply(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
+  static inline scalar_t apply(
+      const Op& vec_fun,
+      Vectorized<scalar_t> acc_vec) {
     return vec_reduce_all(vec_fun, acc_vec, Vectorized<scalar_t>::size());
   }
 };
 
-#if defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
+#if defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && \
+    !defined(C10_MOBILE)
 #if defined(CPU_CAPABILITY_AVX2)
 template <typename Op>
 struct VecReduceAllSIMD<float, Op> {
@@ -76,15 +80,21 @@ struct VecReduceAllSIMD<float, Op> {
   }
 };
 #endif // defined(CPU_CAPABILITY_AVX512)
-#endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) && !defined(C10_MOBILE)
+#endif // defined(__GNUC__) && (__GNUC__ > 5) && !defined(_MSC_VER) &&
+       // !defined(C10_MOBILE)
 
 template <typename scalar_t, typename Op>
-inline scalar_t vec_reduce_all(const Op& vec_fun, Vectorized<scalar_t> acc_vec) {
+inline scalar_t vec_reduce_all(
+    const Op& vec_fun,
+    Vectorized<scalar_t> acc_vec) {
   return VecReduceAllSIMD<scalar_t, Op>::apply(vec_fun, acc_vec);
 }
 
 template <typename scalar_t, typename Op>
-inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size) {
+inline scalar_t reduce_all(
+    const Op& vec_fun,
+    const scalar_t* data,
+    int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
   if (size < Vec::size())
     return vec_reduce_all(vec_fun, Vec::loadu(data, size), size);
@@ -103,14 +113,17 @@ inline scalar_t reduce_all(const Op& vec_fun, const scalar_t* data, int64_t size
 
 // similar to reduce_all, but reduces into two outputs
 template <typename scalar_t, typename Op1, typename Op2>
-inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2& vec_fun2,
-    const scalar_t* data, int64_t size) {
+inline std::pair<scalar_t, scalar_t> reduce2_all(
+    const Op1& vec_fun1,
+    const Op2& vec_fun2,
+    const scalar_t* data,
+    int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
   if (size < Vec::size()) {
     auto loaded_data = Vec::loadu(data, size);
     return std::pair<scalar_t, scalar_t>(
-      vec_reduce_all(vec_fun1, loaded_data, size),
-      vec_reduce_all(vec_fun2, loaded_data, size));
+        vec_reduce_all(vec_fun1, loaded_data, size),
+        vec_reduce_all(vec_fun2, loaded_data, size));
   }
   int64_t d = Vec::size();
   Vec acc_vec1 = Vec::loadu(data);
@@ -126,8 +139,7 @@ inline std::pair<scalar_t, scalar_t> reduce2_all(const Op1& vec_fun1, const Op2&
     acc_vec2 = Vec::set(acc_vec2, vec_fun2(acc_vec2, data_vec), size - d);
   }
   return std::pair<scalar_t, scalar_t>(
-    vec_reduce_all(vec_fun1, acc_vec1),
-    vec_reduce_all(vec_fun2, acc_vec2));
+      vec_reduce_all(vec_fun1, acc_vec1), vec_reduce_all(vec_fun2, acc_vec2));
 }
 
 template <typename scalar_t, typename MapOp, typename ReduceOp>
@@ -317,4 +329,5 @@ inline void map4(
   }
 }
 
-}} // namespace at::vec
+} // namespace vec
+} // namespace at

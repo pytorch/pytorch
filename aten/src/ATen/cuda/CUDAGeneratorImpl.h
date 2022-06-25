@@ -1,8 +1,8 @@
 #pragma once
 
+#include <ATen/Context.h>
 #include <ATen/core/Generator.h>
 #include <ATen/cuda/detail/PhiloxCudaStateRaw.cuh>
-#include <ATen/Context.h>
 #include <limits>
 
 namespace at {
@@ -110,7 +110,7 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
 
   static DeviceType device_type();
 
-private:
+ private:
   CUDAGeneratorImpl* clone_impl() const override;
   uint64_t seed_ = default_rng_seed_val;
   uint64_t philox_offset_per_thread_ = 0;

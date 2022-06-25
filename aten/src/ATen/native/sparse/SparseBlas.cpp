@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/sparse/SparseBlas.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
@@ -10,13 +10,13 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/addmm.h>
 #include <ATen/ops/addmv_native.h>
 #include <ATen/ops/copy_native.h>
-#include <ATen/ops/mul.h>
-#include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/addmm.h>
+#include <ATen/ops/mul.h>
 #include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/scalar_tensor_native.h>
 #include <ATen/ops/sparse_sampled_addmm_native.h>
 #endif
 
@@ -80,17 +80,20 @@ Tensor& addmv_out_sparse_compressed(
 }
 
 /*
-  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
-  op(A) X = B.
+  Solves a system of linear equations whose coefficients are represented in a
+  sparse triangular matrix A: op(A) X = B.
 
   Args:
   * `B` - dense Tensor of size m × nrhs.
   * `A` - sparse Tensor of size m × m.
-  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `upper` - controls whether upper or lower triangular part of A is considered
+  in computations.
   * `transpose` - if true then op(A) = A^T.
-  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be
+  one.
   * `X` - dense Tensor of size m × nrhs.
-  * `clone_A` - cloned matrix A, required only for compatibility with strided layout interface.
+  * `clone_A` - cloned matrix A, required only for compatibility with strided
+  layout interface.
 */
 std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cpu(
     const Tensor& B,
@@ -100,12 +103,14 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cpu(
     bool unitriangular,
     Tensor& X,
     Tensor& clone_A) {
-  sparse::impl::cpu::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
+  sparse::impl::cpu::triangular_solve_out_sparse_csr(
+      A, B, X, upper, transpose, unitriangular);
   return std::tuple<Tensor&, Tensor&>(X, clone_A);
 }
 
 /*
-  Computes `result` <- α*(A @ B) * spy(C) + β*C, where spy(C) is the sparsity pattern matrix of C.
+  Computes `result` <- α*(A @ B) * spy(C) + β*C, where spy(C) is the sparsity
+  pattern matrix of C.
 
   Args:
   * `mat1` - [in] dense Tensor A of size m × k.
@@ -120,20 +125,25 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cpu(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-  at::native::sparse::sparse_sampled_addmm_check_inputs(self, mat1, mat2, beta, alpha, result);
+  at::native::sparse::sparse_sampled_addmm_check_inputs(
+      self, mat1, mat2, beta, alpha, result);
   // Allow only same types as for the CUDA path
   auto t = self.scalar_type();
-  TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float ||
-    t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
-    "sparse_sampled_addmm: Expected self to be a floating-point or complex tensor, but got ", t);
+  TORCH_CHECK(
+      t == ScalarType::Double || t == ScalarType::Float ||
+          t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
+      "sparse_sampled_addmm: Expected self to be a floating-point or complex tensor, but got ",
+      t);
   if (&result != &self) {
     // We allow self to be a single matrix when mat1 and mat2 are batched
     auto result_sizes = DimVector(mat1.sizes().slice(0, mat1.dim() - 2));
     result_sizes.push_back(self.size(-2));
     result_sizes.push_back(self.size(-1));
-    at::sparse_csr::get_sparse_csr_impl(result)->resize_(self._nnz(), result_sizes);
+    at::sparse_csr::get_sparse_csr_impl(result)->resize_(
+        self._nnz(), result_sizes);
   }
-  result.copy_((self.to_dense().mul(beta).add(mat1.matmul(mat2), alpha)).sparse_mask(self));
+  result.copy_((self.to_dense().mul(beta).add(mat1.matmul(mat2), alpha))
+                   .sparse_mask(self));
   return result;
 }
 
@@ -144,7 +154,8 @@ Tensor sparse_sampled_addmm_sparse_csr_cpu(
     const Scalar& beta,
     const Scalar& alpha) {
   auto result = at::empty({0, 0}, self.options());
-  at::native::sparse_sampled_addmm_out_sparse_csr_cpu(self, mat1, mat2, beta, alpha, result);
+  at::native::sparse_sampled_addmm_out_sparse_csr_cpu(
+      self, mat1, mat2, beta, alpha, result);
   return result;
 }
 
@@ -209,18 +220,21 @@ void sparse_sampled_addmm_check_inputs(
       "-D tensor");
 
   TORCH_CHECK(
-    mat1.sizes().slice(0, mat1.dim() - 2) == mat2.sizes().slice(0, mat2.dim() - 2),
-    "sampled_addmm: Expected mat1 and mat2 to have the same batch size, but got ",
-    mat1.sizes().slice(0, mat1.dim() - 2),
-    " and ",
-    mat2.sizes().slice(0, mat2.dim() - 2));
+      mat1.sizes().slice(0, mat1.dim() - 2) ==
+          mat2.sizes().slice(0, mat2.dim() - 2),
+      "sampled_addmm: Expected mat1 and mat2 to have the same batch size, but got ",
+      mat1.sizes().slice(0, mat1.dim() - 2),
+      " and ",
+      mat2.sizes().slice(0, mat2.dim() - 2));
 
   TORCH_CHECK(
-    !(self.dim() > 2 && self.sizes().slice(0, self.dim() - 2) != mat1.sizes().slice(0, mat1.dim() - 2)),
-    "sampled_addmm: Expected self and mat1 to have the same batch size, but got ",
-    self.sizes().slice(0, self.dim() - 2),
-    " and ",
-    mat1.sizes().slice(0, mat1.dim() - 2));
+      !(self.dim() > 2 &&
+        self.sizes().slice(0, self.dim() - 2) !=
+            mat1.sizes().slice(0, mat1.dim() - 2)),
+      "sampled_addmm: Expected self and mat1 to have the same batch size, but got ",
+      self.sizes().slice(0, self.dim() - 2),
+      " and ",
+      mat1.sizes().slice(0, mat1.dim() - 2));
 
   IntArrayRef mat1_sizes = mat1.sizes();
   IntArrayRef mat2_sizes = mat2.sizes();

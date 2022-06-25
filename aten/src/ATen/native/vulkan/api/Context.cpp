@@ -15,25 +15,21 @@ VkDevice create_device(
     const VkPhysicalDevice physical_device,
     const uint32_t compute_queue_family_index) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      physical_device,
-      "Invalid Vulkan physical device!");
+      physical_device, "Invalid Vulkan physical device!");
 
   const float queue_priorities = 1.0f;
   const VkDeviceQueueCreateInfo device_queue_create_info{
-    VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
-    nullptr,
-    0u,
-    compute_queue_family_index,
-    1u,
-    &queue_priorities,
+      VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+      nullptr,
+      0u,
+      compute_queue_family_index,
+      1u,
+      &queue_priorities,
   };
 
   uint32_t device_extension_properties_count = 0;
   VK_CHECK(vkEnumerateDeviceExtensionProperties(
-      physical_device,
-      nullptr,
-      &device_extension_properties_count,
-      nullptr));
+      physical_device, nullptr, &device_extension_properties_count, nullptr));
 
   std::vector<VkExtensionProperties> device_extension_properties(
       device_extension_properties_count);
@@ -45,10 +41,10 @@ VkDevice create_device(
       device_extension_properties.data()));
 
   constexpr const char* const requested_device_extensions[]{
-  #ifdef VK_KHR_portability_subset
-    // https://vulkan.lunarg.com/doc/view/1.2.162.0/mac/1.2-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pProperties-04451
-    VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
-  #endif
+#ifdef VK_KHR_portability_subset
+      // https://vulkan.lunarg.com/doc/view/1.2.162.0/mac/1.2-extensions/vkspec.html#VUID-VkDeviceCreateInfo-pProperties-04451
+      VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+#endif
   };
 
   std::vector<const char*> enabled_device_extensions;
@@ -63,20 +59,21 @@ VkDevice create_device(
   }
 
   const VkDeviceCreateInfo device_create_info{
-    VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-    nullptr,
-    0u,
-    1u,
-    &device_queue_create_info,
-    0u,
-    nullptr,
-    static_cast<uint32_t>(enabled_device_extensions.size()),
-    enabled_device_extensions.data(),
-    nullptr,
+      VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
+      nullptr,
+      0u,
+      1u,
+      &device_queue_create_info,
+      0u,
+      nullptr,
+      static_cast<uint32_t>(enabled_device_extensions.size()),
+      enabled_device_extensions.data(),
+      nullptr,
   };
 
   VkDevice device{};
-  VK_CHECK(vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
+  VK_CHECK(
+      vkCreateDevice(physical_device, &device_create_info, nullptr, &device));
   TORCH_CHECK(device, "Invalid Vulkan device!");
 
 #ifdef USE_VULKAN_WRAPPER
@@ -91,9 +88,7 @@ VkDevice create_device(
 VkQueue acquire_queue(
     const VkDevice device,
     const uint32_t compute_queue_family_index) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device, "Invalid Vulkan device!");
 
   VkQueue queue{};
   vkGetDeviceQueue(device, compute_queue_family_index, 0, &queue);
@@ -111,13 +106,13 @@ Context::Context(const VkInstance instance, size_t adapter_i)
       queue_(runtime()->get_adapter(adapter_i).request_queue()),
       shader_(gpu()),
       pipeline_(gpu()),
-      threadcontext_(gpu()) {
-}
+      threadcontext_(gpu()) {}
 
 Context::~Context() {
   // Let the device know the context is done with the queue
   runtime()->get_adapter(adapter_i_).return_queue(queue_);
-  // Do not call flush() since all per-thread objects will be destroyed as each thread exits
+  // Do not call flush() since all per-thread objects will be destroyed as each
+  // thread exits
 }
 
 void Context::flush() {
@@ -153,20 +148,18 @@ Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
       return new Context(runtime()->instance(), runtime()->default_adapter_i());
-    }
-    catch (const std::exception& e) {
-      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());
-    }
-    catch (...) {
-      TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: Unknown");
+    } catch (const std::exception& e) {
+      TORCH_CHECK(
+          false, "Vulkan: Failed to initialize context! Error: ", e.what());
+    } catch (...) {
+      TORCH_CHECK(
+          false, "Vulkan: Failed to initialize context! Error: Unknown");
     }
 
     return nullptr;
   }());
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      context,
-      "Invalid Vulkan context!");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(context, "Invalid Vulkan context!");
 
   return context.get();
 }
@@ -192,19 +185,17 @@ Descriptor::Set dispatch_prologue(
   Pipeline& pipeline = context->pipeline();
   Shader& shader = context->shader();
 
-  const Shader::Layout::Object shader_layout =
-      shader.layout.cache.retrieve({
-        shader_layout_signature,
-      });
+  const Shader::Layout::Object shader_layout = shader.layout.cache.retrieve({
+      shader_layout_signature,
+  });
 
-  command_buffer.bind(
-      pipeline.cache.retrieve({
-        pipeline.layout.cache.retrieve({
+  command_buffer.bind(pipeline.cache.retrieve({
+      pipeline.layout.cache.retrieve({
           shader_layout.handle,
-        }),
-        shader.cache.retrieve(shader_descriptor),
-        local_work_group_size,
-      }));
+      }),
+      shader.cache.retrieve(shader_descriptor),
+      local_work_group_size,
+  }));
 
   return descriptor.pool.allocate(shader_layout);
 }

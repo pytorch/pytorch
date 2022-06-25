@@ -1,5 +1,5 @@
 #pragma once
-#include <c10/util/Half.h>  // For c10::overflows
+#include <c10/util/Half.h> // For c10::overflows
 
 #ifdef USE_VULKAN_API
 
@@ -13,24 +13,18 @@ namespace utils {
 // Alignment
 //
 
-template<typename Type>
-inline constexpr Type align_down(
-    const Type number,
-    const Type multiple) {
+template <typename Type>
+inline constexpr Type align_down(const Type number, const Type multiple) {
   return (number / multiple) * multiple;
 }
 
-template<typename Type>
-inline constexpr Type align_up(
-    const Type number,
-    const Type multiple) {
+template <typename Type>
+inline constexpr Type align_up(const Type number, const Type multiple) {
   return align_down(number + multiple - 1, multiple);
 }
 
-template<typename Type>
-inline constexpr Type div_up(
-    const Type numerator,
-    const Type denominator) {
+template <typename Type>
+inline constexpr Type div_up(const Type numerator, const Type denominator) {
   return (numerator + denominator - 1) / denominator;
 }
 
@@ -76,26 +70,26 @@ inline constexpr To safe_downcast(const From v) {
 
 namespace detail {
 
-template<typename Type, uint32_t N>
+template <typename Type, uint32_t N>
 struct vec final {
   Type data[N];
 };
 
 } // namespace detail
 
-template<uint32_t N>
+template <uint32_t N>
 using ivec = detail::vec<int32_t, N>;
 using ivec2 = ivec<2u>;
 using ivec3 = ivec<3u>;
 using ivec4 = ivec<4u>;
 
-template<uint32_t N>
+template <uint32_t N>
 using uvec = detail::vec<uint32_t, N>;
 using uvec2 = uvec<2u>;
 using uvec3 = uvec<3u>;
 using uvec4 = uvec<4u>;
 
-template<uint32_t N>
+template <uint32_t N>
 using vec = detail::vec<float, N>;
 using vec2 = vec<2u>;
 using vec3 = vec<3u>;

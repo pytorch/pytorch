@@ -2,8 +2,8 @@
 #include <torch/library.h>
 
 #ifdef USE_PYTORCH_QNNPACK
-#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <pytorch_qnnpack.h>
 #endif // USE_PYTORCH_QNNPACK

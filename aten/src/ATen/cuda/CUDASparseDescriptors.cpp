@@ -53,7 +53,9 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type) {
   }
 }
 
-CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset) {
+CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(
+    const Tensor& input,
+    int64_t batch_offset) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.layout() == kStrided);
   IntArrayRef input_strides = input.strides();
   IntArrayRef input_sizes = input.sizes();
@@ -79,7 +81,8 @@ CuSparseDnMatDescriptor::CuSparseDnMatDescriptor(const Tensor& input, int64_t ba
   auto order = CUSPARSE_ORDER_COL;
 #endif
 
-  auto batch_stride = ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
+  auto batch_stride =
+      ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
   void* values_ptr = static_cast<char*>(input.data_ptr()) +
       batch_offset * batch_stride * input.itemsize();
 
@@ -123,7 +126,9 @@ CuSparseDnVecDescriptor::CuSparseDnVecDescriptor(const Tensor& input) {
   descriptor_.reset(raw_descriptor);
 }
 
-CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int64_t batch_offset) {
+CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(
+    const Tensor& input,
+    int64_t batch_offset) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_sparse_csr());
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.dim() >= 2);
 
@@ -198,7 +203,9 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
     }
   }
 #else
-  TORCH_CHECK(ndim == 2, "Experimental support for batched CSR matrices is implemented only for CUDA 11+");
+  TORCH_CHECK(
+      ndim == 2,
+      "Experimental support for batched CSR matrices is implemented only for CUDA 11+");
 #endif
 
   descriptor_.reset(raw_descriptor);

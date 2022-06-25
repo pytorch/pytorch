@@ -1,6 +1,6 @@
 #include <ATen/Tensor.h>
-#include <ATen/native/metal/MetalContext.h>
 #include <ATen/native/metal/MetalCommandBuffer.h>
+#include <ATen/native/metal/MetalContext.h>
 #include <ATen/native/metal/MetalTensorImpl.h>
 #include <ATen/native/metal/MetalTensorImplStorage.h>
 
@@ -59,8 +59,7 @@ static inline at::Tensor makeTensor(
       std::vector<int64_t>(strides.begin(), strides.end()));
 }
 
-static inline MetalCommandBuffer* getCommandBuffer(
-    const Tensor& tensor) {
+static inline MetalCommandBuffer* getCommandBuffer(const Tensor& tensor) {
   TORCH_CHECK(tensor.is_metal());
   auto implStorage = getTensorImplStorage(tensor);
   MetalCommandBuffer* cmdBuffer = implStorage.texture()->commandBuffer();

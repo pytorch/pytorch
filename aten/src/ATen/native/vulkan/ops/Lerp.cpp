@@ -59,9 +59,9 @@ Tensor _lerp_scalar(
   const vTensor& v_end = convert(end);
 
   vTensor v_output{
-    context,
-    v_start.sizes(),
-    v_start.options(),
+      context,
+      v_start.sizes(),
+      v_start.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -203,13 +203,14 @@ Tensor _lerp_tensor(
   const Tensor end = end_arg.is_vulkan() ? end_arg : end_arg.vulkan();
   const vTensor& v_end = convert(end);
 
-  const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
+  const Tensor weight =
+      weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
   const vTensor& v_weight = convert(weight);
 
   vTensor v_output{
-    context,
-    v_start.sizes(),
-    v_start.options(),
+      context,
+      v_start.sizes(),
+      v_start.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -217,7 +218,8 @@ Tensor _lerp_tensor(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY (v_start.has_image() && v_end.has_image() && v_weight.has_image()) {
+    if C10_LIKELY (
+        v_start.has_image() && v_end.has_image() && v_weight.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t fill_0;
@@ -293,7 +295,8 @@ Tensor& _lerp_tensor_(
   const Tensor end = end_arg.is_vulkan() ? end_arg : end_arg.vulkan();
   const vTensor& v_end = convert(end);
 
-  const Tensor weight = weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
+  const Tensor weight =
+      weight_arg.is_vulkan() ? weight_arg : weight_arg.vulkan();
   const vTensor& v_weight = convert(weight);
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -302,7 +305,8 @@ Tensor& _lerp_tensor_(
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
     if C10_LIKELY (
-        v_self.has_image() && v_end.has_image() && v_weight.has_image() && !self.is_same(end)) {
+        v_self.has_image() && v_end.has_image() && v_weight.has_image() &&
+        !self.is_same(end)) {
       const struct Block final {
         uvec3 extents;
         uint32_t fill_0;
@@ -354,32 +358,32 @@ Tensor& _lerp_tensor_(
   return self;
 }
 
-Tensor lerp_scalar(const Tensor& start, const Tensor& end, const Scalar& weight) {
-  return _lerp_scalar(
-      start, end, weight, "aten::lerp.Scalar");
+Tensor lerp_scalar(
+    const Tensor& start,
+    const Tensor& end,
+    const Scalar& weight) {
+  return _lerp_scalar(start, end, weight, "aten::lerp.Scalar");
 }
 
 Tensor& lerp_scalar_(Tensor& self, const Tensor& end, const Scalar& weight) {
-  return _lerp_scalar_(
-      self, end, weight, "aten::lerp_.Scalar");
+  return _lerp_scalar_(self, end, weight, "aten::lerp_.Scalar");
 }
 
-Tensor lerp_tensor(const Tensor& start, const Tensor& end, const Tensor& weight) {
+Tensor lerp_tensor(
+    const Tensor& start,
+    const Tensor& end,
+    const Tensor& weight) {
   if (weight.sizes().size() == 0) {
-    return _lerp_scalar(
-        start, end, weight.item<float>(), "aten::lerp.Tensor");
+    return _lerp_scalar(start, end, weight.item<float>(), "aten::lerp.Tensor");
   }
-  return _lerp_tensor(
-      start, end, weight, "aten::lerp.Tensor");
+  return _lerp_tensor(start, end, weight, "aten::lerp.Tensor");
 }
 
 Tensor& lerp_tensor_(Tensor& self, const Tensor& end, const Tensor& weight) {
   if (weight.sizes().size() == 0) {
-    return _lerp_scalar_(
-        self, end, weight.item<float>(), "aten::lerp_.Tensor");
+    return _lerp_scalar_(self, end, weight.item<float>(), "aten::lerp_.Tensor");
   }
-  return _lerp_tensor_(
-      self, end, weight, "aten::lerp_.Tensor");
+  return _lerp_tensor_(self, end, weight, "aten::lerp_.Tensor");
 }
 
 #ifdef USE_VULKAN_API

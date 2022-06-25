@@ -2,12 +2,13 @@
 
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
-#include <ATen/native/cpu/WeightNormKernel.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
+#include <ATen/native/cpu/WeightNormKernel.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -17,7 +18,8 @@ void weight_norm_first_dim_kernel(
     Tensor& norm,
     const Tensor& v,
     const Tensor& g,
-    int64_t M, int64_t N) {
+    int64_t M,
+    int64_t N) {
   const auto v_data = v.data_ptr<scalar_t>();
   const auto g_data = g.data_ptr<scalar_t>();
   auto w_data = w.data_ptr<scalar_t>();
@@ -36,10 +38,7 @@ void weight_norm_first_dim_kernel(
 
       accscalar_t a = g_data[i] / norm_val;
       vec::map(
-          [a](Vec x) { return x * Vec(a); },
-          w_data + i * N,
-          v_data + i * N,
-          N);
+          [a](Vec x) { return x * Vec(a); }, w_data + i * N, v_data + i * N, N);
     }
   });
 }
@@ -71,11 +70,12 @@ inline void sum_norm_per_row(
     std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
 
     fVec out_fvec0 = fVec::loadu(out_ptr + d) + v_fvec0 * v_fvec0;
-    fVec out_fvec1 = fVec::loadu(out_ptr + d + fVec::size()) + v_fvec1 * v_fvec1;
+    fVec out_fvec1 =
+        fVec::loadu(out_ptr + d + fVec::size()) + v_fvec1 * v_fvec1;
     out_fvec0.store(out_ptr + d);
     out_fvec1.store(out_ptr + d + fVec::size());
   }
-  for(; d < size; ++d) {
+  for (; d < size; ++d) {
     float v_val = float(v_ptr[d]);
     out_ptr[d] += v_val * v_val;
   }
@@ -88,12 +88,7 @@ inline void apply_norm_per_row(
     const scalar_t* a_ptr,
     int64_t size) {
   using Vec = vec::Vectorized<scalar_t>;
-  vec::map2(
-      [](Vec v, Vec a) { return v * a; },
-      w_ptr,
-      v_ptr,
-      a_ptr,
-      size);
+  vec::map2([](Vec v, Vec a) { return v * a; }, w_ptr, v_ptr, a_ptr, size);
 }
 
 inline void apply_norm_per_row(
@@ -114,7 +109,7 @@ inline void apply_norm_per_row(
     bVec w_bvec = convert_float_bfloat16(w_fvec0, w_fvec1);
     w_bvec.store(w_ptr + d);
   }
-  for(; d < size; ++d) {
+  for (; d < size; ++d) {
     w_ptr[d] = float(v_ptr[d]) * a_ptr[d];
   }
 }
@@ -125,7 +120,8 @@ void weight_norm_last_dim_kernel(
     Tensor& norm,
     const Tensor& v,
     const Tensor& g,
-    int64_t M, int64_t N) {
+    int64_t M,
+    int64_t N) {
   const auto v_data = v.data_ptr<scalar_t>();
   const auto g_data = g.data_ptr<scalar_t>();
   auto w_data = w.data_ptr<scalar_t>();
@@ -138,7 +134,12 @@ void weight_norm_last_dim_kernel(
   // vertical parallel reduction
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
     int tid = at::get_thread_num();
-    TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+    TORCH_CHECK(
+        tid < num_threads,
+        "expect thread id smaller than ",
+        num_threads,
+        ", got thread id ",
+        tid);
     auto buffer_ptr = buffer_data + tid * N;
     for (const auto i : c10::irange(begin, end)) {
       sum_norm_per_row(buffer_ptr, v_data + i * N, N);
@@ -179,7 +180,8 @@ void weight_norm_backward_first_dim_kernel(
     const Tensor& saved_v,
     const Tensor& saved_g,
     const Tensor& saved_norm,
-    int64_t M, int64_t N) {
+    int64_t M,
+    int64_t N) {
   const auto grad_w_data = grad_w.data_ptr<scalar_t>();
   const auto saved_v_data = saved_v.data_ptr<scalar_t>();
   const auto saved_g_data = saved_g.data_ptr<scalar_t>();
@@ -253,11 +255,12 @@ inline void sum_product_per_row(
     std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
 
     fVec out_fvec0 = fVec::loadu(out_ptr + d) + grad_w_fvec0 * v_fvec0;
-    fVec out_fvec1 = fVec::loadu(out_ptr + d + fVec::size()) + grad_w_fvec1 * v_fvec1;
+    fVec out_fvec1 =
+        fVec::loadu(out_ptr + d + fVec::size()) + grad_w_fvec1 * v_fvec1;
     out_fvec0.store(out_ptr + d);
     out_fvec1.store(out_ptr + d + fVec::size());
   }
-  for(; d < size; ++d) {
+  for (; d < size; ++d) {
     float grad_w_val = float(grad_w_ptr[d]);
     float v_val = float(v_ptr[d]);
     out_ptr[d] += grad_w_val * v_val;
@@ -301,14 +304,16 @@ inline void apply_per_row_backward(
     fVec v_fvec0, v_fvec1;
     std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
 
-    fVec grad_v_fvec0 = fVec::loadu(a_ptr + d) * grad_w_fvec0 - fVec::loadu(b_ptr + d) * v_fvec0;
-    fVec grad_v_fvec1 = fVec::loadu(a_ptr + d + fVec::size()) * grad_w_fvec1
-        - fVec::loadu(b_ptr + d + fVec::size()) * v_fvec1;
+    fVec grad_v_fvec0 = fVec::loadu(a_ptr + d) * grad_w_fvec0 -
+        fVec::loadu(b_ptr + d) * v_fvec0;
+    fVec grad_v_fvec1 = fVec::loadu(a_ptr + d + fVec::size()) * grad_w_fvec1 -
+        fVec::loadu(b_ptr + d + fVec::size()) * v_fvec1;
     bVec grad_v_bvec = convert_float_bfloat16(grad_v_fvec0, grad_v_fvec1);
     grad_v_bvec.store(grad_v_ptr + d);
   }
-  for(; d < size; ++d) {
-    grad_v_ptr[d] = float(grad_w_ptr[d]) * a_ptr[d] - float(v_ptr[d]) * b_ptr[d];
+  for (; d < size; ++d) {
+    grad_v_ptr[d] =
+        float(grad_w_ptr[d]) * a_ptr[d] - float(v_ptr[d]) * b_ptr[d];
   }
 }
 
@@ -320,7 +325,8 @@ void weight_norm_backward_last_dim_kernel(
     const Tensor& saved_v,
     const Tensor& saved_g,
     const Tensor& saved_norm,
-    int64_t M, int64_t N) {
+    int64_t M,
+    int64_t N) {
   const auto grad_w_data = grad_w.data_ptr<scalar_t>();
   const auto saved_v_data = saved_v.data_ptr<scalar_t>();
   const auto saved_g_data = saved_g.data_ptr<scalar_t>();
@@ -335,10 +341,16 @@ void weight_norm_backward_last_dim_kernel(
   // vertical parallel reduction
   at::parallel_for(0, M, 1, [&](int64_t begin, int64_t end) {
     int tid = at::get_thread_num();
-    TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+    TORCH_CHECK(
+        tid < num_threads,
+        "expect thread id smaller than ",
+        num_threads,
+        ", got thread id ",
+        tid);
     auto buffer_ptr = buffer_data + tid * N;
     for (const auto i : c10::irange(begin, end)) {
-      sum_product_per_row(buffer_ptr, grad_w_data + i * N, saved_v_data + i * N, N);
+      sum_product_per_row(
+          buffer_ptr, grad_w_data + i * N, saved_v_data + i * N, N);
     }
   });
 
@@ -387,21 +399,24 @@ void weight_norm_kernel(
     const Tensor& v,
     const Tensor& g,
     int64_t dim) {
-  TORCH_INTERNAL_ASSERT(dim == 0 || dim == v.dim() - 1,
+  TORCH_INTERNAL_ASSERT(
+      dim == 0 || dim == v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, v.scalar_type(),
-      "weight_norm_kernel", [&]() {
-    using accscalar_t = vec::vec_scalar_t<scalar_t>;
-    if (dim == 0) {
-      int64_t M = v.size(0);
-      int64_t N = v.numel() / M;
-      weight_norm_first_dim_kernel<scalar_t, accscalar_t>(w, norm, v, g, M, N);
-    } else {
-      int64_t N = v.size(-1);
-      int64_t M = v.numel() / N;
-      weight_norm_last_dim_kernel<scalar_t, accscalar_t>(w, norm, v, g, M, N);
-    }
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16, v.scalar_type(), "weight_norm_kernel", [&]() {
+        using accscalar_t = vec::vec_scalar_t<scalar_t>;
+        if (dim == 0) {
+          int64_t M = v.size(0);
+          int64_t N = v.numel() / M;
+          weight_norm_first_dim_kernel<scalar_t, accscalar_t>(
+              w, norm, v, g, M, N);
+        } else {
+          int64_t N = v.size(-1);
+          int64_t M = v.numel() / N;
+          weight_norm_last_dim_kernel<scalar_t, accscalar_t>(
+              w, norm, v, g, M, N);
+        }
+      });
 }
 
 void weight_norm_backward_kernel(
@@ -412,21 +427,27 @@ void weight_norm_backward_kernel(
     const Tensor& saved_g,
     const Tensor& saved_norm,
     int64_t dim) {
-  TORCH_INTERNAL_ASSERT(dim == 0 || dim == saved_v.dim() - 1,
+  TORCH_INTERNAL_ASSERT(
+      dim == 0 || dim == saved_v.dim() - 1,
       "fused kernels can only be applied for first or last dim");
-  AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, saved_v.scalar_type(),
-      "weight_norm_backward_kernel", [&]() {
-    using accscalar_t = vec::vec_scalar_t<scalar_t>;
-    if (dim == 0) {
-      int64_t M = saved_v.size(0);
-      int64_t N = saved_v.numel() / M;
-      weight_norm_backward_first_dim_kernel<scalar_t, accscalar_t>(grad_v, grad_g, grad_w, saved_v, saved_g, saved_norm, M, N);
-    } else {
-      int64_t N = saved_v.size(-1);
-      int64_t M = saved_v.numel() / N;
-      weight_norm_backward_last_dim_kernel<scalar_t, accscalar_t>(grad_v, grad_g, grad_w, saved_v, saved_g, saved_norm, M, N);
-    }
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      ScalarType::BFloat16,
+      saved_v.scalar_type(),
+      "weight_norm_backward_kernel",
+      [&]() {
+        using accscalar_t = vec::vec_scalar_t<scalar_t>;
+        if (dim == 0) {
+          int64_t M = saved_v.size(0);
+          int64_t N = saved_v.numel() / M;
+          weight_norm_backward_first_dim_kernel<scalar_t, accscalar_t>(
+              grad_v, grad_g, grad_w, saved_v, saved_g, saved_norm, M, N);
+        } else {
+          int64_t N = saved_v.size(-1);
+          int64_t M = saved_v.numel() / N;
+          weight_norm_backward_last_dim_kernel<scalar_t, accscalar_t>(
+              grad_v, grad_g, grad_w, saved_v, saved_g, saved_norm, M, N);
+        }
+      });
 }
 
 } // anonymous namespace
@@ -434,4 +455,5 @@ void weight_norm_backward_kernel(
 REGISTER_DISPATCH(weight_norm_stub, &weight_norm_kernel);
 REGISTER_DISPATCH(weight_norm_backward_stub, &weight_norm_backward_kernel);
 
-}} // at::native
+} // namespace native
+} // namespace at

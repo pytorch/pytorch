@@ -9,16 +9,17 @@
 using namespace ideep;
 
 RegisterEngineAllocator cpu_alloc(
-  engine::cpu_engine(),
-  [](size_t size) {
-    return c10::GetAllocator(c10::DeviceType::CPU)->raw_allocate(size);
-  },
-  [](void* p) {
-    c10::GetAllocator(c10::DeviceType::CPU)->raw_deallocate(p);
-  }
-);
+    engine::cpu_engine(),
+    [](size_t size) {
+      return c10::GetAllocator(c10::DeviceType::CPU)->raw_allocate(size);
+    },
+    [](void* p) {
+      c10::GetAllocator(c10::DeviceType::CPU)->raw_deallocate(p);
+    });
 
-namespace at { namespace native { namespace mkldnn {
+namespace at {
+namespace native {
+namespace mkldnn {
 
 void clear_computation_cache() {
   // Reset computation_cache for forward convolutions
@@ -26,6 +27,8 @@ void clear_computation_cache() {
   ideep::convolution_forward::t_store().clear();
 }
 
-}}} // namespace  at::native::mkldnn
+} // namespace mkldnn
+} // namespace native
+} // namespace at
 
 #endif // AT_MKLDNN_ENALBED()

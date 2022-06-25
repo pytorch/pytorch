@@ -6,7 +6,9 @@
 
 namespace c10 {
 
-inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
+inline std::ostream& operator<<(
+    std::ostream& out,
+    const FunctionSchema& schema) {
   // eventually this should look almost identical to python arg parser, but
   // it is simpler for now to work directly on this schema
 
@@ -18,7 +20,8 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
   bool seen_kwarg_only = false;
   for (const auto i : c10::irange(schema.arguments().size())) {
-    if (i > 0) out << ", ";
+    if (i > 0)
+      out << ", ";
     if (schema.arguments()[i].kwarg_only() && !seen_kwarg_only) {
       out << "*, ";
       seen_kwarg_only = true;
@@ -26,8 +29,8 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     out << schema.arguments()[i];
   }
 
-  if(schema.is_vararg()) {
-    if(schema.arguments().size() > 0)
+  if (schema.is_vararg()) {
+    if (schema.arguments().size() > 0)
       out << ", ";
     out << "...";
   }
@@ -43,15 +46,15 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
    * Need special handling for schema
    *   aten::items.str(Dict(str, t) self) -> (str,t)[]
    * Even though this schema returns a single item, we need add parenthesis.
-   * The is necessary so the printed schema can be parsed by the C++ SchemaParser
-   * Without the extra parenthesis, the parser sees the first parenthesis in '(str,t)' and mistakenly
-   * treat the return type as a tuple. An alternative is to enhance the Lexer
-   * to lookahead multiple tokens to accurately decide if the return type is
-   * a tuple.
+   * The is necessary so the printed schema can be parsed by the C++
+   * SchemaParser Without the extra parenthesis, the parser sees the first
+   * parenthesis in '(str,t)' and mistakenly treat the return type as a tuple.
+   * An alternative is to enhance the Lexer to lookahead multiple tokens to
+   * accurately decide if the return type is a tuple.
    */
-  bool need_paren = !(
-    (returns.size() == 1 && !schema.is_varret()) ||
-    (returns.size() == 0 && schema.is_varret()));
+  bool need_paren =
+      !((returns.size() == 1 && !schema.is_varret()) ||
+        (returns.size() == 0 && schema.is_varret()));
 
   if (returns.size() == 1 && !schema.is_varret()) {
     std::stringstream return_ss;
@@ -67,7 +70,8 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
     // 2. something like '-> ((str, str))'. Need extra parenthesis so the return
     // type is a single tuple rather than two strings.
     // PR (https://github.com/pytorch/pytorch/pull/23204) has more context about
-    // this. test_serialize_and_deserialize (https://github.com/pytorch/pytorch/blob/master/test/test_function_schema.py#L15)
+    // this. test_serialize_and_deserialize
+    // (https://github.com/pytorch/pytorch/blob/master/test/test_function_schema.py#L15)
     // also covers this case.
     if (return_str.size() > 0 && return_str.front() == '(') {
       need_paren = true;
@@ -106,28 +110,27 @@ inline size_t findFirstOutArg(const std::vector<Argument>& args) {
 }
 
 inline bool Argument::isBackwardCompatibleWith(
-      const Argument& old,
-      std::ostream* why_not) const {
-    const Argument* lhs = this;
-    const Argument* rhs = &old;
-    if (!(lhs->name() == rhs->name()
-        && lhs->N() == rhs->N()
-          && (lhs->alias_info() == rhs->alias_info()
-              || (lhs->alias_info() != nullptr && rhs->alias_info() != nullptr
-                  && *lhs->alias_info() == *rhs->alias_info())))) {
-      return false;
-    }
-    if (lhs->kwarg_only() && !rhs->kwarg_only()) {
-      return false;
-    }
-    if (!rhs->type()->isSubtypeOfExt(*lhs->type(), why_not)) {
-      return false;
-    }
-    if (rhs->default_value().has_value() &&
-        lhs->default_value() != rhs->default_value()) {
-      return false;
-    }
-    return true;
+    const Argument& old,
+    std::ostream* why_not) const {
+  const Argument* lhs = this;
+  const Argument* rhs = &old;
+  if (!(lhs->name() == rhs->name() && lhs->N() == rhs->N() &&
+        (lhs->alias_info() == rhs->alias_info() ||
+         (lhs->alias_info() != nullptr && rhs->alias_info() != nullptr &&
+          *lhs->alias_info() == *rhs->alias_info())))) {
+    return false;
+  }
+  if (lhs->kwarg_only() && !rhs->kwarg_only()) {
+    return false;
+  }
+  if (!rhs->type()->isSubtypeOfExt(*lhs->type(), why_not)) {
+    return false;
+  }
+  if (rhs->default_value().has_value() &&
+      lhs->default_value() != rhs->default_value()) {
+    return false;
+  }
+  return true;
 }
 
 inline bool Argument::isForwardCompatibleWith(
@@ -135,11 +138,10 @@ inline bool Argument::isForwardCompatibleWith(
     std::ostream* why_not) const {
   const Argument* lhs = this;
   const Argument* rhs = &old;
-  if (!(lhs->name() == rhs->name()
-      && lhs->N() == rhs->N()
-        && (lhs->alias_info() == rhs->alias_info()
-            || (lhs->alias_info() != nullptr && rhs->alias_info() != nullptr
-                && *lhs->alias_info() == *rhs->alias_info())))) {
+  if (!(lhs->name() == rhs->name() && lhs->N() == rhs->N() &&
+        (lhs->alias_info() == rhs->alias_info() ||
+         (lhs->alias_info() != nullptr && rhs->alias_info() != nullptr &&
+          *lhs->alias_info() == *rhs->alias_info())))) {
     return false;
   }
   if (lhs->kwarg_only() && !rhs->kwarg_only()) {
@@ -184,14 +186,13 @@ inline std::string FunctionSchema::formatTypeMismatchMsg(
 inline bool FunctionSchema::isBackwardCompatibleWith(
     const FunctionSchema& old,
     std::ostream* why_not) const {
-  if (!(name() == old.name()
-        && overload_name() == old.overload_name()
+  if (!(name() == old.name() &&
+        overload_name() == old.overload_name()
         // we are conservative on is_vararg and is_varret,
         // since they are only used by internal operators
-        && is_vararg() == old.is_vararg()
-        && is_varret() == old.is_varret()
-        && returns().size() == old.returns().size()
-        && arguments().size() >= old.arguments().size())) {
+        && is_vararg() == old.is_vararg() && is_varret() == old.is_varret() &&
+        returns().size() == old.returns().size() &&
+        arguments().size() >= old.arguments().size())) {
     return false;
   }
   for (const auto i : c10::irange(returns().size())) {
@@ -199,8 +200,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
     // (i.e. more generic), and contravariance on return types (i.e.
     //  more specific).
     if (!old.returns().at(i).isBackwardCompatibleWith(
-          returns().at(i),
-          why_not)) {
+            returns().at(i), why_not)) {
       return false;
     }
   }
@@ -212,7 +212,7 @@ inline bool FunctionSchema::isBackwardCompatibleWith(
   // make sure among the default args, they are backward compatible
   for (const auto i : c10::irange(old_out_start_idx)) {
     if (!arguments().at(i).isBackwardCompatibleWith(
-          old.arguments().at(i), why_not)) {
+            old.arguments().at(i), why_not)) {
       return false;
     }
   }
@@ -323,7 +323,7 @@ inline bool FunctionSchema::isForwardCompatibleWith(
   return true;
 }
 
-template<typename T>
+template <typename T>
 inline void FunctionSchema::checkArg(
     const IValue& value,
     const Argument& argument,
@@ -335,12 +335,12 @@ inline void FunctionSchema::checkArg(
   if (!value.type<T>()->isSubtypeOf(*argument.type())) {
     TORCH_CHECK(
         false,
-        formatTypeMismatchMsg(
-            argument, value.type<T>()->repr_str(), pos));
+        formatTypeMismatchMsg(argument, value.type<T>()->repr_str(), pos));
   }
 }
 
-inline std::string FunctionSchema::findErrorInKwargs(const std::vector<std::string>& kwargs) const {
+inline std::string FunctionSchema::findErrorInKwargs(
+    const std::vector<std::string>& kwargs) const {
   // First check if any of the kwargs are unknown, i.e. don't match the name of
   // any argument in the schema.
   for (const auto& kwarg : kwargs) {
@@ -362,7 +362,8 @@ inline std::string FunctionSchema::findErrorInKwargs(const std::vector<std::stri
   // If there are unconsumed kwargs but none of them were unknown, the first
   // positional argument present in the kwargs is duplicated.
   for (const auto& argument : arguments()) {
-    if (std::find(kwargs.begin(), kwargs.end(), argument.name()) != kwargs.end()) {
+    if (std::find(kwargs.begin(), kwargs.end(), argument.name()) !=
+        kwargs.end()) {
       AT_ASSERT(!argument.default_value());
       return c10::str(
           "Argument '",
@@ -418,7 +419,7 @@ inline void FunctionSchema::checkAndNormalizeInputs(
   }
   if (consumed_kwargs != kwargs.size()) {
     std::vector<std::string> names;
-    for(const auto& k : kwargs) {
+    for (const auto& k : kwargs) {
       names.emplace_back(k.first);
     }
     throw std::runtime_error(findErrorInKwargs(names));
@@ -430,7 +431,7 @@ inline FunctionSchema FunctionSchema::cloneWithRemappedTypes(
   auto update_args = [&](const std::vector<Argument>& args) {
     std::vector<Argument> new_args;
     new_args.reserve(args.size());
-    for(const Argument& arg : args) {
+    for (const Argument& arg : args) {
       new_args.emplace_back(arg.cloneWithType(type_map(arg.type())));
     }
     return new_args;

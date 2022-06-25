@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NestedTensorImpl.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/core/op_registration/op_registration.h>
-#include <ATen/NestedTensorImpl.h>
 #include <c10/core/DispatchKey.h>
 
 namespace at {
@@ -71,18 +71,23 @@ NestedTensorImpl::NestedTensorImpl(
     at::Tensor nested_size_tensor)
     : TensorImpl(
           (c10::DispatchKeySet(DispatchKey::NestedTensor) |
-           c10::DispatchKeySet(buffer.is_cuda() ? BackendComponent::CUDABit : BackendComponent::CPUBit)),
+           c10::DispatchKeySet(
+               buffer.is_cuda() ? BackendComponent::CUDABit
+                                : BackendComponent::CPUBit)),
           buffer.dtype(),
           buffer.device()),
       buffer_(std::move(buffer)),
       nested_size_tensor_(std::move(nested_size_tensor)),
-      nested_stride_tensor_(construct_nested_stride_tensor(nested_size_tensor_)),
-      opt_sizes_(construct_opt_sizes(nested_size_tensor_))
-{
+      nested_stride_tensor_(
+          construct_nested_stride_tensor(nested_size_tensor_)),
+      opt_sizes_(construct_opt_sizes(nested_size_tensor_)) {
   TORCH_WARN_ONCE(
       "The PyTorch API of nested tensors is in prototype stage and will change "
       "in the near future.");
-  TORCH_INTERNAL_ASSERT(buffer_.is_cuda() || buffer_.is_cpu(), "NestedTensorImpl buffer must be either CUDA or CPU but got ", buffer_);
+  TORCH_INTERNAL_ASSERT(
+      buffer_.is_cuda() || buffer_.is_cpu(),
+      "NestedTensorImpl buffer must be either CUDA or CPU but got ",
+      buffer_);
   TORCH_INTERNAL_ASSERT(nested_size_tensor_.is_contiguous());
   int64_t size_dim = nested_size_tensor_.dim();
   TORCH_INTERNAL_ASSERT(size_dim == 0 || size_dim == 2);
@@ -91,7 +96,8 @@ NestedTensorImpl::NestedTensorImpl(
 }
 
 void NestedTensorImpl::refresh_dim() {
-  const auto my_dim = nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;
+  const auto my_dim =
+      nested_size_tensor_.dim() ? nested_size_tensor_.sizes()[1] + 1 : 1;
   sizes_and_strides_.resize(my_dim);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dim() == my_dim);
 }
@@ -106,10 +112,14 @@ bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
   TORCH_CHECK(false, "is_contiguous is disabled.");
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(
+      false,
+      "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
 }
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(
+      false,
+      "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
 }
 
 c10::SymIntArrayRef NestedTensorImpl::sym_sizes() const {
@@ -117,7 +127,9 @@ c10::SymIntArrayRef NestedTensorImpl::sym_sizes() const {
 }
 
 IntArrayRef NestedTensorImpl::strides_custom() const {
-  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
+  TORCH_CHECK(
+      false,
+      "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
 }
 
 const char* NestedTensorImpl::tensorimpl_type_name() const {

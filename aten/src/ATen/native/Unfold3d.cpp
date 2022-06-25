@@ -432,7 +432,7 @@ void Unfold3dAccKernelImpl(
 
 void Unfold3dCopyCPU(
     ScalarType dtype,
-    const void *src,
+    const void* src,
     int64_t C,
     int64_t X_D,
     int64_t X_H,
@@ -451,10 +451,7 @@ void Unfold3dCopyCPU(
     int64_t pad_w,
     void* dst) {
   AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::BFloat16,
-      dtype,
-      "Unfold3dCopyCPU",
-      [=, &src]() {
+      at::ScalarType::BFloat16, dtype, "Unfold3dCopyCPU", [=, &src]() {
         Unfold3dCopyKernelImpl<scalar_t>(
             C,
             X_D,
@@ -479,7 +476,7 @@ void Unfold3dCopyCPU(
 
 void Unfold3dAccCPU(
     ScalarType dtype,
-    const void *src,
+    const void* src,
     int64_t C,
     int64_t X_D,
     int64_t X_H,
@@ -498,10 +495,7 @@ void Unfold3dAccCPU(
     int64_t pad_w,
     void* dst) {
   AT_DISPATCH_ALL_TYPES_AND(
-      at::ScalarType::BFloat16,
-      dtype,
-      "Unfold3dAccCPU",
-      [=, &src]() {
+      at::ScalarType::BFloat16, dtype, "Unfold3dAccCPU", [=, &src]() {
         Unfold3dAccKernelImpl<scalar_t>(
             C,
             X_D,

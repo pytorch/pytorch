@@ -6,10 +6,18 @@
 namespace at {
 namespace native {
 
-Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, int64_t pad) {
-  TORCH_CHECK(self.dim() == 3, "Input must have 3 dims: time, batch, "
+Tensor conv_tbc(
+    const Tensor& self,
+    const Tensor& weight,
+    const Tensor& bias,
+    int64_t pad) {
+  TORCH_CHECK(
+      self.dim() == 3,
+      "Input must have 3 dims: time, batch, "
       "in_channel");
-  TORCH_CHECK(weight.dim() == 3, "Weight tensor must have 3 dims: kernel_width,"
+  TORCH_CHECK(
+      weight.dim() == 3,
+      "Weight tensor must have 3 dims: kernel_width,"
       " in_channels, out_channels.");
   TORCH_CHECK(bias.dim() == 1, "Bias must be 1-D");
 
@@ -28,17 +36,23 @@ Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, in
   // Input = (time, batch, in_channels)
   // Weight = (kernel_width, in_channels, out_channels)
   // Bias = (out_channels)
-  TORCH_CHECK(inputPlanes == weight_size[1], "Input dim 2 (input channels) "
+  TORCH_CHECK(
+      inputPlanes == weight_size[1],
+      "Input dim 2 (input channels) "
       "is not == dim 1 in the weight tensor");
-  TORCH_CHECK(weight_size[2] == bias.sizes()[0], "Bias size must equal dim 2 in "
+  TORCH_CHECK(
+      weight_size[2] == bias.sizes()[0],
+      "Bias size must equal dim 2 in "
       "the weight tensor (output channels).");
 
   // input * weights + bias -> output_features
-  Tensor output = at::empty({
-    olen,
-    input_size[1],
-    weight_size[2],
-  }, self.options());
+  Tensor output = at::empty(
+      {
+          olen,
+          input_size[1],
+          weight_size[2],
+      },
+      self.options());
   output.copy_(bias.expand(output.sizes()));
   for (const auto k : c10::irange(kw)) {
     int iShift = std::max(0, static_cast<int>(k - real_pad));
@@ -59,7 +73,12 @@ Tensor conv_tbc(const Tensor& self, const Tensor& weight, const Tensor& bias, in
   return output;
 }
 
-std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, const Tensor& input, const Tensor& weight, const Tensor& bias, int64_t pad) {
+std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(
+    const Tensor& dOutput,
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias,
+    int64_t pad) {
   auto input_size = input.sizes();
   auto weight_size = weight.sizes();
 
@@ -80,7 +99,8 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
     int t = std::min(ilen + real_pad - k, olen) - oShift;
     // dOutput * T(weight) -> dInput
     if (t > 0) {
-      auto dO = dOutput.narrow(0, oShift, t).view({t * batchSize, outputPlanes});
+      auto dO =
+          dOutput.narrow(0, oShift, t).view({t * batchSize, outputPlanes});
       auto dI = dInput.narrow(0, iShift, t).view({t * batchSize, inputPlanes});
       dI.addmm_(dO, weight[k].t());
     }
@@ -95,8 +115,10 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
     // T(input) * dOutput -> dWeight
     if (t > 0) {
       auto dW = dWeight[k];
-      auto dO = dOutput.narrow(0, oShift, t).view({t * batchSize, outputPlanes});
-      auto I = input.narrow(0, iShift, t).view({t * batchSize, inputPlanes}).t();
+      auto dO =
+          dOutput.narrow(0, oShift, t).view({t * batchSize, outputPlanes});
+      auto I =
+          input.narrow(0, iShift, t).view({t * batchSize, inputPlanes}).t();
       dW.addmm_(I, dO);
     }
   }
@@ -108,5 +130,5 @@ std::tuple<Tensor, Tensor, Tensor> conv_tbc_backward(const Tensor& dOutput, cons
   return std::make_tuple(dInput, dWeight, dBias);
 }
 
-}
-}
+} // namespace native
+} // namespace at

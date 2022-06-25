@@ -313,7 +313,8 @@ using _MaterializedIListRefElem = typename std::conditional<
     T>::type;
 
 template <typename T>
-using MaterializedIListRef = std::vector<_MaterializedIListRefElem<IListRefConstRef<T>>>;
+using MaterializedIListRef =
+    std::vector<_MaterializedIListRefElem<IListRefConstRef<T>>>;
 
 } // namespace detail
 
@@ -356,7 +357,8 @@ using MaterializedIListRef = std::vector<_MaterializedIListRefElem<IListRefConst
  *     than 0.
  */
 template <typename T>
-class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T> {
+class IListRefIterator
+    : public std::iterator<std::bidirectional_iterator_tag, T> {
  private:
 #define DEFINE_FRIEND_CLASS(TAG, ...)                        \
   friend class detail::IListRefTagImpl<IListRefTag::TAG, T>; \
@@ -379,8 +381,7 @@ class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T
 
 #if defined(_MSC_VER) && _ITERATOR_DEBUG_LEVEL != 0
   // See [Note: MSVC Iterator Debug]
-  IListRefIterator(const IListRefIterator& iterator)
-      : tag_(iterator.tag_) {
+  IListRefIterator(const IListRefIterator& iterator) : tag_(iterator.tag_) {
     switch (tag_) {
       case IListRefTag::Boxed:
         payload_.boxed_iterator = iterator.payload_.boxed_iterator;
@@ -418,7 +419,8 @@ class IListRefIterator : public std::iterator<std::bidirectional_iterator_tag, T
     payload_.unboxed_iterator = unboxed;
   }
 
-  IListRefIterator(materialized_iterator_type materialized) : tag_(IListRefTag::Materialized) {
+  IListRefIterator(materialized_iterator_type materialized)
+      : tag_(IListRefTag::Materialized) {
     payload_.materialized_iterator = materialized;
   }
 
@@ -499,8 +501,7 @@ class IListRef {
       typename detail::IListRefTagImpl<IListRefTag::Unboxed, T>::list_type;
   using boxed_type =
       typename detail::IListRefTagImpl<IListRefTag::Boxed, T>::list_type;
-  using materialized_type =
-      typename detail::MaterializedIListRef<T>;
+  using materialized_type = typename detail::MaterializedIListRef<T>;
 
   using iterator = IListRefIterator<T>;
   using const_iterator = IListRefIterator<T>;
@@ -522,13 +523,16 @@ class IListRef {
 
   template <
       typename... UnboxedConstructorArgs,
-      typename = std::enable_if_t<
-          std::is_constructible<unboxed_type, UnboxedConstructorArgs...>::value>>
+      typename = std::enable_if_t<std::is_constructible<
+          unboxed_type,
+          UnboxedConstructorArgs...>::value>>
   IListRef(UnboxedConstructorArgs&&... args) : tag_(IListRefTag::Unboxed) {
-    payload_.unboxed = unboxed_type(std::forward<UnboxedConstructorArgs>(args)...);
+    payload_.unboxed =
+        unboxed_type(std::forward<UnboxedConstructorArgs>(args)...);
   }
 
-  IListRef(const materialized_type& materialized) : tag_(IListRefTag::Materialized) {
+  IListRef(const materialized_type& materialized)
+      : tag_(IListRefTag::Materialized) {
     payload_.materialized = &materialized;
   }
 
@@ -577,8 +581,8 @@ class IListRef {
     return materialized;
   }
 
-#define DEFINE_CHECK(TAG, ...)    \
-  bool is##TAG() const {          \
+#define DEFINE_CHECK(TAG, ...)       \
+  bool is##TAG() const {             \
     return tag_ == IListRefTag::TAG; \
   }
   TORCH_ILISTREF_FORALL_TAGS(DEFINE_CHECK);

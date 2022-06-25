@@ -2,8 +2,8 @@
 #include <ATen/native/PointwiseOps.h>
 
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/MemoryOverlap.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
 
 #include <ATen/NamedTensorUtils.h>

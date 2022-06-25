@@ -1,12 +1,12 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/cuda/Sort.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/WrapDimUtils.h>
-#include <ATen/native/Sorting.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/Sorting.h>
+#include <ATen/native/cuda/Sort.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -21,9 +21,12 @@
 
 #include <limits>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);
+std::vector<int64_t> infer_dense_strides_dim_last(
+    const Tensor& self,
+    int64_t dim);
 
 void fillSliceWithIndex(const Tensor& t, int dim) {
   if (t.numel()) {
@@ -59,15 +62,19 @@ void sort_cuda_kernel(
   TOTENSOR(values_base, values);
   TOTENSOR(indices_base, indices);
 
-  TORCH_CHECK(self.sizes()[dim] <= std::numeric_limits<int>::max(),
-    "The dimension being sorted can not have more than INT_MAX elements.");
+  TORCH_CHECK(
+      self.sizes()[dim] <= std::numeric_limits<int>::max(),
+      "The dimension being sorted can not have more than INT_MAX elements.");
 
   const auto self_dtype = self.dtype();
   // FIXME: remove this check once cub sort supports bool
-  TORCH_CHECK(self_dtype != ScalarType::Bool,
-    "Sort currently does not support bool dtype on CUDA.");
-  TORCH_CHECK(self_dtype != ScalarType::ComplexFloat && self_dtype != ScalarType::ComplexDouble,
-    "Sort currently does not support complex dtypes on CUDA.");
+  TORCH_CHECK(
+      self_dtype != ScalarType::Bool,
+      "Sort currently does not support bool dtype on CUDA.");
+  TORCH_CHECK(
+      self_dtype != ScalarType::ComplexFloat &&
+          self_dtype != ScalarType::ComplexDouble,
+      "Sort currently does not support complex dtypes on CUDA.");
 
   // use inplace algorithm for smaller input sizes without stable=True
   if (should_use_small_sort(self, dim)) {
@@ -95,7 +102,8 @@ void sort_cuda_kernel(
   }
 
   c10::MaybeOwned<Tensor> values_tmp, indices_tmp;
-  if (values.strides() == self_.strides() && (newself || get_overlap_status(self, values) == MemOverlapStatus::No)) {
+  if (values.strides() == self_.strides() &&
+      (newself || get_overlap_status(self, values) == MemOverlapStatus::No)) {
     values_tmp = c10::MaybeOwned<Tensor>::borrowed(values);
   } else {
     values_tmp = c10::MaybeOwned<Tensor>::owned(
@@ -103,8 +111,8 @@ void sort_cuda_kernel(
   }
 
   if (indices.strides() != self_.strides()) {
-    indices_tmp = c10::MaybeOwned<Tensor>::owned(
-        at::empty_strided(self_.sizes(), self_.strides(), self_.options().dtype(kLong)));
+    indices_tmp = c10::MaybeOwned<Tensor>::owned(at::empty_strided(
+        self_.sizes(), self_.strides(), self_.options().dtype(kLong)));
   } else {
     indices_tmp = c10::MaybeOwned<Tensor>::borrowed(indices);
   }
@@ -119,9 +127,10 @@ void sort_cuda_kernel(
   }
 }
 
-// TODO: we should handle this accordingly when we start using REGISTER_HIP_DISPATCH,
-// since REGISTER_DISPATCH won't work in this cpp file.
+// TODO: we should handle this accordingly when we start using
+// REGISTER_HIP_DISPATCH, since REGISTER_DISPATCH won't work in this cpp file.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 REGISTER_CUDA_DISPATCH(sort_stub, &sort_cuda_kernel);
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

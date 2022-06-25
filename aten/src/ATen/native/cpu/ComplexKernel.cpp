@@ -9,11 +9,12 @@ namespace native {
 namespace {
 
 void complex_kernel(TensorIterator& iter) {
-  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, iter.input_dtype(), "complex_cpu", [&]() {
-    cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
-      return c10::complex<scalar_t>(a, b);
-    });
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      kHalf, iter.input_dtype(), "complex_cpu", [&]() {
+        cpu_kernel(iter, [=](scalar_t a, scalar_t b) -> c10::complex<scalar_t> {
+          return c10::complex<scalar_t>(a, b);
+        });
+      });
 }
 
 void polar_kernel(TensorIterator& iter) {

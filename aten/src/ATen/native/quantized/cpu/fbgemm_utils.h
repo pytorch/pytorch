@@ -196,9 +196,7 @@ struct TORCH_API PackedConvWeight : public ConvPackedParamsBase<kSpatialDim> {
       double output_scale,
       int64_t output_zero_point) override;
 
-  at::Tensor apply_dynamic(
-    const at::Tensor& input,
-    bool reduce_range) override;
+  at::Tensor apply_dynamic(const at::Tensor& input, bool reduce_range) override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 

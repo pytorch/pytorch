@@ -2,12 +2,12 @@
 
 #include <tuple>
 
-// Modified from https://stackoverflow.com/questions/7943525/is-it-possible-to-figure-out-the-parameter-type-and-return-type-of-a-lambda
+// Modified from
+// https://stackoverflow.com/questions/7943525/is-it-possible-to-figure-out-the-parameter-type-and-return-type-of-a-lambda
 
 // Fallback, anything with an operator()
 template <typename T>
-struct function_traits : public function_traits<decltype(&T::operator())> {
-};
+struct function_traits : public function_traits<decltype(&T::operator())> {};
 
 // Pointers to class members that are themselves functors.
 // For example, in the following code:
@@ -24,13 +24,12 @@ struct function_traits : public function_traits<decltype(&T::operator())> {
 //
 // function_traits<decltype(&s::f)> traits;
 template <typename ClassType, typename T>
-struct function_traits<T ClassType::*> : public function_traits<T> {
-};
+struct function_traits<T ClassType::*> : public function_traits<T> {};
 
 // Const class member functions
 template <typename ClassType, typename ReturnType, typename... Args>
-struct function_traits<ReturnType(ClassType::*)(Args...) const> : public function_traits<ReturnType(Args...)> {
-};
+struct function_traits<ReturnType (ClassType::*)(Args...) const>
+    : public function_traits<ReturnType(Args...)> {};
 
 // Reference types
 template <typename T>
@@ -48,11 +47,10 @@ struct function_traits<ReturnType(Args...)> {
   typedef ReturnType result_type;
 
   template <size_t i>
-  struct arg
-  {
-      typedef typename std::tuple_element<i, std::tuple<Args...>>::type type;
-      // the i-th argument is equivalent to the i-th tuple element of a tuple
-      // composed of those arguments.
+  struct arg {
+    typedef typename std::tuple_element<i, std::tuple<Args...>>::type type;
+    // the i-th argument is equivalent to the i-th tuple element of a tuple
+    // composed of those arguments.
   };
 };
 

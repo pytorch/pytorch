@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <torch/library.h>
-#include <ATen/quantized/Quantizer.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/quantized/Quantizer.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -18,12 +18,14 @@ namespace {
 
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_hardsigmoid(Tensor input) {
-  TORCH_CHECK(input.ndimension() > 0, "qnnpack_hardsigmoid(): Got empty input tensor");
-  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
-                "qnnpack_hardsigmoid(): Expected input data type ",
-                toString(c10::kQUInt8),
-                " but got ",
-                toString(input.scalar_type()));
+  TORCH_CHECK(
+      input.ndimension() > 0, "qnnpack_hardsigmoid(): Got empty input tensor");
+  TORCH_CHECK(
+      input.scalar_type() == c10::kQUInt8,
+      "qnnpack_hardsigmoid(): Expected input data type ",
+      toString(c10::kQUInt8),
+      " but got ",
+      toString(input.scalar_type()));
   initQNNPACK();
 
   Tensor input_contig = input.contiguous(input.suggest_memory_format());
@@ -34,47 +36,50 @@ Tensor qnnpack_hardsigmoid(Tensor input) {
   constexpr int32_t o_zero_point = 0;
 
   pytorch_qnnp_operator_t hardsigmoid_op{nullptr};
-  const pytorch_qnnp_status createStatus = pytorch_qnnp_create_hardsigmoid_nc_q8(
-    num_elems, // channels
-    i_zero_point,
-    i_scale,
-    o_zero_point,
-    o_scale,
-    std::numeric_limits<uint8_t>::min(), // output min
-    std::numeric_limits<uint8_t>::max(), // output max
-    0, // flags
-    &hardsigmoid_op);
+  const pytorch_qnnp_status createStatus =
+      pytorch_qnnp_create_hardsigmoid_nc_q8(
+          num_elems, // channels
+          i_zero_point,
+          i_scale,
+          o_zero_point,
+          o_scale,
+          std::numeric_limits<uint8_t>::min(), // output min
+          std::numeric_limits<uint8_t>::max(), // output max
+          0, // flags
+          &hardsigmoid_op);
 
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
       qnnpack_uniq_ptr(hardsigmoid_op);
 
-  TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
-                        "failed to create QNNPACK Hardsigmoid operator");
+  TORCH_INTERNAL_ASSERT(
+      createStatus == pytorch_qnnp_status_success,
+      "failed to create QNNPACK Hardsigmoid operator");
   Tensor qy = at::_empty_affine_quantized(
-    input_contig.sizes(),
-    at::device(kCPU).dtype(input_contig.dtype()),
-    o_scale,
-    o_zero_point,
-    input_contig.suggest_memory_format());
+      input_contig.sizes(),
+      at::device(kCPU).dtype(input_contig.dtype()),
+      o_scale,
+      o_zero_point,
+      input_contig.suggest_memory_format());
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_hardsigmoid_nc_q8(
-    hardsigmoid_op,
-    input_contig.size(0), // batch size
-    (uint8_t*)input_contig.data_ptr<c10::quint8>(), // input data
-    num_elems, // input stride
-    (uint8_t*)qy.data_ptr<c10::quint8>(), // output data
-    num_elems); // output stride
-  TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
-                        "failed to setup QNNPACK Hardsigmoid operator");
+      hardsigmoid_op,
+      input_contig.size(0), // batch size
+      (uint8_t*)input_contig.data_ptr<c10::quint8>(), // input data
+      num_elems, // input stride
+      (uint8_t*)qy.data_ptr<c10::quint8>(), // output data
+      num_elems); // output stride
+  TORCH_INTERNAL_ASSERT(
+      setupStatus == pytorch_qnnp_status_success,
+      "failed to setup QNNPACK Hardsigmoid operator");
 
   pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
-    pytorch_qnnp_run_operator(hardsigmoid_op, threadpool);
+      pytorch_qnnp_run_operator(hardsigmoid_op, threadpool);
 
   TORCH_INTERNAL_ASSERT(
-    runStatus == pytorch_qnnp_status_success,
-    "failed to run QNNPACK Hardsigmoid operator");
+      runStatus == pytorch_qnnp_status_success,
+      "failed to run QNNPACK Hardsigmoid operator");
   return qy;
 }
 #endif // USE_PYTORCH_QNNPACK
@@ -86,7 +91,7 @@ Tensor hardsigmoid_quantized_cpu(const Tensor& qx) {
       qx.scalar_type() == kQUInt8) {
     return qnnpack_hardsigmoid(qx);
   }
-#endif  // USE_PYTORCH_QNNPACK
+#endif // USE_PYTORCH_QNNPACK
   Tensor qy;
   qhardsigmoid_stub(qx.device().type(), qx, qy);
   return qy;
@@ -102,4 +107,5 @@ Tensor& hardsigmoid_out_quantized_cpu(const Tensor& qx, Tensor& result) {
   return result;
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

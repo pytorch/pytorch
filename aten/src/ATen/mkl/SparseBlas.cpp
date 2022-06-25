@@ -256,33 +256,23 @@ void mm<c10::complex<double>>(MKL_SPARSE_MM_ARGTYPES(c10::complex<double>)) {
 #if !defined(_WIN32)
 template <>
 void spmmd<float>(MKL_SPARSE_SPMMD_ARGTYPES(float)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_spmmd(
-      operation, A, B, layout, C, ldc));
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_s_spmmd(operation, A, B, layout, C, ldc));
 }
 template <>
 void spmmd<double>(MKL_SPARSE_SPMMD_ARGTYPES(double)) {
-  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_spmmd(
-      operation, A, B, layout, C, ldc));
+  TORCH_MKLSPARSE_CHECK(mkl_sparse_d_spmmd(operation, A, B, layout, C, ldc));
 }
 template <>
-void spmmd<c10::complex<float>>(MKL_SPARSE_SPMMD_ARGTYPES(c10::complex<float>)) {
+void spmmd<c10::complex<float>>(
+    MKL_SPARSE_SPMMD_ARGTYPES(c10::complex<float>)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_c_spmmd(
-      operation,
-      A,
-      B,
-      layout,
-      reinterpret_cast<MKL_Complex8*>(C),
-      ldc));
+      operation, A, B, layout, reinterpret_cast<MKL_Complex8*>(C), ldc));
 }
 template <>
-void spmmd<c10::complex<double>>(MKL_SPARSE_SPMMD_ARGTYPES(c10::complex<double>)) {
+void spmmd<c10::complex<double>>(
+    MKL_SPARSE_SPMMD_ARGTYPES(c10::complex<double>)) {
   TORCH_MKLSPARSE_CHECK(mkl_sparse_z_spmmd(
-      operation,
-      A,
-      B,
-      layout,
-      reinterpret_cast<MKL_Complex16*>(C),
-      ldc));
+      operation, A, B, layout, reinterpret_cast<MKL_Complex16*>(C), ldc));
 }
 #endif
 

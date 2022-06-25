@@ -26,7 +26,7 @@ Tensor& _sparse_mm_mkl_(
 #endif
   return self; // for stopping compiler warnings.
 }
-} // namespace native
+} // namespace sparse_csr
 } // namespace at
 
 #else // AT_MKL_ENABLED
@@ -100,7 +100,8 @@ class SparseCsrMKLInterface {
         retval);
   }
 
- // res(nrows, dense_ncols) = (sparse(nrows * ncols) @ dense(ncols x dense_ncols))
+  // res(nrows, dense_ncols) = (sparse(nrows * ncols) @ dense(ncols x
+  // dense_ncols))
   inline void sparse_mm(
       float* res,
       float* dense,
@@ -112,27 +113,21 @@ class SparseCsrMKLInterface {
     int stat;
     if (dense_ncols == 1) {
       stat = mkl_sparse_s_mv(
-        SPARSE_OPERATION_NON_TRANSPOSE,
-        alpha,
-        A,
-        desc,
-        dense,
-        beta,
-        res);
+          SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc, dense, beta, res);
       TORCH_CHECK(stat == 0, "mkl_sparse_s_mv failed with error code: ", stat);
     } else {
       stat = mkl_sparse_s_mm(
-        SPARSE_OPERATION_NON_TRANSPOSE,
-        alpha,
-        A,
-        desc,
-        SPARSE_LAYOUT_ROW_MAJOR,
-        dense,
-        nrows,
-        ncols,
-        beta,
-        res,
-        dense_ncols);
+          SPARSE_OPERATION_NON_TRANSPOSE,
+          alpha,
+          A,
+          desc,
+          SPARSE_LAYOUT_ROW_MAJOR,
+          dense,
+          nrows,
+          ncols,
+          beta,
+          res,
+          dense_ncols);
       TORCH_CHECK(stat == 0, "mkl_sparse_s_mm failed with error code: ", stat);
     }
   }
@@ -148,28 +143,21 @@ class SparseCsrMKLInterface {
     int stat;
     if (dense_ncols == 1) {
       stat = mkl_sparse_d_mv(
-        SPARSE_OPERATION_NON_TRANSPOSE,
-        alpha,
-        A,
-        desc,
-        dense,
-        beta,
-        res);
+          SPARSE_OPERATION_NON_TRANSPOSE, alpha, A, desc, dense, beta, res);
       TORCH_CHECK(stat == 0, "mkl_sparse_d_mv failed with error code: ", stat);
-    }
-    else {
+    } else {
       stat = mkl_sparse_d_mm(
-        SPARSE_OPERATION_NON_TRANSPOSE,
-        alpha,
-        A,
-        desc,
-        SPARSE_LAYOUT_ROW_MAJOR,
-        dense,
-        nrows,
-        ncols,
-        beta,
-        res,
-        dense_ncols);
+          SPARSE_OPERATION_NON_TRANSPOSE,
+          alpha,
+          A,
+          desc,
+          SPARSE_LAYOUT_ROW_MAJOR,
+          dense,
+          nrows,
+          ncols,
+          beta,
+          res,
+          dense_ncols);
       TORCH_CHECK(stat == 0, "mkl_sparse_d_mm failed with error code: ", stat);
     }
   }
@@ -258,7 +246,7 @@ Tensor& _sparse_mm_mkl_(
   return self;
 }
 
-} // namespace native
+} // namespace sparse_csr
 } // namespace at
 
 #endif // AT_MKL_ENABLED

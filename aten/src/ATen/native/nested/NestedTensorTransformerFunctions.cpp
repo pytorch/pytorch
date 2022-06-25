@@ -123,7 +123,6 @@ void NestedTensor_softmax_dropout(const Tensor& query, Tensor& attn_scores) {
   }
 }
 
-
 Tensor NestedTensor_batch_offsets_from_size_tensor(
     const Tensor& sizes,
     int64_t extra_elements) {
@@ -143,7 +142,10 @@ Tensor NestedTensor_batch_offsets_from_size_tensor(
   return offsets;
 }
 
-Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c10::optional<int64_t> mask_dim_length) {
+Tensor NestedTensor_to_mask(
+    const Tensor& nt,
+    c10::optional<int64_t> mask_dim,
+    c10::optional<int64_t> mask_dim_length) {
   auto* nt_impl = get_nested_tensor_impl(nt);
   TORCH_CHECK(
       !mask_dim || *mask_dim < nt.dim(),
@@ -162,7 +164,9 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c
   const auto& sizes = nt_impl->get_nested_size_tensor();
   // Shape: # of tensors in our NestedTensor by max size along first dim
   // TODO: calculate this without allocating a std::vector.
-  const auto result_size_1 = mask_dim_length ? *mask_dim_length : NestedTensor_get_max_size(*nt_impl)[0];
+  const auto result_size_1 = mask_dim_length
+      ? *mask_dim_length
+      : NestedTensor_get_max_size(*nt_impl)[0];
   auto result = at::ones({sizes.sizes()[0], result_size_1}, at::kBool);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
   auto* result_data = result.data_ptr<bool>();

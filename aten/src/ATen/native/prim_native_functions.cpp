@@ -22,5 +22,5 @@ bool is_nonzero(const Tensor& self) {
   }
   TORCH_INTERNAL_ASSERT(false, "Expected non-Tensor backend scalar");
 }
-} // namespace meta
+} // namespace native
 } // namespace at

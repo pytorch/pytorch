@@ -1,103 +1,115 @@
-#include <ATen/core/dispatch/Dispatcher.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
-#include <torch/library.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/util/irange.h>
+#include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/ATen.h>
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/to_native.h>
-#include <ATen/ops/resize.h>
 #include <ATen/ops/as_strided.h>
 #include <ATen/ops/as_strided_copy.h>
 #include <ATen/ops/empty_strided_native.h>
+#include <ATen/ops/resize.h>
+#include <ATen/ops/to_native.h>
 #endif
 
 namespace {
-  void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
-    const auto& schema = op.schema();
-    TORCH_INTERNAL_ASSERT(!schema.hasAnyAliasInfo(), "mutating and aliasing ops should all have codegen'd kernels");
-    const auto num_arguments = schema.arguments().size();
-    const auto arguments_begin = stack->size() - num_arguments;
-    auto arguments = torch::jit::last(stack, num_arguments);
+void functionalizeFallback(
+    const c10::OperatorHandle& op,
+    c10::DispatchKeySet dispatchKeySet,
+    torch::jit::Stack* stack) {
+  const auto& schema = op.schema();
+  TORCH_INTERNAL_ASSERT(
+      !schema.hasAnyAliasInfo(),
+      "mutating and aliasing ops should all have codegen'd kernels");
+  const auto num_arguments = schema.arguments().size();
+  const auto arguments_begin = stack->size() - num_arguments;
+  auto arguments = torch::jit::last(stack, num_arguments);
 
-    auto any_functional_inputs = false;
-    auto any_tensor_inputs = false;
-    for (uint64_t idx = 0; idx < num_arguments; ++idx) {
-      const auto& ivalue = arguments[idx];
-      if (ivalue.isTensor()) {
-        any_tensor_inputs = true;
-        auto t = ivalue.toTensor();
-        if (at::functionalization::impl::isFunctionalTensor(t)) {
-          any_functional_inputs = true;
-          at::functionalization::impl::sync(t);
-          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
-          (*stack)[arguments_begin + idx] = t_new;
-        }
-      } else if (ivalue.isTensorList()) {
-        any_tensor_inputs = true;
-        auto tensors = ivalue.toTensorList();
-        if (at::functionalization::impl::isFunctionalTensor(tensors)) {
-          any_functional_inputs = true;
-          at::functionalization::impl::sync(tensors);
-          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(tensors));
-          (*stack)[arguments_begin + idx] = t_new;
-        }
-      } else if (ivalue.isOptionalTensorList()) {
-        any_tensor_inputs = true;
-        auto opt_tensors = ivalue.toOptionalTensorList();
-        if (at::functionalization::impl::isFunctionalTensor(opt_tensors)) {
-          any_functional_inputs = true;
-          at::functionalization::impl::sync(opt_tensors);
-          auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(opt_tensors));
-          (*stack)[arguments_begin + idx] = t_new;
-        }
+  auto any_functional_inputs = false;
+  auto any_tensor_inputs = false;
+  for (uint64_t idx = 0; idx < num_arguments; ++idx) {
+    const auto& ivalue = arguments[idx];
+    if (ivalue.isTensor()) {
+      any_tensor_inputs = true;
+      auto t = ivalue.toTensor();
+      if (at::functionalization::impl::isFunctionalTensor(t)) {
+        any_functional_inputs = true;
+        at::functionalization::impl::sync(t);
+        auto t_new =
+            c10::IValue(at::functionalization::impl::from_functional_tensor(t));
+        (*stack)[arguments_begin + idx] = t_new;
       }
-    }
-    // we should wrap the output if any inputs were wrapped,
-    // OR if we're hitting a factory function (with no tensor inputs)
-    auto should_wrap_outputs = !any_tensor_inputs || any_functional_inputs;
-    {
-      at::AutoDispatchSkipFunctionalize guard;
-      op.callBoxed(stack);
-    }
-    const auto num_returns = schema.returns().size();
-    const auto returns_begin = stack->size() - num_returns;
-    auto returns = torch::jit::last(stack, num_returns);
-
-    for (const auto idx : c10::irange(num_returns)) {
-      const auto& ivalue = returns[idx];
-      if (ivalue.isTensor() && should_wrap_outputs) {
-        auto t = ivalue.toTensor();
-        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
-        (*stack)[returns_begin + idx] = t_new;
-      } else if (ivalue.isTensorList() && should_wrap_outputs) {
-        auto tensors = ivalue.toTensorList();
-        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(tensors));
-        (*stack)[returns_begin + idx] = t_new;
-      } else if (ivalue.isOptionalTensorList() && should_wrap_outputs) {
-        auto opt_tensors = ivalue.toOptionalTensorList();
-        auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(opt_tensors));
-        (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isTensorList()) {
+      any_tensor_inputs = true;
+      auto tensors = ivalue.toTensorList();
+      if (at::functionalization::impl::isFunctionalTensor(tensors)) {
+        any_functional_inputs = true;
+        at::functionalization::impl::sync(tensors);
+        auto t_new = c10::IValue(
+            at::functionalization::impl::from_functional_tensor(tensors));
+        (*stack)[arguments_begin + idx] = t_new;
+      }
+    } else if (ivalue.isOptionalTensorList()) {
+      any_tensor_inputs = true;
+      auto opt_tensors = ivalue.toOptionalTensorList();
+      if (at::functionalization::impl::isFunctionalTensor(opt_tensors)) {
+        any_functional_inputs = true;
+        at::functionalization::impl::sync(opt_tensors);
+        auto t_new = c10::IValue(
+            at::functionalization::impl::from_functional_tensor(opt_tensors));
+        (*stack)[arguments_begin + idx] = t_new;
       }
     }
   }
+  // we should wrap the output if any inputs were wrapped,
+  // OR if we're hitting a factory function (with no tensor inputs)
+  auto should_wrap_outputs = !any_tensor_inputs || any_functional_inputs;
+  {
+    at::AutoDispatchSkipFunctionalize guard;
+    op.callBoxed(stack);
+  }
+  const auto num_returns = schema.returns().size();
+  const auto returns_begin = stack->size() - num_returns;
+  auto returns = torch::jit::last(stack, num_returns);
+
+  for (const auto idx : c10::irange(num_returns)) {
+    const auto& ivalue = returns[idx];
+    if (ivalue.isTensor() && should_wrap_outputs) {
+      auto t = ivalue.toTensor();
+      auto t_new =
+          c10::IValue(at::functionalization::impl::to_functional_tensor(t));
+      (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isTensorList() && should_wrap_outputs) {
+      auto tensors = ivalue.toTensorList();
+      auto t_new = c10::IValue(
+          at::functionalization::impl::to_functional_tensor(tensors));
+      (*stack)[returns_begin + idx] = t_new;
+    } else if (ivalue.isOptionalTensorList() && should_wrap_outputs) {
+      auto opt_tensors = ivalue.toOptionalTensorList();
+      auto t_new = c10::IValue(
+          at::functionalization::impl::to_functional_tensor(opt_tensors));
+      (*stack)[returns_begin + idx] = t_new;
+    }
+  }
 }
+} // namespace
 
 // Vanilla implementation to compute contiguous strides given some sizes.
 // Should probably refactor this into shared code (also used in TensorImpl.h)
 std::vector<int64_t> compute_contiguous_strides(c10::IntArrayRef sizes) {
   auto n = sizes.size();
   std::vector<int64_t> strides(n);
-  if (n == 0) return strides;
+  if (n == 0)
+    return strides;
 
   strides[n - 1] = 1;
   for (int64_t i = n - 2; i >= 0; --i) {
-    strides[i] = strides[i+1] * sizes[i];
+    strides[i] = strides[i + 1] * sizes[i];
   }
   return strides;
 }
@@ -106,7 +118,11 @@ std::vector<int64_t> compute_contiguous_strides(c10::IntArrayRef sizes) {
 // - when we resize to a larger size, it acts as a mutation
 // - when we resize to a smaller size, it acts as a view
 // See Note [resize_ in Functionalization] for more dtails
-const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
+const at::Tensor& resize__functionalization(
+    c10::DispatchKeySet dispatchKeySet,
+    const at::Tensor& self,
+    at::IntArrayRef size,
+    c10::optional<at::MemoryFormat> memory_format) {
   // First unwrap the tensor arguments
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
@@ -117,9 +133,9 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   }
   // Case 1: arguments are not functional tensors, so we no-op and redispatch.
   if (!at::functionalization::impl::isFunctionalTensor(self)) {
-     at::AutoDispatchSkipFunctionalize guard;
-     at::Tensor tmp_output = self_.resize_(size, memory_format);
-     return self;
+    at::AutoDispatchSkipFunctionalize guard;
+    at::Tensor tmp_output = self_.resize_(size, memory_format);
+    return self;
   }
 
   // Case 2: actually functionalize resize_()
@@ -131,16 +147,20 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
 
   auto itemsize = self.dtype().itemsize();
   auto storage_offset = self.storage_offset();
-  auto new_size_bytes = at::detail::computeStorageNbytesContiguous(size, itemsize, storage_offset);
+  auto new_size_bytes = at::detail::computeStorageNbytesContiguous(
+      size, itemsize, storage_offset);
   auto needs_resize_storage = new_size_bytes > self.storage().nbytes();
 
   if (needs_resize_storage) {
-    // If resize_() actually increases the size of the storage, then we need to tell FunctionalTensorWrapper about it.
-    // See Note[resize_() in functionalization pass]
-    auto func_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
+    // If resize_() actually increases the size of the storage, then we need to
+    // tell FunctionalTensorWrapper about it. See Note[resize_() in
+    // functionalization pass]
+    auto func_impl =
+        at::functionalization::impl::unsafeGetFunctionalWrapper(self);
     func_impl->maybe_replace_storage(tmp_output);
-    // See the note - we're guaranteed at this point that "self" is *not* a view (and has no outstanding views)
-    // So we don't need to treat the output of resize as view tensor.
+    // See the note - we're guaranteed at this point that "self" is *not* a view
+    // (and has no outstanding views) So we don't need to treat the output of
+    // resize as view tensor.
     return self;
   }
 
@@ -148,31 +168,37 @@ const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet,
   // resize_() is effectively a view operator.
   // The output of resizing is equivalent to taking a slice of a larger tensor.
   // We have to emulate this "slicing" with an as_strided call.
-  auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
+  auto reapply_views =
+      at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
-    [reapply_views = reapply_views, size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
-      if (reapply_views) {
-        return base.as_strided(size, compute_contiguous_strides(size));
-      } else {
-        return at::as_strided_copy(base, size, compute_contiguous_strides(size));
-      }
-    },
-    [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
-      return base.as_strided_scatter(mutated_view, size, compute_contiguous_strides(size));
-    }
-  );
+      [reapply_views = reapply_views, size = size.vec()](
+          const at::Tensor& base, int64_t mutated_view_idx) -> at::Tensor {
+        if (reapply_views) {
+          return base.as_strided(size, compute_contiguous_strides(size));
+        } else {
+          return at::as_strided_copy(
+              base, size, compute_contiguous_strides(size));
+        }
+      },
+      [size = size.vec()](
+          const at::Tensor& base,
+          const at::Tensor& mutated_view,
+          int64_t mutated_view_idx) -> at::Tensor {
+        return base.as_strided_scatter(
+            mutated_view, size, compute_contiguous_strides(size));
+      });
   at::functionalization::impl::mutate_view_meta(self, view_meta);
   return self;
 }
 
-
-at::Tensor lift_functionalize(const at::Tensor & self) {
+at::Tensor lift_functionalize(const at::Tensor& self) {
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
   return at::functionalization::impl::to_functional_tensor(self);
 }
 
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
-  m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
+  m.fallback(
+      torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
 
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {

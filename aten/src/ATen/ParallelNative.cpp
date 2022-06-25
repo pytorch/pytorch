@@ -1,8 +1,8 @@
 #include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE
+#include <ATen/PTThreadPool.h>
 #include <ATen/Parallel.h>
 #include <ATen/ParallelFuture.h>
-#include <ATen/PTThreadPool.h>
 
 #ifndef C10_MOBILE
 #include <c10/core/thread_pool.h>
@@ -34,13 +34,13 @@ void _set_in_parallel_region(bool in_region) {
   in_parallel_region_ = in_region;
 }
 
-}  // namespace (anonymous)
+} // namespace
 
 namespace internal {
 void set_thread_num(int thread_num) {
   thread_num_ = thread_num;
 }
-}
+} // namespace internal
 
 namespace {
 void _unset_thread_num() {
@@ -77,7 +77,8 @@ TaskThreadPoolBase& _get_intraop_pool() {
       ThreadPoolRegistry()->Create(
           "C10",
           /* device_id */ 0,
-          /* pool_size */ _num_pool_threads(num_intraop_threads.exchange(CONSUMED)),
+          /* pool_size */
+          _num_pool_threads(num_intraop_threads.exchange(CONSUMED)),
           /* create_new */ true); // create a separate thread pool for intra-op
   return *pool;
 }
@@ -98,11 +99,10 @@ void _run_with_pool(const std::function<void(int, size_t)>& fn, size_t range) {
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!");
 
   pool->run(
-    // PThreadPool::run() is blocking.  A std::function [const] reference to
-    // this lambda cannot go out of scope before PThreadPool::run() returns.
-    [&fn](const size_t task_id) {
-      fn(0 /* unused */, task_id);
-    }, range);
+      // PThreadPool::run() is blocking.  A std::function [const] reference to
+      // this lambda cannot go out of scope before PThreadPool::run() returns.
+      [&fn](const size_t task_id) { fn(0 /* unused */, task_id); },
+      range);
 #endif // C10_MOBILE
 }
 
@@ -124,7 +124,9 @@ struct ParallelRegionGuard {
 namespace internal {
 
 inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
-    int64_t begin, int64_t end, int64_t grain_size) {
+    int64_t begin,
+    int64_t end,
+    int64_t grain_size) {
   if ((end - begin) < grain_size) {
     return std::make_tuple(1, std::max((int64_t)0, end - begin));
   }
@@ -137,10 +139,10 @@ inline std::tuple<size_t, size_t> calc_num_tasks_and_chunk_size(
 }
 
 void invoke_parallel(
-  const int64_t begin,
-  const int64_t end,
-  const int64_t grain_size,
-  const std::function<void(int64_t, int64_t)>& f) {
+    const int64_t begin,
+    const int64_t end,
+    const int64_t grain_size,
+    const std::function<void(int64_t, int64_t)>& f) {
   at::internal::lazy_init_num_threads();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -157,8 +159,8 @@ void invoke_parallel(
     std::condition_variable cv;
   } state;
 
-  auto task = [f, &state, begin, end, chunk_size]
-      (int /* unused */, size_t task_id) {
+  auto task = [f, &state, begin, end, chunk_size](
+                  int /* unused */, size_t task_id) {
     int64_t local_start = begin + task_id * chunk_size;
     if (local_start < end) {
       int64_t local_end = std::min(end, (int64_t)(chunk_size + local_start));
@@ -224,9 +226,9 @@ void set_num_threads(int nthreads) {
     }
     if (stored_nthreads != nthreads) {
       TORCH_WARN(
-        "Cannot set number of intraop threads "
-        "after parallel work has started or after set_num_threads call "
-        "when using native parallel backend");
+          "Cannot set number of intraop threads "
+          "after parallel work has started or after set_num_threads call "
+          "when using native parallel backend");
     }
   }
 #else
@@ -254,7 +256,8 @@ int get_num_threads() {
 #else
   caffe2::PThreadPool* const pool = caffe2::pthreadpool();
   TORCH_INTERNAL_ASSERT(pool, "Invalid thread pool!")
-  return in_parallel_region() ? 1 /* current thread */ : pool->get_thread_count();
+  return in_parallel_region() ? 1 /* current thread */
+                              : pool->get_thread_count();
 #endif // C10_MOBILE
 }
 
@@ -264,11 +267,10 @@ int get_thread_num() {
 
 bool in_parallel_region() {
 #ifndef C10_MOBILE
-  return in_parallel_region_ || (
-    num_intraop_threads.load() == CONSUMED &&
-    // Needed as intraop_launch() doesn't set in_parallel_region().
-    _get_intraop_pool().inThreadPool()
-  );
+  return in_parallel_region_ ||
+      (num_intraop_threads.load() == CONSUMED &&
+       // Needed as intraop_launch() doesn't set in_parallel_region().
+       _get_intraop_pool().inThreadPool());
 #else
   return in_parallel_region_;
 #endif // C10_MOBILE
@@ -294,12 +296,10 @@ c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
 #ifndef C10_MOBILE
   auto future = c10::make_intrusive<c10::ivalue::Future>(c10::NoneType::get());
   if (!in_parallel_region() && get_num_threads() > 1) {
-    _get_intraop_pool().run(
-      [func, future]() {
-        func();
-        future->markCompleted();
-      }
-    );
+    _get_intraop_pool().run([func, future]() {
+      func();
+      future->markCompleted();
+    });
   } else {
     func();
     future->markCompleted();

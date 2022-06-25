@@ -4,8 +4,8 @@
 #include <cmath>
 #include <tuple>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/moments_utils.h>
@@ -96,11 +96,11 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
-      "LayerNormKernelImpl", [&]() {
-    LayerNormKernelImplInternal<scalar_t>(
-        X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16, X.scalar_type(), "LayerNormKernelImpl", [&]() {
+        LayerNormKernelImplInternal<scalar_t>(
+            X, gamma, beta, M, N, static_cast<scalar_t>(eps), Y, mean, rstd);
+      });
 }
 
 template <typename T>
@@ -299,11 +299,14 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, X.scalar_type(),
-      "LayerNormBackwardKernelImpl", [&]() {
-    LayerNormBackwardKernelImplInternal<scalar_t>(
-        dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-  });
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::BFloat16,
+      X.scalar_type(),
+      "LayerNormBackwardKernelImpl",
+      [&]() {
+        LayerNormBackwardKernelImplInternal<scalar_t>(
+            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+      });
 }
 
 } // namespace

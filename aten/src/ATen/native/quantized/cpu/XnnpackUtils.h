@@ -68,97 +68,101 @@ enum xnn_status xnnp_create_convolution2d_nhwc(
     bool per_channel,
     bool transpose) {
   /* Symmetric quantization forces kzp = 0 */
-  TORCH_CHECK(!kzp, "XNNPACK Q[SC]8 conv kernels expects kernel zero point to be zero."
-                    "But got: ", kzp);
+  TORCH_CHECK(
+      !kzp,
+      "XNNPACK Q[SC]8 conv kernels expects kernel zero point to be zero."
+      "But got: ",
+      kzp);
 
   if (transpose) {
-    TORCH_CHECK(!per_channel, "XNNPACK Q[SC]8 does not have a per channel deconvolution!");
+    TORCH_CHECK(
+        !per_channel,
+        "XNNPACK Q[SC]8 does not have a per channel deconvolution!");
     return xnn_create_deconvolution2d_nhwc_qs8(
-        pad_top,        /* uint32_t output_padding_top          */
-        pad_right,      /* uint32_t output_padding_right        */
-        pad_bottom,     /* uint32_t output_padding_bottom       */
-        pad_left,       /* uint32_t output_padding_left         */
-        kernel_h,       /* uint32_t kernel_height               */
-        kernel_w,       /* uint32_t kernel_width                */
-        stride_h,       /* uint32_t stride_height               */
-        stride_w,       /* uint32_t stride_width                */
-        dilation_h,     /* uint32_t dilation_height             */
-        dilation_w,     /* uint32_t dilation_width              */
-        groups,         /* uint32_t groups                      */
-        group_input_channels,  /* size_t group_input_channels   */
+        pad_top, /* uint32_t output_padding_top          */
+        pad_right, /* uint32_t output_padding_right        */
+        pad_bottom, /* uint32_t output_padding_bottom       */
+        pad_left, /* uint32_t output_padding_left         */
+        kernel_h, /* uint32_t kernel_height               */
+        kernel_w, /* uint32_t kernel_width                */
+        stride_h, /* uint32_t stride_height               */
+        stride_w, /* uint32_t stride_width                */
+        dilation_h, /* uint32_t dilation_height             */
+        dilation_w, /* uint32_t dilation_width              */
+        groups, /* uint32_t groups                      */
+        group_input_channels, /* size_t group_input_channels   */
         group_output_channels, /* size_t group_output_channels  */
         ip_chan_stride, /* size_t input_pixel_stride            */
         op_chan_stride, /* size_t output_pixel_stride           */
-        izp,            /* int8_t input_zero_point              */
-        ip_scale,       /* float input_scale                    */
-        k_scales[0],    /* float kernel_scale                   */
-        kernel,         /* const int8_t* kernel                 */
-        bias,           /* const int32_t* bias                  */
-        ozp,            /* int8_t output_zero_point             */
-        op_scale,       /* float output_scale                   */
-        op_min,         /* int8_t output_min                    */
-        op_max,         /* int8_t output_max                    */
-        flags,          /* uint32_t flags                       */
-        op);            /* xnn_operator_t* deconvolution_op_out */
-
+        izp, /* int8_t input_zero_point              */
+        ip_scale, /* float input_scale                    */
+        k_scales[0], /* float kernel_scale                   */
+        kernel, /* const int8_t* kernel                 */
+        bias, /* const int32_t* bias                  */
+        ozp, /* int8_t output_zero_point             */
+        op_scale, /* float output_scale                   */
+        op_min, /* int8_t output_min                    */
+        op_max, /* int8_t output_max                    */
+        flags, /* uint32_t flags                       */
+        op); /* xnn_operator_t* deconvolution_op_out */
   }
 
   if (!per_channel) {
     return xnn_create_convolution2d_nhwc_qs8(
-        pad_top,        /* uint32_t input_padding_top         */
-        pad_right,      /* uint32_t input_padding_right       */
-        pad_bottom,     /* uint32_t input_padding_bottom      */
-        pad_left,       /* uint32_t input_padding_left        */
-        kernel_h,       /* uint32_t kernel_height             */
-        kernel_w,       /* uint32_t kernel_width              */
-        stride_h,       /* uint32_t subsampling_height        */
-        stride_w,       /* uint32_t subsampling_width         */
-        dilation_h,     /* uint32_t dilation_height           */
-        dilation_w,     /* uint32_t dilation_width            */
-        groups,         /* uint32_t groups                    */
-        group_input_channels,  /* size_t group_input_channels */
+        pad_top, /* uint32_t input_padding_top         */
+        pad_right, /* uint32_t input_padding_right       */
+        pad_bottom, /* uint32_t input_padding_bottom      */
+        pad_left, /* uint32_t input_padding_left        */
+        kernel_h, /* uint32_t kernel_height             */
+        kernel_w, /* uint32_t kernel_width              */
+        stride_h, /* uint32_t subsampling_height        */
+        stride_w, /* uint32_t subsampling_width         */
+        dilation_h, /* uint32_t dilation_height           */
+        dilation_w, /* uint32_t dilation_width            */
+        groups, /* uint32_t groups                    */
+        group_input_channels, /* size_t group_input_channels */
         group_output_channels, /* size_t group_output_channels*/
         ip_chan_stride, /* size_t input_channel_stride        */
         op_chan_stride, /* size_t output_channel_stride       */
-        izp,            /* int8_t input_zero_point            */
-        ip_scale,       /* float input_scale                  */
-        k_scales[0],    /* float kernel_scale                 */
-        kernel,         /* const int8_t* kernel               */
-        bias,           /* const int32_t* bias                */
-        ozp,            /* int8_t output_zero_point           */
-        op_scale,       /* float output_scale                 */
-        op_min,         /* int8_t output_min                  */
-        op_max,         /* int8_t output_max                  */
-        flags,          /* uint32_t flags                     */
-        op);            /* xnn_operator_t* convolution_op_out */
+        izp, /* int8_t input_zero_point            */
+        ip_scale, /* float input_scale                  */
+        k_scales[0], /* float kernel_scale                 */
+        kernel, /* const int8_t* kernel               */
+        bias, /* const int32_t* bias                */
+        ozp, /* int8_t output_zero_point           */
+        op_scale, /* float output_scale                 */
+        op_min, /* int8_t output_min                  */
+        op_max, /* int8_t output_max                  */
+        flags, /* uint32_t flags                     */
+        op); /* xnn_operator_t* convolution_op_out */
   } else { /* per_channel */
     return xnn_create_convolution2d_nhwc_qc8(
-        pad_top,        /* uint32_t input_padding_top         */
-        pad_right,      /* uint32_t input_padding_right       */
-        pad_bottom,     /* uint32_t input_padding_bottom      */
-        pad_left,       /* uint32_t input_padding_left        */
-        kernel_h,       /* uint32_t kernel_height             */
-        kernel_w,       /* uint32_t kernel_width              */
-        stride_h,       /* uint32_t subsampling_height        */
-        stride_w,       /* uint32_t subsampling_width         */
-        dilation_h,     /* uint32_t dilation_height           */
-        dilation_w,     /* uint32_t dilation_width            */
-        groups,         /* uint32_t groups                    */
-        group_input_channels,  /* size_t group_input_channels */
+        pad_top, /* uint32_t input_padding_top         */
+        pad_right, /* uint32_t input_padding_right       */
+        pad_bottom, /* uint32_t input_padding_bottom      */
+        pad_left, /* uint32_t input_padding_left        */
+        kernel_h, /* uint32_t kernel_height             */
+        kernel_w, /* uint32_t kernel_width              */
+        stride_h, /* uint32_t subsampling_height        */
+        stride_w, /* uint32_t subsampling_width         */
+        dilation_h, /* uint32_t dilation_height           */
+        dilation_w, /* uint32_t dilation_width            */
+        groups, /* uint32_t groups                    */
+        group_input_channels, /* size_t group_input_channels */
         group_output_channels, /* size_t group_output_channels*/
         ip_chan_stride, /* size_t input_channel_stride        */
         op_chan_stride, /* size_t output_channel_stride       */
-        izp,            /* int8_t input_zero_point            */
-        ip_scale,       /* float input_scale                  */
-        k_scales,       /* const float* kernel_scale          */
-        kernel,         /* const int8_t* kernel               */
-        bias,           /* const int32_t* bias                */
-        ozp,            /* int8_t output_zero_point           */
-        op_scale,       /* float output_scale                 */
-        op_min,         /* int8_t output_min                  */
-        op_max,         /* int8_t output_max                  */
-        flags,          /* uint32_t flags                     */
-        op);            /* xnn_operator_t* convolution_op_out */
+        izp, /* int8_t input_zero_point            */
+        ip_scale, /* float input_scale                  */
+        k_scales, /* const float* kernel_scale          */
+        kernel, /* const int8_t* kernel               */
+        bias, /* const int32_t* bias                */
+        ozp, /* int8_t output_zero_point           */
+        op_scale, /* float output_scale                 */
+        op_min, /* int8_t output_min                  */
+        op_max, /* int8_t output_max                  */
+        flags, /* uint32_t flags                     */
+        op); /* xnn_operator_t* convolution_op_out */
   }
 }
 
@@ -178,41 +182,42 @@ enum xnn_status xnnp_setup_convolution2d_nhwc(
     bool transpose = false,
     uint32_t adj_h = 0,
     uint32_t adj_w = 0) {
-  if(transpose) {
-    TORCH_CHECK(!per_channel, "XNNPACK Q[SC]8 does not have a per channel deconvolution!");
+  if (transpose) {
+    TORCH_CHECK(
+        !per_channel,
+        "XNNPACK Q[SC]8 does not have a per channel deconvolution!");
     return xnn_setup_deconvolution2d_nhwc_qs8(
-        op,       /* xnn_operator_t deconvolution_op */
-        batch,    /* size_t batch_size               */
-        in_h,     /* size_t input_height             */
-        in_w,     /* size_t input_width              */
-        adj_h,    /* uint32_t adjustment_height      */
-        adj_w,    /* uint32_t adjustment_width       */
-        inp,      /* const int8_t* input             */
-        outp,     /* int8_t* output                  */
+        op, /* xnn_operator_t deconvolution_op */
+        batch, /* size_t batch_size               */
+        in_h, /* size_t input_height             */
+        in_w, /* size_t input_width              */
+        adj_h, /* uint32_t adjustment_height      */
+        adj_w, /* uint32_t adjustment_width       */
+        inp, /* const int8_t* input             */
+        outp, /* int8_t* output                  */
         pt_pool); /* pthreadpool_t threadpool        */
   }
 
   if (!per_channel) {
     return xnn_setup_convolution2d_nhwc_qs8(
-        op,       /* xnn_operator_t convolution_op */
-        batch,    /* size_t batch_size             */
-        in_h,     /* size_t input_height           */
-        in_w,     /* size_t input_width            */
-        inp,      /* const int8_t* input           */
-        outp,     /* int8_t* output                */
+        op, /* xnn_operator_t convolution_op */
+        batch, /* size_t batch_size             */
+        in_h, /* size_t input_height           */
+        in_w, /* size_t input_width            */
+        inp, /* const int8_t* input           */
+        outp, /* int8_t* output                */
         pt_pool); /* pthreadpool_t threadpool      */
   } else { /* per_channel */
     return xnn_setup_convolution2d_nhwc_qc8(
-        op,       /* xnn_operator_t convolution_op */
-        batch,    /* size_t batch_size             */
-        in_h,     /* size_t input_height           */
-        in_w,     /* size_t input_width            */
-        inp,      /* const int8_t* input           */
-        outp,     /* int8_t* output                */
+        op, /* xnn_operator_t convolution_op */
+        batch, /* size_t batch_size             */
+        in_h, /* size_t input_height           */
+        in_w, /* size_t input_width            */
+        inp, /* const int8_t* input           */
+        outp, /* int8_t* output                */
         pt_pool); /* pthreadpool_t threadpool      */
   }
 }
-
 
 /*
  * Series of wrapper functions to call xnn_create* and xnn_setup*
@@ -237,23 +242,26 @@ enum xnn_status xnnp_create_fully_connected_nc(
     uint32_t flags,
     xnn_operator_t* fully_connected_op_out) {
   /* Symmetric quantization forces kzp = 0 */
-  TORCH_CHECK(!kernel_zero_point, "XNNPACK QS8 linear kernel expects kernel zero point to be zero."
-                    "But got: ", kernel_zero_point);
+  TORCH_CHECK(
+      !kernel_zero_point,
+      "XNNPACK QS8 linear kernel expects kernel zero point to be zero."
+      "But got: ",
+      kernel_zero_point);
   return xnn_create_fully_connected_nc_qs8(
-      input_channels,          /* size_t input_channels                  */
-      output_channels,         /* size_t output_channels                 */
-      input_stride,            /* size_t input_stride                    */
-      output_stride,           /* size_t output_stride                   */
-      input_zero_point,        /* int8_t input_zero_point                */
-      input_scale,             /* float input_scale                      */
-      kernel_scale,            /* float kernel_scale                     */
-      kernel,                  /* const int8_t* kernel                   */
-      bias,                    /* const int32_t* bias                    */
-      output_zero_point,       /* int8_t output_zero_point               */
-      output_scale,            /* float output_scale                     */
-      output_min,              /* int8_t output_min                      */
-      output_max,              /* int8_t output_max                      */
-      flags,                   /* uint32_t flags                         */
+      input_channels, /* size_t input_channels                  */
+      output_channels, /* size_t output_channels                 */
+      input_stride, /* size_t input_stride                    */
+      output_stride, /* size_t output_stride                   */
+      input_zero_point, /* int8_t input_zero_point                */
+      input_scale, /* float input_scale                      */
+      kernel_scale, /* float kernel_scale                     */
+      kernel, /* const int8_t* kernel                   */
+      bias, /* const int32_t* bias                    */
+      output_zero_point, /* int8_t output_zero_point               */
+      output_scale, /* float output_scale                     */
+      output_min, /* int8_t output_min                      */
+      output_max, /* int8_t output_max                      */
+      flags, /* uint32_t flags                         */
       fully_connected_op_out); /* xnn_operator_t* fully_connected_op_out */
 }
 
@@ -266,10 +274,10 @@ enum xnn_status xnnp_setup_fully_connected_nc(
     pthreadpool_t threadpool) {
   return xnn_setup_fully_connected_nc_qs8(
       fully_connected_op, /* xnn_operator_t fully_connected_op */
-      batch_size,         /* size_t batch_size                 */
-      input,              /* const int8_t* input               */
-      output,             /* int8_t* output                    */
-      threadpool);        /* pthreadpool_t threadpool          */
+      batch_size, /* size_t batch_size                 */
+      input, /* const int8_t* input               */
+      output, /* int8_t* output                    */
+      threadpool); /* pthreadpool_t threadpool          */
 }
 
 } // namespace xnnp_utils

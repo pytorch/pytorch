@@ -1,22 +1,22 @@
 #pragma once
 
-#include <ATen/core/function_schema.h>
-#include <c10/util/Metaprogramming.h>
-#include <c10/util/flat_hash_map.h>
-#include <c10/util/either.h>
-#include <c10/util/Optional.h>
-#include <c10/core/DispatchKey.h>
-#include <ATen/core/ivalue.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/dispatch/DispatchKeyExtractor.h>
+#include <ATen/core/function_schema.h>
+#include <ATen/core/ivalue.h>
+#include <c10/core/DispatchKey.h>
+#include <c10/util/Metaprogramming.h>
+#include <c10/util/Optional.h>
+#include <c10/util/either.h>
+#include <c10/util/flat_hash_map.h>
 
-#include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/dispatch/CppSignature.h>
+#include <ATen/core/dispatch/OperatorOptions.h>
 #include <ATen/core/dispatch/RegistrationHandleRAII.h>
 #include <ATen/core/enum_tag.h>
 
-#include <list>
 #include <array>
+#include <list>
 
 #ifdef C10_MOBILE
 #define C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
@@ -34,11 +34,13 @@ namespace impl {
 // we don't put AnnotatedKernel in the actual DispatchTable), but is useful for
 // giving good error messages.
 struct AnnotatedKernel final {
-  AnnotatedKernel(KernelFunction k, std::unique_ptr<FunctionSchema> s, std::string d)
-    : kernel(std::move(k))
-    , inferred_function_schema(std::move(s))
-    , debug(std::move(d))
-    {}
+  AnnotatedKernel(
+      KernelFunction k,
+      std::unique_ptr<FunctionSchema> s,
+      std::string d)
+      : kernel(std::move(k)),
+        inferred_function_schema(std::move(s)),
+        debug(std::move(d)) {}
   AnnotatedKernel() {}
   KernelFunction kernel;
   std::unique_ptr<FunctionSchema> inferred_function_schema;
@@ -52,9 +54,7 @@ struct AnnotatedKernel final {
 // where the registration of this schema occurred
 struct AnnotatedSchema final {
   AnnotatedSchema(FunctionSchema s, std::string d)
-    : schema(std::move(s))
-    , debug(std::move(d))
-    {}
+      : schema(std::move(s)), debug(std::move(d)) {}
   FunctionSchema schema;
   std::string debug;
 };
@@ -67,7 +67,7 @@ struct AnnotatedSchema final {
 // lock (this is important because some methods in OperatorEntry access
 // dispatcher state)
 class TORCH_API OperatorEntry final {
-public:
+ public:
   explicit OperatorEntry(OperatorName&& operator_name);
 
   OperatorEntry(const OperatorEntry&) = delete;
@@ -76,7 +76,11 @@ public:
   OperatorEntry& operator=(OperatorEntry&&) noexcept = delete;
 
   const FunctionSchema& schema() const {
-    TORCH_INTERNAL_ASSERT(schema_.has_value(), "Tried to access the schema for ", name_, " which doesn't have a schema registered yet");
+    TORCH_INTERNAL_ASSERT(
+        schema_.has_value(),
+        "Tried to access the schema for ",
+        name_,
+        " which doesn't have a schema registered yet");
     return schema_->schema;
   }
   const std::string& debug() const {
@@ -99,7 +103,10 @@ public:
   // attempt to register a schema when one is already present or vice
   // versa that is an error.  (Refcounting for the registrations is
   // handled in the OperatorHandle in Dispatcher)
-  void registerSchema(FunctionSchema&&, std::string&& debug, std::vector<at::Tag> tags = {});
+  void registerSchema(
+      FunctionSchema&&,
+      std::string&& debug,
+      std::vector<at::Tag> tags = {});
   void deregisterSchema();
 
   const OperatorName& operator_name() const {
@@ -127,26 +134,21 @@ public:
   // Precondition: Dispatcher::mutex_ is held
   // Postcondition: caller is responsible for disposing of the kernel
   AnnotatedKernelContainerIterator registerKernel(
-    const Dispatcher& dispatcher,
-    c10::optional<DispatchKey> dispatch_key,
-    KernelFunction kernel,
-    c10::optional<CppSignature> cpp_signature,
-    std::unique_ptr<FunctionSchema> inferred_function_schema,
-    std::string debug
-  );
+      const Dispatcher& dispatcher,
+      c10::optional<DispatchKey> dispatch_key,
+      KernelFunction kernel,
+      c10::optional<CppSignature> cpp_signature,
+      std::unique_ptr<FunctionSchema> inferred_function_schema,
+      std::string debug);
 
   // Precondition: Dispatcher::mutex_ is held
   void deregisterKernel_(
-    const Dispatcher& dispatcher,
-    c10::optional<DispatchKey> dispatch_key,
-    AnnotatedKernelContainerIterator kernel
-  );
+      const Dispatcher& dispatcher,
+      c10::optional<DispatchKey> dispatch_key,
+      AnnotatedKernelContainerIterator kernel);
 
   // Precondition: Dispatcher::mutex_ is held
-  void updateFallback(
-    const Dispatcher& dispatcher,
-    DispatchKey dispatch_key
-  );
+  void updateFallback(const Dispatcher& dispatcher, DispatchKey dispatch_key);
 
   // Precondition: Dispatcher::mutex_ is held
   void updateSchemaAliasAnalysis(AliasAnalysisKind a) {
@@ -158,16 +160,21 @@ public:
   std::string dumpState() const;
   void checkInvariants() const;
 
-  const DispatchKeyExtractor& dispatchKeyExtractor() const { return dispatchKeyExtractor_; }
+  const DispatchKeyExtractor& dispatchKeyExtractor() const {
+    return dispatchKeyExtractor_;
+  }
 
-  // Asserts that the given FuncType is correct for calling this operator in an unboxed way.
-  template<class FuncType>
+  // Asserts that the given FuncType is correct for calling this operator in an
+  // unboxed way.
+  template <class FuncType>
   inline void assertSignatureIsCorrect() {
     assertSignatureIsCorrect(CppSignature::make<FuncType>());
   }
 
   void assertSignatureIsCorrect(const CppSignature call_signature) {
-    if (C10_UNLIKELY(cpp_signature_.has_value() && (call_signature != cpp_signature_->signature))) {
+    if (C10_UNLIKELY(
+            cpp_signature_.has_value() &&
+            (call_signature != cpp_signature_->signature))) {
       reportSignatureError(call_signature);
     }
   }
@@ -201,28 +208,27 @@ public:
   // Invariant: There are no alias keys in the passed-in dispatch key set.
   // Note [No Alias Keys in DispatchKeySet]
   // Alias keys should be checked using `hasKernelForDispatchKey`
-  // Alias keys shouldn't go inside of a DispatchKeySet, since they can technically
-  // have a value > 63 (causing overflow).
+  // Alias keys shouldn't go inside of a DispatchKeySet, since they can
+  // technically have a value > 63 (causing overflow).
   bool hasKernelForAnyDispatchKey(DispatchKeySet ks) const;
   // Returns true if kernel_ has entry for a particular key.
   bool hasKernelForDispatchKey(DispatchKey k) const;
   // Returns all the operator tags added at the time of registration
   const std::vector<at::Tag>& getTags() const;
 
-private:
-
+ private:
   OperatorName name_;
   c10::optional<AnnotatedSchema> schema_;
-  #ifndef C10_MOBILE
-    std::vector<at::Tag> tags_;
-  #endif
+#ifndef C10_MOBILE
+  std::vector<at::Tag> tags_;
+#endif
   std::array<KernelFunction, c10::num_runtime_entries> dispatchTable_;
   DispatchKeyExtractor dispatchKeyExtractor_;
 
   // kernels_ stores all registered kernels for the corresponding dispatch key
   // and catchAllKernels_ stores the catch-all kernels.
-  // If an operator library gets loaded that overwrites an already existing kernel,
-  // both kernels will be in that list but only the newer one will be in
+  // If an operator library gets loaded that overwrites an already existing
+  // kernel, both kernels will be in that list but only the newer one will be in
   // dispatchTable. If any of the kernels go away (say the library gets
   // unloaded), we remove the kernel from this list and update the
   // dispatchTable if necessary.
@@ -250,14 +256,16 @@ private:
   // re-executed and then only allow one kernel here, i.e. error if a kernel
   // is already registered, but that's a lot of effort to implement and
   // currently not high-pri.
-  ska::flat_hash_map<DispatchKey,
+  ska::flat_hash_map<
+      DispatchKey,
 #ifdef C10_DISPATCHER_ONE_KERNEL_PER_DISPATCH_KEY
-                     // On mobile, we needn't worry about Jupyter notebooks.
-                     std::array<AnnotatedKernel, 1>
+      // On mobile, we needn't worry about Jupyter notebooks.
+      std::array<AnnotatedKernel, 1>
 #else
-                     std::list<AnnotatedKernel>
+      std::list<AnnotatedKernel>
 #endif
-                     > kernels_;
+      >
+      kernels_;
 
   const AnnotatedKernel& missingKernel() const;
   const AnnotatedKernel& ambiguousAutogradOtherKernel() const;
@@ -279,19 +287,29 @@ private:
   const bool is_observed_;
 
   [[noreturn]] void reportSignatureError(CppSignature call_signature) const;
-  const KernelFunction& computeDispatchTableEntry(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key) const;
-  std::pair<const AnnotatedKernel&, const char*> computeDispatchTableEntryWithDebug(
-    const c10::Dispatcher& dispatcher, DispatchKey dispatch_key
-  ) const;
+  const KernelFunction& computeDispatchTableEntry(
+      const c10::Dispatcher& dispatcher,
+      DispatchKey dispatch_key) const;
+  std::pair<const AnnotatedKernel&, const char*>
+  computeDispatchTableEntryWithDebug(
+      const c10::Dispatcher& dispatcher,
+      DispatchKey dispatch_key) const;
   // This function re-establishes the invariant that dispatchTable
-  // contains the front element from the kernels list for a given runtime dispatch key.
-  void updateDispatchTableEntry_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
+  // contains the front element from the kernels list for a given runtime
+  // dispatch key.
+  void updateDispatchTableEntry_(
+      const c10::Dispatcher& dispatcher,
+      DispatchKey dispatch_key);
   // Like above, but also handles alias dispatch keys.
-  void updateDispatchTable_(const c10::Dispatcher& dispatcher, DispatchKey dispatch_key);
+  void updateDispatchTable_(
+      const c10::Dispatcher& dispatcher,
+      DispatchKey dispatch_key);
   // Like above, but for ALL entries in the dispatch table.
   void updateDispatchTableFull_(const c10::Dispatcher& dispatcher);
-  // Retrieves a pointer to AnnotatedKernel at kernels_.at(dispatch_key).front().
-  const AnnotatedKernel* getKernelForDispatchKey(DispatchKey dispatch_key) const;
+  // Retrieves a pointer to AnnotatedKernel at
+  // kernels_.at(dispatch_key).front().
+  const AnnotatedKernel* getKernelForDispatchKey(
+      DispatchKey dispatch_key) const;
 };
 
 } // namespace impl

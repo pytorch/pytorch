@@ -248,4 +248,5 @@ TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
 }
 
 } // namespace
-}} // namespace ao::sparse
+} // namespace sparse
+} // namespace ao

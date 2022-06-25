@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/UpSample.h>
+#include <ATen/native/cpu/utils.h>
 #include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
-#include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
 #include <algorithm>
@@ -20,11 +20,12 @@ struct UpsampleBilinearParamW {
   int64_t w1, w1p;
   float w0lambda, w1lambda;
 
-  UpsampleBilinearParamW(int64_t w1, int64_t w1p, float w0lambda, float w1lambda)
-    : w1(w1)
-    , w1p(w1p)
-    , w0lambda(w0lambda)
-    , w1lambda(w1lambda) {}
+  UpsampleBilinearParamW(
+      int64_t w1,
+      int64_t w1p,
+      float w0lambda,
+      float w1lambda)
+      : w1(w1), w1p(w1p), w0lambda(w0lambda), w1lambda(w1lambda) {}
 };
 
 // at::native functions for the native_functions.yaml
@@ -90,47 +91,50 @@ static void upsample_bilinear2d_out_frame(
 
   // compared to 'nearest', each requires 4 points and takes additional * and +
   // set the scale to be 16.
-  int64_t grain_size = internal::GRAIN_SIZE / std::max(int64_t{1}, output_width) / 16;
-  at::parallel_for(0, channels * output_height, grain_size, [&](int64_t begin, int64_t end) {
-    int64_t nc{0}, h2{0};
-    data_index_init(begin, nc, channels, h2, output_height);
+  int64_t grain_size =
+      internal::GRAIN_SIZE / std::max(int64_t{1}, output_width) / 16;
+  at::parallel_for(
+      0, channels * output_height, grain_size, [&](int64_t begin, int64_t end) {
+        int64_t nc{0}, h2{0};
+        data_index_init(begin, nc, channels, h2, output_height);
 
-    for (const auto i : c10::irange(begin, end)) {
-      const auto h1r = area_pixel_compute_source_index<float>(
-          rheight, h2, align_corners, /*cubic=*/false);
+        for (const auto i : c10::irange(begin, end)) {
+          const auto h1r = area_pixel_compute_source_index<float>(
+              rheight, h2, align_corners, /*cubic=*/false);
 
-      const int64_t h1 = h1r;
-      const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
+          const int64_t h1 = h1r;
+          const int64_t h1p = (h1 < input_height - 1) ? 1 : 0;
 
-      const float h1lambda = h1r - h1;
-      const float h0lambda = static_cast<float>(1.) - h1lambda;
+          const float h1lambda = h1r - h1;
+          const float h0lambda = static_cast<float>(1.) - h1lambda;
 
-      const auto* i_ptr = &i_p[nc * input_height * input_width];
-      auto* pos2 = &o_p[i * output_width];
+          const auto* i_ptr = &i_p[nc * input_height * input_width];
+          auto* pos2 = &o_p[i * output_width];
 
-      for (const auto w2 : c10::irange(output_width)) {
-        const auto& param_w = params_w[w2];
-        const int64_t w1 = param_w.w1;
-        const int64_t w1p = param_w.w1p;
-        const float w0lambda = param_w.w0lambda;
-        const float w1lambda = param_w.w1lambda;
+          for (const auto w2 : c10::irange(output_width)) {
+            const auto& param_w = params_w[w2];
+            const int64_t w1 = param_w.w1;
+            const int64_t w1p = param_w.w1p;
+            const float w0lambda = param_w.w0lambda;
+            const float w1lambda = param_w.w1lambda;
 
-        const auto* pos1 = i_ptr + h1 * input_width + w1;
+            const auto* pos1 = i_ptr + h1 * input_width + w1;
 
-        float result = h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
-            h1lambda *
-                (w0lambda * pos1[h1p * input_width] +
-                 w1lambda * pos1[h1p * input_width + w1p]) - input_q_zero_point;
-        // requantization
-        pos2[w2] = at::native::quantize_val<scalar_t>(
-                      output_scale, output_q_zero_point, result)
-                      .val_;
-      }
+            float result =
+                h0lambda * (w0lambda * pos1[0] + w1lambda * pos1[w1p]) +
+                h1lambda *
+                    (w0lambda * pos1[h1p * input_width] +
+                     w1lambda * pos1[h1p * input_width + w1p]) -
+                input_q_zero_point;
+            // requantization
+            pos2[w2] = at::native::quantize_val<scalar_t>(
+                           output_scale, output_q_zero_point, result)
+                           .val_;
+          }
 
-      data_index_step(nc, channels, h2, output_height);
-    }
-  });
-
+          data_index_step(nc, channels, h2, output_height);
+        }
+      });
 }
 
 } // namespace
@@ -215,12 +219,13 @@ using at::native::upsample::get_scale_value;
 Tensor upsample_bilinear2d_quantized_cpu(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
-      bool align_corners,
+    bool align_corners,
     c10::optional<ArrayRef<double>> scale_factors) {
   auto osize = compute_output_size(input.sizes(), output_size, scale_factors);
   auto scale_h = get_scale_value(scale_factors, 0);
   auto scale_w = get_scale_value(scale_factors, 1);
-  return upsample_bilinear2d_quantized_cpu(input, osize, align_corners, scale_h, scale_w);
+  return upsample_bilinear2d_quantized_cpu(
+      input, osize, align_corners, scale_h, scale_w);
 }
 
 DEFINE_DISPATCH(qupsample_bilinear2d_nhwc_stub);

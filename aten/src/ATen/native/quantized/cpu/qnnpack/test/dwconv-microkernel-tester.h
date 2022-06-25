@@ -208,8 +208,7 @@ class DWConvMicrokernelTester {
       std::fill(packedWeights.begin(), packedWeights.end(), 0xA5);
 
       size_t num_zero_points_padded = channels() + 8;
-      std::vector<uint8_t> kernel_zero_points(
-          num_zero_points_padded, 0);
+      std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, 0);
       if (per_channel) {
         std::generate(
             kernel_zero_points.begin(),
@@ -274,11 +273,14 @@ class DWConvMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      std::vector<float> requantization_scales(num_zero_points_padded, 1.0f / float(outputScale));
+      std::vector<float> requantization_scales(
+          num_zero_points_padded, 1.0f / float(outputScale));
       if (per_channel) {
         auto f32rng =
             std::bind(std::uniform_real_distribution<float>(1, 5), rng);
-        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        auto scale_generator = [&]() -> float {
+          return (f32rng() / outputScale);
+        };
         std::generate(
             requantization_scales.begin(),
             requantization_scales.end(),
@@ -295,7 +297,10 @@ class DWConvMicrokernelTester {
       const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
               pytorch_qnnp_compute_scalar_fp32_requantization_params(
-                  requantization_scales.data(), outputZeroPoint, qmin(), qmax());
+                  requantization_scales.data(),
+                  outputZeroPoint,
+                  qmin(),
+                  qmax());
 
       q8dwconv(
           channels(),
@@ -378,7 +383,8 @@ class DWConvMicrokernelTester {
       std::fill(packedWeights.begin(), packedWeights.end(), 0xA5);
 
       size_t num_zero_points_padded = channels() + 8;
-      std::vector<uint8_t> kernel_zero_points(num_zero_points_padded, this->kernelZeroPoint_);
+      std::vector<uint8_t> kernel_zero_points(
+          num_zero_points_padded, this->kernelZeroPoint_);
       if (per_channel) {
         std::generate(
             kernel_zero_points.begin(),
@@ -473,11 +479,14 @@ class DWConvMicrokernelTester {
               long(std::numeric_limits<uint8_t>::max())),
           long(std::numeric_limits<uint8_t>::min())));
 
-      std::vector<float> requantization_scales(num_zero_points_padded, 1.0f / float(outputScale));
+      std::vector<float> requantization_scales(
+          num_zero_points_padded, 1.0f / float(outputScale));
       if (per_channel) {
         auto f32rng =
             std::bind(std::uniform_real_distribution<float>(1, 5), rng);
-        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        auto scale_generator = [&]() -> float {
+          return (f32rng() / outputScale);
+        };
         std::generate(
             requantization_scales.begin(),
             requantization_scales.end(),
@@ -494,7 +503,10 @@ class DWConvMicrokernelTester {
       const union pytorch_qnnp_fp32_requantization_params
           scalarRequantizationParams =
               pytorch_qnnp_compute_scalar_fp32_requantization_params(
-                  requantization_scales.data(), outputZeroPoint, qmin(), qmax());
+                  requantization_scales.data(),
+                  outputZeroPoint,
+                  qmin(),
+                  qmax());
 
       q8dwconv(
           channels(),

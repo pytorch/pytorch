@@ -1,18 +1,19 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/ExpandUtils.h>
 #include <ATen/ExpandBase.h>
+#include <ATen/ExpandUtils.h>
 
 #include <c10/util/irange.h>
 
 namespace at {
 namespace internal {
-TensorBase expand_slow_path(const TensorBase &self, IntArrayRef size) {
+TensorBase expand_slow_path(const TensorBase& self, IntArrayRef size) {
   return OptionalTensorRef(self)->expand(size);
 }
-}
+} // namespace internal
 
 namespace {
-// NOTE: are_expandable did a similar check, please keep them sync if change is needed
+// NOTE: are_expandable did a similar check, please keep them sync if change is
+// needed
 template <typename Container>
 Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
   size_t dimsA = a.size();
@@ -30,17 +31,20 @@ Container infer_size_impl(IntArrayRef a, IntArrayRef b) {
 
     TORCH_CHECK(
         sizeA == sizeB || sizeA == 1 || sizeB == 1,
-        "The size of tensor a (", sizeA,
-        ") must match the size of tensor b (", sizeB,
-        ") at non-singleton dimension ", i);
+        "The size of tensor a (",
+        sizeA,
+        ") must match the size of tensor b (",
+        sizeB,
+        ") at non-singleton dimension ",
+        i);
 
-      // 1s map to the other size (even 0).
-      expandedSizes[i] = sizeA == 1 ? sizeB : sizeA;
+    // 1s map to the other size (even 0).
+    expandedSizes[i] = sizeA == 1 ? sizeB : sizeA;
   }
 
   return expandedSizes;
 }
-}
+} // namespace
 
 std::vector<int64_t> infer_size(IntArrayRef a, IntArrayRef b) {
   return infer_size_impl<std::vector<int64_t>>(a, b);
@@ -50,7 +54,7 @@ DimVector infer_size_dimvector(IntArrayRef a, IntArrayRef b) {
   return infer_size_impl<DimVector>(a, b);
 }
 
-template<typename Container>
+template <typename Container>
 C10_ALWAYS_INLINE InferExpandGeometryResult<Container> inferExpandGeometryImpl(
     IntArrayRef tensor_sizes,
     IntArrayRef tensor_strides,
@@ -122,25 +126,35 @@ InferExpandGeometryResult<DimVector> inferExpandGeometry_dimvector(
       tensor_sizes, tensor_strides, sizes);
 }
 
-
-// This function returns a dense and non-overlapping strides, which keeps the same layout permutation
-// as the input `tensor_strides`, computed based on the input `tensor_sizes`.
-// Note:
-// 1. This function expects the inputs `tensor_strides` and `tensor_sizes` are non-dense or overlapping,
-//    If the inputs are densed and non-overlapping, the output strides will be the same as `tensor_strides`.
-//    However, this function won't check whether inputs are dense or overlapping, so the whole function will
-//    still be executed even the inputs are already dense and non-overlapping, this will cause slowness.
+// This function returns a dense and non-overlapping strides, which keeps the
+// same layout permutation as the input `tensor_strides`, computed based on the
+// input `tensor_sizes`. Note:
+// 1. This function expects the inputs `tensor_strides` and `tensor_sizes` are
+// non-dense or overlapping,
+//    If the inputs are densed and non-overlapping, the output strides will be
+//    the same as `tensor_strides`. However, this function won't check whether
+//    inputs are dense or overlapping, so the whole function will still be
+//    executed even the inputs are already dense and non-overlapping, this will
+//    cause slowness.
 //
-//    Please verify whether the inputs are non-dense or overlapping before calling this function if possible,
-//    if the inputs come from a tensor, you can check this through `is_non_overlapping_and_dense()`
+//    Please verify whether the inputs are non-dense or overlapping before
+//    calling this function if possible, if the inputs come from a tensor, you
+//    can check this through `is_non_overlapping_and_dense()`
 //
-// 2. The strides propagation rule that is used in this function is exactily the same as what is being used in
-//    TensorIterator. Please refer to https://github.com/pytorch/pytorch/pull/42922 for more details
+// 2. The strides propagation rule that is used in this function is exactily the
+// same as what is being used in
+//    TensorIterator. Please refer to
+//    https://github.com/pytorch/pytorch/pull/42922 for more details
 
-std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef tensor_strides) {
-
-  TORCH_CHECK(tensor_sizes.size() == tensor_strides.size(),
-    "Input sizes and strides should have same size but got ", tensor_sizes.size(), " and ", tensor_strides.size());
+std::vector<int64_t> infer_dense_strides(
+    IntArrayRef tensor_sizes,
+    IntArrayRef tensor_strides) {
+  TORCH_CHECK(
+      tensor_sizes.size() == tensor_strides.size(),
+      "Input sizes and strides should have same size but got ",
+      tensor_sizes.size(),
+      " and ",
+      tensor_strides.size());
 
   size_t ndim = tensor_sizes.size();
   if (ndim == 0) {
@@ -154,8 +168,9 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
   // initialize perm with n-1, n-2, ..., 1, 0
   std::iota(perm.rbegin(), perm.rend(), 0);
 
-  // The following sorting algorithm has exactly the same behavior as TensorIterator
-  // This is to make sure we have the same stride propagation everywhere.
+  // The following sorting algorithm has exactly the same behavior as
+  // TensorIterator This is to make sure we have the same stride propagation
+  // everywhere.
 
   // return -1 if dim0 should come before dim1
   // return  1 if dim0 should come after dim1
@@ -182,9 +197,10 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
     return 0;
   };
 
-  // Insertion sort (stable) indices in `perm` based on input tensor's stride and shape,
-  // all dimensions with 0 stride won't move. This is the same behavior as TensorIterator.
-  // eg. Given tensor with size/stride (6, 5, 4, 3, 2)/(6, 0, 120, 0, 1), the initial `perm`
+  // Insertion sort (stable) indices in `perm` based on input tensor's stride
+  // and shape, all dimensions with 0 stride won't move. This is the same
+  // behavior as TensorIterator. eg. Given tensor with size/stride (6, 5, 4, 3,
+  // 2)/(6, 0, 120, 0, 1), the initial `perm`
   //     is (4, 3, 2, 1, 0) and the sorted `perm` will be (4, 3, 0, 1, 2)
   for (const auto i : c10::irange(1, ndim)) {
     auto dim1 = i;
@@ -194,8 +210,7 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
       if (comparison > 0) {
         std::swap(perm[dim0], perm[dim1]);
         dim1 = dim0;
-      }
-      else if (comparison < 0) {
+      } else if (comparison < 0) {
         break;
       }
     }
@@ -207,8 +222,8 @@ std::vector<int64_t> infer_dense_strides(IntArrayRef tensor_sizes, IntArrayRef t
   for (const auto i : c10::irange(ndim)) {
     int64_t idx = perm[i];
     out_strides[idx] = curr_stride;
-    // Note: for size 0, we simply treated it as 1, it really doesn't matter here
-    // since the total number of element is 0.
+    // Note: for size 0, we simply treated it as 1, it really doesn't matter
+    // here since the total number of element is 0.
     if (tensor_sizes[idx] > 1) {
       curr_stride *= tensor_sizes[idx];
     }

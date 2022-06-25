@@ -5,11 +5,14 @@
 namespace at {
 struct TensorIteratorBase;
 class TensorBase;
-}
+} // namespace at
 
 namespace at {
 namespace native {
 void launch_masked_scatter_kernel(
-    const TensorBase &self, const TensorBase &mask,
-    const TensorBase &maskPrefixSum, const TensorBase &source);
-}}
+    const TensorBase& self,
+    const TensorBase& mask,
+    const TensorBase& maskPrefixSum,
+    const TensorBase& source);
+}
+} // namespace at

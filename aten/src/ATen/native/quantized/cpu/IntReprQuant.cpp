@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/ceil_div.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/DispatchStub.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -22,7 +22,8 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
           {out_size},
           self.options().dtype(UNDERLYING_TYPE),
           self.suggest_memory_format());
-      const underlying_t* qdata = reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
+      const underlying_t* qdata =
+          reinterpret_cast<underlying_t*>(self.data_ptr<scalar_t>());
       for (const auto i : c10::irange(dst.numel())) {
         dst[i] = static_cast<underlying_t>(qdata[i]);
       }
@@ -32,12 +33,13 @@ Tensor int_repr_quantized_cpu(const Tensor& self) {
           self.options().dtype(UNDERLYING_TYPE),
           self.suggest_memory_format());
       auto iter = TensorIteratorConfig()
-        .check_all_same_dtype(false)
-        .add_output(dst)
-        .add_input(self)
-        .build();
-      cpu_kernel(iter, [](scalar_t value) -> underlying_t { return value.val_; });
-      }
+                      .check_all_same_dtype(false)
+                      .add_output(dst)
+                      .add_input(self)
+                      .build();
+      cpu_kernel(
+          iter, [](scalar_t value) -> underlying_t { return value.val_; });
+    }
   });
   return dst;
 }

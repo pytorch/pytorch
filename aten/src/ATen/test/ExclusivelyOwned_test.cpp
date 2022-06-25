@@ -16,6 +16,7 @@ class ExclusivelyOwnedTest : public ::testing::Test {
  public:
   c10::ExclusivelyOwned<T> defaultConstructed;
   c10::ExclusivelyOwned<T> sample;
+
  protected:
   void SetUp() override; // defined below helpers
   void TearDown() override {
@@ -44,16 +45,13 @@ void assertIsSampleObject<Tensor>(const Tensor& t) {
   EXPECT_EQ(memcmp(zeros, t.data_ptr(), 4 * sizeof(float)), 0);
 }
 
-
 template <typename T>
 void ExclusivelyOwnedTest<T>::SetUp() {
   defaultConstructed = c10::ExclusivelyOwned<T>();
   sample = c10::ExclusivelyOwned<T>(getSampleValue<T>());
 }
 
-using ExclusivelyOwnedTypes = ::testing::Types<
-  Tensor
-  >;
+using ExclusivelyOwnedTypes = ::testing::Types<Tensor>;
 
 TYPED_TEST_CASE(ExclusivelyOwnedTest, ExclusivelyOwnedTypes);
 
@@ -71,13 +69,15 @@ TYPED_TEST(ExclusivelyOwnedTest, MoveConstructor) {
 TYPED_TEST(ExclusivelyOwnedTest, MoveAssignment) {
   // Move assignment from a default-constructed ExclusivelyOwned is handled in
   // TearDown at the end of every test!
-  c10::ExclusivelyOwned<TypeParam> anotherSample = c10::ExclusivelyOwned<TypeParam>(getSampleValue<TypeParam>());
+  c10::ExclusivelyOwned<TypeParam> anotherSample =
+      c10::ExclusivelyOwned<TypeParam>(getSampleValue<TypeParam>());
   anotherSample = std::move(this->sample);
   assertIsSampleObject(*anotherSample);
 }
 
 TYPED_TEST(ExclusivelyOwnedTest, MoveAssignmentFromContainedType) {
-  c10::ExclusivelyOwned<TypeParam> anotherSample = c10::ExclusivelyOwned<TypeParam>(getSampleValue<TypeParam>());
+  c10::ExclusivelyOwned<TypeParam> anotherSample =
+      c10::ExclusivelyOwned<TypeParam>(getSampleValue<TypeParam>());
   anotherSample = getSampleValue<TypeParam>();
   assertIsSampleObject(*anotherSample);
 }

@@ -54,7 +54,7 @@ TEST(Caffe2ToPytorch, ExternalData) {
   }
   ASSERT_FALSE(at_tensor.storage().resizable());
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_ANY_THROW(at_tensor.resize_({7,7}));
+  ASSERT_ANY_THROW(at_tensor.resize_({7, 7}));
 }
 
 TEST(Caffe2ToPytorch, Op) {
@@ -90,14 +90,14 @@ TEST(Caffe2ToPytorch, PartiallyInitialized) {
   {
     // storage, no dtype
     caffe2::Tensor c2_tensor(caffe2::CPU);
-    c2_tensor.Resize(4,4);
+    c2_tensor.Resize(4, 4);
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_ANY_THROW(at::Tensor at_tensor(c2_tensor));
   }
   {
     // dtype, no storage
     caffe2::Tensor c2_tensor(caffe2::CPU);
-    c2_tensor.Resize(4,4);
+    c2_tensor.Resize(4, 4);
     c2_tensor.mutable_data<float>();
     c2_tensor.FreeMemory();
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
@@ -148,9 +148,11 @@ TEST(PytorchToCaffe2, Op) {
   auto at_tensor_c = at::ones({5, 5}, at::dtype(at::kFloat));
 
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
+  auto* c2_tensor_a =
+      BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
+  auto* c2_tensor_b =
+      BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
 
   // Test Alias
   {
@@ -169,7 +171,8 @@ TEST(PytorchToCaffe2, Op) {
 
   workspace.RunNetOnce(net);
 
-  auto result = XBlobGetMutableTensor(workspace.CreateBlob("d"), {5, 5}, at::kCPU);
+  auto result =
+      XBlobGetMutableTensor(workspace.CreateBlob("d"), {5, 5}, at::kCPU);
 
   auto it = result.data<float>();
   for (const auto i : c10::irange(25)) {
@@ -187,9 +190,11 @@ TEST(PytorchToCaffe2, SharedStorageRead) {
   auto at_tensor_b = at_tensor_a.view({5, 5});
 
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
+  auto* c2_tensor_a =
+      BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-  auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
+  auto* c2_tensor_b =
+      BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
 
   {
     auto op = net.add_op();
@@ -201,7 +206,8 @@ TEST(PytorchToCaffe2, SharedStorageRead) {
 
   workspace.RunNetOnce(net);
 
-  auto result = XBlobGetMutableTensor(workspace.CreateBlob("c"), {5, 5}, at::kCPU);
+  auto result =
+      XBlobGetMutableTensor(workspace.CreateBlob("c"), {5, 5}, at::kCPU);
   auto it = result.data<float>();
   for (const auto i : c10::irange(25)) {
     ASSERT_EQ(it[i], 2.0);

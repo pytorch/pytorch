@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
-#include <ATen/native/layer_norm.h>
-#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/layer_norm.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <c10/util/accumulate.h>
 #include <torch/library.h>
 
@@ -22,7 +22,6 @@ Tensor quantized_layer_norm_impl(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-
   auto M_N = _check_layer_norm_inputs(input, normalized_shape, weight, bias);
   auto M = M_N.first;
   auto N = M_N.second;
@@ -31,18 +30,28 @@ Tensor quantized_layer_norm_impl(
   auto beta = bias.expect_contiguous();
 
   Tensor Y = at::_empty_affine_quantized(
-    X->sizes(),
-    X->scalar_type(),
-    output_scale,
-    output_zero_point,
-    X->suggest_memory_format());
+      X->sizes(),
+      X->scalar_type(),
+      output_scale,
+      output_zero_point,
+      X->suggest_memory_format());
 
   if (M > 0) {
     bool affine_per_channel = false;
     int num_channels = 1; // not relevant for LayerNorm
     int num_groups = 1; // not relevant for LayerNorm
-    quantized_normalize_stub(kCPU, *X, *gamma, *beta, affine_per_channel,
-        num_channels, num_groups, M, N, eps, &Y);
+    quantized_normalize_stub(
+        kCPU,
+        *X,
+        *gamma,
+        *beta,
+        affine_per_channel,
+        num_channels,
+        num_groups,
+        M,
+        N,
+        eps,
+        &Y);
   }
   return Y;
 }
@@ -55,7 +64,6 @@ Tensor quantized_group_norm_impl(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-
   const auto& qx_contig = qx.contiguous();
   const auto& weight_contig = weight.contiguous();
   const auto& bias_contig = bias.contiguous();
@@ -67,7 +75,8 @@ Tensor quantized_group_norm_impl(
   TORCH_CHECK(num_groups > 0, "Expected num_groups to be positive");
 
   const auto input_shape = qx_contig.sizes();
-  TORCH_CHECK(input_shape[1] % num_groups == 0,
+  TORCH_CHECK(
+      input_shape[1] % num_groups == 0,
       "Expected channels to be divisible by groups");
 
   const int64_t batches = input_shape[0];
@@ -79,16 +88,26 @@ Tensor quantized_group_norm_impl(
   const int64_t N = elements_per_batch / num_groups;
 
   Tensor Y = at::_empty_affine_quantized(
-    qx_contig.sizes(),
-    qx_contig.scalar_type(),
-    output_scale,
-    output_zero_point,
-    qx_contig.suggest_memory_format());
+      qx_contig.sizes(),
+      qx_contig.scalar_type(),
+      output_scale,
+      output_zero_point,
+      qx_contig.suggest_memory_format());
 
   if (M > 0) {
     bool affine_per_channel = true;
-    quantized_normalize_stub(kCPU, qx_contig, weight_contig, bias_contig,
-        affine_per_channel, num_channels, num_groups, M, N, eps, &Y);
+    quantized_normalize_stub(
+        kCPU,
+        qx_contig,
+        weight_contig,
+        bias_contig,
+        affine_per_channel,
+        num_channels,
+        num_groups,
+        M,
+        N,
+        eps,
+        &Y);
   }
   return Y;
 }
@@ -100,7 +119,6 @@ Tensor quantized_instance_norm_impl(
     double eps,
     double output_scale,
     int64_t output_zero_point) {
-
   const auto input_ndim = qx.dim();
   TORCH_CHECK(
       input_ndim >= 3,
@@ -115,50 +133,61 @@ Tensor quantized_instance_norm_impl(
       qx, num_channels, weight, bias, eps, output_scale, output_zero_point);
 }
 
-
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
   // TODO: this is kind of... blegh
-  m.impl(TORCH_SELECTIVE_NAME("quantized::layer_norm"), [](
-    Tensor input,
-    std::vector<int64_t> normalized_shape,  // because IntArrayRef doesn't work
-    c10::optional<Tensor> weight,
-    c10::optional<Tensor> bias,
-    double eps,
-    double output_scale,
-    int64_t output_zero_point) {
-      return quantized_layer_norm_impl(
-          input, normalized_shape,
-          weight.has_value() ? *weight : Tensor(),
-          bias.has_value() ? *bias : Tensor(),
-          eps, output_scale, output_zero_point);
-  });
-  m.impl(TORCH_SELECTIVE_NAME("quantized::group_norm"), [](
-      Tensor qx,
-      int64_t num_groups,
-      c10::optional<Tensor> weight,
-      c10::optional<Tensor> bias,
-      double eps,
-      double output_scale,
-      int64_t output_zero_point) {
-    return quantized_group_norm_impl(
-        qx, num_groups,
-        weight.has_value() ? *weight : Tensor(),
-        bias.has_value() ? *bias : Tensor(),
-        eps, output_scale, output_zero_point);
-  });
-  m.impl(TORCH_SELECTIVE_NAME("quantized::instance_norm"), [](
-      Tensor qx,
-      c10::optional<Tensor> weight,
-      c10::optional<Tensor> bias,
-      double eps,
-      double output_scale,
-      int64_t output_zero_point) {
-    return quantized_instance_norm_impl(
-        qx,
-        weight.has_value() ? *weight : Tensor(),
-        bias.has_value() ? *bias : Tensor(),
-        eps, output_scale, output_zero_point);
-  });
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::layer_norm"),
+      [](Tensor input,
+         std::vector<int64_t>
+             normalized_shape, // because IntArrayRef doesn't work
+         c10::optional<Tensor> weight,
+         c10::optional<Tensor> bias,
+         double eps,
+         double output_scale,
+         int64_t output_zero_point) {
+        return quantized_layer_norm_impl(
+            input,
+            normalized_shape,
+            weight.has_value() ? *weight : Tensor(),
+            bias.has_value() ? *bias : Tensor(),
+            eps,
+            output_scale,
+            output_zero_point);
+      });
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::group_norm"),
+      [](Tensor qx,
+         int64_t num_groups,
+         c10::optional<Tensor> weight,
+         c10::optional<Tensor> bias,
+         double eps,
+         double output_scale,
+         int64_t output_zero_point) {
+        return quantized_group_norm_impl(
+            qx,
+            num_groups,
+            weight.has_value() ? *weight : Tensor(),
+            bias.has_value() ? *bias : Tensor(),
+            eps,
+            output_scale,
+            output_zero_point);
+      });
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::instance_norm"),
+      [](Tensor qx,
+         c10::optional<Tensor> weight,
+         c10::optional<Tensor> bias,
+         double eps,
+         double output_scale,
+         int64_t output_zero_point) {
+        return quantized_instance_norm_impl(
+            qx,
+            weight.has_value() ? *weight : Tensor(),
+            bias.has_value() ? *bias : Tensor(),
+            eps,
+            output_scale,
+            output_zero_point);
+      });
 }
 
 } // namespace native

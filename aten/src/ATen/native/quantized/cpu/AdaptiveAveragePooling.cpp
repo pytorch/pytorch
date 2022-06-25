@@ -56,7 +56,7 @@ static void adaptive_avg_pool_single_out_frame(
     int64_t osizeH,
     int64_t osizeW,
     int64_t istrideC,
-    int64_t istrideD,  // Set to 1 for 2D
+    int64_t istrideD, // Set to 1 for 2D
     int64_t istrideH,
     int64_t istrideW) {
   at::parallel_for(0, sizeC, 0, [&](int64_t start, int64_t end) {
@@ -85,16 +85,10 @@ static void adaptive_avg_pool_single_out_frame(
             float kDHWr = kDHr / kW;
 
             /* local pointers */
-            scalar_t* ip = input_p +
-                           c * istrideC +
-                           istartD * istrideD +
-                           istartH * istrideH +
-                           istartW * istrideW;
-            scalar_t* op = output_p +
-                           c * osizeD * osizeH * osizeW +
-                           od * osizeH * osizeW +
-                           oh * osizeW +
-                           ow;
+            scalar_t* ip = input_p + c * istrideC + istartD * istrideD +
+                istartH * istrideH + istartW * istrideW;
+            scalar_t* op = output_p + c * osizeD * osizeH * osizeW +
+                od * osizeH * osizeW + oh * osizeW + ow;
 
             /* compute local average: */
             int64_t sum = 0;
@@ -104,10 +98,9 @@ static void adaptive_avg_pool_single_out_frame(
               for (ih = 0; ih < kH; ih++) {
                 for (iw = 0; iw < kW; iw++) {
                   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-                  int64_t val = (ip +
-                                 id * istrideD +
-                                 ih * istrideH +
-                                 iw * istrideW)->val_;
+                  int64_t val =
+                      (ip + id * istrideD + ih * istrideH + iw * istrideW)
+                          ->val_;
                   sum += val;
                 }
               }
@@ -132,7 +125,9 @@ std::vector<int64_t> get_output_shape(
     // Allow for empty batch.
     TORCH_CHECK(
         input.size(i) > 0,
-        "adaptive_avg_pooling", DIM, "d(): ",
+        "adaptive_avg_pooling",
+        DIM,
+        "d(): ",
         "expected input to have non-empty spatial "
         "dimensions, but input has sizes ",
         input.sizes(),
@@ -150,7 +145,7 @@ std::vector<int64_t> get_output_shape(
       "D (batch mode) tensor expected for input");
 
   /* Channels */
-  const int64_t sizeC = input.size(-(DIM+1));
+  const int64_t sizeC = input.size(-(DIM + 1));
 
   std::vector<int64_t> output_shape;
   output_shape.reserve(input.dim());
@@ -163,13 +158,13 @@ std::vector<int64_t> get_output_shape(
     output_shape.push_back(size);
   }
   return output_shape;
-
 }
 
 template <int32_t kSpatialDim, typename scalar_t>
-Tensor _adaptive_avg_pool(const Tensor& input,
-                          IntArrayRef output_size,
-                          Tensor& output) {
+Tensor _adaptive_avg_pool(
+    const Tensor& input,
+    IntArrayRef output_size,
+    Tensor& output) {
   const auto output_shape = get_output_shape<kSpatialDim>(input, output_size);
   /* sizes */
   int64_t sizeC = input.size(-(kSpatialDim + 1));
@@ -181,7 +176,8 @@ Tensor _adaptive_avg_pool(const Tensor& input,
   auto osizeH = output_shape[output_shape.size() - 2];
   auto osizeW = output_shape[output_shape.size() - 1];
 
-  int64_t sizeB = output_shape.size() ==(kSpatialDim + 1) ? 1 : output_shape[0];
+  int64_t sizeB =
+      output_shape.size() == (kSpatialDim + 1) ? 1 : output_shape[0];
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast) ||
       input.is_contiguous(c10::MemoryFormat::ChannelsLast3d)) {
     // Fast path for NDHWC
@@ -245,8 +241,10 @@ Tensor q_adaptive_avg_pool2d(const Tensor& input, IntArrayRef output_size) {
 }
 
 template <typename scalar_t>
-Tensor q_adaptive_avg_pool3d(Tensor& output, const Tensor& input,
-                             IntArrayRef output_size) {
+Tensor q_adaptive_avg_pool3d(
+    Tensor& output,
+    const Tensor& input,
+    IntArrayRef output_size) {
   return _adaptive_avg_pool<3, scalar_t>(input, output_size, output);
 }
 
@@ -323,8 +321,9 @@ Tensor& adaptive_avg_pool3d_out_quantized_cpu(
     at::Tensor& output) {
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
-    TORCH_WARN("Quantized Adaptive Average Pool 3D is not implemented for ",
-               "QNNPACK. Falling back to default implementation.");
+    TORCH_WARN(
+        "Quantized Adaptive Average Pool 3D is not implemented for ",
+        "QNNPACK. Falling back to default implementation.");
   }
 #endif
   AT_DISPATCH_QINT_TYPES(
@@ -338,7 +337,8 @@ Tensor adaptive_avg_pool3d_quantized_cpu(
     const at::Tensor& input,
     IntArrayRef output_size) {
   Tensor output;
-  return at::native::adaptive_avg_pool3d_out_quantized_cpu(input, output_size, output);
+  return at::native::adaptive_avg_pool3d_out_quantized_cpu(
+      input, output_size, output);
 }
 
 } // namespace native

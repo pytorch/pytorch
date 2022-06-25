@@ -1,8 +1,8 @@
 #define TORCH_ASSERT_NO_OPERATORS
 
-#include <ATen/native/DispatchStub.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/DispatchStub.h>
 
 namespace at {
 
@@ -10,10 +10,14 @@ namespace at {
 // included via NativeFunctions.h to avoid recompiling this file when
 // NativeFunctions.h changes
 namespace meta {
-${meta_declaration}
+$ {
+  meta_declaration
 }
+} // namespace meta
 
 namespace native {
-${native_declaration}
-${native_definitions}
-}} // namespace at::native
+${native_declaration} $ {
+  native_definitions
+}
+} // namespace native
+} // namespace at

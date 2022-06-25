@@ -4,9 +4,9 @@
 #include <c10/util/Registry.h>
 
 constexpr const char* ORT_HELP =
-  " You need to 'import torch_ort' to use the 'ort' device in PyTorch. "
-  "The 'torch_ort' module is provided by the ONNX Runtime itself "
-  "(https://onnxruntime.ai).";
+    " You need to 'import torch_ort' to use the 'ort' device in PyTorch. "
+    "The 'torch_ort' module is provided by the ONNX Runtime itself "
+    "(https://onnxruntime.ai).";
 
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
@@ -17,7 +17,8 @@ struct TORCH_API ORTHooksInterface {
   virtual ~ORTHooksInterface() {}
 
   virtual std::string showConfig() const {
-    TORCH_CHECK(false, "Cannot query detailed ORT version information.", ORT_HELP);
+    TORCH_CHECK(
+        false, "Cannot query detailed ORT version information.", ORT_HELP);
   }
 };
 

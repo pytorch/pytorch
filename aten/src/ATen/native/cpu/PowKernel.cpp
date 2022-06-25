@@ -1,40 +1,37 @@
 #define TORCH_ASSERT_NO_OPERATORS
-#include <cmath>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/cpu/vec/vec.h>
-#include <ATen/native/TensorIterator.h>
 #include <ATen/native/Pow.h>
+#include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <cmath>
 
 #include <c10/core/Scalar.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 inline namespace CPU_CAPABILITY {
 
 void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
   const auto dtype = iter.common_dtype();
   if (isFloatingType(dtype) || isComplexType(dtype)) {
-    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, dtype, "pow", [&]() {
-
-      using Vec = Vectorized<scalar_t>;
-      cpu_kernel_vec(iter,
-        [=](scalar_t base, scalar_t exp) -> scalar_t {
-          return std::pow(base, exp);
-        },
-        [&](Vec base, Vec exp) -> Vec {
-          return base.pow(exp);
-        }
-      );
-    });
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
+        kHalf, kBFloat16, dtype, "pow", [&]() {
+          using Vec = Vectorized<scalar_t>;
+          cpu_kernel_vec(
+              iter,
+              [=](scalar_t base, scalar_t exp) -> scalar_t {
+                return std::pow(base, exp);
+              },
+              [&](Vec base, Vec exp) -> Vec { return base.pow(exp); });
+        });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "pow", [&]() {
-      cpu_kernel(iter,
-        [=](scalar_t base, scalar_t exp) -> scalar_t {
-          return native::powi(base, exp);
-        }
-      );
+      cpu_kernel(iter, [=](scalar_t base, scalar_t exp) -> scalar_t {
+        return native::powi(base, exp);
+      });
     });
   }
 }
@@ -49,39 +46,38 @@ void pow_tensor_tensor_kernel(TensorIteratorBase& iter) {
 // to use this common-path. Half cannot currently use it, as AVX2 support for
 // sqrt & rsqrt doesn't currently exist for it.
 template <typename scalar_t, typename cast_scalar_t, typename exp_scalar_t>
-void pow_tensor_scalar_optimized_kernel(TensorIteratorBase& iter, const exp_scalar_t exp) {
+void pow_tensor_scalar_optimized_kernel(
+    TensorIteratorBase& iter,
+    const exp_scalar_t exp) {
   using Vec = Vectorized<scalar_t>;
   // .5 (sqrt), -.5 (rsqrt) and -1 (reciprocal) specializations are handled
   // in pow_tensor_scalar_kernel
   if (exp == 2.0) {
-    cpu_kernel_vec(iter,
-        [](scalar_t base) -> scalar_t {
-          return base * base;
-        },
-        [](Vec base) -> Vec { return base * base; }
-    );
+    cpu_kernel_vec(
+        iter,
+        [](scalar_t base) -> scalar_t { return base * base; },
+        [](Vec base) -> Vec { return base * base; });
   } else if (exp == 3.0) {
-    cpu_kernel_vec(iter,
-        [](scalar_t base) -> scalar_t {
-          return base * base * base;
-        },
-        [](Vec base) -> Vec { return base * base * base; }
-    );
+    cpu_kernel_vec(
+        iter,
+        [](scalar_t base) -> scalar_t { return base * base * base; },
+        [](Vec base) -> Vec { return base * base * base; });
   } else if (exp == -2.0) {
-    cpu_kernel_vec(iter,
+    cpu_kernel_vec(
+        iter,
         [](scalar_t base) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
-          return static_cast<cast_scalar_t>(1.0) / (base * base); },
-        [](Vec base) -> Vec { return (base * base).reciprocal(); }
-    );
+          return static_cast<cast_scalar_t>(1.0) / (base * base);
+        },
+        [](Vec base) -> Vec { return (base * base).reciprocal(); });
   } else {
-    cpu_kernel_vec(iter,
+    cpu_kernel_vec(
+        iter,
         [=](scalar_t base) -> scalar_t {
           return std::pow(base, static_cast<cast_scalar_t>(exp));
         },
         [=](Vec base) -> Vec {
           return base.pow(static_cast<cast_scalar_t>(exp));
-        }
-    );
+        });
   }
 }
 
@@ -124,18 +120,16 @@ void pow_tensor_scalar_kernel(
           decltype(c10::impl::ScalarTypeToCPPType<ScalarType::Half>::t);
       const auto exp = exp_scalar.to<scalar_t>();
       using Vec = Vectorized<scalar_t>;
-      cpu_kernel_vec(iter,
-          [=](scalar_t base) -> scalar_t {
-            return std::pow(base, exp);
-          },
-          [=](Vec base) -> Vec { return base.pow(exp); }
-      );
+      cpu_kernel_vec(
+          iter,
+          [=](scalar_t base) -> scalar_t { return std::pow(base, exp); },
+          [=](Vec base) -> Vec { return base.pow(exp); });
     }();
   } else if (dtype == ScalarType::BFloat16) {
-      AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, dtype, "pow", [&]() {
-        pow_tensor_scalar_optimized_kernel<scalar_t, scalar_t>(
-            iter, exp_scalar.to<scalar_t>());
-      });
+    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, dtype, "pow", [&]() {
+      pow_tensor_scalar_optimized_kernel<scalar_t, scalar_t>(
+          iter, exp_scalar.to<scalar_t>());
+    });
   } else {
     AT_DISPATCH_INTEGRAL_TYPES(dtype, "pow", [&]() {
       const scalar_t exp = exp_scalar.to<scalar_t>();
@@ -146,9 +140,14 @@ void pow_tensor_scalar_kernel(
   }
 }
 
-} // anonymous namespace
+} // namespace CPU_CAPABILITY
 
-REGISTER_DISPATCH(pow_tensor_tensor_stub, &CPU_CAPABILITY::pow_tensor_tensor_kernel);
-REGISTER_DISPATCH(pow_tensor_scalar_stub, &CPU_CAPABILITY::pow_tensor_scalar_kernel);
+REGISTER_DISPATCH(
+    pow_tensor_tensor_stub,
+    &CPU_CAPABILITY::pow_tensor_tensor_kernel);
+REGISTER_DISPATCH(
+    pow_tensor_scalar_stub,
+    &CPU_CAPABILITY::pow_tensor_scalar_kernel);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

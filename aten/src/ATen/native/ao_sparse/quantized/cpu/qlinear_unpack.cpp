@@ -72,5 +72,6 @@ TORCH_LIBRARY_IMPL(sparse, QuantizedCPU, m) {
       TORCH_SELECTIVE_NAME("sparse::qlinear_unpack"),
       TORCH_FN(QLinearUnpackWeightInt8::run));
 }
-}  // namespace
-}}  // namespace ao::sparse
+} // namespace
+} // namespace sparse
+} // namespace ao

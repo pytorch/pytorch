@@ -14,8 +14,9 @@ struct TensorIterator;
 
 namespace native {
 
-DECLARE_DISPATCH(void(*)(TensorIterator&, const c10::Scalar&), fill_stub);
+DECLARE_DISPATCH(void (*)(TensorIterator&, const c10::Scalar&), fill_stub);
 
 Tensor& fill_out(Tensor& self, const Scalar& value);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

@@ -6,10 +6,10 @@
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
 #include <ATen/native/quantized/PackedParams.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
@@ -73,7 +73,8 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
     bool reduce_range) {
   if (reduce_range) {
-    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
+    TORCH_WARN(
+        "Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
   }
 
   // On empty input, no output data will be generated,
@@ -129,7 +130,6 @@ template <int kSpatialDim>
 at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
     bool reduce_range) {
-
   // Find min/max of input
   float x_max = 0, x_min = 0;
   if (input.numel() > 0) {

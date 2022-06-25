@@ -1,8 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <torch/library.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
+#include <ATen/quantized/Quantizer.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -17,7 +17,7 @@ Tensor quantized_threshold_impl(
     const Scalar& threshold,
     const Scalar& value) {
   Tensor qy = at::_empty_affine_quantized(
-    qx.sizes(), qx.options(), qx.q_scale(), qx.q_zero_point());
+      qx.sizes(), qx.options(), qx.q_scale(), qx.q_zero_point());
   qthreshold_stub(qx.device().type(), qx, threshold, value, qy);
   return qy;
 }
@@ -35,7 +35,9 @@ Tensor threshold_quantized_cpu(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::threshold"), TORCH_FN(threshold_quantized_cpu));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::threshold"),
+      TORCH_FN(threshold_quantized_cpu));
 }
 
 } // namespace native

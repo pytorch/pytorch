@@ -1,6 +1,6 @@
-#include <gtest/gtest.h>
-#include <ATen/core/type_ptr.h>
 #include <ATen/core/jit_type.h>
+#include <ATen/core/type_ptr.h>
+#include <gtest/gtest.h>
 
 using c10::SingletonOrSharedTypePtr;
 
@@ -48,6 +48,5 @@ TEST(SingletonOrSharedTypePtr, SingletonComparison) {
   EXPECT_NE(type, c10::StringType::get());
   EXPECT_NE(type, c10::DeviceObjType::get());
 }
-
 
 } // namespace

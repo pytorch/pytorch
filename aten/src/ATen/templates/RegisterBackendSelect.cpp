@@ -1,6 +1,7 @@
-// We register ops with a higher priority dispatch key (BackendSelect) than the usual backend-specific keys (e.g. CPU)
-// which makes calls to the factory functions dispatch to here.
-// We then 'manually' compute a lower-priority to re-dispatch to (e.g. CPU) to get to the eventually correct backend.
+// We register ops with a higher priority dispatch key (BackendSelect) than the
+// usual backend-specific keys (e.g. CPU) which makes calls to the factory
+// functions dispatch to here. We then 'manually' compute a lower-priority to
+// re-dispatch to (e.g. CPU) to get to the eventually correct backend.
 // ${generated_comment}
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
@@ -11,17 +12,21 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Operators.h>
 #else
-#include <ATen/ops/is_pinned_ops.h>
 #include <ATen/ops/_pin_memory_ops.h>
+#include <ATen/ops/is_pinned_ops.h>
 
-${ops_headers}
+$ {
+  ops_headers
+}
 #endif
 
 namespace at {
 
 namespace {
 
-${backend_select_method_definitions}
+$ {
+  backend_select_method_definitions
+}
 
 bool is_pinned(const Tensor& self, c10::optional<at::Device> device) {
   // Only CPU tensors can be pinned
@@ -29,13 +34,19 @@ bool is_pinned(const Tensor& self, c10::optional<at::Device> device) {
     return false;
   }
   // TODO: fetch scalar type from Tensor? But it doesn't really matter...
-  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
+  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(
+      c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
   return at::_ops::is_pinned::redispatch(_dk, self, device);
 }
 
 at::Tensor _pin_memory(const Tensor& self, c10::optional<at::Device> device) {
-  TORCH_CHECK(self.device().is_cpu(), "cannot pin '", self.toString(), "' only dense CPU tensors can be pinned");
-  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
+  TORCH_CHECK(
+      self.device().is_cpu(),
+      "cannot pin '",
+      self.toString(),
+      "' only dense CPU tensors can be pinned");
+  DispatchKeySet _dk = c10::DispatchKeySet(c10::computeDispatchKey(
+      c10::nullopt, self.layout(), device.value_or(at::kCUDA)));
   return at::_ops::_pin_memory::redispatch(_dk, self, device);
 }
 
@@ -46,4 +57,4 @@ TORCH_LIBRARY_IMPL(aten, BackendSelect, m) {
 }
 
 } // namespace
-} // at
+} // namespace at

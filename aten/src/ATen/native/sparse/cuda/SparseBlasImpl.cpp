@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/OpMathType.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseBlas.h>
@@ -42,7 +42,8 @@ c10::MaybeOwned<Tensor> prepare_column_major_matrix_for_cusparse(
 c10::MaybeOwned<Tensor> inline prepare_dense_matrix_for_cusparse(
     const Tensor& tensor) {
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
-  // CUDA < 11.0 doesn't support row-major layout, return column-major in this case
+  // CUDA < 11.0 doesn't support row-major layout, return column-major in this
+  // case
   return prepare_column_major_matrix_for_cusparse(tensor);
 #else
   if (is_blas_compatible_row_major_order(tensor) ||
@@ -71,7 +72,8 @@ c10::MaybeOwned<Tensor> prepare_dense_matrix_for_cusparse(
   }
 }
 
-// This function is used for old CUDA Toolkit versions that doesn't support new cuSPARSE Generic API
+// This function is used for old CUDA Toolkit versions that doesn't support new
+// cuSPARSE Generic API
 void addmm_out_legacy(
     const at::sparse_csr::SparseCsrTensor& mat1,
     const Tensor& mat2,
@@ -88,7 +90,19 @@ void addmm_out_legacy(
   auto values = mat1.values();
   auto mat2_ = at::native::expect_resolved_conj(mat2);
   auto result_ = at::native::expect_resolved_conj(result);
-  at::native::s_addmm_out_csr_sparse_dense_cuda_worker(nnz, m, n, k, result, beta, *result_, alpha, crow_indices, col_indices, values, *mat2_);
+  at::native::s_addmm_out_csr_sparse_dense_cuda_worker(
+      nnz,
+      m,
+      n,
+      k,
+      result,
+      beta,
+      *result_,
+      alpha,
+      crow_indices,
+      col_indices,
+      values,
+      *mat2_);
   if (!result.is_same(*result_)) {
     result.copy_(*result_);
   }
@@ -105,25 +119,28 @@ c10::MaybeOwned<Tensor> inline prepare_dense_vector_for_cusparse(
 }
 
 void inline indices_to_32_bit_inplace(const Tensor& input) {
-  static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())->set_member_tensors(
-      input.crow_indices().to(kInt),
-      input.col_indices().to(kInt),
-      input.values(),
-      input.sizes());
+  static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
+      ->set_member_tensors(
+          input.crow_indices().to(kInt),
+          input.col_indices().to(kInt),
+          input.values(),
+          input.sizes());
 }
 
 void inline col_indices_and_values_resize_(const Tensor& input, int64_t nnz) {
-  static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())->set_member_tensors(
-      input.crow_indices(),
-      input.col_indices().resize_({nnz}),
-      input.values().resize_({nnz}),
-      input.sizes());
+  static_cast<SparseCsrTensorImpl*>(input.unsafeGetTensorImpl())
+      ->set_member_tensors(
+          input.crow_indices(),
+          input.col_indices().resize_({nnz}),
+          input.values().resize_({nnz}),
+          input.sizes());
 }
 
 void inline bsrsv2_bsrsm2_may_need_to_sync() {
 #if defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11703
-  // cusparse bsrsv2 and bsrsm2 have a synchronization issue that may cause illegal memory access in cuda <= 11.6.x
-  // See https://github.com/pytorch/pytorch/issues/71297
+  // cusparse bsrsv2 and bsrsm2 have a synchronization issue that may cause
+  // illegal memory access in cuda <= 11.6.x See
+  // https://github.com/pytorch/pytorch/issues/71297
   ::c10::cuda::device_synchronize();
 #endif
   // else: do nothing!
@@ -224,7 +241,8 @@ void block_sparse_triangular_solve_vec(
 
         if (!unitriangular) {
           int first_zero_diag_idx = -1;
-          cusparseStatus_t status = cusparseXbsrsv2_zeroPivot(handle, info.descriptor(), &first_zero_diag_idx);
+          cusparseStatus_t status = cusparseXbsrsv2_zeroPivot(
+              handle, info.descriptor(), &first_zero_diag_idx);
           if (status == CUSPARSE_STATUS_ZERO_PIVOT) {
             X_->fill_(NAN);
             return;
@@ -361,7 +379,8 @@ void block_sparse_triangular_solve_mat(
 
         if (!unitriangular) {
           int first_zero_diag_idx = -1;
-          cusparseStatus_t status = cusparseXbsrsm2_zeroPivot(handle, info.descriptor(), &first_zero_diag_idx);
+          cusparseStatus_t status = cusparseXbsrsm2_zeroPivot(
+              handle, info.descriptor(), &first_zero_diag_idx);
           if (status == CUSPARSE_STATUS_ZERO_PIVOT) {
             X_->fill_(NAN);
             return;
@@ -593,8 +612,8 @@ void spmm(
   cusparseOperation_t opB = transpose_B ? CUSPARSE_OPERATION_TRANSPOSE
                                         : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  // CUDA < 11.0 doesn't support 64-bit indices and doesn't raise an error about this
-  // silently returning incorrect results
+  // CUDA < 11.0 doesn't support 64-bit indices and doesn't raise an error about
+  // this silently returning incorrect results
 #if defined(CUDA_VERSION) && CUDA_VERSION < 11000
   auto mat1_32 = at::native::_sparse_csr_tensor_unsafe(
       mat1.crow_indices().to(kInt),
@@ -617,11 +636,7 @@ void spmm(
   auto descC = at::cuda::sparse::CuSparseDnMatDescriptor(*result_);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      kHalf,
-      kBFloat16,
-      result.scalar_type(),
-      "spmm",
-      [&] {
+      kHalf, kBFloat16, result.scalar_type(), "spmm", [&] {
         using opmath_t = at::opmath_type<scalar_t>;
         auto beta_ = beta.to<opmath_t>();
         auto alpha_ = alpha.to<opmath_t>();
@@ -694,8 +709,22 @@ void spgemm(
   auto n = B_sizes[ndim - 1];
 
   // Only 32-bit indices are supported
-  auto A_32 = at::native::_sparse_csr_tensor_unsafe(A.crow_indices().to(kInt), A.col_indices().to(kInt), A.values(), A.sizes(), A.scalar_type(), A.layout(), A.device());
-  auto B_32 = at::native::_sparse_csr_tensor_unsafe(B.crow_indices().to(kInt), B.col_indices().to(kInt), B.values(), B.sizes(), B.scalar_type(), B.layout(), B.device());
+  auto A_32 = at::native::_sparse_csr_tensor_unsafe(
+      A.crow_indices().to(kInt),
+      A.col_indices().to(kInt),
+      A.values(),
+      A.sizes(),
+      A.scalar_type(),
+      A.layout(),
+      A.device());
+  auto B_32 = at::native::_sparse_csr_tensor_unsafe(
+      B.crow_indices().to(kInt),
+      B.col_indices().to(kInt),
+      B.values(),
+      B.sizes(),
+      B.scalar_type(),
+      B.layout(),
+      B.device());
 
   // Modify C tensor in-place to swap indices tensors with 32-bit variants
   indices_to_32_bit_inplace(C);
@@ -709,11 +738,7 @@ void spgemm(
   cusparseOperation_t opB = CUSPARSE_OPERATION_NON_TRANSPOSE;
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
-      kHalf,
-      kBFloat16,
-      C.scalar_type(),
-      "spgemm",
-      [&] {
+      kHalf, kBFloat16, C.scalar_type(), "spgemm", [&] {
         auto beta_ = beta.to<scalar_t>();
         auto alpha_ = alpha.to<scalar_t>();
         auto compute_type = at::cuda::getCudaDataType<scalar_t>();
@@ -826,21 +851,35 @@ void addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  if (mat1.layout() == kSparseBsr && mat2.layout() == kStrided && result.layout() == kStrided) {
+  if (mat1.layout() == kSparseBsr && mat2.layout() == kStrided &&
+      result.layout() == kStrided) {
     return block_sparse_mm(mat1, mat2, beta, alpha, result);
   }
-  if (mat1.is_sparse_csr() && mat2.layout() == kStrided && result.layout() == kStrided) {
+  if (mat1.is_sparse_csr() && mat2.layout() == kStrided &&
+      result.layout() == kStrided) {
     return spmm(mat1, mat2, beta, alpha, result);
   }
-  if (mat1.layout() == kStrided && mat2.is_sparse_csr() && result.layout() == kStrided) {
+  if (mat1.layout() == kStrided && mat2.is_sparse_csr() &&
+      result.layout() == kStrided) {
     // TODO: Add native CSC support via cuSPARSE if supported.
-    return spmm(mat2.transpose(0, 1).to_sparse_csr(), mat1.transpose(0, 1), beta, alpha, result.transpose(0, 1));
+    return spmm(
+        mat2.transpose(0, 1).to_sparse_csr(),
+        mat1.transpose(0, 1),
+        beta,
+        alpha,
+        result.transpose(0, 1));
   }
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return spgemm(mat1, mat2, beta, alpha, result);
   }
-  TORCH_CHECK(false, "addmm: computation on CUDA is not implemented for ",
-              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
+  TORCH_CHECK(
+      false,
+      "addmm: computation on CUDA is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout());
 }
 
 /*
@@ -896,9 +935,7 @@ void addmv_out_sparse_csr(
   }
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      dispatch_scalar_type,
-      "addmv_out_sparse_csr_cuda_impl",
-      [&] {
+      dispatch_scalar_type, "addmv_out_sparse_csr_cuda_impl", [&] {
         auto beta_ = beta.to<scalar_t>();
         auto alpha_ = alpha.to<scalar_t>();
         cudaDataType compute_type = at::cuda::getCudaDataType<scalar_t>();
@@ -958,7 +995,8 @@ void add_out_sparse_csr(
   int m = at::native::cuda_int_cast(A_sizes[ndim - 2], "m");
   int n = at::native::cuda_int_cast(A_sizes[ndim - 1], "n");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.sizes().equals(B.sizes()) && A.sizes().equals(C.sizes()));
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      A.sizes().equals(B.sizes()) && A.sizes().equals(C.sizes()));
 
   // Only 32-bit indices are supported
   auto A_32 = at::native::_sparse_csr_tensor_unsafe(
@@ -1031,7 +1069,8 @@ void add_out_sparse_csr(
         auto C_values_ptr = C_values.data_ptr<scalar_t>();
 
         auto handle = at::cuda::getCurrentCUDASparseHandle();
-        TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(handle, CUSPARSE_POINTER_MODE_HOST));
+        TORCH_CUDASPARSE_CHECK(
+            cusparseSetPointerMode(handle, CUSPARSE_POINTER_MODE_HOST));
 
         size_t buffer_size;
         at::cuda::sparse::csrgeam2_bufferSizeExt<scalar_t>(
@@ -1113,16 +1152,18 @@ void add_out_sparse_csr(
 }
 
 /*
-  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
-  op(A) X = B.
+  Solves a system of linear equations whose coefficients are represented in a
+  sparse triangular matrix A: op(A) X = B.
 
   Args:
   * `A` - sparse Tensor of size m × m.
   * `B` - dense Tensor of size m × nrhs.
   * `X` - dense Tensor of size m × nrhs.
-  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `upper` - controls whether upper or lower triangular part of A is considered
+  in computations.
   * `transpose` - if true then op(A) = A^T.
-  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be
+  one.
 */
 void triangular_solve_out_sparse_csr(
     const at::sparse_csr::SparseCsrTensor& A,
@@ -1138,9 +1179,11 @@ void triangular_solve_out_sparse_csr(
   }
   if (A.layout() == kSparseBsr) {
     if (B.size(-1) == 1) {
-      return block_sparse_triangular_solve_vec(A, B, X, upper, transpose, unitriangular);
+      return block_sparse_triangular_solve_vec(
+          A, B, X, upper, transpose, unitriangular);
     } else {
-      return block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular);
+      return block_sparse_triangular_solve_mat(
+          A, B, X, upper, transpose, unitriangular);
     }
   }
 #if !AT_USE_CUSPARSE_GENERIC_SPSV()
@@ -1155,7 +1198,8 @@ void triangular_solve_out_sparse_csr(
   // but there is a bug in CUDA 11.3.1 version:
   // strides of matrix B are used to write result to matrix X.
   // As a workaround we need to convert matrices to have the same strides.
-  c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B, X_->strides());
+  c10::MaybeOwned<Tensor> B_ =
+      prepare_dense_matrix_for_cusparse(B, X_->strides());
 
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(A);
@@ -1310,16 +1354,17 @@ void sampled_addmm_out_sparse_csr(
   c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_cusparse(B);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
-      C.scalar_type(),
-      "sampled_addmm_out_sparse_csr",
-      [&] {
+      C.scalar_type(), "sampled_addmm_out_sparse_csr", [&] {
         // CUDA 11.6 doesn't support batched inputs, it raises an error:
-        // ** On entry to cusparseSDDMM_bufferSize(): batched SDDMM is not supported
-        // So we need to resort to the for loop
+        // ** On entry to cusparseSDDMM_bufferSize(): batched SDDMM is not
+        // supported So we need to resort to the for loop
         for (const auto i : c10::irange(batchCount(A))) {
-          auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(*A_, /*batch_offset=*/i);
-          auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_, /*batch_offset=*/i);
-          auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C, /*batch_offset=*/i);
+          auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(
+              *A_, /*batch_offset=*/i);
+          auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
+              *B_, /*batch_offset=*/i);
+          auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(
+              C, /*batch_offset=*/i);
 
           auto beta_ = beta.to<scalar_t>();
           auto alpha_ = alpha.to<scalar_t>();

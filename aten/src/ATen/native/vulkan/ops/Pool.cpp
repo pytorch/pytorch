@@ -1,6 +1,6 @@
+#include <ATen/native/Pool.h>
 #include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
-#include <ATen/native/Pool.h>
 #include <torch/library.h>
 
 namespace at {
@@ -24,28 +24,29 @@ Tensor adaptive_avg_pool2d(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    {
-      self.size(Layout::Activation4D::batch),
-      self.size(Layout::Activation4D::channels),
-      output_size[Layout::Activation4D::batch],
-      output_size[Layout::Activation4D::channels],
-    },
-    v_self.options(),
+      context,
+      {
+          self.size(Layout::Activation4D::batch),
+          self.size(Layout::Activation4D::channels),
+          output_size[Layout::Activation4D::batch],
+          output_size[Layout::Activation4D::channels],
+      },
+      v_self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::_adaptive_avg_pool2d");
+    api::OpProfiler profiler(
+        command_buffer, context->querypool(), "aten::_adaptive_avg_pool2d");
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY (v_self.has_image()) {
       const uvec3 v_output_size = v_output.extents();
       const uvec3 v_self_size = v_self.extents();
 
-      const vec2 stride {
-        static_cast<float>(v_self_size.data[0u]) / v_output_size.data[0u],
-        static_cast<float>(v_self_size.data[1u]) / v_output_size.data[1u],
+      const vec2 stride{
+          static_cast<float>(v_self_size.data[0u]) / v_output_size.data[0u],
+          static_cast<float>(v_self_size.data[1u]) / v_output_size.data[1u],
       };
 
       const struct Block final {
@@ -53,22 +54,24 @@ Tensor adaptive_avg_pool2d(
         uint32_t _;
         vec2 kernel;
         vec2 stride;
-      } block {
-        v_output.extents(),
-        0u,
-        {
-          v_self_size.data[0u] - (v_output_size.data[0u] - 1u) * stride.data[0u],
-          v_self_size.data[1u] - (v_output_size.data[1u] - 1u) * stride.data[1u],
-        },
-        stride,
+      } block{
+          v_output.extents(),
+          0u,
+          {
+              v_self_size.data[0u] -
+                  (v_output_size.data[0u] - 1u) * stride.data[0u],
+              v_self_size.data[1u] -
+                  (v_output_size.data[1u] - 1u) * stride.data[1u],
+          },
+          stride,
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(adaptive_avg_pool2d),
           v_output.extents(),
@@ -76,19 +79,14 @@ Tensor adaptive_avg_pool2d(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -116,8 +114,8 @@ Tensor pool2d(
 
   static const auto normalize = [](const IntArrayRef parameter) {
     return std::array<int64_t, 2>{
-      parameter[0],
-      (2 == parameter.size()) ? parameter[1] : parameter[0],
+        parameter[0],
+        (2 == parameter.size()) ? parameter[1] : parameter[0],
     };
   };
 
@@ -166,14 +164,14 @@ Tensor pool2d(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    {
-      input_size[Layout::Activation4D::batch],
-      input_size[Layout::Activation4D::channels],
-      output_height,
-      output_width,
-    },
-    v_self.options(),
+      context,
+      {
+          input_size[Layout::Activation4D::batch],
+          input_size[Layout::Activation4D::channels],
+          output_height,
+          output_width,
+      },
+      v_self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -181,7 +179,7 @@ Tensor pool2d(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY (v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         int32_t range;
@@ -189,37 +187,37 @@ Tensor pool2d(
         ivec2 stride;
         ivec2 padding;
         ivec2 dilation;
-      } block {
-        v_output.extents(),
-        safe_downcast<int32_t>(
-            kernel[Layout::Parameter::width] *
-            kernel[Layout::Parameter::height]),
-        {
-          safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
-          safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
-          safe_downcast<int32_t>(self.size(Layout::Activation4D::width)),
-          safe_downcast<int32_t>(self.size(Layout::Activation4D::height)),
-        },
-        {
-          safe_downcast<int32_t>(stride[Layout::Parameter::width]),
-          safe_downcast<int32_t>(stride[Layout::Parameter::height]),
-        },
-        {
-          safe_downcast<int32_t>(padding[Layout::Parameter::width]),
-          safe_downcast<int32_t>(padding[Layout::Parameter::height]),
-        },
-        {
-          safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
-          safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
-        },
+      } block{
+          v_output.extents(),
+          safe_downcast<int32_t>(
+              kernel[Layout::Parameter::width] *
+              kernel[Layout::Parameter::height]),
+          {
+              safe_downcast<int32_t>(kernel[Layout::Parameter::width]),
+              safe_downcast<int32_t>(kernel[Layout::Parameter::height]),
+              safe_downcast<int32_t>(self.size(Layout::Activation4D::width)),
+              safe_downcast<int32_t>(self.size(Layout::Activation4D::height)),
+          },
+          {
+              safe_downcast<int32_t>(stride[Layout::Parameter::width]),
+              safe_downcast<int32_t>(stride[Layout::Parameter::height]),
+          },
+          {
+              safe_downcast<int32_t>(padding[Layout::Parameter::width]),
+              safe_downcast<int32_t>(padding[Layout::Parameter::height]),
+          },
+          {
+              safe_downcast<int32_t>(dilation[Layout::Parameter::width]),
+              safe_downcast<int32_t>(dilation[Layout::Parameter::height]),
+          },
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_output.extents(),
@@ -227,19 +225,14 @@ Tensor pool2d(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -257,15 +250,14 @@ Tensor avg_pool2d(
     const bool /* count_include_pad */,
     const c10::optional<int64_t> /* divisor_override */) {
   return pool2d(
-    self_arg,
-    kernel_arg,
-    stride_arg,
-    padding_arg,
-    {1,1},
-    ceil_mode,
-    VK_KERNEL(avg_pool2d),
-    "aten::avg_pool2d"
-  );
+      self_arg,
+      kernel_arg,
+      stride_arg,
+      padding_arg,
+      {1, 1},
+      ceil_mode,
+      VK_KERNEL(avg_pool2d),
+      "aten::avg_pool2d");
 }
 
 Tensor max_pool2d(
@@ -276,21 +268,22 @@ Tensor max_pool2d(
     const IntArrayRef dilation_arg,
     const bool ceil_mode) {
   return pool2d(
-    self_arg,
-    kernel_arg,
-    stride_arg,
-    padding_arg,
-    dilation_arg,
-    ceil_mode,
-    VK_KERNEL(max_pool2d),
-    "aten::max_pool2d"
-  );
+      self_arg,
+      kernel_arg,
+      stride_arg,
+      padding_arg,
+      dilation_arg,
+      ceil_mode,
+      VK_KERNEL(max_pool2d),
+      "aten::max_pool2d");
 }
 
 #ifdef USE_VULKAN_API
 
 TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::_adaptive_avg_pool2d"), TORCH_FN(adaptive_avg_pool2d));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::_adaptive_avg_pool2d"),
+      TORCH_FN(adaptive_avg_pool2d));
   m.impl(TORCH_SELECTIVE_NAME("aten::avg_pool2d"), TORCH_FN(avg_pool2d));
   m.impl(TORCH_SELECTIVE_NAME("aten::max_pool2d"), TORCH_FN(max_pool2d));
 }

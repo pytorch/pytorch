@@ -3,26 +3,27 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/util/irange.h>
+#include <caffe2/core/context_gpu.h>
 #include <caffe2/core/init.h>
 #include <caffe2/core/operator.h>
-#include <caffe2/core/context_gpu.h>
 #include <caffe2/utils/math.h>
 
 // dumbest possible copies
-template<typename T>
+template <typename T>
 T cuda_get(T* addr) {
   T result;
   CUDA_ENFORCE(cudaMemcpy(&result, addr, sizeof(T), cudaMemcpyDefault));
   return result;
 }
 
-template<typename T>
+template <typename T>
 void cuda_set(T* addr, T value) {
   CUDA_ENFORCE(cudaMemcpy(addr, &value, sizeof(T), cudaMemcpyDefault));
 }
 
 TEST(CUDACaffe2ToPytorch, SimpleLegacy) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   caffe2::Tensor c2_tensor(caffe2::CUDA);
   c2_tensor.Resize(4, 4);
   auto data = c2_tensor.mutable_data<int64_t>();
@@ -41,7 +42,8 @@ TEST(CUDACaffe2ToPytorch, SimpleLegacy) {
 }
 
 TEST(CUDACaffe2ToPytorch, Simple) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   caffe2::Tensor c2_tensor =
       caffe2::empty({4, 4}, at::dtype<int64_t>().device(caffe2::CUDA));
   auto data = c2_tensor.mutable_data<int64_t>();
@@ -60,7 +62,8 @@ TEST(CUDACaffe2ToPytorch, Simple) {
 }
 
 TEST(CUDACaffe2ToPytorch, Op) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   caffe2::Tensor c2_tensor =
       caffe2::empty({3, 3}, at::dtype<int64_t>().device(caffe2::CUDA));
   auto data = c2_tensor.mutable_data<int64_t>();
@@ -75,7 +78,8 @@ TEST(CUDACaffe2ToPytorch, Op) {
 }
 
 TEST(CUDAPytorchToCaffe2, Op) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   caffe2::Workspace workspace;
   caffe2::NetDef net;
 
@@ -83,8 +87,10 @@ TEST(CUDAPytorchToCaffe2, Op) {
   auto at_tensor_b = at::ones({5, 5}, at::dtype(at::kFloat).device(at::kCUDA));
   auto at_tensor_c = at::ones({5, 5}, at::dtype(at::kFloat).device(at::kCUDA));
 
-  auto* c2_tensor_a = BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
-  auto* c2_tensor_b = BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
+  auto* c2_tensor_a =
+      BlobSetTensor(workspace.CreateBlob("a"), caffe2::Tensor(at_tensor_a));
+  auto* c2_tensor_b =
+      BlobSetTensor(workspace.CreateBlob("b"), caffe2::Tensor(at_tensor_b));
   (void)c2_tensor_a;
   (void)c2_tensor_b;
 
@@ -119,7 +125,8 @@ TEST(CUDAPytorchToCaffe2, Op) {
 }
 
 TEST(CUDAPytorchToCaffe2, SharedStorageWrite) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   auto at_tensor_a = at::ones({5, 5}, at::dtype(at::kFloat).device(at::kCUDA));
   auto at_tensor_b = at_tensor_a.view({25});
 
@@ -134,7 +141,8 @@ TEST(CUDAPytorchToCaffe2, SharedStorageWrite) {
 }
 
 TEST(CUDAPytorchToCaffe2, MutualResizes) {
-  if (!at::cuda::is_available()) return;
+  if (!at::cuda::is_available())
+    return;
   auto at_tensor = at::ones({5, 5}, at::dtype(at::kFloat).device(at::kCUDA));
 
   caffe2::Tensor c2_tensor(at_tensor);

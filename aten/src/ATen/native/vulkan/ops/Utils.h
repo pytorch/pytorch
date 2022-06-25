@@ -10,9 +10,7 @@ namespace vulkan {
 namespace ops {
 namespace utils {
 
-inline int64_t normalize(
-    const int64_t dimension,
-    const int64_t n) {
+inline int64_t normalize(const int64_t dimension, const int64_t n) {
   return (dimension % n + n) % n;
 }
 

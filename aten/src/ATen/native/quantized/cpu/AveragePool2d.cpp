@@ -2,9 +2,9 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/Pool.h>
-#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 #include <c10/util/irange.h>
@@ -129,9 +129,9 @@ inline std::pair<int, int> get_stride(IntArrayRef stride, int kW, int kH) {
       stride.empty() || stride.size() == 1 || stride.size() == 2,
       "avg_pool2d: stride must either be omitted, a single int, or a tuple of two ints");
   const int dH = stride.empty() ? kH : safe_downcast<int, int64_t>(stride[0]);
-  const int dW = stride.empty()
-      ? kW
-      : stride.size() == 1 ? dH : safe_downcast<int, int64_t>(stride[1]);
+  const int dW = stride.empty() ? kW
+      : stride.size() == 1      ? dH
+                                : safe_downcast<int, int64_t>(stride[1]);
   return std::make_pair(dW, dH);
 }
 
@@ -268,11 +268,12 @@ Tensor qnnpack_avg_pool2d(
       input.ndimension() == 4,
       "qnnpack_avg_pool2d(): Expected input to be 4-dimensional: got ",
       input.ndimension());
-  TORCH_CHECK(input.scalar_type() == c10::kQUInt8,
-                "qnnpack_avg_pool2d(): Expected input data type ",
-                toString(c10::kQUInt8),
-                " but got ",
-                toString(input.scalar_type()));
+  TORCH_CHECK(
+      input.scalar_type() == c10::kQUInt8,
+      "qnnpack_avg_pool2d(): Expected input data type ",
+      toString(c10::kQUInt8),
+      " but got ",
+      toString(input.scalar_type()));
 
   int64_t batch_size = input.size(0);
   int64_t inC = input.size(1);
@@ -347,7 +348,7 @@ Tensor qnnpack_avg_pool2d(
       "failed to run QNNPACK Average Pool operator");
   return output.contiguous(input.suggest_memory_format());
 }
-} // qnnp_avgpool_helper
+} // namespace qnnp_avgpool_helper
 #endif
 
 Tensor avg_pool2d_quantized_cpu(
@@ -372,16 +373,17 @@ Tensor avg_pool2d_quantized_cpu(
         divisor_override);
   }
 #endif
-  AT_DISPATCH_QINT_TYPES(input.scalar_type(), "avg_pool2d_quantized_cpu", [&]() {
-    output = q_avg_pool2d<scalar_t>(
-        input,
-        kernel_size,
-        stride,
-        padding,
-        ceil_mode,
-        count_include_pad,
-        divisor_override);
-  });
+  AT_DISPATCH_QINT_TYPES(
+      input.scalar_type(), "avg_pool2d_quantized_cpu", [&]() {
+        output = q_avg_pool2d<scalar_t>(
+            input,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override);
+      });
   return output;
 }
 

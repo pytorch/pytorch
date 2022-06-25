@@ -11,7 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include<pytorch_qnnpack.h>
+#include <pytorch_qnnpack.h>
 #include <qnnpack/common.h>
 
 #ifdef __cplusplus

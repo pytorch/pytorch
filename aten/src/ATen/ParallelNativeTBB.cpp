@@ -1,8 +1,8 @@
 #include <ATen/Config.h>
 #if AT_PARALLEL_NATIVE_TBB
+#include <ATen/PTThreadPool.h>
 #include <ATen/Parallel.h>
 #include <ATen/ParallelFuture.h>
-#include <ATen/PTThreadPool.h>
 
 #include <atomic>
 #include <mutex>
@@ -42,16 +42,16 @@ void _internal_set_num_threads(int nthreads) {
     num_intraop_threads_.store(nthreads);
   }
 }
-}
+} // namespace
 
 void init_num_threads() {
-  #ifdef _OPENMP
+#ifdef _OPENMP
   omp_set_num_threads(1);
-  #endif
+#endif
 
-  #if AT_MKL_ENABLED()
+#if AT_MKL_ENABLED()
   mkl_set_num_threads(1);
-  #endif
+#endif
 
   int nthreads = num_intraop_threads_.load();
   if (nthreads < 0) {
@@ -80,7 +80,7 @@ namespace internal {
 void set_thread_num(int id) {
   this_thread_id = id;
 }
-}
+} // namespace internal
 
 bool in_parallel_region() {
   return tbb::this_task_arena::current_thread_index() >= 0;
@@ -98,12 +98,10 @@ c10::intrusive_ptr<c10::ivalue::Future> intraop_launch_future(
     std::function<void()> func) {
   auto future = c10::make_intrusive<c10::ivalue::Future>(NoneType::get());
   if (get_num_threads() > 1) {
-    tg_.run(
-      [func, future]() {
-        func();
-        future->markCompleted();
-      }
-    );
+    tg_.run([func, future]() {
+      func();
+      future->markCompleted();
+    });
   } else {
     func();
     future->markCompleted();

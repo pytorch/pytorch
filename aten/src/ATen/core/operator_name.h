@@ -4,9 +4,9 @@
 #include <c10/util/Exception.h>
 #include <c10/util/Optional.h>
 #include <c10/util/string_view.h>
+#include <ostream>
 #include <string>
 #include <utility>
-#include <ostream>
 
 namespace c10 {
 
@@ -39,7 +39,8 @@ struct OperatorName final {
       const auto old_name_size = name.size();
       name.resize(ns_len + 2 + old_name_size);
       // Shift current value of name to the end of the new space.
-      name.replace(name.size() - old_name_size, old_name_size, name, 0, old_name_size);
+      name.replace(
+          name.size() - old_name_size, old_name_size, name, 0, old_name_size);
       name.replace(0, ns_len, ns, ns_len);
       name[ns_len] = ':';
       name[ns_len + 1] = ':';
@@ -56,8 +57,10 @@ struct OperatorName final {
 struct OperatorNameView final {
   c10::string_view name;
   c10::string_view overload_name;
-  constexpr OperatorNameView(c10::string_view name, c10::string_view overload_name)
-    : name(name), overload_name(overload_name) {}
+  constexpr OperatorNameView(
+      c10::string_view name,
+      c10::string_view overload_name)
+      : name(name), overload_name(overload_name) {}
   // Parses strings like "foo.overload" and also "foo"
   constexpr static OperatorNameView parse(c10::string_view full_name) {
     auto i = full_name.find('.');
@@ -83,10 +86,11 @@ TORCH_API std::ostream& operator<<(std::ostream&, const OperatorName&);
 } // namespace c10
 
 namespace std {
-  template <>
-  struct hash<::c10::OperatorName> {
-    size_t operator()(const ::c10::OperatorName& x) const {
-      return std::hash<std::string>()(x.name) ^ (~ std::hash<std::string>()(x.overload_name));
-    }
-  };
-}
+template <>
+struct hash<::c10::OperatorName> {
+  size_t operator()(const ::c10::OperatorName& x) const {
+    return std::hash<std::string>()(x.name) ^
+        (~std::hash<std::string>()(x.overload_name));
+  }
+};
+} // namespace std

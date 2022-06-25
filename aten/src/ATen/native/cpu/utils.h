@@ -54,14 +54,25 @@ struct Vec2 {
     val.store(ptr);
   }
 };
-inline Vec2 operator+(const Vec2& a, const Vec2& b) { return {a.val0 + b.val0, a.val1 + b.val1}; }
-inline Vec2 operator*(const Vec2& a, const Vec2& b) { return {a.val0 * b.val0, a.val1 * b.val1}; }
+inline Vec2 operator+(const Vec2& a, const Vec2& b) {
+  return {a.val0 + b.val0, a.val1 + b.val1};
+}
+inline Vec2 operator*(const Vec2& a, const Vec2& b) {
+  return {a.val0 * b.val0, a.val1 * b.val1};
+}
 
-template <typename scalar_t> struct VectorizedType { using type = Vectorized<scalar_t>; };
-template <> struct VectorizedType<BFloat16> { using type = Vec2; };
-template <typename scalar_t> using VecType = typename VectorizedType<scalar_t>::type;
+template <typename scalar_t>
+struct VectorizedType {
+  using type = Vectorized<scalar_t>;
+};
+template <>
+struct VectorizedType<BFloat16> {
+  using type = Vec2;
+};
+template <typename scalar_t>
+using VecType = typename VectorizedType<scalar_t>::type;
 
-} // namespace
+} // namespace CPU_CAPABILITY
 
 namespace utils {
 
@@ -79,7 +90,13 @@ T CeilLog2(const T& x) {
 //   src has shape of M by N, with leading dimension of ld_src
 //   dst has shape of N by M, with leading dimension of ld_dst
 template <typename T>
-inline void transpose(int64_t M, int64_t N, const T* src, int64_t ld_src, T* dst, int64_t ld_dst) {
+inline void transpose(
+    int64_t M,
+    int64_t N,
+    const T* src,
+    int64_t ld_src,
+    T* dst,
+    int64_t ld_dst) {
   for (int64_t j = 0; j < N; j++) {
     for (int64_t i = 0; i < M; i++) {
       dst[j * ld_dst + i] = src[i * ld_src + j];
@@ -89,8 +106,15 @@ inline void transpose(int64_t M, int64_t N, const T* src, int64_t ld_src, T* dst
 
 #ifdef USE_FBGEMM
 template <>
-inline void transpose<float>(int64_t M, int64_t N, const float* src, int64_t ld_src, float* dst, int64_t ld_dst) {
-  TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
+inline void transpose<float>(
+    int64_t M,
+    int64_t N,
+    const float* src,
+    int64_t ld_src,
+    float* dst,
+    int64_t ld_dst) {
+  TORCH_CHECK(
+      fbgemm::fbgemmSupportedCPU(), "Your CPU does not support FBGEMM.");
   fbgemm::transpose_simd<float>(M, N, src, ld_src, dst, ld_dst);
 }
 #endif

@@ -16,20 +16,21 @@
 #include <string>
 #include <unordered_map>
 
-namespace at { namespace native { namespace detail {
+namespace at {
+namespace native {
+namespace detail {
 
 // Enum representing the FFT type
 enum class CuFFTTransformType : int8_t {
-  C2C,  // Complex-to-complex
-  R2C,  // Real-to-complex
-  C2R,  // Complex-to-real
+  C2C, // Complex-to-complex
+  R2C, // Real-to-complex
+  C2R, // Complex-to-real
 };
 
 // This struct is used to let us easily compute hashes of the
 // parameters.
 // It will be the **key** to the plan cache.
-struct CuFFTParams
-{
+struct CuFFTParams {
   int64_t signal_ndim_; // between 1 and max_rank, i.e., 1 <= signal_ndim <= 3
   // These include additional batch dimension as well.
   int64_t sizes_[max_rank + 1];
@@ -40,8 +41,12 @@ struct CuFFTParams
 
   CuFFTParams() = default;
 
-  CuFFTParams(IntArrayRef in_strides, IntArrayRef out_strides,
-      IntArrayRef signal_sizes, CuFFTTransformType fft_type, ScalarType value_type) {
+  CuFFTParams(
+      IntArrayRef in_strides,
+      IntArrayRef out_strides,
+      IntArrayRef signal_sizes,
+      CuFFTTransformType fft_type,
+      ScalarType value_type) {
     // Padding bits must be zeroed for hashing
     memset(this, 0, sizeof(*this));
     signal_ndim_ = signal_sizes.size() - 1;
@@ -86,8 +91,11 @@ inline bool cufft_complex_output(CuFFTTransformType type) {
   TORCH_INTERNAL_ASSERT(false);
 }
 
-// Create transform type enum from bools representing if input and output are complex
-inline CuFFTTransformType GetCuFFTTransformType(bool complex_input, bool complex_output) {
+// Create transform type enum from bools representing if input and output are
+// complex
+inline CuFFTTransformType GetCuFFTTransformType(
+    bool complex_input,
+    bool complex_output) {
   if (complex_input && complex_output) {
     return CuFFTTransformType::C2C;
   } else if (complex_input && !complex_output) {
@@ -98,17 +106,20 @@ inline CuFFTTransformType GetCuFFTTransformType(bool complex_input, bool complex
   TORCH_INTERNAL_ASSERT(false, "Real to real FFTs are not supported");
 }
 
-
 class CuFFTHandle {
   ::cufftHandle handle_;
-public:
 
+ public:
   CuFFTHandle() {
     CUFFT_CHECK(cufftCreate(&handle_));
   }
 
-  ::cufftHandle & get() { return handle_; }
-  const ::cufftHandle & get() const { return handle_; }
+  ::cufftHandle& get() {
+    return handle_;
+  }
+  const ::cufftHandle& get() const {
+    return handle_;
+  }
 
   ~CuFFTHandle() {
 // Not using fftDestroy() for rocFFT to work around double freeing of handles
@@ -118,18 +129,18 @@ public:
   }
 };
 
-__forceinline__
-static bool is_pow_of_two(int64_t x) {
+__forceinline__ static bool is_pow_of_two(int64_t x) {
   return (x & (x - 1)) == 0;
 }
 
 #if defined(USE_ROCM)
-    using cufft_size_type = int;
+using cufft_size_type = int;
 #else
-    using cufft_size_type = long long int;
+using cufft_size_type = long long int;
 #endif
 
-using CuFFTDimVector = c10::SmallVector<cufft_size_type, at::kDimVectorStaticSize>;
+using CuFFTDimVector =
+    c10::SmallVector<cufft_size_type, at::kDimVectorStaticSize>;
 
 // Struct representing a tensor in CuFFT's data layout for planning transforms
 // See NOTE [ cuFFT Embedded Strides ].
@@ -159,17 +170,21 @@ inline CuFFTDataLayout cufft_simple_embed(IntArrayRef sizes, bool onesided) {
 }
 
 // Convert strides to a CuFFT embedded representation.
-// If strides cannot be embedded, returns a simple layout and sets must_clone flag
-// See NOTE [ cuFFT Embedded Strides ].
-inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bool onesided) {
+// If strides cannot be embedded, returns a simple layout and sets must_clone
+// flag See NOTE [ cuFFT Embedded Strides ].
+inline CuFFTDataLayout as_cufft_embed(
+    IntArrayRef strides,
+    IntArrayRef sizes,
+    bool onesided) {
   const auto signal_ndim = strides.size() - 1;
   CuFFTDataLayout layout;
   auto last_stride = strides[signal_ndim];
   layout.must_clone = (last_stride <= 0);
 
-  const auto last_dim_size = onesided ?
-      sizes[signal_ndim] / 2 + 1 : sizes[signal_ndim];
-  const auto signal_numel = c10::multiply_integers(sizes.slice(1, sizes.size() - 2)) * last_dim_size;
+  const auto last_dim_size =
+      onesided ? sizes[signal_ndim] / 2 + 1 : sizes[signal_ndim];
+  const auto signal_numel =
+      c10::multiply_integers(sizes.slice(1, sizes.size() - 2)) * last_dim_size;
 
   // Zero stides are not allowed, even if the batch size is one.
   // If that happens just set a dummy case
@@ -181,7 +196,8 @@ inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bo
     layout.dist = strides[0];
   }
 
-  // Calculate the embedding shape, or set must_clone if the strides cannot be embedded
+  // Calculate the embedding shape, or set must_clone if the strides cannot be
+  // embedded
   layout.embed.resize(signal_ndim);
   for (auto i = signal_ndim - 1; !layout.must_clone && i > 0; i--) {
     auto stride = strides[i];
@@ -210,7 +226,8 @@ inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bo
         }
       }
 
-      return (layout.stride == 1 && layout.dist == signal_numel &&
+      return (
+          layout.stride == 1 && layout.dist == signal_numel &&
           layout.embed.back() == last_dim_size);
     }();
   }
@@ -225,28 +242,30 @@ inline CuFFTDataLayout as_cufft_embed(IntArrayRef strides, IntArrayRef sizes, bo
 // This class will be the **value** in the plan cache.
 // It **owns** the raw plan via a unique_ptr.
 class CuFFTConfig {
-public:
-
+ public:
   // Only move semantics is enought for this class. Although we already use
   // unique_ptr for the plan, still remove copy constructor and assignment op so
   // we don't accidentally copy and take perf hit.
   CuFFTConfig(const CuFFTConfig&) = delete;
   CuFFTConfig& operator=(CuFFTConfig const&) = delete;
 
-  explicit CuFFTConfig(const CuFFTParams& params):
-      CuFFTConfig(
-          IntArrayRef(params.input_strides_, params.signal_ndim_ + 1),
-          IntArrayRef(params.output_strides_, params.signal_ndim_ + 1),
-          IntArrayRef(params.sizes_, params.signal_ndim_ + 1),
-          params.fft_type_,
-          params.value_type_) {}
+  explicit CuFFTConfig(const CuFFTParams& params)
+      : CuFFTConfig(
+            IntArrayRef(params.input_strides_, params.signal_ndim_ + 1),
+            IntArrayRef(params.output_strides_, params.signal_ndim_ + 1),
+            IntArrayRef(params.sizes_, params.signal_ndim_ + 1),
+            params.fft_type_,
+            params.value_type_) {}
 
   // For complex types, strides are in units of 2 * element_size(dtype)
   // sizes are for the full signal, including batch size and always two-sided
-  CuFFTConfig(IntArrayRef in_strides, IntArrayRef out_strides,
-      IntArrayRef sizes, CuFFTTransformType fft_type, ScalarType dtype):
-        fft_type_(fft_type), value_type_(dtype) {
-
+  CuFFTConfig(
+      IntArrayRef in_strides,
+      IntArrayRef out_strides,
+      IntArrayRef sizes,
+      CuFFTTransformType fft_type,
+      ScalarType dtype)
+      : fft_type_(fft_type), value_type_(dtype) {
     // signal sizes (excluding batch dim)
     CuFFTDimVector signal_sizes(sizes.begin() + 1, sizes.end());
 
@@ -254,12 +273,13 @@ public:
     const int64_t batch = sizes[0];
     const int64_t signal_ndim = sizes.size() - 1;
 
-    // Since cuFFT has limited non-unit stride support and various constraints, we
-    // use a flag to keep track throughout this function to see if we need to
+    // Since cuFFT has limited non-unit stride support and various constraints,
+    // we use a flag to keep track throughout this function to see if we need to
     // input = input.clone();
 
 #if defined(USE_ROCM)
-    // clone input to avoid issues with hipfft clobering the input and failing tests
+    // clone input to avoid issues with hipfft clobering the input and failing
+    // tests
     clone_input = true;
 #else
     clone_input = false;
@@ -271,12 +291,17 @@ public:
     if (dtype == ScalarType::Half) {
       // cuFFT on half requires compute capability of at least SM_53
       auto dev_prop = at::cuda::getCurrentDeviceProperties();
-      TORCH_CHECK(dev_prop->major >= 5 && !(dev_prop->major == 5 && dev_prop->minor < 3),
-               "cuFFT doesn't support signals of half type with compute "
-               "capability less than SM_53, but the device containing input half "
-               "tensor only has SM_", dev_prop->major, dev_prop->minor);
+      TORCH_CHECK(
+          dev_prop->major >= 5 &&
+              !(dev_prop->major == 5 && dev_prop->minor < 3),
+          "cuFFT doesn't support signals of half type with compute "
+          "capability less than SM_53, but the device containing input half "
+          "tensor only has SM_",
+          dev_prop->major,
+          dev_prop->minor);
       for (const auto i : c10::irange(signal_ndim)) {
-        TORCH_CHECK(is_pow_of_two(sizes[i + 1]),
+        TORCH_CHECK(
+            is_pow_of_two(sizes[i + 1]),
             "cuFFT only supports dimensions whose sizes are powers of two when"
             " computing in half precision, but got a signal size of",
             sizes.slice(1));
@@ -286,12 +311,17 @@ public:
 
     CuFFTDataLayout in_layout;
     if (clone_input) {
-      in_layout = cufft_simple_embed(sizes, fft_type == CuFFTTransformType::C2R);
+      in_layout =
+          cufft_simple_embed(sizes, fft_type == CuFFTTransformType::C2R);
     } else {
-      in_layout = as_cufft_embed(in_strides, sizes, fft_type == CuFFTTransformType::C2R);
+      in_layout = as_cufft_embed(
+          in_strides, sizes, fft_type == CuFFTTransformType::C2R);
     }
-    auto out_layout = as_cufft_embed(out_strides, sizes, fft_type == CuFFTTransformType::R2C);
-    TORCH_INTERNAL_ASSERT(!out_layout.must_clone, "Out strides cannot be represented as CuFFT embedding");
+    auto out_layout =
+        as_cufft_embed(out_strides, sizes, fft_type == CuFFTTransformType::R2C);
+    TORCH_INTERNAL_ASSERT(
+        !out_layout.must_clone,
+        "Out strides cannot be represented as CuFFT embedding");
     clone_input |= in_layout.must_clone;
 
     // Check if we can take advantage of simple data layout.
@@ -301,18 +331,24 @@ public:
     const bool simple_layout = in_layout.simple && out_layout.simple;
 
 #if defined(USE_ROCM)
-    hipfftType exec_type = [&]{
+    hipfftType exec_type = [&] {
       if (dtype == kFloat) {
         switch (fft_type) {
-          case CuFFTTransformType::C2C: return HIPFFT_C2C;
-          case CuFFTTransformType::R2C: return HIPFFT_R2C;
-          case CuFFTTransformType::C2R: return HIPFFT_C2R;
+          case CuFFTTransformType::C2C:
+            return HIPFFT_C2C;
+          case CuFFTTransformType::R2C:
+            return HIPFFT_R2C;
+          case CuFFTTransformType::C2R:
+            return HIPFFT_C2R;
         }
       } else if (dtype == kDouble) {
         switch (fft_type) {
-          case CuFFTTransformType::C2C: return HIPFFT_Z2Z;
-          case CuFFTTransformType::R2C: return HIPFFT_D2Z;
-          case CuFFTTransformType::C2R: return HIPFFT_Z2D;
+          case CuFFTTransformType::C2C:
+            return HIPFFT_Z2Z;
+          case CuFFTTransformType::R2C:
+            return HIPFFT_D2Z;
+          case CuFFTTransformType::C2R:
+            return HIPFFT_Z2D;
         }
       }
       TORCH_CHECK(false, "hipFFT doesn't support transforms of type: ", dtype);
@@ -345,46 +381,96 @@ public:
 
     // make plan
     if (simple_layout) {
-      // If with unit-stride, we tell cuFFT by setting inembed == onembed == NULL.
-      // In such case, cuFFT ignores istride, ostride, idist, and odist
-      // by assuming istride = ostride = 1.
+      // If with unit-stride, we tell cuFFT by setting inembed == onembed ==
+      // NULL. In such case, cuFFT ignores istride, ostride, idist, and odist by
+      // assuming istride = ostride = 1.
       //
       // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
 #if defined(USE_ROCM)
-      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
-        /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1,
-        /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1,
-        exec_type, batch, &ws_size_t));
+      CUFFT_CHECK(hipfftMakePlanMany(
+          plan(),
+          signal_ndim,
+          signal_sizes.data(),
+          /* inembed */ nullptr,
+          /* base_istride */ 1,
+          /* idist */ 1,
+          /* onembed */ nullptr,
+          /* base_ostride */ 1,
+          /* odist */ 1,
+          exec_type,
+          batch,
+          &ws_size_t));
 #else
-      CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
-        /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
-        /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1, otype,
-        batch, &ws_size_t, exec_type));
+      CUFFT_CHECK(cufftXtMakePlanMany(
+          plan(),
+          signal_ndim,
+          signal_sizes.data(),
+          /* inembed */ nullptr,
+          /* base_istride */ 1,
+          /* idist */ 1,
+          itype,
+          /* onembed */ nullptr,
+          /* base_ostride */ 1,
+          /* odist */ 1,
+          otype,
+          batch,
+          &ws_size_t,
+          exec_type));
 #endif
     } else {
 #if defined(USE_ROCM)
-      CUFFT_CHECK(hipfftMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
-        in_layout.embed.data(), in_layout.stride, in_layout.dist,
-        out_layout.embed.data(), out_layout.stride, out_layout.dist,
-        exec_type, batch, &ws_size_t));
+      CUFFT_CHECK(hipfftMakePlanMany(
+          plan(),
+          signal_ndim,
+          signal_sizes.data(),
+          in_layout.embed.data(),
+          in_layout.stride,
+          in_layout.dist,
+          out_layout.embed.data(),
+          out_layout.stride,
+          out_layout.dist,
+          exec_type,
+          batch,
+          &ws_size_t));
 #else
-      CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
-            in_layout.embed.data(), in_layout.stride, in_layout.dist, itype,
-            out_layout.embed.data(), out_layout.stride, out_layout.dist, otype,
-            batch, &ws_size_t, exec_type));
+      CUFFT_CHECK(cufftXtMakePlanMany(
+          plan(),
+          signal_ndim,
+          signal_sizes.data(),
+          in_layout.embed.data(),
+          in_layout.stride,
+          in_layout.dist,
+          itype,
+          out_layout.embed.data(),
+          out_layout.stride,
+          out_layout.dist,
+          otype,
+          batch,
+          &ws_size_t,
+          exec_type));
 #endif
     }
     ws_size = static_cast<int64_t>(ws_size_t);
   }
 
-  const cufftHandle &plan() const { return plan_ptr.get(); }
+  const cufftHandle& plan() const {
+    return plan_ptr.get();
+  }
 
-  CuFFTTransformType transform_type() const { return fft_type_; }
-  ScalarType data_type() const { return value_type_; }
-  bool should_clone_input() const { return clone_input; }
-  int64_t workspace_size() const { return ws_size; }
+  CuFFTTransformType transform_type() const {
+    return fft_type_;
+  }
+  ScalarType data_type() const {
+    return value_type_;
+  }
+  bool should_clone_input() const {
+    return clone_input;
+  }
+  int64_t workspace_size() const {
+    return ws_size;
+  }
 
-private:
+ private:
   CuFFTHandle plan_ptr;
   bool clone_input;
   int64_t ws_size;
@@ -393,21 +479,25 @@ private:
 };
 
 #if (defined(CUDA_VERSION) && CUDA_VERSION < 10000) || defined(USE_ROCM)
-  // Note that the max plan number for CUDA version < 10 has to be 1023
-  // due to a bug that fails on the 1024th plan
-  constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
-  constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = CUFFT_MAX_PLAN_NUM;
+// Note that the max plan number for CUDA version < 10 has to be 1023
+// due to a bug that fails on the 1024th plan
+constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = CUFFT_MAX_PLAN_NUM;
 #else
-  constexpr int64_t CUFFT_MAX_PLAN_NUM = std::numeric_limits<int64_t>::max();
-  // The default max cache size chosen for CUDA version > 10 is arbitrary.
-  // This number puts a limit on how big of a plan cache should we maintain by
-  // default. Users can always configure it via cufft_set_plan_cache_max_size.
-  constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = 4096;
+constexpr int64_t CUFFT_MAX_PLAN_NUM = std::numeric_limits<int64_t>::max();
+// The default max cache size chosen for CUDA version > 10 is arbitrary.
+// This number puts a limit on how big of a plan cache should we maintain by
+// default. Users can always configure it via cufft_set_plan_cache_max_size.
+constexpr int64_t CUFFT_DEFAULT_CACHE_SIZE = 4096;
 #endif
-static_assert(0 <= CUFFT_MAX_PLAN_NUM && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<int64_t>::max(),
-              "CUFFT_MAX_PLAN_NUM not in size_t range");
-static_assert(CUFFT_DEFAULT_CACHE_SIZE >= 0 && CUFFT_DEFAULT_CACHE_SIZE <= CUFFT_MAX_PLAN_NUM,
-              "CUFFT_DEFAULT_CACHE_SIZE not in [0, CUFFT_MAX_PLAN_NUM] range");
+static_assert(
+    0 <= CUFFT_MAX_PLAN_NUM &&
+        CUFFT_MAX_PLAN_NUM <= std::numeric_limits<int64_t>::max(),
+    "CUFFT_MAX_PLAN_NUM not in size_t range");
+static_assert(
+    CUFFT_DEFAULT_CACHE_SIZE >= 0 &&
+        CUFFT_DEFAULT_CACHE_SIZE <= CUFFT_MAX_PLAN_NUM,
+    "CUFFT_DEFAULT_CACHE_SIZE not in [0, CUFFT_MAX_PLAN_NUM] range");
 
 // This cache assumes that the mapping from key to value never changes.
 // This is **NOT** thread-safe. Please use a mutex when using it **AND** the
@@ -415,14 +505,14 @@ static_assert(CUFFT_DEFAULT_CACHE_SIZE >= 0 && CUFFT_DEFAULT_CACHE_SIZE <= CUFFT
 // The contract of using this cache is that try_emplace_value should only be
 // used when the max_size is positive.
 class CuFFTParamsLRUCache {
-public:
+ public:
   using kv_t = typename std::pair<CuFFTParams, CuFFTConfig>;
-  using map_t = typename std::unordered_map<std::reference_wrapper<CuFFTParams>,
-                                            typename std::list<kv_t>::iterator,
-                                            ParamsHash<CuFFTParams>,
-                                            ParamsEqual<CuFFTParams>>;
+  using map_t = typename std::unordered_map<
+      std::reference_wrapper<CuFFTParams>,
+      typename std::list<kv_t>::iterator,
+      ParamsHash<CuFFTParams>,
+      ParamsEqual<CuFFTParams>>;
   using map_kkv_iter_t = typename map_t::iterator;
-
 
   CuFFTParamsLRUCache() : CuFFTParamsLRUCache(CUFFT_DEFAULT_CACHE_SIZE) {}
 
@@ -430,10 +520,10 @@ public:
     _set_max_size(max_size);
   }
 
-  CuFFTParamsLRUCache(CuFFTParamsLRUCache&& other) noexcept :
-    _usage_list(std::move(other._usage_list)),
-    _cache_map(std::move(other._cache_map)),
-    _max_size(other._max_size) {}
+  CuFFTParamsLRUCache(CuFFTParamsLRUCache&& other) noexcept
+      : _usage_list(std::move(other._usage_list)),
+        _cache_map(std::move(other._cache_map)),
+        _max_size(other._max_size) {}
 
   CuFFTParamsLRUCache& operator=(CuFFTParamsLRUCache&& other) noexcept {
     _usage_list = std::move(other._usage_list);
@@ -446,7 +536,7 @@ public:
   // config in this cache and return it.
   // Return const reference because CuFFTConfig shouldn't be tampered with once
   // created.
-  const CuFFTConfig &lookup(CuFFTParams params) {
+  const CuFFTConfig& lookup(CuFFTParams params) {
     AT_ASSERT(_max_size > 0);
 
     map_kkv_iter_t map_it = _cache_map.find(params);
@@ -466,13 +556,15 @@ public:
     }
 
     // construct new plan at list front, then insert into _cache_map
-    _usage_list.emplace_front(std::piecewise_construct,
-                       std::forward_as_tuple(params),
-                       std::forward_as_tuple(params));
+    _usage_list.emplace_front(
+        std::piecewise_construct,
+        std::forward_as_tuple(params),
+        std::forward_as_tuple(params));
     auto kv_it = _usage_list.begin();
-    _cache_map.emplace(std::piecewise_construct,
-                std::forward_as_tuple(kv_it->first),
-                std::forward_as_tuple(kv_it));
+    _cache_map.emplace(
+        std::piecewise_construct,
+        std::forward_as_tuple(kv_it->first),
+        std::forward_as_tuple(kv_it));
     return kv_it->second;
   }
 
@@ -494,22 +586,32 @@ public:
     }
   }
 
-  size_t size() const { return _cache_map.size(); }
+  size_t size() const {
+    return _cache_map.size();
+  }
 
-  size_t max_size() const noexcept { return _max_size; }
+  size_t max_size() const noexcept {
+    return _max_size;
+  }
 
   std::mutex mutex;
 
-private:
+ private:
   // Only sets size and does value check. Does not resize the data structures.
   void _set_max_size(int64_t new_size) {
     // We check that 0 <= new_size <= CUFFT_MAX_PLAN_NUM here. Since
     // CUFFT_MAX_PLAN_NUM is of type size_t, we need to do non-negativity check
     // first.
-    TORCH_CHECK(new_size >= 0,
-             "cuFFT plan cache size must be non-negative, but got ", new_size);
-    TORCH_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
-             "cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
+    TORCH_CHECK(
+        new_size >= 0,
+        "cuFFT plan cache size must be non-negative, but got ",
+        new_size);
+    TORCH_CHECK(
+        new_size <= CUFFT_MAX_PLAN_NUM,
+        "cuFFT plan cache size can not be larger than ",
+        CUFFT_MAX_PLAN_NUM,
+        ", but got ",
+        new_size);
     _max_size = static_cast<size_t>(new_size);
   }
 
@@ -529,4 +631,6 @@ void cufft_set_plan_cache_max_size_impl(int64_t device_index, int64_t max_size);
 int64_t cufft_get_plan_cache_size_impl(int64_t device_index);
 void cufft_clear_plan_cache_impl(int64_t device_index);
 
-}}} // namespace at::native::detail
+} // namespace detail
+} // namespace native
+} // namespace at

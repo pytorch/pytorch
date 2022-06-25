@@ -11,14 +11,19 @@
 #endif
 
 // Forward declarations of any types needed in the operator signatures.
-// We can't directly include these classes because it will cause circular include dependencies.
-// This file is included by TensorBody.h, which defines the Tensor class.
+// We can't directly include these classes because it will cause circular
+// include dependencies. This file is included by TensorBody.h, which defines
+// the Tensor class.
 #include <ATen/core/ATen_fwd.h>
 
-${MethodOperators_includes}
+$ {
+  MethodOperators_includes
+}
 
 namespace at {
 namespace _ops {
-${MethodOperators_declarations}
+$ {
+  MethodOperators_declarations
+}
 } // namespace _ops
 } // namespace at

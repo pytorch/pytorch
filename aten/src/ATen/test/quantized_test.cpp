@@ -10,9 +10,9 @@
 #include <type_traits>
 // For quantize_val
 #include <ATen/native/quantized/AffineQuantizer.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/irange.h>
-#include <ATen/quantized/Quantizer.h>
 
 using namespace at;
 #ifndef ATEN_CPU_STATIC_DISPATCH
@@ -234,21 +234,21 @@ TEST(TestQTensor, FromBlobQuantizedPerTensor) {
     customDataDeleted = true;
   };
   {
-  Tensor qtensor = at::from_blob_quantized_per_tensor_affine(custom_data, shape, deleter, scale, zero_point, options);
+    Tensor qtensor = at::from_blob_quantized_per_tensor_affine(
+        custom_data, shape, deleter, scale, zero_point, options);
 
-  uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
-  for (const auto i : c10::irange(numel)) {
-    ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
-  }
-  for (int h = 0, i = 0; h < shape[0]; ++h) {
-    for (int w = 0; w < shape[1]; ++w, ++i) {
-      ASSERT_EQ(
-          qtensor[h][w].item<float>(),
-          (custom_data[i] - zero_point) * scale);
+    uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
+    for (const auto i : c10::irange(numel)) {
+      ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
     }
-  }
-  ASSERT_EQ((float)qtensor.q_scale(), (float)scale);
-  ASSERT_EQ(qtensor.q_zero_point(), zero_point);
+    for (int h = 0, i = 0; h < shape[0]; ++h) {
+      for (int w = 0; w < shape[1]; ++w, ++i) {
+        ASSERT_EQ(
+            qtensor[h][w].item<float>(), (custom_data[i] - zero_point) * scale);
+      }
+    }
+    ASSERT_EQ((float)qtensor.q_scale(), (float)scale);
+    ASSERT_EQ(qtensor.q_zero_point(), zero_point);
   }
   TORCH_CHECK(customDataDeleted);
 }
@@ -277,14 +277,15 @@ TEST(TestQTensor, FromBlobQuantizedPerChannel) {
     customDataDeleted = true;
   };
   {
-  Tensor qtensor = at::from_blob_quantized_per_channel_affine(custom_data, shape, deleter, scales, zero_points, ch_axis, options);
-  uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
-  for (const auto i : c10::irange(numel)) {
-    ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
-  }
-  ASSERT_TRUE(at::allclose(qtensor.q_per_channel_scales(), scales));
-  ASSERT_TRUE(at::allclose(qtensor.q_per_channel_zero_points(), zero_points));
-  ASSERT_TRUE(qtensor.is_quantized());
+    Tensor qtensor = at::from_blob_quantized_per_channel_affine(
+        custom_data, shape, deleter, scales, zero_points, ch_axis, options);
+    uint8_t* q_data = (uint8_t*)qtensor.data_ptr<quint8>();
+    for (const auto i : c10::irange(numel)) {
+      ASSERT_EQ((int)custom_data[i], (int)q_data[i]);
+    }
+    ASSERT_TRUE(at::allclose(qtensor.q_per_channel_scales(), scales));
+    ASSERT_TRUE(at::allclose(qtensor.q_per_channel_zero_points(), zero_points));
+    ASSERT_TRUE(qtensor.is_quantized());
   }
   TORCH_CHECK(customDataDeleted);
 }
@@ -301,53 +302,52 @@ TEST(TestQTensor, TestArmVectorizedQuantizeDequantize) {
 
   const Tensor x = from_blob(x_values.data(), x_values.size());
 
-  auto test_for_datatype = [&](
-      const ScalarType scalar_type,
-      const auto get_data_ptr,
-      const auto quantize_val_with_datatype,
-      const int zero_point_min,
-      const int zero_point_max) {
+  auto test_for_datatype = [&](const ScalarType scalar_type,
+                               const auto get_data_ptr,
+                               const auto quantize_val_with_datatype,
+                               const int zero_point_min,
+                               const int zero_point_max) {
     for (int zero_point : {zero_point_min, 10, zero_point_max}) {
-      const Tensor q = at::quantize_per_tensor(x, scale, zero_point, scalar_type);
+      const Tensor q =
+          at::quantize_per_tensor(x, scale, zero_point, scalar_type);
       auto* q_data = get_data_ptr(q);
       for (const auto i : c10::irange(numel)) {
         ASSERT_EQ(
-          q_data[i].val_,
-          quantize_val_with_datatype(scale, zero_point, x_values[i]).val_);
+            q_data[i].val_,
+            quantize_val_with_datatype(scale, zero_point, x_values[i]).val_);
       }
       const Tensor r = q.dequantize();
       const float* r_data = r.data_ptr<float>();
       for (const auto i : c10::irange(numel)) {
         ASSERT_FLOAT_EQ(
-          r_data[i],
-          native::dequantize_val(scale, zero_point, q_data[i]));
+            r_data[i], native::dequantize_val(scale, zero_point, q_data[i]));
       }
     }
   };
 
   // Unsigned Int 8
   test_for_datatype(
-    kQUInt8,
-    [](Tensor q) { return q.data_ptr<quint8>(); },
-    native::quantize_val<quint8>,
-    std::numeric_limits<uint8_t>::min(),
-    std::numeric_limits<uint8_t>::max());
+      kQUInt8,
+      [](Tensor q) { return q.data_ptr<quint8>(); },
+      native::quantize_val<quint8>,
+      std::numeric_limits<uint8_t>::min(),
+      std::numeric_limits<uint8_t>::max());
 
   // Signed Int 8
   test_for_datatype(
-    kQInt8,
-    [](Tensor q) { return q.data_ptr<qint8>(); },
-    native::quantize_val<qint8>,
-    std::numeric_limits<int8_t>::min(),
-    std::numeric_limits<int8_t>::max());
+      kQInt8,
+      [](Tensor q) { return q.data_ptr<qint8>(); },
+      native::quantize_val<qint8>,
+      std::numeric_limits<int8_t>::min(),
+      std::numeric_limits<int8_t>::max());
 
   // Signed Int 32 (not optimized with vectorization)
   test_for_datatype(
-    kQInt32,
-    [](Tensor q) { return q.data_ptr<qint32>(); },
-    native::quantize_val<qint32>,
-    std::numeric_limits<int32_t>::min(),
-    std::numeric_limits<int32_t>::max());
+      kQInt32,
+      [](Tensor q) { return q.data_ptr<qint32>(); },
+      native::quantize_val<qint32>,
+      std::numeric_limits<int32_t>::min(),
+      std::numeric_limits<int32_t>::max());
 }
 #endif // (__ARM_NEON__) || defined(__aarch64__)
 

@@ -4,13 +4,21 @@
 
 using namespace at;
 
-std::vector<std::vector<int64_t>> sizes = {{4, 4, 4, 4}, {4, 4, 1, 1}, {4, 1, 4, 4}, {4, 1, 4, 1}, {4, 1, 1, 4}, {1, 4, 1, 4}, {1, 4, 4, 1}};
+std::vector<std::vector<int64_t>> sizes = {
+    {4, 4, 4, 4},
+    {4, 4, 1, 1},
+    {4, 1, 4, 4},
+    {4, 1, 4, 1},
+    {4, 1, 1, 4},
+    {1, 4, 1, 4},
+    {1, 4, 4, 1}};
 
 TEST(MemoryFormatTest, SetMemoryFormat) {
   // NOLINTNEXTLINE(performance-for-range-copy)
   for (auto size : sizes) {
     Tensor t = at::rand(size);
-    for (auto memory_format : {at::MemoryFormat::ChannelsLast, at::MemoryFormat::Contiguous}) {
+    for (auto memory_format :
+         {at::MemoryFormat::ChannelsLast, at::MemoryFormat::Contiguous}) {
       t.resize_(size, memory_format);
       EXPECT_TRUE(t.suggest_memory_format() == memory_format);
     }
@@ -19,9 +27,9 @@ TEST(MemoryFormatTest, SetMemoryFormat) {
   Tensor t = at::rand({4, 1, 1, 1});
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::Contiguous);
   t.resize_({4, 1, 1, 1}, at::MemoryFormat::ChannelsLast);
-  // TODO: Should be able to handle this after accumulated permutation is implemented;
-  // Ambiguous case where we fallback to Contiguous;
-  // This should be `EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);`
+  // TODO: Should be able to handle this after accumulated permutation is
+  // implemented; Ambiguous case where we fallback to Contiguous; This should be
+  // `EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::ChannelsLast);`
   EXPECT_TRUE(t.suggest_memory_format() == at::MemoryFormat::Contiguous);
 }
 
@@ -106,10 +114,9 @@ TEST(MemoryFormatTest, SliceStepTwoMemoryFormat) {
   t = t.slice(1, 0, 3, 2);
   EXPECT_TRUE(t.suggest_memory_format() == MemoryFormat::ChannelsLast);
   t = t.slice(1, 0, 3, 2);
-  // TODO: Should be able to handle this after accumulated permutation is implemented;
-  // won't be able to tell how we ended up here
-  // [4, 1, 1, 4]@[4, 4, 4, 1] slice twice at dim3
-  // [4, 4, 1, 1]@[4, 1, 4, 4] slice twice at dim1
+  // TODO: Should be able to handle this after accumulated permutation is
+  // implemented; won't be able to tell how we ended up here [4, 1, 1, 4]@[4, 4,
+  // 4, 1] slice twice at dim3 [4, 4, 1, 1]@[4, 1, 4, 4] slice twice at dim1
   // EXPECT_TRUE(t.suggest_memory_format() == MemoryFormat::ChannelsLast);
   EXPECT_TRUE(t.suggest_memory_format() == MemoryFormat::Contiguous);
 
@@ -186,8 +193,8 @@ TEST(MemoryFormatTest, SliceFirstMemoryFormat) {
   sliceFirst(t, 2, MemoryFormat::Contiguous);
   t = at::rand({4, 1, 4, 1});
   t.resize_({4, 1, 4, 1}, at::MemoryFormat::ChannelsLast);
-  // TODO: Should be able to handle this after accumulated permutation is implemented;
-  // [4, 1, 4, 1]@[4, 1, 1, 1] after slice becomes [4, 1, 1, 1]@[4, 1, 1, 1]
-  // sliceFirst(t, 2, MemoryFormat::ChannelsLast);
+  // TODO: Should be able to handle this after accumulated permutation is
+  // implemented; [4, 1, 4, 1]@[4, 1, 1, 1] after slice becomes [4, 1, 1, 1]@[4,
+  // 1, 1, 1] sliceFirst(t, 2, MemoryFormat::ChannelsLast);
   sliceFirst(t, 2, MemoryFormat::Contiguous);
 }

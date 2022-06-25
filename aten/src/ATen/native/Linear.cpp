@@ -1,12 +1,12 @@
 #include <ATen/ATen.h>
-#include <ATen/native/Resize.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/native/xnnpack/Engine.h>
-#include <ATen/WrapDimUtilsMulti.h>
-#include <c10/macros/Macros.h>
-#include <c10/util/irange.h>
-#include <c10/util/MaybeOwned.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
+#include <ATen/native/Resize.h>
+#include <ATen/native/xnnpack/Engine.h>
+#include <c10/macros/Macros.h>
+#include <c10/util/MaybeOwned.h>
+#include <c10/util/irange.h>
 
 #include <array>
 #include <cctype>
@@ -15,19 +15,23 @@
 #include <string>
 #include <vector>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor linear(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
-    ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+      ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+      : c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
   }
   if (input.is_mps()) {
-   return at::_mps_linear(input, weight, *bias);
+    return at::_mps_linear(input, weight, *bias);
   }
 #if defined(C10_MOBILE)
   if (xnnpack::use_linear(input, weight, *bias)) {
@@ -41,14 +45,16 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   if (input.dim() == 3 && bias->defined() && input.is_contiguous()) {
     // Also hit the fused path for contiguous 3D input.
     const auto input_sizes = input.sizes();
-    const auto result = at::addmm(*bias, input.view({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
+    const auto result = at::addmm(
+        *bias,
+        input.view({input_sizes[0] * input_sizes[1], input_sizes[2]}),
+        weight.t());
     return result.view({input_sizes[0], input_sizes[1], result.size(1)});
   }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {
     // for composite compliance use out-of-place version of `add`
-    if (isTensorSubclassLike(*bias) ||
-        bias->_fw_grad(/*level*/ 0).defined()) {
+    if (isTensorSubclassLike(*bias) || bias->_fw_grad(/*level*/ 0).defined()) {
       output = at::add(output, *bias);
     } else {
       output.add_(*bias);
@@ -57,12 +63,17 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   return output;
 }
 
-Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
-  TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
+Tensor& linear_out(
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
+    Tensor& output) {
+  TORCH_CHECK(
+      !input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
-              ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-              : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+      ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
+      : c10::MaybeOwned<Tensor>::owned(c10::in_place);
 
   if (input.dim() == 2 && bias->defined()) {
     // Fused op is marginally faster.
@@ -75,39 +86,52 @@ Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optiona
   return output;
 }
 
-// sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
-// batch matrix multiplication
-// its main purpose is to provide a pairwise reduction for einsum
-static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArrayRef sum_dims_, bool keepdim) {
-  // assumes that tensors have been pre-unsqueezed (so that all dimensions match - after broadcasting)
-  // but makes no other assumptions on the order of dimensions
-  TORCH_CHECK(left_.dim()==right_.dim(), "number of dimensions must match");
+// sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation
+// and batch matrix multiplication its main purpose is to provide a pairwise
+// reduction for einsum
+static Tensor sumproduct_pair(
+    const Tensor& left_,
+    const Tensor& right_,
+    IntArrayRef sum_dims_,
+    bool keepdim) {
+  // assumes that tensors have been pre-unsqueezed (so that all dimensions match
+  // - after broadcasting) but makes no other assumptions on the order of
+  // dimensions
+  TORCH_CHECK(left_.dim() == right_.dim(), "number of dimensions must match");
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
   auto sum_dims = at::dim_list_to_bitset(sum_dims_, dim);
-  // dimensions that will be part of the output (i.e. not summed over) in three vectors
-  // dims in lro appear in left, right and output, similarly lo: left and output, ro: right and output
-  // also the sizes are kept track of for reshaping
+  // dimensions that will be part of the output (i.e. not summed over) in three
+  // vectors dims in lro appear in left, right and output, similarly lo: left
+  // and output, ro: right and output also the sizes are kept track of for
+  // reshaping
   std::vector<int64_t> lro, lo, ro;
   int64_t lro_size = 1, lo_size = 1, ro_size = 1, sum_size = 1;
   Tensor left = left_;
   Tensor right = right_;
   for (const auto i : c10::irange(dim)) {
-    auto sl = left.size(i)>1;
-    auto sr = right.size(i)>1;
-    if (sum_dims[i]) { // first dimensions that will be summed over after multiplication
-      if (sl && sr) {  // dimensions nontrivially in both left and right must be of the same size
-        TORCH_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
+    auto sl = left.size(i) > 1;
+    auto sr = right.size(i) > 1;
+    if (sum_dims[i]) { // first dimensions that will be summed over after
+                       // multiplication
+      if (sl && sr) { // dimensions nontrivially in both left and right must be
+                      // of the same size
+        TORCH_CHECK(
+            left.size(i) == right.size(i),
+            "non-broadcast dimensions must match");
         sum_size *= left.size(i);
-      } else if (sl) { // if it is only in one of left and right, we can sum right away
+      } else if (sl) { // if it is only in one of left and right, we can sum
+                       // right away
         left = left.sum(i, true);
       } else if (sr) {
         right = right.sum(i, true);
       }
-    } else if (sl && sr) { // now deal with dimensions  dimensions that will be in the output
+    } else if (sl && sr) { // now deal with dimensions  dimensions that will be
+                           // in the output
       // dimensions nontrivially in both left and right must be of the same size
-      TORCH_CHECK(left.size(i)==right.size(i), "non-broadcast dimensions must match");
+      TORCH_CHECK(
+          left.size(i) == right.size(i), "non-broadcast dimensions must match");
       lro.push_back(i);
       lro_size *= left.size(i);
     } else if (sl) { // keep track of dimensions appearing only once
@@ -119,18 +143,25 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
     }
   }
   // we now work with the following permutations / shapes.
-  // the pipeline is permute inputs -> reshape inputs -> batch matrix mul -> reshape(view) output -> permute output
-  // output: "lro, lo, 1-for-summed-dims, ro" with orgiginal shape dimensions
-  // left:   "lro, lo, summed" permuted with lpermutation and the three flattened
-  // right:  "lro, summed, ro" permuted with rpermutation and the three flattened
-  // then the permuted output is a view of bmm(left, right)
-  // finally, opermutation reverts the permutation to the original order of dimensions
+  // the pipeline is permute inputs -> reshape inputs -> batch matrix mul ->
+  // reshape(view) output -> permute output output: "lro, lo, 1-for-summed-dims,
+  // ro" with orgiginal shape dimensions left:   "lro, lo, summed" permuted with
+  // lpermutation and the three flattened right:  "lro, summed, ro" permuted
+  // with rpermutation and the three flattened then the permuted output is a
+  // view of bmm(left, right) finally, opermutation reverts the permutation to
+  // the original order of dimensions
   std::vector<int64_t> out_size;
   // NOLINTNEXTLINE(performance-inefficient-vector-operation)
-  for (auto& d : lro) out_size.push_back(left.size(d));
-  for (auto& d : lo) out_size.push_back(left.size(d));
-  for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
-  for (auto& d : ro) out_size.push_back(right.size(d));
+  for (auto& d : lro)
+    out_size.push_back(left.size(d));
+  for (auto& d : lo)
+    out_size.push_back(left.size(d));
+  for (auto& d : sum_dims_) {
+    out_size.push_back(1);
+    (void)(d);
+  }; // avoid warining about not using d
+  for (auto& d : ro)
+    out_size.push_back(right.size(d));
 
   std::vector<int64_t> lpermutation(lro);
   lpermutation.insert(lpermutation.end(), lo.begin(), lo.end());
@@ -142,7 +173,8 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   rpermutation.insert(rpermutation.end(), ro.begin(), ro.end());
   rpermutation.insert(rpermutation.end(), lo.begin(), lo.end());
 
-  std::vector<int64_t> opermutation(lro.size()+lo.size()+sum_dims_.size()+ro.size(), -1);
+  std::vector<int64_t> opermutation(
+      lro.size() + lo.size() + sum_dims_.size() + ro.size(), -1);
   {
     int64_t i = 0;
 
@@ -167,10 +199,10 @@ static Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntArra
   result = result.view(out_size).permute(opermutation);
 
   // finally squeeze summed dimensions if desired
-  if (! keepdim) {
+  if (!keepdim) {
     auto sizes = result.sizes().vec();
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    for (int i = dim-1; i>=0; i--) {
+    for (int i = dim - 1; i >= 0; i--) {
       if (sum_dims[i]) {
         sizes.erase(sizes.begin() + i);
       }
@@ -279,7 +311,7 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
   // Compute label frequency and number of dimensions covered by ellipsis
   // We do this after parsing labels to make it more readable and simpler
   // to compute the number of dimensions covered by ellipsis.
-  for(const auto i : c10::irange(num_ops)) {
+  for (const auto i : c10::irange(num_ops)) {
     const auto operand = operands[i];
     const auto labels = op_labels[i];
     const auto ndims = operand.dim();
@@ -357,12 +389,12 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
           TORCH_CHECK(
               einsum_check_label(label),
               "einsum(): invalid subscript given at index ",
-            lhs.size() + 2 + i,
+              lhs.size() + 2 + i,
               " in the equation string, subscripts must be in [a-zA-Z]");
           const auto index = einsum_label_to_index(label);
           TORCH_CHECK(
-              // Ensure label appeared at least once for some input operand and at
-              // most once for the output
+              // Ensure label appeared at least once for some input operand and
+              // at most once for the output
               label_count[index] > 0 && label_perm_index[index] == -1,
               "einsum(): output subscript ",
               label,
@@ -395,7 +427,7 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
   // same operand. Finally we permute the operands to align dimensions as
   // per the perm_out_index we computed above.
   std::vector<Tensor> permuted_operands;
-  for (const auto i: c10::irange(num_ops)) {
+  for (const auto i : c10::irange(num_ops)) {
     std::vector<int64_t> perm_shape(perm_index, -1);
     std::vector<int64_t> label_dim(TOTAL_LABELS, -1);
     Tensor operand = operands[i];
@@ -409,7 +441,7 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
         const auto num_missing_dim =
             ell_num_dim - (original_sizes.size() - labels.size() + 1);
         for (const auto k : c10::irange(num_missing_dim)) {
-          (void)k; //Suppress unused warning
+          (void)k; // Suppress unused warning
           operand = operand.unsqueeze(j);
         }
         for (const auto k : c10::irange(ell_num_dim)) {
@@ -453,12 +485,12 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
   bool has_zero_size_dim = false;
   for (const auto dim : c10::irange(perm_index)) {
     auto broadcast_size = permuted_operands[0].size(dim);
-    for (const auto i: c10::irange(1, num_ops)) {
+    for (const auto i : c10::irange(1, num_ops)) {
       const auto dim_size = permuted_operands[i].size(dim);
       if (broadcast_size != dim_size && broadcast_size != 1 && dim_size != 1) {
         std::ostringstream msg;
         msg << "einsum(): operands do not broadcast with remapped shapes [original->remapped]:";
-        for (const auto j: c10::irange(num_ops)) {
+        for (const auto j : c10::irange(num_ops)) {
           msg << " " << operands[j].sizes() << "->"
               << permuted_operands[j].sizes();
         }
@@ -496,7 +528,7 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
     }
   }
 
-  for (const auto i: c10::irange(1, num_ops)) {
+  for (const auto i : c10::irange(1, num_ops)) {
     Tensor operand = permuted_operands[i];
     std::vector<int64_t> sum_dims;
 
@@ -531,18 +563,30 @@ Tensor einsum(c10::string_view equation, TensorList operands) {
 }
 
 // _trilinear computes a trilinear einstein sum with an unrolled dimension
-// the result is `(i1.unsqueeze(expand1)*i2.unsqueeze(expand2)*i2.unsqueeze(expand3)).sum(sumdim)`
+// the result is
+// `(i1.unsqueeze(expand1)*i2.unsqueeze(expand2)*i2.unsqueeze(expand3)).sum(sumdim)`
 // the computation is unrolled in the unroll_dim dimension
-// its main purpose is to unify the computations in bilinear and bilinear_backward
-Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
-                  IntArrayRef expand1_, IntArrayRef expand2_, IntArrayRef expand3_,
-                  IntArrayRef sumdim_, int64_t unroll_dim) {
-  int64_t total_dim = i1_.dim()+expand1_.size();
-  TORCH_CHECK((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,", total_dim-1, "]");
+// its main purpose is to unify the computations in bilinear and
+// bilinear_backward
+Tensor _trilinear(
+    const Tensor& i1_,
+    const Tensor& i2_,
+    const Tensor& i3_,
+    IntArrayRef expand1_,
+    IntArrayRef expand2_,
+    IntArrayRef expand3_,
+    IntArrayRef sumdim_,
+    int64_t unroll_dim) {
+  int64_t total_dim = i1_.dim() + expand1_.size();
+  TORCH_CHECK(
+      (unroll_dim >= 0) && (unroll_dim < total_dim),
+      "unroll_dim must be in [0,",
+      total_dim - 1,
+      "]");
   auto expand1 = at::dim_list_to_bitset(expand1_, total_dim);
   auto expand2 = at::dim_list_to_bitset(expand2_, total_dim);
   auto expand3 = at::dim_list_to_bitset(expand3_, total_dim);
-  auto sumdim  = at::dim_list_to_bitset(sumdim_,  total_dim);
+  auto sumdim = at::dim_list_to_bitset(sumdim_, total_dim);
   Tensor i1 = i1_;
   Tensor i2 = i2_;
   Tensor i3 = i3_;
@@ -554,19 +598,19 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
     int64_t s = 0;
     if (expand1[i]) {
       i1 = i1.unsqueeze(i);
-    } else  {
+    } else {
       s = i1.size(i);
     }
     if (expand2[i]) {
       i2 = i2.unsqueeze(i);
-    } else  {
+    } else {
       s = i2.size(i);
     }
     if (expand3[i]) {
       i3 = i3.unsqueeze(i);
       if (sumdim[i] && (i != unroll_dim))
         sum_dims_12.push_back(i);
-    } else  {
+    } else {
       s = i3.size(i);
       if (sumdim[i] && (i != unroll_dim))
         sum_dims_23.push_back(i);
@@ -581,53 +625,85 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 
   auto output = at::zeros(output_size, i1.options());
 
-  // Three conditionals are necessary since this function is meant to work for both
-  // forward and backward, which changes the dimensions of the inputs.
-  // Note that if output has zero elems is because (at least) one of i1, i2, i3 has zero elems.
+  // Three conditionals are necessary since this function is meant to work for
+  // both forward and backward, which changes the dimensions of the inputs. Note
+  // that if output has zero elems is because (at least) one of i1, i2, i3 has
+  // zero elems.
   if (i1.numel() != 0 && i2.numel() != 0 && i3.numel() != 0) {
-    if (! sumdim[unroll_dim]) {
+    if (!sumdim[unroll_dim]) {
       for (const auto k : c10::irange(unroll_size)) {
-        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
-                                                 i2.narrow(unroll_dim, k * slicemul2, 1),
-                                                 sum_dims_12, true);
-        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
+        Tensor buf = at::native::sumproduct_pair(
+            i1.narrow(unroll_dim, k * slicemul1, 1),
+            i2.narrow(unroll_dim, k * slicemul2, 1),
+            sum_dims_12,
+            true);
+        buf = at::native::sumproduct_pair(
+            buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
         output.narrow(unroll_dim, k, 1).add_(buf);
       }
-    }
-    else {
+    } else {
       for (const auto k : c10::irange(unroll_size)) {
-        Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
-                                                 i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
-        buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
+        Tensor buf = at::native::sumproduct_pair(
+            i1.narrow(unroll_dim, k * slicemul1, 1),
+            i2.narrow(unroll_dim, k * slicemul2, 1),
+            sum_dims_12,
+            true);
+        buf = at::native::sumproduct_pair(
+            buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
         output.add_(buf);
       }
     }
   }
-  for (int64_t i = output.dim()-1; i >= 0; i--)
+  for (int64_t i = output.dim() - 1; i >= 0; i--)
     if (sumdim[i])
       output.squeeze_(i);
   return output;
 }
 
-Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor bilinear(
+    const Tensor& input1,
+    const Tensor& input2,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  TORCH_CHECK(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got ", input1.dim(), " and ", input2.dim());
+  TORCH_CHECK(
+      input1.dim() == input2.dim(),
+      "bilinear(): input dimensions do not match: got ",
+      input1.dim(),
+      " and ",
+      input2.dim());
   for (const auto i : c10::irange(input1.dim() - 1)) {
-    TORCH_CHECK(input1.size(i) == input2.size(i),
-              "bilinear(): input batch dimensions do not match at dim ", i, ": got ", input1.size(i), " and ", input2.size(i));
+    TORCH_CHECK(
+        input1.size(i) == input2.size(i),
+        "bilinear(): input batch dimensions do not match at dim ",
+        i,
+        ": got ",
+        input1.size(i),
+        " and ",
+        input2.size(i));
   }
-  TORCH_CHECK(input1.size(input1.dim() - 1) == weight.size(1),
-            "bilinear(): input1 size does not match weight size: got ",
-            input1.size(input1.dim() - 1), " but expected ", weight.size(1));
-  TORCH_CHECK(input2.size(input2.dim() - 1) == weight.size(2),
-            "bilinear(): input2 size does not match weight size: got ",
-            input2.size(input2.dim() - 1), " but expected ", weight.size(2));
-  TORCH_CHECK(!bias.defined() || bias.size(0) == weight.size(0),
-            "bilinear(): bias size does not match weight size: got ",
-            bias.size(0), " but expected ", weight.size(0));
+  TORCH_CHECK(
+      input1.size(input1.dim() - 1) == weight.size(1),
+      "bilinear(): input1 size does not match weight size: got ",
+      input1.size(input1.dim() - 1),
+      " but expected ",
+      weight.size(1));
+  TORCH_CHECK(
+      input2.size(input2.dim() - 1) == weight.size(2),
+      "bilinear(): input2 size does not match weight size: got ",
+      input2.size(input2.dim() - 1),
+      " but expected ",
+      weight.size(2));
+  TORCH_CHECK(
+      !bias.defined() || bias.size(0) == weight.size(0),
+      "bilinear(): bias size does not match weight size: got ",
+      bias.size(0),
+      " but expected ",
+      weight.size(0));
 
   std::vector<int64_t> output_size;
   auto size1 = input1.sizes();
@@ -635,18 +711,32 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   output_size.push_back(weight.size(0));
   auto input1_flattened = input1.reshape({-1, input1.size(-1)});
   auto input2_flattened = input2.reshape({-1, input2.size(-1)});
-  Tensor output = at::_trilinear(input1_flattened, weight, input2_flattened, {1,3}, {0}, {1,2}, {2,3}).reshape(output_size);
+  Tensor output = at::_trilinear(
+                      input1_flattened,
+                      weight,
+                      input2_flattened,
+                      {1, 3},
+                      {0},
+                      {1, 2},
+                      {2, 3})
+                      .reshape(output_size);
   if (bias.defined()) {
     output = output + bias;
   }
   return output;
 }
 
-// implements tensordot, a matrix-multiplication-like contraction, but the dimensions given
-// in the two dimension lists
-Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2) {
-  TORCH_CHECK(dims1.size() == dims2.size(), "both dimension lists should have same length");
-  int64_t csize = 1;  // total size of the contracted dimensions
+// implements tensordot, a matrix-multiplication-like contraction, but the
+// dimensions given in the two dimension lists
+Tensor tensordot(
+    const Tensor& input1,
+    const Tensor& input2,
+    IntArrayRef dims1,
+    IntArrayRef dims2) {
+  TORCH_CHECK(
+      dims1.size() == dims2.size(),
+      "both dimension lists should have same length");
+  int64_t csize = 1; // total size of the contracted dimensions
   Tensor t1 = input1;
   Tensor t2 = input2;
   for (const auto i : c10::irange(dims1.size())) {
@@ -657,24 +747,33 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
     } else if (s1 == 1) {
       t2 = t2.sum(dims2[i], true);
     } else {
-      TORCH_CHECK(s1 == s2, "contracted dimensions need to match, but first has size ", s1, " in dim ", dims1[i],
-               " and second has size ", s2, " in dim ", dims2[i]);
+      TORCH_CHECK(
+          s1 == s2,
+          "contracted dimensions need to match, but first has size ",
+          s1,
+          " in dim ",
+          dims1[i],
+          " and second has size ",
+          s2,
+          " in dim ",
+          dims2[i]);
       csize *= s1;
     }
   }
 
   auto cdims1 = at::dim_list_to_bitset(dims1, input1.dim());
   auto cdims2 = at::dim_list_to_bitset(dims2, input2.dim());
-  std::vector<int64_t> p1, p2, rsizes;  // p1, p2: input permutations, rsizes: sizes of the result
+  std::vector<int64_t> p1, p2,
+      rsizes; // p1, p2: input permutations, rsizes: sizes of the result
   p1.reserve(input1.dim());
   p2.reserve(input2.dim());
-  rsizes.reserve(input1.dim() + input2.dim() - (int64_t) dims1.size());
+  rsizes.reserve(input1.dim() + input2.dim() - (int64_t)dims1.size());
   int64_t size1 = 1; // number of non-contracted elements in input1
   int64_t size2 = 1; // number of non-contracted elements in input2
 
   // fill the permutations and compute sizes
   for (const auto i : c10::irange(input1.dim())) {
-    if (! cdims1[i]) {
+    if (!cdims1[i]) {
       p1.emplace_back(i);
       size1 *= t1.size(i);
       rsizes.emplace_back(t1.size(i));
@@ -687,7 +786,7 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
     p2.emplace_back(x);
   }
   for (const auto i : c10::irange(input2.dim())) {
-    if (! cdims2[i]) {
+    if (!cdims2[i]) {
       p2.emplace_back(i);
       size2 *= t2.size(i);
       rsizes.emplace_back(t2.size(i));
@@ -700,7 +799,12 @@ Tensor tensordot(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, 
   return at::mm(t1, t2).reshape(rsizes);
 }
 
-Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef dims1, IntArrayRef dims2, Tensor& result) {
+Tensor& tensordot_out(
+    const Tensor& input1,
+    const Tensor& input2,
+    IntArrayRef dims1,
+    IntArrayRef dims2,
+    Tensor& result) {
   Tensor result_tmp = at::native::tensordot(input1, input2, dims1, dims2);
   auto result_dtype = result_tmp.scalar_type();
   auto output_tensor_dtype = result.scalar_type();
@@ -709,19 +813,27 @@ Tensor &tensordot_out(const Tensor& input1, const Tensor& input2, IntArrayRef di
   auto input2_device = input2.device();
   // check if the input & output tensors are on the same device.
   TORCH_CHECK(
-    (output_device == input1_device) && (input1_device == input2_device),
-    "tensordot: Expected the output and input tensors to be on the "
-    "same device, but got the output tensor on ", output_device,
-    ", input tensor a on ", input1_device, ", and input tensor b on ", input2_device);
+      (output_device == input1_device) && (input1_device == input2_device),
+      "tensordot: Expected the output and input tensors to be on the "
+      "same device, but got the output tensor on ",
+      output_device,
+      ", input tensor a on ",
+      input1_device,
+      ", and input tensor b on ",
+      input2_device);
   // check if the computed result has the same dtype as the out tensor
   // (because tensordot does not support type promotion)
   TORCH_CHECK(
-    result_dtype == output_tensor_dtype, "tensordot",
-    ": Expected the output tensor to have dtype ", result_dtype,
-    ", but got an output tensor with dtype ", output_tensor_dtype);
+      result_dtype == output_tensor_dtype,
+      "tensordot",
+      ": Expected the output tensor to have dtype ",
+      result_dtype,
+      ", but got an output tensor with dtype ",
+      output_tensor_dtype);
   at::native::resize_output(result, result_tmp.sizes());
   result.copy_(result_tmp);
   return result;
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

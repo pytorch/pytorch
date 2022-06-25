@@ -90,10 +90,10 @@
 #include <ATen/ops/sin_native.h>
 #include <ATen/ops/sinh.h>
 #include <ATen/ops/sinh_native.h>
-#include <ATen/ops/sqrt.h>
-#include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/sparse_mask.h>
 #include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/tan.h>
 #include <ATen/ops/tan_native.h>
 #include <ATen/ops/tanh.h>
@@ -149,8 +149,8 @@ Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
     if (result.numel() == 0) {
       at::native::resize_as_sparse_csr_(result, self);
     }
-    // copy_sparse_compressed_ internally checks the sizes of result and self tensors
-    // Hence no external size check required
+    // copy_sparse_compressed_ internally checks the sizes of result and self
+    // tensors Hence no external size check required
     at::native::copy_sparse_compressed_(result, self);
   }
 
@@ -214,18 +214,20 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
 
   // To handle type promotion for inputs to unary ops,
   // we first get the result from the underlined op, and use the result
-  // to create a sparse compressed tensor, which is used as the input to the out=
-  // variant
+  // to create a sparse compressed tensor, which is used as the input to the
+  // out= variant
   auto result_values = op(values);
 
-  auto compressed_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(input.layout(),
-                                                                      "get_result_tensor_for_unary_op",
-                                                                      [&]{ return input.crow_indices(); },
-                                                                      [&]{ return input.ccol_indices(); });
-  auto plain_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(input.layout(),
-                                                                 "get_result_tensor_for_unary_op",
-                                                                 [&]{ return input.col_indices(); },
-                                                                 [&]{ return input.row_indices(); });
+  auto compressed_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      input.layout(),
+      "get_result_tensor_for_unary_op",
+      [&] { return input.crow_indices(); },
+      [&] { return input.ccol_indices(); });
+  auto plain_indices = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(
+      input.layout(),
+      "get_result_tensor_for_unary_op",
+      [&] { return input.col_indices(); },
+      [&] { return input.row_indices(); });
 
   auto result = at::native::_sparse_compressed_tensor_unsafe(
       compressed_indices.clone(),
@@ -270,12 +272,13 @@ Tensor& fill_sparse_csr_(Tensor& self, const Scalar& value) {
   return unary_op_inplace(self, &TensorBase::fill_, value);
 }
 
-Tensor sparse_mask_sparse_csr(
-    const Tensor& self,
-    const Tensor& sparse_mask) {
-  TORCH_CHECK(sparse_mask.is_sparse_csr(), "sparse_mask_sparse_csr expects mask to be sparse csr");
+Tensor sparse_mask_sparse_csr(const Tensor& self, const Tensor& sparse_mask) {
+  TORCH_CHECK(
+      sparse_mask.is_sparse_csr(),
+      "sparse_mask_sparse_csr expects mask to be sparse csr");
   TORCH_CHECK(self.dim() == 2, "sparse_mask_sparse_csr expects self to be 2D");
-  TORCH_CHECK(sparse_mask.dim() == 2, "sparse_mask_sparse_csr expects mask to be 2D");
+  TORCH_CHECK(
+      sparse_mask.dim() == 2, "sparse_mask_sparse_csr expects mask to be 2D");
 
   // We are computing self.mul(at::ones_like(sparse_mask))
   // But mul(dense, sparse_csr) is not implemented yet
@@ -454,8 +457,16 @@ Tensor& addmm_out_sparse_compressed_cpu(
   sparse::impl::_check_dim(mat2, 2, "mat2");
 
   TORCH_CHECK(
-      mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+      mat1.size(1) == mat2.size(0),
+      "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.size(0),
+      "x",
+      mat1.size(1),
+      " and ",
+      mat2.sizes()[0],
+      "x",
+      mat2.sizes()[1],
+      ")");
 
   if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
     return addmm_out_sparse_compressed_cpu(
@@ -465,25 +476,24 @@ Tensor& addmm_out_sparse_compressed_cpu(
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
   if (&result == &self) {
-     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
+    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
   } else {
-     self_ = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+    self_ = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
   }
 
-
-  TORCH_CHECK(((self_->dim() == 2) &&
-               (self_->size(0) == mat1.size(0)) &&
-               (self_->size(1) == mat2.size(1))),
-              "The input tensor must be a matrix with size ",
-              mat1.size(0),
-              "x",
-              mat2.size(1),
-              ", but got a ",
-              self_->dim(),
-              "-D tensor with size ",
-              self_->size(0),
-              "x",
-              self_->size(1));
+  TORCH_CHECK(
+      ((self_->dim() == 2) && (self_->size(0) == mat1.size(0)) &&
+       (self_->size(1) == mat2.size(1))),
+      "The input tensor must be a matrix with size ",
+      mat1.size(0),
+      "x",
+      mat2.size(1),
+      ", but got a ",
+      self_->dim(),
+      "-D tensor with size ",
+      self_->size(0),
+      "x",
+      self_->size(1));
 
   if (&result != &self) {
     if (result.layout() == kStrided) {
@@ -498,7 +508,8 @@ Tensor& addmm_out_sparse_compressed_cpu(
     return result;
   }
 
-  if (sparse::impl::_is_sparse_and_zero(mat1) || sparse::impl::_is_sparse_and_zero(mat2)) {
+  if (sparse::impl::_is_sparse_and_zero(mat1) ||
+      sparse::impl::_is_sparse_and_zero(mat2)) {
     // According to docs, when beta==0 values in self should be ignored.
     // nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
@@ -597,7 +608,11 @@ Tensor _sparse_csr_mm(const Tensor& mat1, const Tensor& mat2) {
         0.0,
         1.0);
   }
-  AT_ERROR("_sparse_csr_mm does not support matrix multiplication of ", mat1.layout(), " @ ", mat2.layout());
+  AT_ERROR(
+      "_sparse_csr_mm does not support matrix multiplication of ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout());
 }
 
 Tensor _sparse_csr_addmm(
@@ -685,10 +700,13 @@ void add_out_dense_sparse_csr_cpu(
     return;
   }
 
-  auto valuesBuffer = src_values.to(commonDtype).view({-1, src_values.size(-1)});
+  auto valuesBuffer =
+      src_values.to(commonDtype).view({-1, src_values.size(-1)});
   resultBuffer = resultBuffer.view({-1, out.size(-2), out.size(-1)});
-  auto src_crow_indices = src.crow_indices().view({-1, src.crow_indices().size(-1)});
-  auto src_col_indices = src.col_indices().view({-1, src.col_indices().size(-1)});
+  auto src_crow_indices =
+      src.crow_indices().view({-1, src.crow_indices().size(-1)});
+  auto src_col_indices =
+      src.col_indices().view({-1, src.col_indices().size(-1)});
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
       kComplexHalf,
@@ -710,7 +728,8 @@ void add_out_dense_sparse_csr_cpu(
              &alpha,
              &src_crow_indices,
              &src_col_indices]() {
-              auto batch_count = resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
+              auto batch_count =
+                  resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
               auto values_accessor = valuesBuffer.accessor<scalar_t, 2>();
               scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
               scalar_t cast_value = alpha.to<scalar_t>();
@@ -722,13 +741,17 @@ void add_out_dense_sparse_csr_cpu(
               auto out_strides = resultBuffer.strides();
 
               for (const auto batch_idx : c10::irange(batch_count)) {
-                for (const auto irow : c10::irange(src_crow_indices.size(-1) - 1)) {
+                for (const auto irow :
+                     c10::irange(src_crow_indices.size(-1) - 1)) {
                   index_t start_index = crow_indices_accessor[batch_idx][irow];
-                  index_t end_index = crow_indices_accessor[batch_idx][irow + 1];
+                  index_t end_index =
+                      crow_indices_accessor[batch_idx][irow + 1];
                   for (const auto i : c10::irange(start_index, end_index)) {
                     auto icol = col_indices_accessor[batch_idx][i];
-                    auto index = batch_idx * out_strides[0] + irow * out_strides[1] + icol * out_strides[2];
-                    out_ptr[index] += cast_value * values_accessor[batch_idx][i];
+                    auto index = batch_idx * out_strides[0] +
+                        irow * out_strides[1] + icol * out_strides[2];
+                    out_ptr[index] +=
+                        cast_value * values_accessor[batch_idx][i];
                   }
                 }
               }
@@ -775,18 +798,20 @@ struct Reduction...Op {
   inline scalar_t identity() const { return ...; }
 };
 
-Tensor _sparse_csr_..._cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_..._cpu(const Tensor& input, IntArrayRef dims_to_sum, bool
+keepdim, c10::optional<ScalarType> dtype) {
   ...
-      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum, keepdim, Reduction...Op<scalar_t>());
+      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum,
+keepdim, Reduction...Op<scalar_t>());
   ...
   return result;
 }
 
       and add the following
 
-        - func: _sparse_csr_op.dim_dtype(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-          dispatch:
-            SparseCsrCUDA: _sparse_csr_..._cpu
+        - func: _sparse_csr_op.dim_dtype(Tensor self, int[1] dim, bool
+keepdim=False, *, ScalarType? dtype=None) -> Tensor dispatch: SparseCsrCUDA:
+_sparse_csr_..._cpu
 
       to native_functions.yaml
 
@@ -800,7 +825,9 @@ Tensor _sparse_csr_..._cpu(const Tensor& input, IntArrayRef dims_to_sum, bool ke
 namespace {
 
 template <typename scalar_t, typename ReductionOp>
-Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop) {
+Tensor reduce_sparse_csr_dim0_cpu_template(
+    const Tensor& sparse,
+    ReductionOp rop) {
   /*
     Consider the following sparse tensor:
 
@@ -828,12 +855,11 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
 
     In general, the CSR representation data can be computed as follows:
 
-      new_col_indices, col_map = col_indices.unique(sorted=True, return_inverse=True)
-      nnz = new_col_indices.numel()
-      new_crow_indices = [0, nnz]
-      new_values.resize(nnz); new_values.fill_(identity)
-      for i in range(col_indices.numel()):
-          new_values[col_map[i]] = rop(new_values[col_map[i], values[i])
+      new_col_indices, col_map = col_indices.unique(sorted=True,
+    return_inverse=True) nnz = new_col_indices.numel() new_crow_indices = [0,
+    nnz] new_values.resize(nnz); new_values.fill_(identity) for i in
+    range(col_indices.numel()): new_values[col_map[i]] =
+    rop(new_values[col_map[i], values[i])
    */
 
   Tensor col_indices = sparse.col_indices();
@@ -858,30 +884,35 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   Tensor new_values = at::empty({nnz}, values.options());
   new_values.fill_(rop.identity());
 
-  AT_DISPATCH_INDEX_TYPES(col_indices.scalar_type(), "reduce_sparse_csr_dim0_cpu_indices",
-                          [&]() {
-                            index_t* columns_map_ptr = columns_map.data_ptr<index_t>();
-                            scalar_t* values_ptr = values.data_ptr<scalar_t>();
-                            scalar_t* new_values_ptr = new_values.data_ptr<scalar_t>();
+  AT_DISPATCH_INDEX_TYPES(
+      col_indices.scalar_type(), "reduce_sparse_csr_dim0_cpu_indices", [&]() {
+        index_t* columns_map_ptr = columns_map.data_ptr<index_t>();
+        scalar_t* values_ptr = values.data_ptr<scalar_t>();
+        scalar_t* new_values_ptr = new_values.data_ptr<scalar_t>();
 
-                            // There is no point in parallelizing the following for-loop
-                            // because about 99.3% of the computation time is spent in the
-                            // at::_unique call above.
-                            for (int64_t i=0; i<numel; i++) {
-                              index_t col = columns_map_ptr[i];
-                              scalar_t val = values_ptr[i];
-                              new_values_ptr[col] = rop(new_values_ptr[col], val);
-                            }
-                          });
-  return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
-                                               {1, sparse.size(1)},
-                                               new_values.scalar_type(),
-                                               sparse.layout(),
-                                               new_values.device());
+        // There is no point in parallelizing the following for-loop
+        // because about 99.3% of the computation time is spent in the
+        // at::_unique call above.
+        for (int64_t i = 0; i < numel; i++) {
+          index_t col = columns_map_ptr[i];
+          scalar_t val = values_ptr[i];
+          new_values_ptr[col] = rop(new_values_ptr[col], val);
+        }
+      });
+  return at::native::_sparse_csr_tensor_unsafe(
+      new_crow_indices,
+      new_col_indices,
+      new_values,
+      {1, sparse.size(1)},
+      new_values.scalar_type(),
+      sparse.layout(),
+      new_values.device());
 }
 
 template <typename scalar_t, typename ReductionOp>
-Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop) {
+Tensor reduce_sparse_csr_dim1_cpu_template(
+    const Tensor& sparse,
+    ReductionOp rop) {
   /*
     Consider the following sparse tensor:
 
@@ -915,9 +946,8 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
 
       new_crow_indices = [0]
       for i in range(1, nrows+1):
-          new_crow_indices[i] = new_crow_indices[i-1] + (crow_indices[i] == crow_indices[i-1])
-      nnz = new_crow_indices[-1]
-      new_col_indices = zeros(nnz)
+          new_crow_indices[i] = new_crow_indices[i-1] + (crow_indices[i] ==
+    crow_indices[i-1]) nnz = new_crow_indices[-1] new_col_indices = zeros(nnz)
       new_values.resize(nnz)
       j = -1
       for i in range(1, nrows+1):
@@ -937,57 +967,61 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
   Tensor new_values = at::empty({}, values.options());
   Tensor row_map = at::empty({nrows}, ioptions);
 
-  AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
-                          [&]() {
-    index_t* crow_indices_ptr = crow_indices.data_ptr<index_t>();
-    index_t* new_crow_indices_ptr = new_crow_indices.data_ptr<index_t>();
-    index_t* row_map_ptr = row_map.data_ptr<index_t>();
-    int64_t nnz = 0;
-    new_crow_indices_ptr[0] = 0;
-    for(int64_t i=0; i<nrows; i++) {
-      if (crow_indices_ptr[i] != crow_indices_ptr[i + 1]) {
-        row_map_ptr[i] = nnz;
-        nnz++;
-      }
-      new_crow_indices_ptr[i + 1] = nnz;
-    }
-    new_col_indices.resize_(nnz);
-    new_col_indices.fill_(index_t(0));
-    new_values.resize_(nnz);
+  AT_DISPATCH_INDEX_TYPES(
+      crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices", [&]() {
+        index_t* crow_indices_ptr = crow_indices.data_ptr<index_t>();
+        index_t* new_crow_indices_ptr = new_crow_indices.data_ptr<index_t>();
+        index_t* row_map_ptr = row_map.data_ptr<index_t>();
+        int64_t nnz = 0;
+        new_crow_indices_ptr[0] = 0;
+        for (int64_t i = 0; i < nrows; i++) {
+          if (crow_indices_ptr[i] != crow_indices_ptr[i + 1]) {
+            row_map_ptr[i] = nnz;
+            nnz++;
+          }
+          new_crow_indices_ptr[i + 1] = nnz;
+        }
+        new_col_indices.resize_(nnz);
+        new_col_indices.fill_(index_t(0));
+        new_values.resize_(nnz);
 
-    scalar_t* values_ptr = values.data_ptr<scalar_t>();
-    scalar_t* new_values_ptr = new_values.data_ptr<scalar_t>();
+        scalar_t* values_ptr = values.data_ptr<scalar_t>();
+        scalar_t* new_values_ptr = new_values.data_ptr<scalar_t>();
 
-    at::parallel_for(
-        0,
-        nrows,
-        internal::GRAIN_SIZE,
-        [&](int64_t irow_start, int64_t irow_end) {
-            index_t i_end = crow_indices_ptr[irow_start];
-            for (index_t h = irow_start; h < irow_end; ++h) {
-              index_t i_start = i_end;
-              i_end = crow_indices_ptr[h+1];
-              if (i_start != i_end) {
-                scalar_t res = values_ptr[i_start];
-                for (index_t i = i_start + 1; i < i_end; i++) {
-                  res = rop(res, values_ptr[i]);
+        at::parallel_for(
+            0,
+            nrows,
+            internal::GRAIN_SIZE,
+            [&](int64_t irow_start, int64_t irow_end) {
+              index_t i_end = crow_indices_ptr[irow_start];
+              for (index_t h = irow_start; h < irow_end; ++h) {
+                index_t i_start = i_end;
+                i_end = crow_indices_ptr[h + 1];
+                if (i_start != i_end) {
+                  scalar_t res = values_ptr[i_start];
+                  for (index_t i = i_start + 1; i < i_end; i++) {
+                    res = rop(res, values_ptr[i]);
+                  }
+                  new_values_ptr[row_map_ptr[h]] = res;
                 }
-                new_values_ptr[row_map_ptr[h]] = res;
               }
-            }
-        });
-                          });
+            });
+      });
 
-  return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
-                                               {sparse.size(0), 1},
-                                               new_values.scalar_type(),
-                                               sparse.layout(),
-                                               new_values.device());
+  return at::native::_sparse_csr_tensor_unsafe(
+      new_crow_indices,
+      new_col_indices,
+      new_values,
+      {sparse.size(0), 1},
+      new_values.scalar_type(),
+      sparse.layout(),
+      new_values.device());
 }
 
 template <typename scalar_t, typename ReductionOp>
-Tensor reduce_sparse_csr_dim01_cpu_template(const Tensor& sparse, ReductionOp rop) {
-
+Tensor reduce_sparse_csr_dim01_cpu_template(
+    const Tensor& sparse,
+    ReductionOp rop) {
   auto ioptions = sparse.col_indices().options();
   Tensor values = sparse.values();
   auto numel = values.numel();
@@ -1005,19 +1039,19 @@ In [4]: %timeit torch.sum(t.values())
   */
   scalar_t* values_ptr = values.data_ptr<scalar_t>();
   scalar_t value = at::parallel_reduce(
-                                       0,
-                                       numel,
-                                       internal::GRAIN_SIZE,
-                                       rop.identity(),
-                                       [&](int64_t i_start, int64_t i_end, scalar_t identity) {
-                                         scalar_t res = identity;
-                                         for (int64_t i=i_start; i<i_end; i++) {
-                                           scalar_t val = values_ptr[i];
-                                           res = rop(res, val);
-                                         }
-                                         return res;
-                                       }, rop
-                                       );
+      0,
+      numel,
+      internal::GRAIN_SIZE,
+      rop.identity(),
+      [&](int64_t i_start, int64_t i_end, scalar_t identity) {
+        scalar_t res = identity;
+        for (int64_t i = i_start; i < i_end; i++) {
+          scalar_t val = values_ptr[i];
+          res = rop(res, val);
+        }
+        return res;
+      },
+      rop);
 
   Tensor new_col_indices = at::zeros({nnz}, ioptions);
   Tensor new_crow_indices = at::tensor(ArrayRef<int64_t>{0, nnz}, ioptions);
@@ -1028,15 +1062,21 @@ In [4]: %timeit torch.sum(t.values())
   } else {
     new_values = at::empty({}, values.options());
   }
-  return at::native::_sparse_csr_tensor_unsafe(new_crow_indices, new_col_indices, new_values,
-                                               {1, std::min<int64_t>(1, sparse.size(1))},
-                                               new_values.scalar_type(),
-                                               sparse.layout(),
-                                               new_values.device());
+  return at::native::_sparse_csr_tensor_unsafe(
+      new_crow_indices,
+      new_col_indices,
+      new_values,
+      {1, std::min<int64_t>(1, sparse.size(1))},
+      new_values.scalar_type(),
+      sparse.layout(),
+      new_values.device());
 }
 
 template <typename scalar_t, typename ReductionOp>
-Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t> dims, ReductionOp rop) {
+Tensor reduce_sparse_csr_cpu_template(
+    const Tensor& sparse,
+    std::vector<int64_t> dims,
+    ReductionOp rop) {
   if (dims.size() == 1) {
     if (dims[0] == 0) {
       return reduce_sparse_csr_dim0_cpu_template<scalar_t>(sparse, rop);
@@ -1045,7 +1085,8 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t>
       return reduce_sparse_csr_dim1_cpu_template<scalar_t>(sparse, rop);
     }
   } else if (dims.size() == 2) {
-    TORCH_INTERNAL_ASSERT(((dims[0] == 0 && dims[1] == 1) || (dims[0] == 1 && dims[1] == 0)));
+    TORCH_INTERNAL_ASSERT(
+        ((dims[0] == 0 && dims[1] == 1) || (dims[0] == 1 && dims[1] == 0)));
     return reduce_sparse_csr_dim01_cpu_template<scalar_t>(sparse, rop);
   }
   TORCH_INTERNAL_ASSERT(dims.size() == 0);
@@ -1054,9 +1095,15 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, std::vector<int64_t>
 }
 
 template <typename scalar_t, typename ReductionOp>
-Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_sum, bool keepdim, ReductionOp rop) {
+Tensor reduce_sparse_csr_cpu_template(
+    const Tensor& sparse,
+    IntArrayRef dims_to_sum,
+    bool keepdim,
+    ReductionOp rop) {
   TORCH_INTERNAL_ASSERT(sparse.is_sparse_csr());
-  TORCH_CHECK(keepdim, "reduction operations on CSR tensors with keepdim=False is unsupported");
+  TORCH_CHECK(
+      keepdim,
+      "reduction operations on CSR tensors with keepdim=False is unsupported");
   TORCH_INTERNAL_ASSERT(sparse.device() == kCPU);
 
   const int64_t input_dim = sparse.dim();
@@ -1076,7 +1123,9 @@ struct ReductionAddOp {
   inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a + b;
   }
-  inline scalar_t identity() const { return 0; }
+  inline scalar_t identity() const {
+    return 0;
+  }
 };
 
 template <typename scalar_t>
@@ -1084,32 +1133,42 @@ struct ReductionMulOp {
   inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a * b;
   }
-  inline scalar_t identity() const { return 1; }
+  inline scalar_t identity() const {
+    return 1;
+  }
 };
 
-}  // namespace
+} // namespace
 
-Tensor _sparse_csr_sum_cpu(const Tensor& input, IntArrayRef dims_to_sum, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_sum_cpu(
+    const Tensor& input,
+    IntArrayRef dims_to_sum,
+    bool keepdim,
+    c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-    kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_sum_cpu",
-    [&] {
-      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_sum, keepdim, ReductionAddOp<scalar_t>());
-    });
+      kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_sum_cpu", [&] {
+        result = reduce_sparse_csr_cpu_template<scalar_t>(
+            input_, dims_to_sum, keepdim, ReductionAddOp<scalar_t>());
+      });
   return result;
 }
 
-Tensor _sparse_csr_prod_cpu(const Tensor& input, IntArrayRef dims_to_reduce, bool keepdim, c10::optional<ScalarType> dtype) {
+Tensor _sparse_csr_prod_cpu(
+    const Tensor& input,
+    IntArrayRef dims_to_reduce,
+    bool keepdim,
+    c10::optional<ScalarType> dtype) {
   ScalarType dtype_ = dtype.value_or(input.scalar_type());
   Tensor input_ = input.to(dtype_);
   Tensor result;
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-    kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_prod_cpu",
-    [&] {
-      result = reduce_sparse_csr_cpu_template<scalar_t>(input_, dims_to_reduce, keepdim, ReductionMulOp<scalar_t>());
-    });
+      kHalf, kBFloat16, input_.scalar_type(), "_sparse_csr_prod_cpu", [&] {
+        result = reduce_sparse_csr_cpu_template<scalar_t>(
+            input_, dims_to_reduce, keepdim, ReductionMulOp<scalar_t>());
+      });
   return result;
 }
 

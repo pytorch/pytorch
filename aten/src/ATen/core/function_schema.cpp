@@ -8,4 +8,4 @@ void FunctionSchema::dump() const {
   std::cout << *this << "\n";
 }
 
-}
+} // namespace c10

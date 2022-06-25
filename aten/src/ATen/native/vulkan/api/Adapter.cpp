@@ -42,7 +42,7 @@ void find_requested_device_extensions(
 //
 
 std::string get_device_type_str(const VkPhysicalDeviceType type) {
-  switch(type) {
+  switch (type) {
     case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
       return "INTEGRATED_GPU";
     case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
@@ -97,18 +97,18 @@ std::string get_queue_family_properties_str(const VkQueueFlags flags) {
 } // namespace
 
 Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
-  : physical_handle_(handle),
-    properties_{},
-    memory_properties_{},
-    queue_families_{},
-    num_requested_queues_{num_queues},
-    queue_usage_{},
-    handle_(VK_NULL_HANDLE),
-    queues_{},
-    num_compute_queues_{},
-    has_unified_memory_{false},
-    timestamp_compute_and_graphics_{false},
-    timestamp_period_{0.f} {
+    : physical_handle_(handle),
+      properties_{},
+      memory_properties_{},
+      queue_families_{},
+      num_requested_queues_{num_queues},
+      queue_usage_{},
+      handle_(VK_NULL_HANDLE),
+      queues_{},
+      num_compute_queues_{},
+      has_unified_memory_{false},
+      timestamp_compute_and_graphics_{false},
+      timestamp_period_{0.f} {
   // This should never happen, but double check to be safe
   TORCH_CHECK(
       VK_NULL_HANDLE != physical_handle_,
@@ -117,15 +117,17 @@ Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
   vkGetPhysicalDeviceProperties(physical_handle_, &properties_);
   vkGetPhysicalDeviceMemoryProperties(physical_handle_, &memory_properties_);
 
-  timestamp_compute_and_graphics_ = properties_.limits.timestampComputeAndGraphics;
+  timestamp_compute_and_graphics_ =
+      properties_.limits.timestampComputeAndGraphics;
   timestamp_period_ = properties_.limits.timestampPeriod;
 
   // Check if there are any memory types have both the HOST_VISIBLE and the
   // DEVICE_LOCAL property flags
   const VkMemoryPropertyFlags unified_memory_flags =
-    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
+      VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
   for (const uint32_t i : c10::irange(memory_properties_.memoryTypeCount)) {
-    if (memory_properties_.memoryTypes[i].propertyFlags | unified_memory_flags) {
+    if (memory_properties_.memoryTypes[i].propertyFlags |
+        unified_memory_flags) {
       has_unified_memory_ = true;
       break;
     }
@@ -153,24 +155,24 @@ Adapter::Adapter(const VkPhysicalDevice handle, const uint32_t num_queues)
 }
 
 Adapter::Adapter(Adapter&& other) noexcept
-  : physical_handle_(other.physical_handle_),
-    properties_(other.properties_),
-    memory_properties_(other.memory_properties_),
-    queue_families_(std::move(other.queue_families_)),
-    num_requested_queues_(other.num_requested_queues_),
-    queue_usage_(std::move(other.queue_usage_)),
-    handle_(other.handle_),
-    queues_(std::move(other.queues_)),
-    num_compute_queues_(other.num_compute_queues_),
-    has_unified_memory_(other.has_unified_memory_),
-    timestamp_compute_and_graphics_(other.timestamp_compute_and_graphics_),
-    timestamp_period_(other.timestamp_period_) {
+    : physical_handle_(other.physical_handle_),
+      properties_(other.properties_),
+      memory_properties_(other.memory_properties_),
+      queue_families_(std::move(other.queue_families_)),
+      num_requested_queues_(other.num_requested_queues_),
+      queue_usage_(std::move(other.queue_usage_)),
+      handle_(other.handle_),
+      queues_(std::move(other.queues_)),
+      num_compute_queues_(other.num_compute_queues_),
+      has_unified_memory_(other.has_unified_memory_),
+      timestamp_compute_and_graphics_(other.timestamp_compute_and_graphics_),
+      timestamp_period_(other.timestamp_period_) {
   other.physical_handle_ = VK_NULL_HANDLE;
   other.handle_ = VK_NULL_HANDLE;
 }
 
 Adapter::~Adapter() {
-  if C10_LIKELY(VK_NULL_HANDLE == handle_) {
+  if C10_LIKELY (VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyDevice(handle_, nullptr);
@@ -189,7 +191,7 @@ void Adapter::init_device() {
       "have any queues that support compute!")
 
   // This device has already been initialized, no-op
-  if C10_LIKELY(VK_NULL_HANDLE != handle_) {
+  if C10_LIKELY (VK_NULL_HANDLE != handle_) {
     return;
   }
 
@@ -208,17 +210,17 @@ void Adapter::init_device() {
     const VkQueueFamilyProperties& properties = queue_families_[family_i];
     // Check if this family has compute capability
     if (properties.queueFlags & VK_QUEUE_COMPUTE_BIT) {
-      const uint32_t queues_to_init = std::min(
-          remaining_queues, properties.queueCount);
+      const uint32_t queues_to_init =
+          std::min(remaining_queues, properties.queueCount);
 
       const std::vector<float> queue_priorities(queues_to_init, 1.0f);
       queue_create_infos.push_back({
-        VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,  // sType
-        nullptr,  // pNext
-        0u,  // flags
-        family_i,  // queueFamilyIndex
-        queues_to_init,  // queueCount
-        queue_priorities.data(),  // pQueuePriorities
+          VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, // sType
+          nullptr, // pNext
+          0u, // flags
+          family_i, // queueFamilyIndex
+          queues_to_init, // queueCount
+          queue_priorities.data(), // pQueuePriorities
       });
 
       for (const uint32_t queue_i : c10::irange(queues_to_init)) {
@@ -236,10 +238,10 @@ void Adapter::init_device() {
   // Create the VkDevice
   //
 
-  std::vector<const char*> requested_device_extensions {
-  #ifdef VK_KHR_portability_subset
-    VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
-  #endif
+  std::vector<const char*> requested_device_extensions{
+#ifdef VK_KHR_portability_subset
+      VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME,
+#endif
   };
 
   std::vector<const char*> enabled_device_extensions;
@@ -247,20 +249,21 @@ void Adapter::init_device() {
       physical_handle_, enabled_device_extensions, requested_device_extensions);
 
   const VkDeviceCreateInfo device_create_info{
-    VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,  // sType
-    nullptr,  // pNext
-    0u,  // flags
-    static_cast<uint32_t>(queue_create_infos.size()),  // queueCreateInfoCount
-    queue_create_infos.data(),  // pQueueCreateInfos
-    0u,  // enabledLayerCount
-    nullptr,  // ppEnabledLayerNames
-    static_cast<uint32_t>(enabled_device_extensions.size()),  // enabledExtensionCount
-    enabled_device_extensions.data(),  // ppEnabledExtensionNames
-    nullptr,  // pEnabledFeatures
+      VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, // sType
+      nullptr, // pNext
+      0u, // flags
+      static_cast<uint32_t>(queue_create_infos.size()), // queueCreateInfoCount
+      queue_create_infos.data(), // pQueueCreateInfos
+      0u, // enabledLayerCount
+      nullptr, // ppEnabledLayerNames
+      static_cast<uint32_t>(
+          enabled_device_extensions.size()), // enabledExtensionCount
+      enabled_device_extensions.data(), // ppEnabledExtensionNames
+      nullptr, // pEnabledFeatures
   };
 
-  const VkResult device_create_res = vkCreateDevice(
-      physical_handle_, &device_create_info, nullptr, &handle_);
+  const VkResult device_create_res =
+      vkCreateDevice(physical_handle_, &device_create_info, nullptr, &handle_);
   // If device was not created successfully, ensure handle_ is invalid and throw
   if (VK_SUCCESS != device_create_res) {
     handle_ = VK_NULL_HANDLE;
@@ -278,8 +281,7 @@ void Adapter::init_device() {
   for (const std::pair<uint32_t, uint32_t>& queue_idx : queues_to_get) {
     VkQueue queue_handle = VK_NULL_HANDLE;
     VkQueueFlags flags = queue_families_[queue_idx.first].queueFlags;
-    vkGetDeviceQueue(
-        handle_, queue_idx.first, queue_idx.second, &queue_handle);
+    vkGetDeviceQueue(handle_, queue_idx.first, queue_idx.second, &queue_handle);
     queues_.push_back({queue_idx.first, queue_idx.second, flags, queue_handle});
     // Initial usage value
     queue_usage_.push_back(0);
@@ -329,14 +331,13 @@ std::string Adapter::stringize() const {
   ss << "    deviceType:    " << device_type << std::endl;
   ss << "    deviceName:    " << properties_.deviceName << std::endl;
 
-#define PRINT_LIMIT_PROP(name) \
-  ss << "      " << std::left << std::setw(36) << #name << limits.name << std::endl;
+#define PRINT_LIMIT_PROP(name)                                         \
+  ss << "      " << std::left << std::setw(36) << #name << limits.name \
+     << std::endl;
 
-#define PRINT_LIMIT_PROP_VEC3(name) \
-  ss << "      " << std::left << std::setw(36) << #name \
-  << limits.name[0] << "," \
-  << limits.name[1] << "," \
-  << limits.name[2] << std::endl;
+#define PRINT_LIMIT_PROP_VEC3(name)                                       \
+  ss << "      " << std::left << std::setw(36) << #name << limits.name[0] \
+     << "," << limits.name[1] << "," << limits.name[2] << std::endl;
 
   ss << "    Physical Device Limits {" << std::endl;
   PRINT_LIMIT_PROP(maxImageDimension1D);
@@ -351,36 +352,40 @@ std::string Adapter::stringize() const {
   PRINT_LIMIT_PROP(maxComputeWorkGroupInvocations);
   PRINT_LIMIT_PROP_VEC3(maxComputeWorkGroupSize);
   ss << "    }" << std::endl;
-  ss << "  }" << std::endl;;
+  ss << "  }" << std::endl;
+  ;
 
   const VkPhysicalDeviceMemoryProperties& mem_props = memory_properties_;
   ss << "  Memory Info {" << std::endl;
   ss << "    Memory Types [" << std::endl;
   for (const auto i : c10::irange(mem_props.memoryTypeCount)) {
-  ss << "      " << " [Heap " << mem_props.memoryTypes[i].heapIndex << "] "
-               << get_memory_properties_str(mem_props.memoryTypes[i].propertyFlags)
-               << std::endl;
+    ss << "      "
+       << " [Heap " << mem_props.memoryTypes[i].heapIndex << "] "
+       << get_memory_properties_str(mem_props.memoryTypes[i].propertyFlags)
+       << std::endl;
   }
   ss << "    ]" << std::endl;
   ss << "    Memory Heaps [" << std::endl;
   for (const auto i : c10::irange(mem_props.memoryHeapCount)) {
-  ss << "      " << mem_props.memoryHeaps[i].size << std::endl;
+    ss << "      " << mem_props.memoryHeaps[i].size << std::endl;
   }
   ss << "    ]" << std::endl;
   ss << "  }" << std::endl;
 
   ss << "  Queue Families {" << std::endl;
   for (const VkQueueFamilyProperties& queue_family_props : queue_families_) {
-  ss << "    (" << queue_family_props.queueCount << " Queues) "
-     << get_queue_family_properties_str(queue_family_props.queueFlags) << std::endl;
+    ss << "    (" << queue_family_props.queueCount << " Queues) "
+       << get_queue_family_properties_str(queue_family_props.queueFlags)
+       << std::endl;
   }
   ss << "  }" << std::endl;
   ss << "  VkDevice: " << handle_ << std::endl;
   ss << "  Compute Queues [" << std::endl;
   for (const Adapter::Queue& compute_queue : queues_) {
-  ss << "    Family " << compute_queue.family_index
-     << ", Queue " << compute_queue.queue_index
-     << ": " << compute_queue.handle << std::endl;;
+    ss << "    Family " << compute_queue.family_index << ", Queue "
+       << compute_queue.queue_index << ": " << compute_queue.handle
+       << std::endl;
+    ;
   }
   ss << "  ]" << std::endl;
   ss << "}";

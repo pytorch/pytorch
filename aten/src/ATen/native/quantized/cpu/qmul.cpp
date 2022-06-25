@@ -1,9 +1,9 @@
 #include <ATen/ATen.h>
-#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/quantized/Quantizer.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -16,12 +16,15 @@ DEFINE_DISPATCH(qmul_stub);
 namespace {
 
 inline void check_inputs(const Tensor& qa, const Tensor& qb) {
-  TORCH_CHECK(qa.qscheme() == kPerTensorAffine,
-              "Only per tensor quantization is supported in Mul.");
-  TORCH_CHECK(qa.scalar_type() == qb.scalar_type(),
-              "Mul operands should have same data type.");
-  TORCH_CHECK(qa.qscheme() == qb.qscheme(),
-              "Both inputs to Mul must have the same quantization shceme.");
+  TORCH_CHECK(
+      qa.qscheme() == kPerTensorAffine,
+      "Only per tensor quantization is supported in Mul.");
+  TORCH_CHECK(
+      qa.scalar_type() == qb.scalar_type(),
+      "Mul operands should have same data type.");
+  TORCH_CHECK(
+      qa.qscheme() == qb.qscheme(),
+      "Both inputs to Mul must have the same quantization shceme.");
 }
 
 // Note: out is assumed to be the same size as self and other.
@@ -62,8 +65,10 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
       } else {
         out.copy_(self);
       }
-      set_quantizer_(out, make_per_tensor_affine_quantizer(
-          scale_prime, zero_point_prime, self.scalar_type()));
+      set_quantizer_(
+          out,
+          make_per_tensor_affine_quantizer(
+              scale_prime, zero_point_prime, self.scalar_type()));
     } else if (other_val == 0.0) {
       scale_prime = 1.0;
       zero_point_prime = 0;
@@ -77,25 +82,27 @@ Tensor _mul_scalar_out(Tensor& out, const Tensor& self, const Scalar& other) {
           [&](Vectorized<scalar_t> vec) -> Vectorized<scalar_t> {
             return Vectorized<scalar_t>(scalar_t(0));
           });
-      set_quantizer_(out, make_per_tensor_affine_quantizer(
-          scale_prime, zero_point_prime, self.scalar_type()));
+      set_quantizer_(
+          out,
+          make_per_tensor_affine_quantizer(
+              scale_prime, zero_point_prime, self.scalar_type()));
     } else /* other_val < 0.0 */ {
       scale_prime = std::abs(other_val) * self_scale;
       zero_point_prime = q_max - (self_zero_point - q_min);
 
       // xq' = q_max + q_min - x_q
       auto iter = TensorIterator::unary_op(out, self);
-      cpu_kernel(
-          iter,
-          [&](scalar_t a) -> scalar_t {
-            a = scalar_t(underlying_t(q_max + q_min - a.val_));
-            if (ReLUFused) {
-              a = scalar_t(std::max(a.val_, underlying_t(zero_point_prime)));
-            }
-            return a;
-          });
-      set_quantizer_(out, make_per_tensor_affine_quantizer(
-          scale_prime, zero_point_prime, self.scalar_type()));
+      cpu_kernel(iter, [&](scalar_t a) -> scalar_t {
+        a = scalar_t(underlying_t(q_max + q_min - a.val_));
+        if (ReLUFused) {
+          a = scalar_t(std::max(a.val_, underlying_t(zero_point_prime)));
+        }
+        return a;
+      });
+      set_quantizer_(
+          out,
+          make_per_tensor_affine_quantizer(
+              scale_prime, zero_point_prime, self.scalar_type()));
     }
   });
 
@@ -126,14 +133,13 @@ class QMulOut final {
   }
 };
 
-
 template <bool ReLUFused = false>
 class QMulScalar final {
  public:
   static Tensor run(Tensor qa, const Scalar& b) {
-    TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
-              qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is supported in Mul.");
+    TORCH_CHECK(
+        qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
+        "Only per tensor quantization is supported in Mul.");
     auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b);
   }
@@ -143,9 +149,9 @@ template <bool ReLUFused = false>
 class QMulScalar2 final {
  public:
   static Tensor run(const Scalar& b, Tensor qa) {
-    TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
-              qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is supported in Mul.");
+    TORCH_CHECK(
+        qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
+        "Only per tensor quantization is supported in Mul.");
     auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b);
   }
@@ -167,9 +173,9 @@ template <bool ReLUFused = false>
 class QMulScalarTensor final {
  public:
   static Tensor run(Tensor qa, Tensor b) {
-    TORCH_CHECK(qa.qscheme() == kPerTensorAffine ||
-              qa.qscheme() == kPerTensorSymmetric,
-              "Only per tensor quantization is suported in Mul.");
+    TORCH_CHECK(
+        qa.qscheme() == kPerTensorAffine || qa.qscheme() == kPerTensorSymmetric,
+        "Only per tensor quantization is suported in Mul.");
     auto qc = at::empty_like(qa, qa.suggest_memory_format());
     return _mul_scalar_out<ReLUFused>(qc, qa, b.item());
   }
@@ -188,29 +194,70 @@ class QMulScalarTensorOut final {
 };
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul"),                 TORCH_FN(QMul</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul.out"),             TORCH_FN(QMulOut</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul.Scalar"),          TORCH_FN(QMulScalar</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul.Scalar2"),          TORCH_FN(QMulScalar2</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul.Scalar_out"),      TORCH_FN(QMulScalarOut</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_relu"),            TORCH_FN(QMul</*ReLUFused=*/true>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_relu.out"),        TORCH_FN(QMulOut</*ReLUFused=*/true>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_relu.Scalar"),     TORCH_FN(QMulScalar</*ReLUFused=*/true>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_relu.Scalar2"),     TORCH_FN(QMulScalar2</*ReLUFused=*/true>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_relu.Scalar_out"), TORCH_FN(QMulScalarOut</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul"),
+      TORCH_FN(QMul</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul.out"),
+      TORCH_FN(QMulOut</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul.Scalar"),
+      TORCH_FN(QMulScalar</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul.Scalar2"),
+      TORCH_FN(QMulScalar2</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul.Scalar_out"),
+      TORCH_FN(QMulScalarOut</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_relu"),
+      TORCH_FN(QMul</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_relu.out"),
+      TORCH_FN(QMulOut</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_relu.Scalar"),
+      TORCH_FN(QMulScalar</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_relu.Scalar2"),
+      TORCH_FN(QMulScalar2</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_relu.Scalar_out"),
+      TORCH_FN(QMulScalarOut</*ReLUFused=*/true>::run));
   // deprecated functions, kept for backward compatibility
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_out"),             TORCH_FN(QMulOut</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_relu_out"),        TORCH_FN(QMulOut</*ReLUFused=*/true>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar"),          TORCH_FN(QMulScalar</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu"),     TORCH_FN(QMulScalar</*ReLUFused=*/true>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_out"),      TORCH_FN(QMulScalarOut</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu_out"), TORCH_FN(QMulScalarOut</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_out"),
+      TORCH_FN(QMulOut</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_relu_out"),
+      TORCH_FN(QMulOut</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_scalar"),
+      TORCH_FN(QMulScalar</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu"),
+      TORCH_FN(QMulScalar</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_scalar_out"),
+      TORCH_FN(QMulScalarOut</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu_out"),
+      TORCH_FN(QMulScalarOut</*ReLUFused=*/true>::run));
   // TODO: remove after broadcasting is supported
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar.Tensor"), TORCH_FN(QMulScalarTensor</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu.Tensor"), TORCH_FN(QMulScalarTensor</*ReLUFused=*/true>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_out.Tensor"), TORCH_FN(QMulScalarTensorOut</*ReLUFused=*/false>::run));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu_out.Tensor"), TORCH_FN(QMulScalarTensorOut</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_scalar.Tensor"),
+      TORCH_FN(QMulScalarTensor</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu.Tensor"),
+      TORCH_FN(QMulScalarTensor</*ReLUFused=*/true>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_scalar_out.Tensor"),
+      TORCH_FN(QMulScalarTensorOut</*ReLUFused=*/false>::run));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::mul_scalar_relu_out.Tensor"),
+      TORCH_FN(QMulScalarTensorOut</*ReLUFused=*/true>::run));
 }
 
-}  // namespace
-}}  // namespace at::native
+} // namespace
+} // namespace native
+} // namespace at

@@ -1,8 +1,9 @@
-#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/Pool.h>
+#include <ATen/native/mkldnn/Utils.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 std::vector<int64_t> pool_output_sizes(
     IntArrayRef input_size,
@@ -19,17 +20,17 @@ std::vector<int64_t> pool_output_sizes(
 
   for (const auto i : c10::irange(2, input_size.size())) {
     output_size[i] = pooling_output_shape_pad_lr<int64_t>(
-      input_size[i],
-      kernel_size[i - 2],
-      padding_l[i - 2],
-      padding_r[i - 2],
-      stride[i - 2],
-      dilation[i - 2],
-      ceil_mode
-    );
+        input_size[i],
+        kernel_size[i - 2],
+        padding_l[i - 2],
+        padding_r[i - 2],
+        stride[i - 2],
+        dilation[i - 2],
+        ceil_mode);
   }
 
-   return output_size;
+  return output_size;
 }
 
-}}
+} // namespace native
+} // namespace at

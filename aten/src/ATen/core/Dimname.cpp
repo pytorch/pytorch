@@ -40,7 +40,8 @@ static void check_valid_identifier(const std::string& name) {
       Dimname::isValidName(name),
       "Invalid name: a valid identifier contains only digits, alphabetical "
       "characters, and/or underscore and starts with a non-digit. got: '",
-      name, "'.");
+      name,
+      "'.");
 }
 
 Dimname Dimname::fromSymbol(Symbol name) {

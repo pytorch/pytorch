@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <sleef.h>
 namespace at {
 namespace vec {
@@ -38,8 +38,10 @@ class Vectorized<float> {
 
   C10_ALWAYS_INLINE Vectorized(vfloat32 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vfloat32 v1, vfloat32 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vfloat32 v1, vfloat32 v2)
+      : _vec0{v1}, _vec1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2)
+      : _vecb0{v1}, _vecb1{v2} {}
   C10_ALWAYS_INLINE Vectorized(float scalar)
       : _vec0{vec_splats(scalar)}, _vec1{vec_splats(scalar)} {}
   C10_ALWAYS_INLINE Vectorized(
@@ -61,62 +63,71 @@ class Vectorized<float> {
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 0, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 0, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     return a;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 1, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 1, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     return b;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 2, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 2, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     return {b._vec0, a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 3, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 3, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     return {a._vec0, b._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 4, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 4, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     return {(vfloat32)vec_sel(a._vec0, b._vec0, mask_1st), a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 5, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 5, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     return {(vfloat32)vec_sel(a._vec0, b._vec0, mask_1st), b._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 6, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 6, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     const vbool32 mask_2nd = VsxMask2(mask);
     // generated masks
     return {a._vec0, (vfloat32)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 7, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 7, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     const vbool32 mask_2nd = VsxMask2(mask);
     // generated masks
     return {b._vec0, (vfloat32)vec_sel(a._vec1, b._vec1, mask_2nd)};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoice(mask) == 8, Vectorized<float>> C10_ALWAYS_INLINE
-  blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static std::enable_if_t<blendChoice(mask) == 8, Vectorized<float>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<float>& a, const Vectorized<float>& b) {
     const vbool32 mask_1st = VsxMask1(mask);
     const vbool32 mask_2nd = VsxMask2(mask);
     return {
@@ -136,7 +147,9 @@ class Vectorized<float> {
   }
 
   template <typename step_t>
-  static Vectorized<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
+  static Vectorized<float> arange(
+      float base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     return Vectorized<float>(
         base,
         base + step,
@@ -212,8 +225,9 @@ class Vectorized<float> {
     return ret;
   }
 
-  Vectorized<float> mapbi(float (*const f)(float, float), const Vectorized<float>& other)
-      const {
+  Vectorized<float> mapbi(
+      float (*const f)(float, float),
+      const Vectorized<float>& other) const {
     Vectorized<float> ret;
     for (int i = 0; i < size() / 2; i++) {
       ret._vec0[i] = f(_vec0[i], other._vec0[i]);
@@ -256,29 +270,33 @@ class Vectorized<float> {
   }
 
   Vectorized<float> C10_ALWAYS_INLINE acos() const {
-     return {Sleef_acosf4_u10vsx(_vec0), Sleef_acosf4_u10vsx(_vec1)};
+    return {Sleef_acosf4_u10vsx(_vec0), Sleef_acosf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE asin() const {
-     return {Sleef_asinf4_u10vsx(_vec0), Sleef_asinf4_u10vsx(_vec1)};
+    return {Sleef_asinf4_u10vsx(_vec0), Sleef_asinf4_u10vsx(_vec1)};
   }
   Vectorized<float> atan() const {
-     return {Sleef_atanf4_u10vsx(_vec0), Sleef_atanf4_u10vsx(_vec1)};
+    return {Sleef_atanf4_u10vsx(_vec0), Sleef_atanf4_u10vsx(_vec1)};
   }
   Vectorized<float> atan2(const Vectorized<float>& b) const {
-     return {Sleef_atan2f4_u10vsx(_vec0, b._vec0), Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
+    return {
+        Sleef_atan2f4_u10vsx(_vec0, b._vec0),
+        Sleef_atan2f4_u10vsx(_vec1, b._vec1)};
   }
-  Vectorized<float> copysign(const Vectorized<float> &sign) const {
-    return {Sleef_copysignf4_vsx(_vec0, sign._vec0), Sleef_copysignf4_vsx(_vec1, sign._vec1)};
+  Vectorized<float> copysign(const Vectorized<float>& sign) const {
+    return {
+        Sleef_copysignf4_vsx(_vec0, sign._vec0),
+        Sleef_copysignf4_vsx(_vec1, sign._vec1)};
   }
   Vectorized<float> lgamma() const {
-     return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
+    return {Sleef_lgammaf4_u10vsx(_vec0), Sleef_lgammaf4_u10vsx(_vec1)};
   }
   Vectorized<float> erf() const {
-     return {Sleef_erff4_u10vsx(_vec0), Sleef_erff4_u10vsx(_vec1)};
+    return {Sleef_erff4_u10vsx(_vec0), Sleef_erff4_u10vsx(_vec1)};
   }
 
   Vectorized<float> erfc() const {
-     return {Sleef_erfcf4_u15vsx(_vec0), Sleef_erfcf4_u15vsx(_vec1)};
+    return {Sleef_erfcf4_u15vsx(_vec0), Sleef_erfcf4_u15vsx(_vec1)};
   }
 
   Vectorized<float> erfinv() const {
@@ -287,7 +305,9 @@ class Vectorized<float> {
 
   Vectorized<float> angle() const {
     auto tmp = blendv(
-      Vectorized<float>(0), Vectorized<float>(c10::pi<float>), *this < Vectorized<float>(0));
+        Vectorized<float>(0),
+        Vectorized<float>(c10::pi<float>),
+        *this < Vectorized<float>(0));
     return blendv(tmp, *this, isnan());
   }
   Vectorized<float> real() const {
@@ -349,13 +369,13 @@ class Vectorized<float> {
     return {Sleef_logf4_u10vsx(_vec0), Sleef_logf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log10() const {
-     return {Sleef_log10f4_u10vsx(_vec0), Sleef_log10f4_u10vsx(_vec1)};
+    return {Sleef_log10f4_u10vsx(_vec0), Sleef_log10f4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log1p() const {
-     return {Sleef_log1pf4_u10vsx(_vec0), Sleef_log1pf4_u10vsx(_vec1)};
+    return {Sleef_log1pf4_u10vsx(_vec0), Sleef_log1pf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE log2() const {
-     return {Sleef_log2f4_u10vsx(_vec0), Sleef_log2f4_u10vsx(_vec1)};
+    return {Sleef_log2f4_u10vsx(_vec0), Sleef_log2f4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE ceil() const {
     return {vec_ceil(_vec0), vec_ceil(_vec1)};
@@ -507,7 +527,7 @@ class Vectorized<float> {
     return result | sign_bit;
   }
   Vectorized<float> C10_ALWAYS_INLINE tan() const {
-     return {Sleef_tanf4_u10vsx(_vec0), Sleef_tanf4_u10vsx(_vec1)};
+    return {Sleef_tanf4_u10vsx(_vec0), Sleef_tanf4_u10vsx(_vec1)};
   }
   Vectorized<float> C10_ALWAYS_INLINE tanh() const {
     auto x = *this;
@@ -575,15 +595,19 @@ class Vectorized<float> {
   }
 
   Vectorized<float> fmod(const Vectorized<float>& b) const {
-     return {Sleef_fmodf4_vsx(_vec0, b._vec0),Sleef_fmodf4_vsx(_vec1, b._vec1)};
+    return {Sleef_fmodf4_vsx(_vec0, b._vec0), Sleef_fmodf4_vsx(_vec1, b._vec1)};
   }
 
   Vectorized<float> hypot(const Vectorized<float>& b) const {
-     return {Sleef_hypotf4_u05vsx(_vec0, b._vec0), Sleef_hypotf4_u05vsx(_vec1, b._vec1)};
+    return {
+        Sleef_hypotf4_u05vsx(_vec0, b._vec0),
+        Sleef_hypotf4_u05vsx(_vec1, b._vec1)};
   }
 
   Vectorized<float> nextafter(const Vectorized<float>& b) const {
-     return {Sleef_nextafterf4_vsx(_vec0, b._vec0), Sleef_nextafterf4_vsx(_vec1, b._vec1)};
+    return {
+        Sleef_nextafterf4_vsx(_vec0, b._vec0),
+        Sleef_nextafterf4_vsx(_vec1, b._vec1)};
   }
 
   Vectorized<float> igamma(const Vectorized<float>& x) const {
@@ -627,15 +651,19 @@ class Vectorized<float> {
 };
 
 template <>
-Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline maximum(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return a.maximum(b);
 }
 
 template <>
-Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline minimum(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return a.minimum(b);
 }
 
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

@@ -10,5 +10,5 @@ Tensor& _sparse_mm_mkl_(
     const Tensor& t,
     const Scalar& alpha,
     const Scalar& beta);
-} // namespace native
+} // namespace sparse_csr
 } // namespace at

@@ -6,16 +6,21 @@
 
 using namespace at;
 
-bool allClose(const at::Tensor& t1, const at::Tensor& t2, double rtol=1e-5, double atol=1e-8) {
+bool allClose(
+    const at::Tensor& t1,
+    const at::Tensor& t2,
+    double rtol = 1e-5,
+    double atol = 1e-8) {
   if (!t1.is_same_size(t2)) {
-    std::cerr << "Difference in tensor shapes: "
-      << t1.sizes() << " v.s. " << t2.sizes() << std::endl;
+    std::cerr << "Difference in tensor shapes: " << t1.sizes() << " v.s. "
+              << t2.sizes() << std::endl;
     return false;
   }
   bool equal = t1.allclose(t2, rtol, atol);
   if (!equal) {
     std::cerr << "Difference in tensor value: \nFirst tensor:\n"
-        << t1 << "\nSecond tensor:\n" << t2 << std::endl;
+              << t1 << "\nSecond tensor:\n"
+              << t2 << std::endl;
   }
   return equal;
 }
@@ -36,18 +41,33 @@ TEST(MathKernelTest, NativeGroupNorm) {
   const auto weight = randn({num_channels});
   const auto bias = randn({num_channels});
   double eps = 1e-05;
-  for (bool undef_weight: {true, false}) {
-    for (int num_groups: {3, 6, 1}) {
+  for (bool undef_weight : {true, false}) {
+    for (int num_groups : {3, 6, 1}) {
       Tensor undef;
       auto out = at::native::native_group_norm(
-            input, undef_weight ? undef : weight, undef_weight ? undef : bias,
-            N, num_channels, HxW, num_groups, eps);
+          input,
+          undef_weight ? undef : weight,
+          undef_weight ? undef : bias,
+          N,
+          num_channels,
+          HxW,
+          num_groups,
+          eps);
       auto math_out = at::native::math_group_norm(
-            input, undef_weight ? undef : weight, undef_weight ? undef : bias,
-            N, num_channels, HxW, num_groups, eps);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<0>(out), std::get<0>(math_out), 1e-4, 1e-6);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<1>(out), std::get<1>(math_out), 1e-4, 1e-6);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<2>(out), std::get<2>(math_out), 1e-4, 1e-6);
+          input,
+          undef_weight ? undef : weight,
+          undef_weight ? undef : bias,
+          N,
+          num_channels,
+          HxW,
+          num_groups,
+          eps);
+      ASSERT_ALLCLOSE_TOLERANCES(
+          std::get<0>(out), std::get<0>(math_out), 1e-4, 1e-6);
+      ASSERT_ALLCLOSE_TOLERANCES(
+          std::get<1>(out), std::get<1>(math_out), 1e-4, 1e-6);
+      ASSERT_ALLCLOSE_TOLERANCES(
+          std::get<2>(out), std::get<2>(math_out), 1e-4, 1e-6);
     }
   }
 }
@@ -57,22 +77,31 @@ TEST(MathKernelTest, NativeLayerNorm) {
   const auto input_shape = input.sizes();
 
   double eps = 1e-05;
-  for (bool undef_weight: {true, false}) {
-    for (int normalized_size: {2, 3}) {
+  for (bool undef_weight : {true, false}) {
+    for (int normalized_size : {2, 3}) {
       Tensor undef;
       std::vector<int64_t> normalized_shape(normalized_size, 10);
       const auto weight = rand(normalized_shape);
       const auto bias = rand(normalized_shape);
 
       auto out = at::native_layer_norm(
-            input, normalized_shape, undef_weight ? undef : weight, undef_weight ? undef : bias,
-            eps);
+          input,
+          normalized_shape,
+          undef_weight ? undef : weight,
+          undef_weight ? undef : bias,
+          eps);
       auto math_out = at::native::math_native_layer_norm(
-            input, normalized_shape, undef_weight ? undef : weight, undef_weight ? undef : bias,
-            eps);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<0>(out), std::get<0>(math_out), 1e-3, 1e-5);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<1>(out), std::get<1>(math_out), 1e-3, 1e-5);
-      ASSERT_ALLCLOSE_TOLERANCES(std::get<2>(out), std::get<2>(math_out), 1e-3, 1e-5);
+          input,
+          normalized_shape,
+          undef_weight ? undef : weight,
+          undef_weight ? undef : bias,
+          eps);
+      ASSERT_ALLCLOSE_TOLERANCES(
+          std::get<0>(out), std::get<0>(math_out), 1e-3, 1e-5);
+      ASSERT_ALLCLOSE_TOLERANCES(
+          std::get<1>(out), std::get<1>(math_out), 1e-3, 1e-5);
+      ASSERT_ALLCLOSE_TOLERANCES(
+          std::get<2>(out), std::get<2>(math_out), 1e-3, 1e-5);
     }
   }
 }
@@ -83,14 +112,14 @@ TEST(MathKernelTest, Addr) {
   const auto M = zeros({3, 2});
 
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-  for (float beta: {1., 1.2, 0.}) {
+  for (float beta : {1., 1.2, 0.}) {
     // nans and infs are not propagated to the output when beta == 0
     if (beta == 0) {
       M[0][0] = std::numeric_limits<float>::infinity();
       M[2][0] = std::numeric_limits<float>::quiet_NaN();
     }
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    for (float alpha: {1., 2., 0.}) {
+    for (float alpha : {1., 2., 0.}) {
       auto out = at::native::addr(M, vec1, vec2, beta, alpha);
       auto math_out = at::native::math_addr(M, vec1, vec2, beta, alpha);
       ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
@@ -114,7 +143,7 @@ TEST(MathKernelTest, MishBackward) {
   ASSERT_ALLCLOSE_TOLERANCES(out, math_out, 1e-4, 1e-6);
 }
 
-TEST(MathKernelTest, NarrowCopy)  {
+TEST(MathKernelTest, NarrowCopy) {
   auto x = rand({5, 8, 7});
   for (const auto dim : c10::irange(3)) {
     const int64_t start = 1, length = 4;
@@ -124,7 +153,7 @@ TEST(MathKernelTest, NarrowCopy)  {
   }
 }
 
-TEST(MathKernelTest, Bmm)  {
+TEST(MathKernelTest, Bmm) {
   auto test_bmm = [](int64_t last_dim) {
     auto x = rand({1, 4, 4}, at::kFloat);
     auto y = rand({1, 4, last_dim}, at::kDouble);

@@ -24,20 +24,20 @@ namespace api {
 //
 // To accelerate creation of the descriptor sets, modern graphics APIs allocate
 // them from a pool, more elaborately referred to as descriptor pools, which do
-// need to be purged frequently _after_ none of the descriptors the pools contain
-// is in use by the GPU.  Care must be taken that descriptors are not freed while
-// they are in use by the pipeline, which considering the asynchronous nature of
-// CPU-GPU interactions, can be anytime after the command is issued until it is
-// fully executed by the GPU.
+// need to be purged frequently _after_ none of the descriptors the pools
+// contain is in use by the GPU.  Care must be taken that descriptors are not
+// freed while they are in use by the pipeline, which considering the
+// asynchronous nature of CPU-GPU interactions, can be anytime after the command
+// is issued until it is fully executed by the GPU.
 //
 // As you can imagine, it is possible to have multiple descriptor pools, each of
-// which is configured to house different types of descriptor sets with different
-// allocation strategies. These descriptor pools themselves are fairly stable
-// objects in that they theymself should not be created and destroyed frequently.
-// That is the reason why we store them in a cache, which according to our usage
-// of the term 'cache' in this implementatoin, is reserved for objects that are
-// created infrequently and stabilize to a manageable number quickly over the
-// lifetime of the program.
+// which is configured to house different types of descriptor sets with
+// different allocation strategies. These descriptor pools themselves are fairly
+// stable objects in that they theymself should not be created and destroyed
+// frequently. That is the reason why we store them in a cache, which according
+// to our usage of the term 'cache' in this implementatoin, is reserved for
+// objects that are created infrequently and stabilize to a manageable number
+// quickly over the lifetime of the program.
 //
 // Descriptor sets though, on the other hand, are allocated from pools which
 // indeed does mean that the pools must be purged on a regular basis or else
@@ -58,8 +58,7 @@ struct Descriptor final {
 
   class Set final {
    public:
-    Set(
-        VkDevice device,
+    Set(VkDevice device,
         VkDescriptorSet descriptor_set,
         const Shader::Layout::Signature& shader_layout_signature);
     Set(const Set&) = delete;
@@ -138,9 +137,7 @@ struct Descriptor final {
     } set_;
   } pool /* [thread_count] */;
 
-  explicit Descriptor(const GPU& gpu)
-    : pool(gpu) {
-  }
+  explicit Descriptor(const GPU& gpu) : pool(gpu) {}
 };
 
 } // namespace api

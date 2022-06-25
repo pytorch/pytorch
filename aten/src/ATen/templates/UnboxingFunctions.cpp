@@ -1,5 +1,5 @@
-#include <ATen/UnboxingFunctions.h>
 #include <ATen/Functions.h>
+#include <ATen/UnboxingFunctions.h>
 
 #include <ATen/Tensor.h>
 #include <ATen/core/functional.h>
@@ -21,15 +21,17 @@
 namespace at {
 namespace unboxing {
 
-using ::c10::fmap;
 using ::c10::filter;
-using torch::jit::peek;
+using ::c10::fmap;
 using torch::jit::drop;
 using torch::jit::pack;
+using torch::jit::peek;
 using torch::jit::pop;
 
 // Generated function declaration
-${definitions}
+$ {
+  definitions
+}
 
 } // namespace unboxing
 } // namespace at

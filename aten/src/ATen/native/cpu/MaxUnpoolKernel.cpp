@@ -1,15 +1,16 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/cpu/MaxUnpoolKernel.h>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
 #include <c10/util/Optional.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
@@ -39,13 +40,17 @@ void cpu_max_unpool(
   // and the feature map as another dimension
   int64_t channels, output_depth, output_height, output_width;
   if (is_3d) {
-    TORCH_CHECK(ndim == 4 || ndim == 5, "MaxUnpool3d: expect input to be 4d or 5d tensor.");
+    TORCH_CHECK(
+        ndim == 4 || ndim == 5,
+        "MaxUnpool3d: expect input to be 4d or 5d tensor.");
     channels = ndim == 4 ? input.size(0) : input.size(0) * input.size(1);
     output_depth = output.size(-3);
     output_height = output.size(-2);
     output_width = output.size(-1);
   } else {
-    TORCH_CHECK(ndim == 3 || ndim == 4, "MaxUnpool2d: expect input to be 3d or 4d tensor.");
+    TORCH_CHECK(
+        ndim == 3 || ndim == 4,
+        "MaxUnpool2d: expect input to be 3d or 4d tensor.");
     channels = ndim == 3 ? input.size(0) : input.size(0) * input.size(1);
     output_depth = 1;
     output_height = output.size(-2);
@@ -80,13 +85,23 @@ void cpu_max_unpool(
 
   if (optional_error_index) {
     if (is_3d) {
-      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
-          " (output volumes are of size ", output_depth,
-          "x", output_height, "x", output_width);
+      AT_ERROR(
+          "Found an invalid max index: ",
+          optional_error_index.value(),
+          " (output volumes are of size ",
+          output_depth,
+          "x",
+          output_height,
+          "x",
+          output_width);
     } else {
-      AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
-          " (output volumes are of size ", output_height,
-          "x", output_width);
+      AT_ERROR(
+          "Found an invalid max index: ",
+          optional_error_index.value(),
+          " (output volumes are of size ",
+          output_height,
+          "x",
+          output_width);
     }
   }
 
@@ -100,8 +115,9 @@ void cpu_max_unpool_channels_last(
     Tensor& output_,
     const Tensor& input,
     const Tensor& indices) {
-  TORCH_CHECK(input.ndimension() == 4,
-              "max_unpool2d with channels last format supports tensors with 4 dims");
+  TORCH_CHECK(
+      input.ndimension() == 4,
+      "max_unpool2d with channels last format supports tensors with 4 dims");
   auto memory_format = at::MemoryFormat::ChannelsLast;
   auto output = output_.contiguous(memory_format);
 
@@ -121,36 +137,42 @@ void cpu_max_unpool_channels_last(
   c10::optional<int64_t> optional_error_index;
 
   // parallel on dim N, H, W
-  at::parallel_for(0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
-    int64_t n = 0;
-    int64_t ip = 0;
-    data_index_init(begin, n, nbatch, ip, input_image_size);
+  at::parallel_for(
+      0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
+        int64_t n = 0;
+        int64_t ip = 0;
+        data_index_init(begin, n, nbatch, ip, input_image_size);
 
-    for (const auto i : c10::irange(begin, end)) {
-      scalar_t* input_ptr = input_data + i * channels;
-      int64_t* indices_ptr = indices_data + i * channels;
-      scalar_t* output_ptr = output_data + n * output_image_size * channels;
+        for (const auto i : c10::irange(begin, end)) {
+          scalar_t* input_ptr = input_data + i * channels;
+          int64_t* indices_ptr = indices_data + i * channels;
+          scalar_t* output_ptr = output_data + n * output_image_size * channels;
 
-      // can't do scatter on avx2 (only available on avx512)
-      for (const auto c : c10::irange(channels)) {
-        int64_t maxp = indices_ptr[c];
-        if (maxp < 0 || maxp >= output_image_size) {
-          optional_error_index = maxp;
-          std::atomic_thread_fence(std::memory_order_release);
-        } else {
-          output_ptr[maxp * channels + c] = input_ptr[c];
+          // can't do scatter on avx2 (only available on avx512)
+          for (const auto c : c10::irange(channels)) {
+            int64_t maxp = indices_ptr[c];
+            if (maxp < 0 || maxp >= output_image_size) {
+              optional_error_index = maxp;
+              std::atomic_thread_fence(std::memory_order_release);
+            } else {
+              output_ptr[maxp * channels + c] = input_ptr[c];
+            }
+          }
+
+          // move on to next input index
+          data_index_step(n, nbatch, ip, input_image_size);
         }
-      }
-
-      // move on to next input index
-      data_index_step(n, nbatch, ip, input_image_size);
-    }
-  });
+      });
 
   if (optional_error_index) {
-    AT_ERROR("Found an invalid max index: ", optional_error_index.value(),
-        " (output volumes are of size ", output_height,
-        "x", output_width, ")");
+    AT_ERROR(
+        "Found an invalid max index: ",
+        optional_error_index.value(),
+        " (output volumes are of size ",
+        output_height,
+        "x",
+        output_width,
+        ")");
   }
 
   if (!output_.is_contiguous(memory_format)) {
@@ -176,14 +198,20 @@ void cpu_max_unpool_backward(
   // and the feature map as another dimension
   int64_t channels, output_depth, output_height, output_width;
   if (is_3d) {
-    TORCH_CHECK(ndim == 4 || ndim == 5, "MaxUnpool3d_backward: expect grad_output to be 4d or 5d tensor.");
-    channels = ndim == 4 ? grad_output.size(0) : grad_output.size(0) * grad_output.size(1);
+    TORCH_CHECK(
+        ndim == 4 || ndim == 5,
+        "MaxUnpool3d_backward: expect grad_output to be 4d or 5d tensor.");
+    channels = ndim == 4 ? grad_output.size(0)
+                         : grad_output.size(0) * grad_output.size(1);
     output_depth = grad_output.size(-3);
     output_height = grad_output.size(-2);
     output_width = grad_output.size(-1);
   } else {
-    TORCH_CHECK(ndim == 3 || ndim == 4, "MaxUnpool2d_backward: expect grad_output to be 3d or 4d tensor.");
-    channels = ndim == 3 ? grad_output.size(0) : grad_output.size(0) * grad_output.size(1);
+    TORCH_CHECK(
+        ndim == 3 || ndim == 4,
+        "MaxUnpool2d_backward: expect grad_output to be 3d or 4d tensor.");
+    channels = ndim == 3 ? grad_output.size(0)
+                         : grad_output.size(0) * grad_output.size(1);
     output_depth = 1;
     output_height = grad_output.size(-2);
     output_width = grad_output.size(-1);
@@ -204,8 +232,8 @@ void cpu_max_unpool_backward(
 
       int64_t maxp = indices_data[i];
       if (maxp < 0 || maxp >= output_image_size) {
-          optional_error_index = maxp;
-          std::atomic_thread_fence(std::memory_order_release);
+        optional_error_index = maxp;
+        std::atomic_thread_fence(std::memory_order_release);
       } else {
         grad_input_data[i] = grad_output_ptr[maxp];
       }
@@ -217,14 +245,23 @@ void cpu_max_unpool_backward(
 
   if (optional_error_index) {
     if (is_3d) {
-      AT_ERROR("invalid max index ", optional_error_index.value(),
-          ", odepth= ", output_depth,
-          ", owidth= ", output_width,
-          ", oheight= ", output_height);
+      AT_ERROR(
+          "invalid max index ",
+          optional_error_index.value(),
+          ", odepth= ",
+          output_depth,
+          ", owidth= ",
+          output_width,
+          ", oheight= ",
+          output_height);
     } else {
-      AT_ERROR("invalid max index ", optional_error_index.value(),
-          ", owidth= ", output_width,
-          ", oheight= ", output_height);
+      AT_ERROR(
+          "invalid max index ",
+          optional_error_index.value(),
+          ", owidth= ",
+          output_width,
+          ", oheight= ",
+          output_height);
     }
   }
 
@@ -237,21 +274,24 @@ void max_unpool2d_kernel_impl(
     Tensor& output,
     const Tensor& input,
     const Tensor& indices) {
-  switch(input.suggest_memory_format()) {
+  switch (input.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
       AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_unpool2d", [&] {
-        cpu_max_unpool<scalar_t, /*is_3d*/false>(output, input, indices);
+        cpu_max_unpool<scalar_t, /*is_3d*/ false>(output, input, indices);
       });
       break;
     }
     case at::MemoryFormat::ChannelsLast: {
-      AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_unpool2d_channels_last", [&] {
-        cpu_max_unpool_channels_last<scalar_t>(output, input, indices);
-      });
+      AT_DISPATCH_FLOATING_TYPES(
+          input.scalar_type(), "max_unpool2d_channels_last", [&] {
+            cpu_max_unpool_channels_last<scalar_t>(output, input, indices);
+          });
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, Contiguous");
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format. Supports only ChannelsLast, Contiguous");
   }
 }
 
@@ -260,7 +300,7 @@ void max_unpool3d_kernel_impl(
     const Tensor& input,
     const Tensor& indices) {
   AT_DISPATCH_FLOATING_TYPES(input.scalar_type(), "max_unpool3d", [&] {
-    cpu_max_unpool<scalar_t, /*is_3d*/true>(output, input, indices);
+    cpu_max_unpool<scalar_t, /*is_3d*/ true>(output, input, indices);
   });
 }
 
@@ -269,4 +309,5 @@ void max_unpool3d_kernel_impl(
 REGISTER_DISPATCH(max_unpool2d_kernel, &max_unpool2d_kernel_impl);
 REGISTER_DISPATCH(max_unpool3d_kernel, &max_unpool3d_kernel_impl);
 
-}} // at::native
+} // namespace native
+} // namespace at

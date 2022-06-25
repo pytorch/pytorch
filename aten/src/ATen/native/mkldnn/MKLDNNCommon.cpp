@@ -1,17 +1,18 @@
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/OpaqueTensorImpl.h>
+#include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <c10/core/Allocator.h>
 
 #if AT_MKLDNN_ENABLED()
 
 #include <ideep.hpp>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 /**
  * `IntrusivePtrTargetWrapper` wraps a custom storage handle  of a tensor
-*  (as template param) and inherits `c10::intrusive_ptr_target` so that it
-*  can be used with `c10::intrusive_ptr`.
+ *  (as template param) and inherits `c10::intrusive_ptr_target` so that it
+ *  can be used with `c10::intrusive_ptr`.
  *
  * It currently only supports wrapping the custom handle by:
  * - Constructing with an existing custom handle by copy/move constructor.
@@ -22,13 +23,13 @@ namespace at { namespace native {
  */
 template <typename T>
 struct TORCH_API IntrusivePtrTargetWrapper : c10::intrusive_ptr_target {
-private:
+ private:
   T target_;
 
-public:
+ public:
   IntrusivePtrTargetWrapper() = delete;
-  IntrusivePtrTargetWrapper(const T& target): target_(target) {}
-  IntrusivePtrTargetWrapper(T&& target): target_(std::move(target)) {}
+  IntrusivePtrTargetWrapper(const T& target) : target_(target) {}
+  IntrusivePtrTargetWrapper(T&& target) : target_(std::move(target)) {}
 
   T& get_target() {
     return target_;
@@ -58,24 +59,32 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
   }
 }
 
-Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device) {
+Tensor new_with_itensor_mkldnn(
+    ideep::tensor&& it,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Device> device) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   auto dims = it.get_dims();
-  IDeepTensorWrapperPtr handle = c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
+  IDeepTensorWrapperPtr handle =
+      c10::make_intrusive<IDeepTensorWrapper>(std::move(it));
   caffe2::TypeMeta dtype_ = scalarTypeToTypeMeta(dtype_or_default(dtype));
   Device device_ = device_or_default(device);
   return detail::make_tensor<MKLDNNTensorImpl>(
-    DispatchKeySet(DispatchKey::MkldnnCPU),
-    dtype_, device_, handle,
-    std::vector<int64_t>(dims.begin(), dims.end()));
+      DispatchKeySet(DispatchKey::MkldnnCPU),
+      dtype_,
+      device_,
+      handle,
+      std::vector<int64_t>(dims.begin(), dims.end()));
 }
 
 ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
-  TORCH_CHECK(mkldnn_tensor.is_mkldnn(),
-             "itensor_from_mkldnn expects MKL-DNN tensor input");
+  TORCH_CHECK(
+      mkldnn_tensor.is_mkldnn(),
+      "itensor_from_mkldnn expects MKL-DNN tensor input");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
-  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
+  MKLDNNTensorImpl* mklimpl =
+      static_cast<MKLDNNTensorImpl*>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
@@ -88,19 +97,20 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
       "itensor_view_from_dense expects dense tensor input");
   TORCH_INTERNAL_ASSERT(at::impl::variable_excluded_from_dispatch());
   if (tensor.scalar_type() == ScalarType::Float) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::f32,
-            tensor.strides().vec()},
-            tensor.template data_ptr<float>()};
-  }
-  else if (tensor.scalar_type() == ScalarType::BFloat16) {
-    return {{tensor.sizes().vec(),
-            ideep::tensor::data_type::bf16,
-            tensor.strides().vec()},
-            tensor.template data_ptr<BFloat16>()};
-  }
-  else {
-    TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16 tensor input");
+    return {
+        {tensor.sizes().vec(),
+         ideep::tensor::data_type::f32,
+         tensor.strides().vec()},
+        tensor.template data_ptr<float>()};
+  } else if (tensor.scalar_type() == ScalarType::BFloat16) {
+    return {
+        {tensor.sizes().vec(),
+         ideep::tensor::data_type::bf16,
+         tensor.strides().vec()},
+        tensor.template data_ptr<BFloat16>()};
+  } else {
+    TORCH_CHECK(
+        false, "itensor_view_from_dense expects float/bfloat16 tensor input");
   }
 }
 
@@ -117,6 +127,7 @@ ideep::tensor itensor_from_tensor(const Tensor& tensor) {
   }
 }
 
-}}
+} // namespace native
+} // namespace at
 
 #endif // AT_MKLDNN_ENABLED()

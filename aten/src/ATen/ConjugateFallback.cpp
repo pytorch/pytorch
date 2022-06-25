@@ -1,5 +1,5 @@
-#include <ATen/native/MathBitsFallback.h>
 #include <ATen/native/MathBitFallThroughLists.h>
+#include <ATen/native/MathBitsFallback.h>
 
 namespace at {
 namespace native {
@@ -10,7 +10,10 @@ struct ConjFallback : MathOpFallback {
   }
 };
 
-void conjugateFallback(const c10::OperatorHandle& op, DispatchKeySet dispatch_keys, torch::jit::Stack* stack) {
+void conjugateFallback(
+    const c10::OperatorHandle& op,
+    DispatchKeySet dispatch_keys,
+    torch::jit::Stack* stack) {
   ConjFallback object;
   object.fallback_impl(op, dispatch_keys, stack);
 }
@@ -20,7 +23,9 @@ TORCH_LIBRARY_IMPL(_, Conjugate, m) {
 }
 
 TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
-  m.impl("set_.source_Storage_storage_offset", torch::CppFunction::makeFallthrough());
+  m.impl(
+      "set_.source_Storage_storage_offset",
+      torch::CppFunction::makeFallthrough());
   m.impl("set_.source_Tensor", torch::CppFunction::makeFallthrough());
   m.impl("set_", torch::CppFunction::makeFallthrough());
   m.impl("copy_", torch::CppFunction::makeFallthrough());
@@ -31,12 +36,15 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   m.impl("resolve_conj", torch::CppFunction::makeFallthrough());
   m.impl("resolve_neg", torch::CppFunction::makeFallthrough());
   m.impl("repeat_interleave.Tensor", torch::CppFunction::makeFallthrough());
-  m.impl("repeat_interleave.self_Tensor", torch::CppFunction::makeFallthrough());
+  m.impl(
+      "repeat_interleave.self_Tensor", torch::CppFunction::makeFallthrough());
   m.impl("repeat_interleave.self_int", torch::CppFunction::makeFallthrough());
 
   // See test_metadata_check_when_primal_has_conj_bit in test_autograd.py
   m.impl("_has_same_storage_numel", torch::CppFunction::makeFallthrough());
-  m.impl("_new_zeros_with_same_feature_meta", torch::CppFunction::makeFallthrough());
+  m.impl(
+      "_new_zeros_with_same_feature_meta",
+      torch::CppFunction::makeFallthrough());
 
   // linear algebra functions
   m.impl("dot", torch::CppFunction::makeFallthrough());
@@ -63,5 +71,5 @@ TORCH_LIBRARY_IMPL(aten, Conjugate, m) {
   TORCH_VIEW_FNS_NATIVE_FN_REGISTRATION(m)
 }
 
-}
+} // namespace native
 } // namespace at

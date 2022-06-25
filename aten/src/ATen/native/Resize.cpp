@@ -1,11 +1,12 @@
 #include <ATen/ATen.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
-#include <ATen/TensorSubclassLikeUtils.h>
 
 #include <c10/core/TensorOptions.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // Returns true if resize is necessary
 bool resize_output_check(const Tensor& output, IntArrayRef shape) {
@@ -15,13 +16,17 @@ bool resize_output_check(const Tensor& output, IntArrayRef shape) {
   }
   if (output.numel() != 0) {
     TORCH_WARN(
-      "An output with one or more elements was resized since it had ",
-      "shape ", output.sizes(), ", which does not match the required ",
-      "output shape ", shape, ". ",
-      "This behavior is deprecated, and in a future PyTorch release outputs ",
-      "will not be resized unless they have zero elements. You can explicitly ",
-      "reuse an out tensor t by resizing it, inplace, to zero elements with ",
-      "t.resize_(0).");
+        "An output with one or more elements was resized since it had ",
+        "shape ",
+        output.sizes(),
+        ", which does not match the required ",
+        "output shape ",
+        shape,
+        ". ",
+        "This behavior is deprecated, and in a future PyTorch release outputs ",
+        "will not be resized unless they have zero elements. You can explicitly ",
+        "reuse an out tensor t by resizing it, inplace, to zero elements with ",
+        "t.resize_(0).");
   }
   return true;
 }
@@ -45,14 +50,20 @@ bool resize_output(const Tensor& output, IntArrayRef shape) {
   }
 }
 
-const Tensor& _resize_output_(const Tensor& self, IntArrayRef shape, c10::Device device) {
-  TORCH_CHECK(self.device() == device, "out Tensor doesn't have the correct device set");
+const Tensor& _resize_output_(
+    const Tensor& self,
+    IntArrayRef shape,
+    c10::Device device) {
+  TORCH_CHECK(
+      self.device() == device,
+      "out Tensor doesn't have the correct device set");
   at::native::resize_output(self, shape);
   return self;
 }
 
 void resize_bytes_cpu(StorageImpl* storage, size_t size_bytes) {
-  TORCH_CHECK(storage->resizable(), "Trying to resize storage that is not resizable");
+  TORCH_CHECK(
+      storage->resizable(), "Trying to resize storage that is not resizable");
 
   at::DataPtr new_data;
   if (size_bytes != 0) {
@@ -81,8 +92,8 @@ const Tensor& resize_as_sparse_(const Tensor& self, const Tensor& src);
 // tensor, strides of the output will remain unchanged. Strides going to be
 // set to contiguous if shapes are different.
 //
-// If memory_format is equals to MemoryFormat::Contiguous (torch.contiguous_format)
-// output tensor will have contiguous strides.
+// If memory_format is equals to MemoryFormat::Contiguous
+// (torch.contiguous_format) output tensor will have contiguous strides.
 //
 // If memory_format is equal to MemoryFormat::ChannelsLast (torch.channels_last)
 // and input tensor is 4D, output tensor will have channels last memory layout.
@@ -130,8 +141,7 @@ const Tensor& resize_(
   // NOLINTNEXTLINE(bugprone-argument-comment)
   resize_impl_cpu_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
-    auto memory_format =
-        optional_memory_format.value();
+    auto memory_format = optional_memory_format.value();
     TORCH_CHECK(
         memory_format != MemoryFormat::Preserve,
         "Unsupported memory format",

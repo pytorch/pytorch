@@ -20,7 +20,8 @@ static std::vector<optional<at::Tensor>> get_boxed_opt_tensor_vector() {
   std::vector<optional<at::Tensor>> optional_tensors;
   const size_t SIZE = 5;
   for (size_t i = 0; i < SIZE * 2; i++) {
-    auto opt_tensor = (i % 2 == 0) ? optional<at::Tensor>(at::empty({0})) : nullopt;
+    auto opt_tensor =
+        (i % 2 == 0) ? optional<at::Tensor>(at::empty({0})) : nullopt;
     optional_tensors.emplace_back(opt_tensor);
   }
   return optional_tensors;
@@ -38,7 +39,10 @@ static std::vector<at::OptionalTensorRef> get_unboxed_opt_tensor_vector() {
 }
 
 template <typename T>
-void check_elements_same(at::ITensorListRef list, const T& thing, int use_count) {
+void check_elements_same(
+    at::ITensorListRef list,
+    const T& thing,
+    int use_count) {
   EXPECT_EQ(thing.size(), list.size());
   size_t i = 0;
   for (const auto& t : list) {
@@ -135,13 +139,17 @@ TEST(ITensorListRefTest, UnboxedIndirect_Equal) {
   //   4. temporary `std::vector`
   auto vec = get_tensor_vector();
   // Implicit constructors
-  check_elements_same(vec[0], std::vector<at::Tensor>{vec[0]}, /* use_count= */ 3);
+  check_elements_same(
+      vec[0], std::vector<at::Tensor>{vec[0]}, /* use_count= */ 3);
   check_elements_same({vec.data(), vec.size()}, vec, /* use_count= */ 1);
   check_elements_same({&*vec.begin(), &*vec.end()}, vec, /* use_count= */ 1);
   // Vector constructor
   check_elements_same(vec, vec, /* use_count= */ 1);
   // InitializerList constructor
-  check_elements_same({vec[0], vec[1], vec[2]}, std::vector<at::Tensor>{vec[0], vec[1], vec[2]}, /* use_count= */ 4);
+  check_elements_same(
+      {vec[0], vec[1], vec[2]},
+      std::vector<at::Tensor>{vec[0], vec[1], vec[2]},
+      /* use_count= */ 4);
 }
 
 TEST(ITensorListRefTest, BoxedMaterialize_Equal) {

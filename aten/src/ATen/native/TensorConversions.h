@@ -7,7 +7,7 @@
 #include <c10/util/Optional.h>
 
 namespace at {
-  class Tensor;
+class Tensor;
 namespace native {
 bool to_will_alias(
     const Tensor& self,

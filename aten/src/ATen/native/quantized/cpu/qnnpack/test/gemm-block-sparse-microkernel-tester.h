@@ -27,54 +27,62 @@
 #define MAYBE_UNUSED __attribute__((unused))
 
 namespace {
-  void fillBlockSparseWeights(
-      uint8_t* b,
-      size_t N,
-      size_t K,
-      size_t row_block_size,
-      size_t col_block_size,
-      float sparsity,
-      const uint8_t* zero_points) {
-    std::random_device randomDevice;
-    auto rng = std::mt19937(randomDevice());
-    std::bernoulli_distribution dist{sparsity};
-    for (uint32_t n = 0; n < N ; n += row_block_size) {
-      for (uint32_t k = 0; k < K; k += col_block_size) {
-        if (dist(rng)) {
-          for (uint32_t nb = 0; (nb < row_block_size) && (n + nb < N); ++nb) {
-            for (uint32_t kb = 0; (kb < col_block_size) && (k + kb < K); ++kb) {
-              *(b + (n + nb) * K + k + kb) = zero_points[n + nb];
-            }
+void fillBlockSparseWeights(
+    uint8_t* b,
+    size_t N,
+    size_t K,
+    size_t row_block_size,
+    size_t col_block_size,
+    float sparsity,
+    const uint8_t* zero_points) {
+  std::random_device randomDevice;
+  auto rng = std::mt19937(randomDevice());
+  std::bernoulli_distribution dist{sparsity};
+  for (uint32_t n = 0; n < N; n += row_block_size) {
+    for (uint32_t k = 0; k < K; k += col_block_size) {
+      if (dist(rng)) {
+        for (uint32_t nb = 0; (nb < row_block_size) && (n + nb < N); ++nb) {
+          for (uint32_t kb = 0; (kb < col_block_size) && (k + kb < K); ++kb) {
+            *(b + (n + nb) * K + k + kb) = zero_points[n + nb];
           }
         }
       }
     }
   }
-
-  // Temp Debug utils that will be removed later
-  MAYBE_UNUSED void printMatrix(const char* name, const uint8_t* a, const size_t M, const size_t N) {
-    std::cout << "Matrix START:" << name << "...\n";
-    for (uint32_t m = 0; m < M ; ++m) {
-      for (uint32_t n = 0; n < N; n++) {
-        std::cout << (const uint32_t)(*(a + m * N + n)) << ", ";
-      }
-      std::cout << std::endl;
-    }
-    std::cout << "Matrix END...\n\n";
-  }
-
-  MAYBE_UNUSED void printMatrix(const char* name, const float* a, const size_t M, const size_t N) {
-    std::cout << "Matrix START:" << name << "...\n";
-    for (uint32_t m = 0; m < M ; ++m) {
-      for (uint32_t n = 0; n < N; n++) {
-        std::cout << (*(a + m * N + n)) << ", ";
-      }
-      std::cout << std::endl;
-    }
-    std::cout << "Matrix END...\n\n";
-  }
-
 }
+
+// Temp Debug utils that will be removed later
+MAYBE_UNUSED void printMatrix(
+    const char* name,
+    const uint8_t* a,
+    const size_t M,
+    const size_t N) {
+  std::cout << "Matrix START:" << name << "...\n";
+  for (uint32_t m = 0; m < M; ++m) {
+    for (uint32_t n = 0; n < N; n++) {
+      std::cout << (const uint32_t)(*(a + m * N + n)) << ", ";
+    }
+    std::cout << std::endl;
+  }
+  std::cout << "Matrix END...\n\n";
+}
+
+MAYBE_UNUSED void printMatrix(
+    const char* name,
+    const float* a,
+    const size_t M,
+    const size_t N) {
+  std::cout << "Matrix START:" << name << "...\n";
+  for (uint32_t m = 0; m < M; ++m) {
+    for (uint32_t n = 0; n < N; n++) {
+      std::cout << (*(a + m * N + n)) << ", ";
+    }
+    std::cout << std::endl;
+  }
+  std::cout << "Matrix END...\n\n";
+}
+
+} // namespace
 
 class GemmBlockSparseMicrokernelTester {
  public:
@@ -247,7 +255,8 @@ class GemmBlockSparseMicrokernelTester {
 
     std::vector<uint8_t> a((m() - 1) * aStride() + k() + 8);
     std::vector<uint8_t> b(n() * k());
-    std::vector<float, AlignedAllocator<float, 32>> bias(std::max<size_t>(8, n()));
+    std::vector<float, AlignedAllocator<float, 32>> bias(
+        std::max<size_t>(8, n()));
     std::vector<float> c((m() - 1) * cStride() + n());
     std::vector<float> acc(m() * n());
 
@@ -258,9 +267,12 @@ class GemmBlockSparseMicrokernelTester {
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
       std::fill(c.begin(), c.end(), 0.0f);
       size_t num_zero_points_padded = n() + 8;
-      std::vector<uint8_t> kernel_zero_points
-        (num_zero_points_padded, bZeroPoint());
-      std::generate(kernel_zero_points.begin(), kernel_zero_points.end(), std::ref(u8rng));
+      std::vector<uint8_t> kernel_zero_points(
+          num_zero_points_padded, bZeroPoint());
+      std::generate(
+          kernel_zero_points.begin(),
+          kernel_zero_points.end(),
+          std::ref(u8rng));
 
       // This loop to ensure the assert_ne on b mat does not fire.
       uint8_t max_elem, min_elem;
@@ -294,8 +306,7 @@ class GemmBlockSparseMicrokernelTester {
           *std::max_element(b.cbegin(), b.cend()),
           *std::min_element(b.cbegin(), b.cend()));
 
-      auto f32rng =
-          std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+      auto f32rng = std::bind(std::uniform_real_distribution<float>(1, 5), rng);
       std::vector<float> dequantization_scales(num_zero_points_padded);
       std::generate(
           dequantization_scales.begin(),
@@ -311,19 +322,18 @@ class GemmBlockSparseMicrokernelTester {
             acc[mIndex * n() + nIndex] +=
                 (int32_t(aPtr[mIndex * aStride() + kIndex]) -
                  int32_t(aZeroPoint())) *
-                (int32_t(b[nIndex * k() + kIndex]) - int32_t(kernel_zero_points[nIndex]));
+                (int32_t(b[nIndex * k() + kIndex]) -
+                 int32_t(kernel_zero_points[nIndex]));
           }
           acc[mIndex * n() + nIndex] =
-            acc[mIndex * n() + nIndex] *
-            dequantization_scales[nIndex] +
-            bias[nIndex];
+              acc[mIndex * n() + nIndex] * dequantization_scales[nIndex] +
+              bias[nIndex];
         }
       }
 
-      const struct pytorch_qnnp_conv_dynamic_quantization_params quantizationParams{
-        aZeroPoint(),
-        kernel_zero_points.data(),
-        dequantization_scales.data(),
+      const struct pytorch_qnnp_conv_dynamic_quantization_params
+          quantizationParams {
+        aZeroPoint(), kernel_zero_points.data(), dequantization_scales.data(),
       };
 
       qgemm(
@@ -342,9 +352,7 @@ class GemmBlockSparseMicrokernelTester {
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
-          ASSERT_EQ(
-              c[mIndex * cStride() + nIndex],
-              acc[mIndex * n() + nIndex])
+          ASSERT_EQ(c[mIndex * cStride() + nIndex], acc[mIndex * n() + nIndex])
               << "at " << mIndex << ", " << nIndex
               << ": reference = " << acc[mIndex * n() + nIndex]
               << ", optimized = " << c[mIndex * cStride() + nIndex]
@@ -369,15 +377,17 @@ class GemmBlockSparseMicrokernelTester {
 
     std::vector<uint8_t> a((m() - 1) * aStride() + k() + 8);
     std::vector<uint8_t> b(n() * k());
-    std::vector<float, AlignedAllocator<float, 32>> bias(std::max<size_t>(8, n()));
+    std::vector<float, AlignedAllocator<float, 32>> bias(
+        std::max<size_t>(8, n()));
     std::vector<float> c((m() - 1) * cStride() + n());
     std::vector<float> acc(m() * n());
-    auto m_blocks = (m() + mr()  - 1) / mr();
+    auto m_blocks = (m() + mr() - 1) / mr();
     // While colBlockSize() is what kr is, we reuse 8x4/4x4 packing kernels
     // and thus a_packed has to be allocated accordingly.
     const uint32_t kr_value = 4;
-    auto k_blocks = (k() + kr_value  - 1) / kr_value;
-    std::vector<uint8_t> a_packed((m_blocks * k_blocks * mr() * kr_value) + 8, 0);
+    auto k_blocks = (k() + kr_value - 1) / kr_value;
+    std::vector<uint8_t> a_packed(
+        (m_blocks * k_blocks * mr() * kr_value) + 8, 0);
 
     const uint8_t* aPtr = a.data();
 
@@ -386,8 +396,8 @@ class GemmBlockSparseMicrokernelTester {
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
       std::fill(c.begin(), c.end(), 0.0f);
       size_t num_zero_points_padded = n() + 8;
-      std::vector<uint8_t> kernel_zero_points
-        (num_zero_points_padded, bZeroPoint());
+      std::vector<uint8_t> kernel_zero_points(
+          num_zero_points_padded, bZeroPoint());
 
       uint8_t max_elem, min_elem;
       // This loop to ensure the assert_ne on b mat does not fire.
@@ -405,13 +415,13 @@ class GemmBlockSparseMicrokernelTester {
         min_elem = *std::min_element(b.cbegin(), b.cend());
       } while (max_elem == min_elem);
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
-        qnnpack::generateBlockCSRMatrix(
-            b.data(),
-            n(),
-            k(),
-            rowBlockSize(),
-            colBlockSize(),
-            kernel_zero_points.data());
+          qnnpack::generateBlockCSRMatrix(
+              b.data(),
+              n(),
+              k(),
+              rowBlockSize(),
+              colBlockSize(),
+              kernel_zero_points.data());
 
       ASSERT_NE(
           *std::max_element(a.cbegin(), a.cend()),
@@ -420,8 +430,7 @@ class GemmBlockSparseMicrokernelTester {
           *std::max_element(b.cbegin(), b.cend()),
           *std::min_element(b.cbegin(), b.cend()));
 
-      auto f32rng =
-          std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+      auto f32rng = std::bind(std::uniform_real_distribution<float>(1, 5), rng);
       std::vector<float> dequantization_scales(num_zero_points_padded, 1.f);
       std::generate(
           dequantization_scales.begin(),
@@ -437,28 +446,21 @@ class GemmBlockSparseMicrokernelTester {
             acc[mIndex * n() + nIndex] +=
                 (int32_t(aPtr[mIndex * aStride() + kIndex]) -
                  int32_t(aZeroPoint())) *
-                (int32_t(b[nIndex * k() + kIndex]) - int32_t(kernel_zero_points[nIndex]));
+                (int32_t(b[nIndex * k() + kIndex]) -
+                 int32_t(kernel_zero_points[nIndex]));
           }
           acc[mIndex * n() + nIndex] =
-            acc[mIndex * n() + nIndex] *
-            dequantization_scales[nIndex] +
-            bias[nIndex];
+              acc[mIndex * n() + nIndex] * dequantization_scales[nIndex] +
+              bias[nIndex];
         }
       }
 
-      const struct pytorch_qnnp_conv_dynamic_quantization_params quantizationParams{
-        aZeroPoint(),
-        kernel_zero_points.data(),
-        dequantization_scales.data(),
+      const struct pytorch_qnnp_conv_dynamic_quantization_params
+          quantizationParams {
+        aZeroPoint(), kernel_zero_points.data(), dequantization_scales.data(),
       };
 
-      packa(
-          m(),
-          k(),
-          aPtr,
-          aStride() * sizeof(uint8_t),
-          a_packed.data()
-          );
+      packa(m(), k(), aPtr, aStride() * sizeof(uint8_t), a_packed.data());
 
       qgemm(
           m(),
@@ -475,9 +477,7 @@ class GemmBlockSparseMicrokernelTester {
 
       for (size_t mIndex = 0; mIndex < m(); mIndex++) {
         for (size_t nIndex = 0; nIndex < n(); nIndex++) {
-          ASSERT_EQ(
-              c[mIndex * cStride() + nIndex],
-              acc[mIndex * n() + nIndex])
+          ASSERT_EQ(c[mIndex * cStride() + nIndex], acc[mIndex * n() + nIndex])
               << "at " << mIndex << ", " << nIndex
               << ": reference = " << acc[mIndex * n() + nIndex]
               << ", optimized = " << c[mIndex * cStride() + nIndex]

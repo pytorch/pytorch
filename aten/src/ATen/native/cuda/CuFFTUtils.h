@@ -2,22 +2,21 @@
 
 #include <ATen/Config.h>
 
-#include <string>
-#include <stdexcept>
-#include <sstream>
 #include <cufft.h>
 #include <cufftXt.h>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // This means that max dim is 3 + 2 = 5 with batch dimension and possible
 // complex dimension
 constexpr int max_rank = 3;
 
-static inline std::string _cudaGetErrorEnum(cufftResult error)
-{
-  switch (error)
-  {
+static inline std::string _cudaGetErrorEnum(cufftResult error) {
+  switch (error) {
     case CUFFT_SUCCESS:
       return "CUFFT_SUCCESS";
     case CUFFT_INVALID_PLAN:
@@ -61,8 +60,7 @@ static inline std::string _cudaGetErrorEnum(cufftResult error)
   }
 }
 
-static inline void CUFFT_CHECK(cufftResult error)
-{
+static inline void CUFFT_CHECK(cufftResult error) {
   if (error != CUFFT_SUCCESS) {
     std::ostringstream ss;
     ss << "cuFFT error: " << _cudaGetErrorEnum(error);
@@ -70,4 +68,5 @@ static inline void CUFFT_CHECK(cufftResult error)
   }
 }
 
-}} // at::native
+} // namespace native
+} // namespace at

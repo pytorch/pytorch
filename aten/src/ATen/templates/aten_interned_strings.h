@@ -2,7 +2,8 @@
 
 // ${generated_comment}
 
-#if defined(TORCH_ASSERT_NO_OPERATORS) || defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
+#if defined(TORCH_ASSERT_NO_OPERATORS) || \
+    defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
 #error This change adds a dependency on native_functions.yaml,          \
   meaning the file will need to be re-compiled every time an operator   \
   is changed or added. Consider if including <ATen/core/symbol.h> for   \
@@ -16,7 +17,11 @@
 // with their ATen name.
 
 #define FORALL_ATEN_BASE_SYMBOLS(_) \
-${aten_symbols}
+  $ {                               \
+    aten_symbols                    \
+  }
 
 #define FORALL_ATTR_BASE_SYMBOLS(_) \
-${attr_symbols}
+  $ {                               \
+    attr_symbols                    \
+  }

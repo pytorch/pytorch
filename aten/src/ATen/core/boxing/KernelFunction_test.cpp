@@ -1,17 +1,17 @@
-#include <gtest/gtest.h>
 #include <ATen/ATen.h>
 #include <ATen/core/boxing/KernelFunction.h>
 #include <ATen/core/boxing/impl/test_helpers.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <gtest/gtest.h>
 
-using std::vector;
-using std::tuple;
-using c10::optional;
 using c10::IValue;
-using c10::OperatorKernel;
-using c10::OperatorHandle;
-using c10::Stack;
 using c10::KernelFunction;
+using c10::OperatorHandle;
+using c10::OperatorKernel;
+using c10::optional;
+using c10::Stack;
+using std::tuple;
+using std::vector;
 
 namespace {
 
@@ -26,33 +26,38 @@ namespace kernels {
 
 optional<tuple<int64_t, int64_t>> called_with_args;
 
-
-// The calling convention in the dispatcher requires that calls to KernelFunction::call()/callBoxed()
-// take in a DispatchKeySet.
-// The value itself is meaningless for all of the tests that use kernels without a DispatchKeySet argument.
-// See Note [Plumbing Keys Through The Dispatcher] for details.
+// The calling convention in the dispatcher requires that calls to
+// KernelFunction::call()/callBoxed() take in a DispatchKeySet. The value itself
+// is meaningless for all of the tests that use kernels without a DispatchKeySet
+// argument. See Note [Plumbing Keys Through The Dispatcher] for details.
 c10::DispatchKeySet CPU_TEST_SET = c10::DispatchKeySet(c10::DispatchKey::CPU);
 
 void boxed_func_with_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
   EXPECT_EQ(2, stack->size());
   EXPECT_TRUE(stack->at(0).isInt());
   EXPECT_TRUE(stack->at(1).isInt());
-  called_with_args = tuple<int64_t, int64_t>(stack->at(0).toInt(), stack->at(1).toInt());
+  called_with_args =
+      tuple<int64_t, int64_t>(stack->at(0).toInt(), stack->at(1).toInt());
 
   stack->clear();
   stack->push_back(5);
 }
 
-void boxed_func_without_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_without_return(
+    const OperatorHandle& /*opHandle*/,
+    Stack* stack) {
   EXPECT_EQ(2, stack->size());
   EXPECT_TRUE(stack->at(0).isInt());
   EXPECT_TRUE(stack->at(1).isInt());
-  called_with_args = tuple<int64_t, int64_t>(stack->at(0).toInt(), stack->at(1).toInt());
+  called_with_args =
+      tuple<int64_t, int64_t>(stack->at(0).toInt(), stack->at(1).toInt());
 
   stack->clear();
 }
 
-void boxed_func_with_multi_return(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_with_multi_return(
+    const OperatorHandle& /*opHandle*/,
+    Stack* stack) {
   EXPECT_EQ(2, stack->size());
   EXPECT_TRUE(stack->at(0).isInt());
   int64_t a = stack->at(0).toInt();
@@ -99,12 +104,12 @@ void unboxed_function_without_return(int64_t a, int64_t b) {
   called_with_args = tuple<int64_t, int64_t>(a, b);
 }
 
-auto unboxed_lambda_with_return = [] (int64_t a, int64_t b) -> int64_t {
+auto unboxed_lambda_with_return = [](int64_t a, int64_t b) -> int64_t {
   called_with_args = tuple<int64_t, int64_t>(a, b);
   return 5;
 };
 
-auto unboxed_lambda_without_return = [] (int64_t a, int64_t b) -> void{
+auto unboxed_lambda_without_return = [](int64_t a, int64_t b) -> void {
   called_with_args = tuple<int64_t, int64_t>(a, b);
 };
 
@@ -114,10 +119,13 @@ OperatorHandle makeDummyOperatorHandle() {
 }
 
 //
-// boxed kernels that return refs to tensor arguments, a la inplace/outplace kernels
+// boxed kernels that return refs to tensor arguments, a la inplace/outplace
+// kernels
 //
 
-void boxed_func_for_inplace_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_for_inplace_op(
+    const OperatorHandle& /*opHandle*/,
+    Stack* stack) {
   // (Tensor(a!), Scalar) -> Tensor(a!)
   EXPECT_EQ(2, stack->size());
 
@@ -133,7 +141,9 @@ void boxed_func_for_inplace_op(const OperatorHandle& /*opHandle*/, Stack* stack)
   torch::jit::push(stack, t);
 }
 
-void boxed_func_for_outofplace_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_for_outofplace_op(
+    const OperatorHandle& /*opHandle*/,
+    Stack* stack) {
   // (Scalar, Tensor(a!)) -> Tensor(a!)
   EXPECT_EQ(2, stack->size());
 
@@ -149,7 +159,9 @@ void boxed_func_for_outofplace_op(const OperatorHandle& /*opHandle*/, Stack* sta
   torch::jit::push(stack, t);
 }
 
-void boxed_func_for_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stack* stack) {
+void boxed_func_for_outofplace_multi_op(
+    const OperatorHandle& /*opHandle*/,
+    Stack* stack) {
   // (Scalar, Scalar, Tensor(a!), Tensor(b!)) -> (Tensor(a!), Tensor(b!))
   EXPECT_EQ(4, stack->size());
 
@@ -181,7 +193,7 @@ void boxed_func_for_outofplace_multi_op(const OperatorHandle& /*opHandle*/, Stac
 
 void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
-  vector<IValue> stack {3, 4};
+  vector<IValue> stack{3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   func.callBoxed(dummy, CPU_TEST_SET, &stack);
@@ -195,7 +207,7 @@ void expectBoxedCallingWithReturnWorks(const KernelFunction& func) {
 
 void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
-  vector<IValue> stack {3, 4};
+  vector<IValue> stack{3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   func.callBoxed(dummy, CPU_TEST_SET, &stack);
@@ -207,7 +219,7 @@ void expectBoxedCallingWithoutReturnWorks(const KernelFunction& func) {
 
 void expectBoxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
-  vector<IValue> stack {3, 4};
+  vector<IValue> stack{3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   func.callBoxed(dummy, CPU_TEST_SET, &stack);
@@ -230,7 +242,7 @@ void expectInPlaceBoxedCallingWorks(const KernelFunction& func) {
 
   auto t = at::zeros({1});
   auto s = 1.0f;
-  vector<IValue> stack {t, s};
+  vector<IValue> stack{t, s};
   func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated out arg and returned it
@@ -245,7 +257,7 @@ void expectOutOfPlaceBoxedCallingWorks(const KernelFunction& func) {
 
   auto s = 1.0f;
   auto t = at::zeros({1});
-  vector<IValue> stack {s, t};
+  vector<IValue> stack{s, t};
   func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated out arg and returned it on the stack
@@ -262,7 +274,7 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   auto s2 = 2.0f;
   auto t1 = at::zeros({1});
   auto t2 = at::zeros({1});
-  vector<IValue> stack {s1, s2, t1, t2};
+  vector<IValue> stack{s1, s2, t1, t2};
   func.callBoxed(dummy, CPU_TEST_SET, &stack);
 
   // kernel should have updated output args and returned them on the stack
@@ -275,14 +287,15 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   EXPECT_TRUE(stack[1].toTensor().is_same(t2));
 }
 
-void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMessage) {
+void expectBoxedCallingFailsWith(
+    const KernelFunction& func,
+    const char* errorMessage) {
   called_with_args = c10::nullopt;
-  vector<IValue> stack {3, 4};
+  vector<IValue> stack{3, 4};
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, CPU_TEST_SET, &stack);
-  }, errorMessage);
+  expectThrows<c10::Error>(
+      [&] { func.callBoxed(dummy, CPU_TEST_SET, &stack); }, errorMessage);
 }
 
 //
@@ -297,7 +310,8 @@ void expectUnboxedCallingWithReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  int64_t result = func.call<int64_t, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
+  int64_t result =
+      func.call<int64_t, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -323,7 +337,8 @@ void expectUnboxedCallingWithMultiReturnWorks(const KernelFunction& func) {
   called_with_args = c10::nullopt;
   OperatorHandle dummy = makeDummyOperatorHandle();
 
-  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(dummy, CPU_TEST_SET, 3, 4);
+  auto result = func.call<std::tuple<int64_t, int64_t>, int64_t, int64_t>(
+      dummy, CPU_TEST_SET, 3, 4);
 
   EXPECT_TRUE(called_with_args.has_value());
   EXPECT_EQ((tuple<int64_t, int64_t>(3, 4)), *called_with_args);
@@ -337,7 +352,8 @@ void expectInPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto t = at::zeros({1});
-  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(dummy, CPU_TEST_SET, t, 1.0f);
+  at::Tensor& t_out = func.call<at::Tensor&, at::Tensor&, at::Scalar>(
+      dummy, CPU_TEST_SET, t, 1.0f);
 
   // should have updated first arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -348,7 +364,8 @@ void expectOutOfPlaceUnboxedCallingWorks(const KernelFunction& func) {
   OperatorHandle dummy = makeDummyOperatorHandle();
 
   auto t = at::zeros({1});
-  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(dummy, CPU_TEST_SET, 1.0f, t);
+  at::Tensor& t_out = func.call<at::Tensor&, at::Scalar, at::Tensor&>(
+      dummy, CPU_TEST_SET, 1.0f, t);
 
   // should have updated out arg and returned it
   EXPECT_EQ(t.item().toFloat(), 1.0f);
@@ -364,8 +381,11 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   auto t2 = at::zeros({1});
 
   std::tuple<at::Tensor&, at::Tensor&> tup = func.call<
-    std::tuple<at::Tensor&, at::Tensor&>, at::Scalar, at::Scalar, at::Tensor&, at::Tensor&
-  >(dummy, CPU_TEST_SET, s1, s2, t1, t2);
+      std::tuple<at::Tensor&, at::Tensor&>,
+      at::Scalar,
+      at::Scalar,
+      at::Tensor&,
+      at::Tensor&>(dummy, CPU_TEST_SET, s1, s2, t1, t2);
 
   // kernel should have updated out args and returned them in a tuple
   EXPECT_EQ(t1.item().toFloat(), 1.0f);
@@ -380,158 +400,250 @@ void expectOutOfPlaceMultiUnboxedCallingWorks(const KernelFunction& func) {
   EXPECT_TRUE(t2_out.is_same(t2));
 }
 
-}
+} // namespace kernels
 
 // functional, boxed calling
 
-TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func =
+      KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_without_return>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_without_return>();
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_multi_return>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withMultiReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_with_multi_return>();
   kernels::expectBoxedCallingWithMultiReturnWorks(func);
 }
 
 // in/out, boxed calling
 
-TEST(KernelFunctionTest, givenBoxedFunction_withInPlaceSignature_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_inplace_op>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withInPlaceSignature_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_for_inplace_op>();
   kernels::expectInPlaceBoxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_op>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withOutOfPlaceSignature_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_for_outofplace_op>();
   kernels::expectOutOfPlaceBoxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_for_outofplace_multi_op>();
   kernels::expectOutOfPlaceMultiBoxedCallingWorks(func);
 }
 
 // functional, unboxed calling
 
-TEST(KernelFunctionTest, givenBoxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func =
+      KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_return>();
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_without_return>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_without_return>();
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withMultiReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_with_multi_return>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withMultiReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_with_multi_return>();
   kernels::expectUnboxedCallingWithMultiReturnWorks(func);
 }
 
 // in/out, unboxed calling
 
-TEST(KernelFunctionTest, givenBoxedFunction_withInPlaceSignature_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_inplace_op>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withInPlaceSignature_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_for_inplace_op>();
   kernels::expectInPlaceUnboxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceSignature_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_op>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withOutOfPlaceSignature_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_for_outofplace_op>();
   kernels::expectOutOfPlaceUnboxedCallingWorks(func);
 }
 
-TEST(KernelFunctionTest, givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromBoxedFunction<&kernels::boxed_func_for_outofplace_multi_op>();
+TEST(
+    KernelFunctionTest,
+    givenBoxedFunction_withOutOfPlaceMultiSignature_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromBoxedFunction<
+      &kernels::boxed_func_for_outofplace_multi_op>();
   kernels::expectOutOfPlaceMultiUnboxedCallingWorks(func);
 }
 
 // functors etc.
 
-TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
+TEST(
+    KernelFunctionTest,
+    givenUnboxedFunctor_withReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::
+      makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(
+          std::unique_ptr<OperatorKernel>(
+              std::make_unique<kernels::unboxed_functor_with_return>()));
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
+TEST(
+    KernelFunctionTest,
+    givenUnboxedFunctor_withoutReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::
+      makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(
+          std::unique_ptr<OperatorKernel>(
+              std::make_unique<kernels::unboxed_functor_without_return>()));
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedFunctor_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_with_return>()));
+TEST(
+    KernelFunctionTest,
+    givenUnboxedFunctor_withReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::
+      makeFromUnboxedFunctor<false, kernels::unboxed_functor_with_return>(
+          std::unique_ptr<OperatorKernel>(
+              std::make_unique<kernels::unboxed_functor_with_return>()));
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedFunctor_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(std::unique_ptr<OperatorKernel>(std::make_unique<kernels::unboxed_functor_without_return>()));
+TEST(
+    KernelFunctionTest,
+    givenUnboxedFunctor_withoutReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::
+      makeFromUnboxedFunctor<false, kernels::unboxed_functor_without_return>(
+          std::unique_ptr<OperatorKernel>(
+              std::make_unique<kernels::unboxed_functor_without_return>()));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
+TEST(
+    KernelFunctionTest,
+    givenUnboxedFunction_withReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction(
+      TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
+TEST(
+    KernelFunctionTest,
+    givenUnboxedFunction_withoutReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction(
+      TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_with_return));
+TEST(
+    KernelFunctionTest,
+    givenUnboxedFunction_withReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction(
+      TORCH_FN(kernels::unboxed_function_with_return));
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedFunction(TORCH_FN(kernels::unboxed_function_without_return));
+TEST(
+    KernelFunctionTest,
+    givenUnboxedFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedFunction(
+      TORCH_FN(kernels::unboxed_function_without_return));
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_with_return);
+TEST(
+    KernelFunctionTest,
+    givenUnboxedRuntimeFunction_withReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(
+      &kernels::unboxed_function_with_return);
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withoutReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_without_return);
+TEST(
+    KernelFunctionTest,
+    givenUnboxedRuntimeFunction_withoutReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(
+      &kernels::unboxed_function_without_return);
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_with_return);
+TEST(
+    KernelFunctionTest,
+    givenUnboxedRuntimeFunction_withReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(
+      &kernels::unboxed_function_with_return);
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedRuntimeFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(&kernels::unboxed_function_without_return);
+TEST(
+    KernelFunctionTest,
+    givenUnboxedRuntimeFunction_withoutReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedRuntimeFunction(
+      &kernels::unboxed_function_without_return);
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_with_return);
+TEST(
+    KernelFunctionTest,
+    givenUnboxedLambda_withReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedLambda(
+      kernels::unboxed_lambda_with_return);
   kernels::expectBoxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedLambda_withoutReturn_whenCallingBoxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_without_return);
+TEST(
+    KernelFunctionTest,
+    givenUnboxedLambda_withoutReturn_whenCallingBoxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedLambda(
+      kernels::unboxed_lambda_without_return);
   kernels::expectBoxedCallingWithoutReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedLambda_withReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_with_return);
+TEST(
+    KernelFunctionTest,
+    givenUnboxedLambda_withReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedLambda(
+      kernels::unboxed_lambda_with_return);
   kernels::expectUnboxedCallingWithReturnWorks(func);
 }
 
-TEST(KernelFunctionTest, givenUnboxedLambda_withoutReturn_whenCallingUnboxed_thenWorks) {
-  KernelFunction func = KernelFunction::makeFromUnboxedLambda(kernels::unboxed_lambda_without_return);
+TEST(
+    KernelFunctionTest,
+    givenUnboxedLambda_withoutReturn_whenCallingUnboxed_thenWorks) {
+  KernelFunction func = KernelFunction::makeFromUnboxedLambda(
+      kernels::unboxed_lambda_without_return);
   kernels::expectUnboxedCallingWithoutReturnWorks(func);
 }
 
-}
+} // namespace
 
 // TODO Also test different variants of calling unboxed with wrong signatures

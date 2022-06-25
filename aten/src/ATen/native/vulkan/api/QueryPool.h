@@ -13,14 +13,17 @@ namespace api {
 
 class QueryPool final {
  public:
-  explicit QueryPool(const VkDevice& device, const bool is_timestamps_supported, const float timestamp_period_us);
+  explicit QueryPool(
+      const VkDevice& device,
+      const bool is_timestamps_supported,
+      const float timestamp_period_us);
   QueryPool(const QueryPool&) = delete;
   QueryPool(QueryPool&&) = default;
   QueryPool& operator=(const QueryPool&) = delete;
   QueryPool& operator=(QueryPool&&) = default;
   ~QueryPool();
 
-public:
+ public:
   struct PerfInfo final {
     std::string query_name;
     int64_t start_time_us;
@@ -33,15 +36,18 @@ public:
     static constexpr uint32_t kMaxQueryCount = 65536u;
   };
 
-public:
+ public:
   bool is_enabled() const;
   bool enable();
-  std::vector<QueryPool::PerfInfo> disable(const bool waitfor_allqueries = true);
-  int begin(const VkCommandBuffer& commandBuffer, const std::string& query_name);
+  std::vector<QueryPool::PerfInfo> disable(
+      const bool waitfor_allqueries = true);
+  int begin(
+      const VkCommandBuffer& commandBuffer,
+      const std::string& query_name);
   void end(const VkCommandBuffer& commandBuffer, const int queryIndex);
   std::vector<PerfInfo> result(const bool waitfor_allqueries) const;
 
-private:
+ private:
   VkDevice device_;
   bool is_timestamps_supported_;
   float timestamp_period_us_;

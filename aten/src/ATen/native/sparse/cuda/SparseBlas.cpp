@@ -1,11 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/SparseCsrTensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlas.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
+#include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -28,7 +28,8 @@ namespace at {
 namespace native {
 
 /*
-  Computes `result` <- α*(A @ B) * spy(C) + β*C, where spy(C) is the sparsity pattern matrix of C.
+  Computes `result` <- α*(A @ B) * spy(C) + β*C, where spy(C) is the sparsity
+  pattern matrix of C.
 
   Args:
   * `mat1` - [in] dense Tensor A of size m × k.
@@ -51,7 +52,8 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cuda(
     auto result_sizes = DimVector(mat1.sizes().slice(0, mat1.dim() - 2));
     result_sizes.push_back(self.size(-2));
     result_sizes.push_back(self.size(-1));
-    at::sparse_csr::get_sparse_csr_impl(result)->resize_(self._nnz(), result_sizes);
+    at::sparse_csr::get_sparse_csr_impl(result)->resize_(
+        self._nnz(), result_sizes);
     result.copy_(self);
   }
 
@@ -60,7 +62,8 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cuda(
     return result;
   }
 
-  sparse::impl::cuda::sampled_addmm_out_sparse_csr(mat1, mat2, beta, alpha, result);
+  sparse::impl::cuda::sampled_addmm_out_sparse_csr(
+      mat1, mat2, beta, alpha, result);
   return result;
 }
 
@@ -71,7 +74,8 @@ Tensor sparse_sampled_addmm_sparse_csr_cuda(
     const Scalar& beta,
     const Scalar& alpha) {
   auto result = at::empty({0, 0}, self.options());
-  at::native::sparse_sampled_addmm_out_sparse_csr_cuda(self, mat1, mat2, beta, alpha, result);
+  at::native::sparse_sampled_addmm_out_sparse_csr_cuda(
+      self, mat1, mat2, beta, alpha, result);
   return result;
 }
 
@@ -83,15 +87,18 @@ Tensor& addmm_out_sparse_compressed_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-
   if (mat1.layout() == kSparseCsc || mat2.layout() == kSparseCsc) {
     // TODO: Add native CSC support to avoid costly conversion.
-    return addmm_out_sparse_compressed_cuda(self, mat1.to_sparse_csr(), mat2.to_sparse_csr(),
-        beta, alpha, result);
+    return addmm_out_sparse_compressed_cuda(
+        self, mat1.to_sparse_csr(), mat2.to_sparse_csr(), beta, alpha, result);
   }
-  TORCH_CHECK(!(mat1.layout() == kSparseBsc || mat2.layout() == kSparseBsc),
+  TORCH_CHECK(
+      !(mat1.layout() == kSparseBsc || mat2.layout() == kSparseBsc),
       "addmm_out_sparse_compressed_cuda currently does not support layout SparseBsc for input mat, but got ",
-      mat1.layout(), " for mat 1 and ", mat2.layout(), " for mat2.");
+      mat1.layout(),
+      " for mat 1 and ",
+      mat2.layout(),
+      " for mat2.");
 
   sparse::impl::_check_is_cuda(self, "self");
   sparse::impl::_check_is_cuda(mat1, "mat1");
@@ -104,8 +111,16 @@ Tensor& addmm_out_sparse_compressed_cuda(
   sparse::impl::_check_dim(mat2, 2, "mat2");
 
   TORCH_CHECK(
-      mat1.size(1) == mat2.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1.size(0), "x", mat1.size(1), " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
+      mat1.size(1) == mat2.size(0),
+      "mat1 and mat2 shapes cannot be multiplied (",
+      mat1.size(0),
+      "x",
+      mat1.size(1),
+      " and ",
+      mat2.sizes()[0],
+      "x",
+      mat2.sizes()[1],
+      ")");
 
   // From addmm_out_cuda_impl at ATen/native/cuda/Blas.cpp
   // TODO: remove code duplication and unify code
@@ -115,25 +130,25 @@ Tensor& addmm_out_sparse_compressed_cuda(
   c10::MaybeOwned<at::Tensor> self_;
   // Don't expand self if this is an in-place operation
   if (&result == &self) {
-     self_ = c10::MaybeOwned<Tensor>::borrowed(self);
+    self_ = c10::MaybeOwned<Tensor>::borrowed(self);
   } else {
-     self_ = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+    self_ = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
   }
 
   sparse::impl::_check_dim(*self_, 2, "self");
-  TORCH_CHECK(((self_->dim() == 2) &&
-               (self_->size(0) == mat1.size(0)) &&
-               (self_->size(1) == mat2.size(1))),
-              "The input tensor must be a matrix with size ",
-              mat1.size(0),
-              "x",
-              mat2.size(1),
-              ", but got a ",
-              self_->dim(),
-              "-D tensor with size ",
-              self_->size(0),
-              "x",
-              self_->size(1));
+  TORCH_CHECK(
+      ((self_->dim() == 2) && (self_->size(0) == mat1.size(0)) &&
+       (self_->size(1) == mat2.size(1))),
+      "The input tensor must be a matrix with size ",
+      mat1.size(0),
+      "x",
+      mat2.size(1),
+      ", but got a ",
+      self_->dim(),
+      "-D tensor with size ",
+      self_->size(0),
+      "x",
+      self_->size(1));
 
   if (&result != &self) {
     if (result.layout() == kStrided) {
@@ -148,7 +163,8 @@ Tensor& addmm_out_sparse_compressed_cuda(
     return result;
   }
 
-  if (sparse::impl::_is_sparse_and_zero(mat1) || sparse::impl::_is_sparse_and_zero(mat2)) {
+  if (sparse::impl::_is_sparse_and_zero(mat1) ||
+      sparse::impl::_is_sparse_and_zero(mat2)) {
     // According to docs, when beta==0 values in self should be ignored.
     // nans and infs should not propagate
     if (beta.toComplexDouble() == 0.) {
@@ -172,9 +188,18 @@ Tensor& baddbmm_out_sparse_csr_cuda(
     Tensor& result) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.is_sparse_csr());
 
-  TORCH_CHECK(self.layout() == kStrided, "torch.baddbmm: Expected self to be strided, but got layout ", self.layout());
-  TORCH_CHECK(mat2.layout() == kStrided, "torch.baddbmm: Expect mat2 to be strided, but got ", mat2.layout());
-  TORCH_CHECK(result.layout() == kStrided, "torch.baddbmm: Expect result to be strided, but got ", result.layout());
+  TORCH_CHECK(
+      self.layout() == kStrided,
+      "torch.baddbmm: Expected self to be strided, but got layout ",
+      self.layout());
+  TORCH_CHECK(
+      mat2.layout() == kStrided,
+      "torch.baddbmm: Expect mat2 to be strided, but got ",
+      mat2.layout());
+  TORCH_CHECK(
+      result.layout() == kStrided,
+      "torch.baddbmm: Expect result to be strided, but got ",
+      result.layout());
 
   if (&result != &self) {
     at::native::resize_output(result, self.sizes());
@@ -202,7 +227,8 @@ Tensor& bmm_out_sparse_csr_cuda(
     Tensor& result) {
   Scalar beta(0.0);
   Scalar alpha(1.0);
-  return at::native::baddbmm_out_sparse_csr_cuda(result, mat1, mat2, beta, alpha, result);
+  return at::native::baddbmm_out_sparse_csr_cuda(
+      result, mat1, mat2, beta, alpha, result);
 }
 
 Tensor& addmv_out_sparse_compressed_cuda(
@@ -212,12 +238,13 @@ Tensor& addmv_out_sparse_compressed_cuda(
     const Scalar& beta,
     const Scalar& alpha,
     Tensor& result) {
-
   if (mat.layout() == kSparseCsc) {
-    return addmv_out_sparse_compressed_cuda(self, mat.to_sparse_csr(), vec,
-        beta, alpha, result);
+    return addmv_out_sparse_compressed_cuda(
+        self, mat.to_sparse_csr(), vec, beta, alpha, result);
   }
-  TORCH_CHECK(mat.layout() != kSparseBsc, "addmm_out_sparse_csr_cuda currently does not support layout SparseBsc for input mat.");
+  TORCH_CHECK(
+      mat.layout() != kSparseBsc,
+      "addmm_out_sparse_csr_cuda currently does not support layout SparseBsc for input mat.");
 
   TORCH_CHECK(mat.dim() == 2, "addmv: Expected mat to be 2-D");
   TORCH_CHECK(vec.dim() == 1, "addmv: Expected vec to be 1-D");
@@ -261,17 +288,20 @@ Tensor& addmv_out_sparse_compressed_cuda(
 }
 
 /*
-  Solves a system of linear equations whose coefficients are represented in a sparse triangular matrix A:
-  op(A) X = B.
+  Solves a system of linear equations whose coefficients are represented in a
+  sparse triangular matrix A: op(A) X = B.
 
   Args:
   * `B` - dense Tensor of size m × nrhs.
   * `A` - sparse Tensor of size m × m.
-  * `upper` - controls whether upper or lower triangular part of A is considered in computations.
+  * `upper` - controls whether upper or lower triangular part of A is considered
+  in computations.
   * `transpose` - if true then op(A) = A^T.
-  * `unitriangular` - if true then the diagonal elements of A are assumed to be one.
+  * `unitriangular` - if true then the diagonal elements of A are assumed to be
+  one.
   * `X` - dense Tensor of size m × nrhs.
-  * `clone_A` - cloned matrix A, required only for compatibility with strided layout interface.
+  * `clone_A` - cloned matrix A, required only for compatibility with strided
+  layout interface.
 */
 std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cuda(
     const Tensor& B,
@@ -281,7 +311,8 @@ std::tuple<Tensor&, Tensor&> triangular_solve_out_sparse_csr_cuda(
     bool unitriangular,
     Tensor& X,
     Tensor& clone_A) {
-  sparse::impl::cuda::triangular_solve_out_sparse_csr(A, B, X, upper, transpose, unitriangular);
+  sparse::impl::cuda::triangular_solve_out_sparse_csr(
+      A, B, X, upper, transpose, unitriangular);
   return std::tuple<Tensor&, Tensor&>(X, clone_A);
 }
 

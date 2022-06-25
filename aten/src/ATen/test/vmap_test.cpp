@@ -49,11 +49,12 @@ TEST(VmapTest, TestBatchedTensor) {
   }
   {
     // Create a "scalar" BatchedTensor. Should not crash.
-    Tensor tensor = addBatchDim(ones({3}), /*lvl*/1, /*dim*/0);
+    Tensor tensor = addBatchDim(ones({3}), /*lvl*/ 1, /*dim*/ 0);
   }
 }
 
-// returns {{lvl=0,dim=0}, {lvl=1,dim=1}, ..., {lvl=kVmapNumLevels-1,dim=kVmapNumLevels-1}};
+// returns {{lvl=0,dim=0}, {lvl=1,dim=1}, ...,
+// {lvl=kVmapNumLevels-1,dim=kVmapNumLevels-1}};
 static BatchDims maxBatchDimsAtFront() {
   BatchDims result;
   for (const auto lvl : c10::irange(kVmapNumLevels)) {
@@ -66,20 +67,20 @@ TEST(VmapTest, TestBatchedTensorMaxLevel) {
   {
     // Should not throw
     auto tensor = ones({2, 3, 4});
-    makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels - 1, /*dim*/0}});
+    makeBatched(ones({2, 3, 4}), {{/*lvl*/ kVmapNumLevels - 1, /*dim*/ 0}});
   }
   {
     auto tensor = ones({2, 3, 4});
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(
-        makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels, /*dim*/0}}),
+        makeBatched(ones({2, 3, 4}), {{/*lvl*/ kVmapNumLevels, /*dim*/ 0}}),
         c10::Error);
   }
   {
     auto tensor = ones({2, 3, 4});
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(
-        makeBatched(ones({2, 3, 4}), {{/*lvl*/kVmapNumLevels + 5, /*dim*/0}}),
+        makeBatched(ones({2, 3, 4}), {{/*lvl*/ kVmapNumLevels + 5, /*dim*/ 0}}),
         c10::Error);
   }
   {
@@ -92,7 +93,7 @@ TEST(VmapTest, TestBatchedTensorMaxLevel) {
     // create a BatchedTensor with kVmapNumLevels+1 levels.
     auto tensor = ones(std::vector<int64_t>(kVmapNumLevels + 1, 1));
     auto batch_dims = maxBatchDimsAtFront();
-    batch_dims.emplace_back(/*lvl*/kVmapNumLevels, /*dim*/kVmapNumLevels);
+    batch_dims.emplace_back(/*lvl*/ kVmapNumLevels, /*dim*/ kVmapNumLevels);
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(makeBatched(tensor, batch_dims), c10::Error);
   }
@@ -117,13 +118,13 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
 
     // test wrap_dim = False
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-    ASSERT_THROW(batched->actualDim(-1, /*wrap_dim*/false), c10::Error);
+    ASSERT_THROW(batched->actualDim(-1, /*wrap_dim*/ false), c10::Error);
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-    ASSERT_THROW(batched->actualDim(-4, /*wrap_dim*/false), c10::Error);
+    ASSERT_THROW(batched->actualDim(-4, /*wrap_dim*/ false), c10::Error);
   }
   {
     // Single batch dim at front
-    Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/0}});
+    Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/ 1, /*dim*/ 0}});
     auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 1);
     ASSERT_EQ(batched->actualDim(2), 3);
@@ -133,7 +134,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   }
   {
     // Single batch dim in middle
-    Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/1}});
+    Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/ 1, /*dim*/ 1}});
     auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(1), 2);
@@ -141,7 +142,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   }
   {
     // Single batch dim at end
-    Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/1, /*dim*/1}});
+    Tensor tensor = makeBatched(ones({2, 3, 5, 7}), {{/*lvl*/ 1, /*dim*/ 1}});
     auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(2), 3);
@@ -150,8 +151,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // Multiple (2) batch dims at front
     Tensor tensor = makeBatched(
-        ones({2, 3, 5, 7}),
-        {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
+        ones({2, 3, 5, 7}), {{/*lvl*/ 1, /*dim*/ 0}, {/*lvl*/ 2, /*dim*/ 1}});
     auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 2);
     ASSERT_EQ(batched->actualDim(1), 3);
@@ -159,8 +159,7 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
   {
     // Multiple (2) batch dims, misc places
     Tensor tensor = makeBatched(
-        ones({2, 3, 5, 7}),
-        {{/*lvl*/1, /*dim*/1}, {/*lvl*/2, /*dim*/3}});
+        ones({2, 3, 5, 7}), {{/*lvl*/ 1, /*dim*/ 1}, {/*lvl*/ 2, /*dim*/ 3}});
     auto* batched = maybeGetBatchedImpl(tensor);
     ASSERT_EQ(batched->actualDim(0), 0);
     ASSERT_EQ(batched->actualDim(1), 2);
@@ -176,14 +175,12 @@ TEST(VmapTest, TestBatchedTensorActualDim) {
     }
     ASSERT_EQ(tensor.dim(), kVmapMaxTensorDims);
 
-    auto batched = addBatchDim(tensor, /*lvl*/1, /*dim*/0);
+    auto batched = addBatchDim(tensor, /*lvl*/ 1, /*dim*/ 0);
     auto* batched_impl = maybeGetBatchedImpl(batched);
     ASSERT_EQ(
         batched_impl->actualDim(kVmapMaxTensorDims - 2),
         kVmapMaxTensorDims - 1);
-    ASSERT_EQ(
-        batched_impl->actualDim(-1),
-        kVmapMaxTensorDims - 1);
+    ASSERT_EQ(batched_impl->actualDim(-1), kVmapMaxTensorDims - 1);
   }
 }
 TEST(VmapTest, TestMultiBatchVmapTransform) {
@@ -191,12 +188,13 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
     // Input is regular Tensor
     auto tensor = ones({2, 3, 5});
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-    ASSERT_THROW(MultiBatchVmapTransform::logicalToPhysical(tensor), c10::Error);
+    ASSERT_THROW(
+        MultiBatchVmapTransform::logicalToPhysical(tensor), c10::Error);
   }
   {
     // Input is BatchedTensor, Batch dims are already at the front
     auto tensor = ones({2, 3, 5});
-    BatchDims bdims = {{/*lvl*/1, /*dim*/0}, {/*lvl*/3, /*dim*/1}};
+    BatchDims bdims = {{/*lvl*/ 1, /*dim*/ 0}, {/*lvl*/ 3, /*dim*/ 1}};
     auto batched = makeBatched(tensor, bdims);
 
     auto result = MultiBatchVmapTransform::logicalToPhysical(batched);
@@ -205,7 +203,7 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
   {
     // Single batch dim, not at front
     auto tensor = ones({2, 3, 5});
-    BatchDims bdims = {{/*lvl*/1, /*dim*/1}};
+    BatchDims bdims = {{/*lvl*/ 1, /*dim*/ 1}};
     auto batched = makeBatched(tensor, bdims);
 
     auto result = MultiBatchVmapTransform::logicalToPhysical(batched);
@@ -215,7 +213,8 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
   {
     // Multiple batch dims, not at front.
     auto tensor = ones({2, 3, 5});
-    BatchDims bdims = {{/*lvl*/1, /*dim*/1}, {/*lvl*/2,/*dim*/2}, {/*lvl*/3,/*dim*/0}};
+    BatchDims bdims = {
+        {/*lvl*/ 1, /*dim*/ 1}, {/*lvl*/ 2, /*dim*/ 2}, {/*lvl*/ 3, /*dim*/ 0}};
     auto batched = makeBatched(tensor, bdims);
 
     auto result = MultiBatchVmapTransform::logicalToPhysical(batched);
@@ -260,8 +259,13 @@ TEST(VmapTest, TestMultiBatchVmapTransform) {
     // bdims = {{0, 2}, {1, 1}, {2, 63}, {3, 5}, {4, 0}, {5, 3}, {6, 4},
     //          {7, 6}, {8, 7}, {9, 8}, ..., {63, 62}}
     BatchDims batch_dims = {
-      {0, 2}, {1, 1}, {2, kVmapNumLevels - 1}, {3, 5}, {4, 0}, {5, 3}, {6, 4}
-    };
+        {0, 2},
+        {1, 1},
+        {2, kVmapNumLevels - 1},
+        {3, 5},
+        {4, 0},
+        {5, 3},
+        {6, 4}};
     for (const auto level : c10::irange(7, kVmapNumLevels)) {
       batch_dims.emplace_back(level, /*dim=*/level - 1);
     }
@@ -303,7 +307,9 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalDims) {
   ASSERT_THROW(physical_view.getPhysicalDims({0, -3}), c10::Error);
 }
 
-static void checkBatchDimsEqual(BatchDimsRef bdims, BatchDimsRef expected_bdims) {
+static void checkBatchDimsEqual(
+    BatchDimsRef bdims,
+    BatchDimsRef expected_bdims) {
   ASSERT_EQ(bdims.size(), expected_bdims.size());
   for (const auto idx : c10::irange(bdims.size())) {
     ASSERT_EQ(bdims[idx].dim(), expected_bdims[idx].dim());
@@ -314,7 +320,7 @@ static void checkBatchDimsEqual(BatchDimsRef bdims, BatchDimsRef expected_bdims)
 TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
   {
     // Simple case: single level
-    VmapPhysicalView physical_view(ones({2, 3, 4}), /*levels = {2}*/4);
+    VmapPhysicalView physical_view(ones({2, 3, 4}), /*levels = {2}*/ 4);
     Tensor physical = ones({2, 6, 7});
 
     auto result = physical_view.getPhysicalToLogicalMap().apply(physical);
@@ -325,7 +331,8 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
   }
   {
     // Multiple levels
-    VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), /*levels = {1, 3, 4}*/2 | 8 | 16);
+    VmapPhysicalView physical_view(
+        ones({2, 3, 4, 5, 6}), /*levels = {1, 3, 4}*/ 2 | 8 | 16);
     Tensor physical = ones({2, 3, 4, 7});
 
     auto result = physical_view.getPhysicalToLogicalMap().apply(physical);
@@ -336,7 +343,7 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
   }
   {
     // Logical dimensions is [].
-    VmapPhysicalView physical_view(ones({2}), /*levels = {2}*/4);
+    VmapPhysicalView physical_view(ones({2}), /*levels = {2}*/ 4);
     Tensor physical = ones({2});
 
     auto result = physical_view.getPhysicalToLogicalMap().apply(physical);
@@ -348,14 +355,14 @@ TEST(VmapTest, TestVmapPhysicalViewNewLogicalFromPhysical) {
 }
 
 // Basic test for BatchedTensor::sum.
-// NB: We don't need to write tests in C++ for batching rules if we can test them
-// in Python via the vmap API. These are here to bootstrap that process.
+// NB: We don't need to write tests in C++ for batching rules if we can test
+// them in Python via the vmap API. These are here to bootstrap that process.
 TEST(VmapTest, TestBatchedTensorSum) {
   {
     // Simple: single batch dim, single reduce dim
     Tensor x = at::randn({2, 3, 5, 7});
 
-    Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/0}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/ 1, /*dim*/ 0}});
     Tensor batched_out = batched_x.sum(0);
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
@@ -365,7 +372,7 @@ TEST(VmapTest, TestBatchedTensorSum) {
     // single batch dim, -1 reduce dim handling
     Tensor x = at::randn({2, 3});
 
-    Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/ 1, /*dim*/ 1}});
     Tensor batched_out = batched_x.sum(-1);
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
@@ -375,7 +382,7 @@ TEST(VmapTest, TestBatchedTensorSum) {
     // single batch dim, multiple reduce dim
     Tensor x = at::randn({2, 3, 5, 7});
 
-    Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/ 1, /*dim*/ 1}});
     Tensor batched_out = batched_x.sum(std::vector<int64_t>{0, 1});
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
@@ -385,7 +392,8 @@ TEST(VmapTest, TestBatchedTensorSum) {
     // multiple batch dim, multiple reduce dim
     Tensor x = at::randn({2, 3, 5, 7});
 
-    Tensor batched_x = makeBatched(x, {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 1, /*dim*/ 0}, {/*lvl*/ 2, /*dim*/ 1}});
     Tensor batched_out = batched_x.sum(std::vector<int64_t>{0, 1});
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
@@ -393,7 +401,9 @@ TEST(VmapTest, TestBatchedTensorSum) {
   }
 }
 
-static void checkBroadcastingVmapTransform(TensorList inputs, TensorList expected_outputs) {
+static void checkBroadcastingVmapTransform(
+    TensorList inputs,
+    TensorList expected_outputs) {
   auto outputs = BroadcastingVmapTransform::logicalToPhysical(inputs);
   ASSERT_EQ(outputs.size(), expected_outputs.size());
   for (const auto idx : c10::irange(outputs.size())) {
@@ -425,8 +435,7 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedBatched) {
     Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
 
     checkBroadcastingVmapTransform(
-        {batched_x, batched_y},
-        {x.unsqueeze(1), y.unsqueeze(2)});
+        {batched_x, batched_y}, {x.unsqueeze(1), y.unsqueeze(2)});
   }
   {
     // Check that the "example" gets padded with extra dims of size 1.
@@ -436,9 +445,7 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedBatched) {
     Tensor batched_x = makeBatched(x, {{0, 0}});
     Tensor batched_y = makeBatched(y, {{0, 0}});
 
-    checkBroadcastingVmapTransform(
-        {batched_x, batched_y},
-        {x.unsqueeze(1), y});
+    checkBroadcastingVmapTransform({batched_x, batched_y}, {x.unsqueeze(1), y});
   }
   {
     // Check batch dims get moved to front, batch dims get aligned,
@@ -452,8 +459,8 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedBatched) {
     checkBroadcastingVmapTransform(
         {batched_x, batched_y},
         {
-          x.permute({1, 3, 0, 2}).view({B0, 1, B2, 1, 2, 3}),
-          y.permute({2, 0, 1}).view({1, B1, 1, B3, 1, 3}),
+            x.permute({1, 3, 0, 2}).view({B0, 1, B2, 1, 2, 3}),
+            y.permute({2, 0, 1}).view({1, B1, 1, B3, 1, 3}),
         });
   }
   {
@@ -464,8 +471,10 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedBatched) {
     Tensor batched_x = makeBatched(x, {{0, 0}});
     Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
 
-    checkBroadcastingVmapTransform({batched_x, batched_y}, {x.view({B0, 1}), y});
-    checkBroadcastingVmapTransform({batched_y, batched_x}, {y, x.view({B0, 1})});
+    checkBroadcastingVmapTransform(
+        {batched_x, batched_y}, {x.view({B0, 1}), y});
+    checkBroadcastingVmapTransform(
+        {batched_y, batched_x}, {y, x.view({B0, 1})});
   }
   {
     // Edge case: Only one tensor is a "batchedtensor scalar"
@@ -475,8 +484,10 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedBatched) {
     Tensor batched_x = makeBatched(x, {{0, 0}});
     Tensor batched_y = makeBatched(y, {{0, 0}, {1, 1}});
 
-    checkBroadcastingVmapTransform({batched_x, batched_y}, {x.view({B0, 1, 1}), y});
-    checkBroadcastingVmapTransform({batched_y, batched_x}, {y, x.view({B0, 1, 1})});
+    checkBroadcastingVmapTransform(
+        {batched_x, batched_y}, {x.view({B0, 1, 1}), y});
+    checkBroadcastingVmapTransform(
+        {batched_y, batched_x}, {y, x.view({B0, 1, 1})});
   }
 }
 
@@ -489,11 +500,9 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedUnbatched) {
     Tensor batched_x = makeBatched(x, {{0, 1}, {1, 3}});
 
     checkBroadcastingVmapTransform(
-        {batched_x, y},
-        {x.permute({1, 3, 0, 2}), y.view({1, 1, 2, 3})});
+        {batched_x, y}, {x.permute({1, 3, 0, 2}), y.view({1, 1, 2, 3})});
     checkBroadcastingVmapTransform(
-        {y, batched_x},
-        {y.view({1, 1, 2, 3}), x.permute({1, 3, 0, 2})});
+        {y, batched_x}, {y.view({1, 1, 2, 3}), x.permute({1, 3, 0, 2})});
   }
   {
     // BatchedTensor has higher example dim than non-batched-tensor
@@ -502,10 +511,8 @@ TEST(VmapTest, TestBroadcastingVmapTransformBatchedUnbatched) {
     Tensor y = at::randn({3});
     Tensor batched_x = makeBatched(x, {{0, 0}, {1, 1}});
 
-    checkBroadcastingVmapTransform(
-        {batched_x, y}, {x, y.view({1, 1, 1, 3})});
-    checkBroadcastingVmapTransform(
-        {y, batched_x}, {y.view({1, 1, 1, 3}), x});
+    checkBroadcastingVmapTransform({batched_x, y}, {x, y.view({1, 1, 1, 3})});
+    checkBroadcastingVmapTransform({y, batched_x}, {y.view({1, 1, 1, 3}), x});
   }
   {
     // BatchedTensor has lower example dim than non-batched-tensor
@@ -555,7 +562,7 @@ TEST(VmapTest, TestBroadcastingVmapTransformMaxLevels) {
     auto y_bdims_vector = fmap(
         ArrayRef<BatchDim>(tmp.begin() + split, tmp.end()),
         [&](const BatchDim& bdim) -> BatchDim {
-          return { bdim.level(), dim++ };
+          return {bdim.level(), dim++};
         });
     BatchDims y_bdims(y_bdims_vector.begin(), y_bdims_vector.end());
 
@@ -564,8 +571,7 @@ TEST(VmapTest, TestBroadcastingVmapTransformMaxLevels) {
 
     auto expected_size = std::vector<int64_t>(kVmapNumLevels, 1);
     checkBroadcastingVmapTransform(
-        {batched_x, batched_y},
-        {x.view(expected_size), y.view(expected_size)});
+        {batched_x, batched_y}, {x.view(expected_size), y.view(expected_size)});
   }
 }
 
@@ -576,8 +582,8 @@ TEST(VmapTest, TestBatchedTensorMul) {
     Tensor x = at::randn({2, 3});
     Tensor y = at::randn({2, 3});
 
-    Tensor Bx = addBatchDim(x, /*lvl*/1, /*dim*/0);
-    Tensor By = addBatchDim(y, /*lvl*/1, /*dim*/0);
+    Tensor Bx = addBatchDim(x, /*lvl*/ 1, /*dim*/ 0);
+    Tensor By = addBatchDim(y, /*lvl*/ 1, /*dim*/ 0);
     Tensor Bout = Bx * By;
 
     const auto& out = maybeGetBatchedImpl(Bout)->value();
@@ -590,7 +596,7 @@ TEST(VmapTest, TestBatchedTensorMul) {
     Tensor x = at::randn({2, 3});
     Tensor y = at::randn({3});
 
-    Tensor Bx = addBatchDim(x, /*lvl*/1, /*dim*/0);
+    Tensor Bx = addBatchDim(x, /*lvl*/ 1, /*dim*/ 0);
     Tensor Bout = Bx * y;
     const auto& out = maybeGetBatchedImpl(Bout)->value();
     std::vector<int64_t> expected_size = {2, 3};
@@ -602,8 +608,8 @@ TEST(VmapTest, TestBatchedTensorMul) {
     Tensor x = at::randn({2, 3});
     Tensor y = at::randn({5, 3});
 
-    Tensor Bx = addBatchDim(x, /*lvl*/1, /*dim*/0);
-    Tensor By = addBatchDim(y, /*lvl*/2, /*dim*/0);
+    Tensor Bx = addBatchDim(x, /*lvl*/ 1, /*dim*/ 0);
+    Tensor By = addBatchDim(y, /*lvl*/ 2, /*dim*/ 0);
     Tensor Bout = Bx * By;
 
     // We get a doubly wrapped BatchTensor...
@@ -625,7 +631,8 @@ TEST(VmapTest, TestBatchedTensorMul) {
     const auto& out = maybeGetBatchedImpl(Bout)->value();
 
     // The batching rule aligns dimensions in the order of their `level`.
-    // It just happened that we chose sizes to be in the same order as the level.
+    // It just happened that we chose sizes to be in the same order as the
+    // level.
     std::vector<int64_t> expected_size = {2, 3, 5, 7};
     ASSERT_EQ(out.sizes(), expected_size);
     ASSERT_TRUE(at::allclose(out, x * y.permute({1, 2, 0}).unsqueeze(3)));
@@ -671,8 +678,12 @@ TEST(VmapTest, TestVmapPhysicalViewGetPhysicalShape) {
     VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 1 | 4);
     ASSERT_EQ(physical_view.getPhysicalShape({}), VmapDimVector({2, 3}));
     ASSERT_EQ(physical_view.getPhysicalShape({7}), VmapDimVector({2, 3, 7}));
-    ASSERT_EQ(physical_view.getPhysicalShape({7, 11, 13}), VmapDimVector({2, 3, 7, 11, 13}));
-    ASSERT_EQ(physical_view.getPhysicalShape({7, 11, 13, 17}), VmapDimVector({2, 3, 7, 11, 13, 17}));
+    ASSERT_EQ(
+        physical_view.getPhysicalShape({7, 11, 13}),
+        VmapDimVector({2, 3, 7, 11, 13}));
+    ASSERT_EQ(
+        physical_view.getPhysicalShape({7, 11, 13, 17}),
+        VmapDimVector({2, 3, 7, 11, 13, 17}));
   }
   {
     VmapPhysicalView physical_view(ones({2, 3, 4, 5, 6}), 2);
@@ -686,14 +697,14 @@ TEST(VmapTest, TestBatchedTensorExpand) {
   {
     // Expand size is too small
     auto tensor = at::randn({2, 3, 5});
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched.expand({5}), c10::Error);
   }
   {
     // Expand size has same dimensionality as the logical dim
     auto tensor = at::randn({2, 1, 5});
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
     auto batched_out = batched.expand({3, 5});
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
@@ -701,26 +712,29 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     ASSERT_TRUE(at::allclose(out, tensor.expand({2, 3, 5})));
   }
   {
-    // Expand size has same dimensionality as the logical dim, incorrect expand size
+    // Expand size has same dimensionality as the logical dim, incorrect expand
+    // size
     auto tensor = at::randn({2, 1, 5});
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched.expand({1, 25}), c10::Error);
   }
   {
     // Expand size has greater dimensionality as the logical dim
     auto tensor = at::randn({2, 3, 5});
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
     auto batched_out = batched.expand({7, 3, 5});
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
 
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
-    ASSERT_TRUE(at::allclose(out, tensor.view({2, 1, 3, 5}).expand({2, 7, 3, 5})));
+    ASSERT_TRUE(
+        at::allclose(out, tensor.view({2, 1, 3, 5}).expand({2, 7, 3, 5})));
   }
   {
-    // Expand size has greater dimensionality as the logical dim, incorrect expand size
+    // Expand size has greater dimensionality as the logical dim, incorrect
+    // expand size
     auto tensor = at::randn({2, 3, 5});
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
     // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
     ASSERT_THROW(batched.expand({7, 9, 5}), c10::Error);
   }
@@ -740,15 +754,16 @@ TEST(VmapTest, TestBatchedTensorExpand) {
     auto batched_out = batched.expand({5, 7});
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
     ASSERT_EQ(out.data_ptr(), tensor.data_ptr());
-    ASSERT_TRUE(at::allclose(out, tensor.view({2, 3, 1, 1}).expand({2, 3, 5, 7})));
+    ASSERT_TRUE(
+        at::allclose(out, tensor.view({2, 3, 1, 1}).expand({2, 3, 5, 7})));
   }
 }
 // Basic test for BatchedTensor::unsqueeze
 TEST(VmapTest, TestBatchedTensorUnsqueeze) {
   {
     // Basic test
-    auto tensor = at::randn({2, 3, 5});  // NOLINT
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto tensor = at::randn({2, 3, 5}); // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
 
     auto batched_out = batched.unsqueeze(0);
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
@@ -757,7 +772,7 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
   }
   {
     // Test with multiple levels
-    auto tensor = at::randn({2, 3, 5});  // NOLINT
+    auto tensor = at::randn({2, 3, 5}); // NOLINT
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.unsqueeze(0);
@@ -767,8 +782,8 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
   }
   {
     // Negative dim
-    auto tensor = at::randn({2, 3, 5});  // NOLINT
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto tensor = at::randn({2, 3, 5}); // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
 
     auto batched_out = batched.unsqueeze(-1);
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
@@ -780,8 +795,8 @@ TEST(VmapTest, TestBatchedTensorUnsqueeze) {
 TEST(VmapTest, TestBatchedTensorSqueeze) {
   {
     // Basic test
-    auto tensor = at::randn({2, 1, 5});  // NOLINT
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto tensor = at::randn({2, 1, 5}); // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
 
     auto batched_out = batched.squeeze(0);
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
@@ -790,7 +805,7 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
   }
   {
     // Test with multiple levels
-    auto tensor = at::randn({2, 3, 1});  // NOLINT
+    auto tensor = at::randn({2, 3, 1}); // NOLINT
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.squeeze(0);
@@ -800,8 +815,8 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
   }
   {
     // Negative dim
-    auto tensor = at::randn({2, 3, 1});  // NOLINT
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto tensor = at::randn({2, 3, 1}); // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
 
     auto batched_out = batched.squeeze(-1);
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
@@ -813,8 +828,8 @@ TEST(VmapTest, TestBatchedTensorSqueeze) {
 TEST(VmapTest, TestBatchedTensorTranspose) {
   {
     // Basic test
-    auto tensor = at::randn({2, 3, 5});  // NOLINT
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto tensor = at::randn({2, 3, 5}); // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
 
     auto batched_out = batched.transpose(0, 1);
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
@@ -823,7 +838,7 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
   }
   {
     // Test with multiple levels
-    auto tensor = at::randn({2, 3, 5, 7, 11});  // NOLINT
+    auto tensor = at::randn({2, 3, 5, 7, 11}); // NOLINT
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.transpose(0, 2);
@@ -833,8 +848,8 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
   }
   {
     // Negative dims
-    auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto tensor = at::randn({2, 3, 5, 7}); // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
 
     auto batched_out = batched.mT();
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
@@ -847,8 +862,8 @@ TEST(VmapTest, TestBatchedTensorTranspose) {
 TEST(VmapTest, TestBatchedTensorPermute) {
   {
     // Basic test
-    auto tensor = at::randn({2, 3, 5});  // NOLINT
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto tensor = at::randn({2, 3, 5}); // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
 
     auto batched_out = batched.permute({1, 0});
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
@@ -857,7 +872,7 @@ TEST(VmapTest, TestBatchedTensorPermute) {
   }
   {
     // Test with multiple levels
-    auto tensor = at::randn({2, 3, 5, 7, 11});  // NOLINT
+    auto tensor = at::randn({2, 3, 5, 7, 11}); // NOLINT
     auto batched = makeBatched(tensor, {{0, 0}, {1, 1}});
 
     auto batched_out = batched.permute({2, 1, 0});
@@ -867,8 +882,8 @@ TEST(VmapTest, TestBatchedTensorPermute) {
   }
   {
     // Negative dims
-    auto tensor = at::randn({2, 3, 5, 7});  // NOLINT
-    auto batched = makeBatched(tensor, {{/*lvl*/0, /*dim*/0}});
+    auto tensor = at::randn({2, 3, 5, 7}); // NOLINT
+    auto batched = makeBatched(tensor, {{/*lvl*/ 0, /*dim*/ 0}});
 
     auto batched_out = batched.permute({-1, -2, -3});
     const auto& out = maybeGetBatchedImpl(batched_out)->value();
@@ -877,7 +892,9 @@ TEST(VmapTest, TestBatchedTensorPermute) {
   }
 }
 
-static void checkMultiBatchVmapTransform(TensorList inputs, TensorList expected_outputs) {
+static void checkMultiBatchVmapTransform(
+    TensorList inputs,
+    TensorList expected_outputs) {
   auto outputs = MultiBatchVmapTransform::logicalToPhysical(inputs);
   ASSERT_EQ(outputs.size(), expected_outputs.size());
   for (const auto idx : c10::irange(outputs.size())) {
@@ -894,8 +911,10 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({2, B0, 3, B1});
     Tensor y = at::randn({B1, 2, 3, B0});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/1}, {/*lvl*/1, /*dim*/3}});
-    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/3}, {/*lvl*/1, /*dim*/0}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 0, /*dim*/ 1}, {/*lvl*/ 1, /*dim*/ 3}});
+    Tensor batched_y =
+        makeBatched(y, {{/*lvl*/ 0, /*dim*/ 3}, {/*lvl*/ 1, /*dim*/ 0}});
 
     checkMultiBatchVmapTransform(
         {batched_x, batched_y},
@@ -906,20 +925,23 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5, B1 = 7, B2 = 9;
     Tensor x = at::randn({B0, B2, 2, 3});
     Tensor y = at::randn({B0, B1, 2, 3});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}, {/*lvl*/2, /*dim*/1}});
-    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 0, /*dim*/ 0}, {/*lvl*/ 2, /*dim*/ 1}});
+    Tensor batched_y =
+        makeBatched(y, {{/*lvl*/ 0, /*dim*/ 0}, {/*lvl*/ 1, /*dim*/ 1}});
 
     checkMultiBatchVmapTransform(
         {batched_x, batched_y},
-        {x.unsqueeze(1).expand({B0, B1, B2, 2, 3}), y.unsqueeze(2).expand({B0, B1, B2, 2, 3})});
+        {x.unsqueeze(1).expand({B0, B1, B2, 2, 3}),
+         y.unsqueeze(2).expand({B0, B1, B2, 2, 3})});
   }
   {
     // Check operation on tensors of different logical dims
     int64_t B0 = 5;
     Tensor x = at::randn({B0, 3});
     Tensor y = at::randn({B0, 2, 3});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}});
-    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/0}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/ 0, /*dim*/ 0}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/ 0, /*dim*/ 0}});
 
     checkMultiBatchVmapTransform({batched_x, batched_y}, {x, y});
   }
@@ -928,14 +950,20 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5, B1 = 7, B2 = 11, B3 = 13;
     Tensor x = at::randn({2, B0, 3, B2});
     Tensor y = at::randn({B3, 3, B1});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/1}, {/*lvl*/2, /*dim*/3}});
-    Tensor batched_y = makeBatched(y, {{/*lvl*/1, /*dim*/2}, {/*lvl*/3, /*dim*/0}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 0, /*dim*/ 1}, {/*lvl*/ 2, /*dim*/ 3}});
+    Tensor batched_y =
+        makeBatched(y, {{/*lvl*/ 1, /*dim*/ 2}, {/*lvl*/ 3, /*dim*/ 0}});
 
     checkMultiBatchVmapTransform(
         {batched_x, batched_y},
         {
-          x.permute({1, 3, 0, 2}).view({B0, 1, B2, 1, 2, 3}).expand({B0, B1, B2, B3, 2, 3}),
-          y.permute({2, 0, 1}).view({1, B1, 1, B3, 3}).expand({B0, B1, B2, B3, 3}),
+            x.permute({1, 3, 0, 2})
+                .view({B0, 1, B2, 1, 2, 3})
+                .expand({B0, B1, B2, B3, 2, 3}),
+            y.permute({2, 0, 1})
+                .view({1, B1, 1, B3, 3})
+                .expand({B0, B1, B2, B3, 3}),
         });
   }
   {
@@ -943,22 +971,28 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedBatched) {
     int64_t B0 = 5, B2 = 11;
     Tensor x = at::randn({B0});
     Tensor y = at::randn({B0, B2});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}});
-    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/ 0, /*dim*/ 0}});
+    Tensor batched_y =
+        makeBatched(y, {{/*lvl*/ 0, /*dim*/ 0}, {/*lvl*/ 1, /*dim*/ 1}});
 
-    checkMultiBatchVmapTransform({batched_x, batched_y}, {x.view({B0, 1}).expand({B0, B2}), y});
-    checkMultiBatchVmapTransform({batched_y, batched_x}, {y, x.view({B0, 1}).expand({B0, B2})});
+    checkMultiBatchVmapTransform(
+        {batched_x, batched_y}, {x.view({B0, 1}).expand({B0, B2}), y});
+    checkMultiBatchVmapTransform(
+        {batched_y, batched_x}, {y, x.view({B0, 1}).expand({B0, B2})});
   }
   {
     // Edge case: Only one tensor is a "batchedtensor scalar"
     int64_t B0 = 5, B2 = 11;
     Tensor x = at::randn({B0});
     Tensor y = at::randn({B0, B2, 2});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}});
-    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
+    Tensor batched_x = makeBatched(x, {{/*lvl*/ 0, /*dim*/ 0}});
+    Tensor batched_y =
+        makeBatched(y, {{/*lvl*/ 0, /*dim*/ 0}, {/*lvl*/ 1, /*dim*/ 1}});
 
-    checkMultiBatchVmapTransform({batched_x, batched_y}, {x.view({B0, 1}).expand({B0, B2}), y});
-    checkMultiBatchVmapTransform({batched_y, batched_x}, {y, x.view({B0, 1}).expand({B0, B2})});
+    checkMultiBatchVmapTransform(
+        {batched_x, batched_y}, {x.view({B0, 1}).expand({B0, B2}), y});
+    checkMultiBatchVmapTransform(
+        {batched_y, batched_x}, {y, x.view({B0, 1}).expand({B0, B2})});
   }
 }
 
@@ -968,21 +1002,25 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedUnbatched) {
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({2, B0, 3, B1});
     Tensor y = at::randn({2, 3});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/1}, {/*lvl*/1, /*dim*/3}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 0, /*dim*/ 1}, {/*lvl*/ 1, /*dim*/ 3}});
 
     checkMultiBatchVmapTransform(
         {batched_x, y},
-        {at::movedim(x, {1, 3}, {0, 1}), y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3})});
+        {at::movedim(x, {1, 3}, {0, 1}),
+         y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3})});
     checkMultiBatchVmapTransform(
         {y, batched_x},
-        {y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3}), at::movedim(x, {1, 3}, {0, 1})});
+        {y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3}),
+         at::movedim(x, {1, 3}, {0, 1})});
   }
   {
     // BatchedTensor has higher example dim than non-batched-tensor
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({B0, B1, 2, 3});
     Tensor y = at::randn({3});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 0, /*dim*/ 0}, {/*lvl*/ 1, /*dim*/ 1}});
 
     checkMultiBatchVmapTransform(
         {batched_x, y}, {x, y.view({1, 1, 3}).expand({B0, B1, 3})});
@@ -994,22 +1032,28 @@ TEST(VmapTest, TestMultiBatchVmapTransformBatchedUnbatched) {
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({B0, B1, 3});
     Tensor y = at::randn({2, 3});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 0, /*dim*/ 0}, {/*lvl*/ 1, /*dim*/ 1}});
 
     checkMultiBatchVmapTransform(
-        {batched_x, y}, {x.view({B0, B1, 3}), y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3})});
+        {batched_x, y},
+        {x.view({B0, B1, 3}), y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3})});
     checkMultiBatchVmapTransform(
-        {y, batched_x}, {y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3}), x.view({B0, B1, 3})});
+        {y, batched_x},
+        {y.view({1, 1, 2, 3}).expand({B0, B1, 2, 3}), x.view({B0, B1, 3})});
   }
   {
     // Scalar handling
     int64_t B0 = 5, B1 = 7;
     Tensor x = at::randn({B0, B1});
     Tensor y = at::randn({});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/0}, {/*lvl*/1, /*dim*/1}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 0, /*dim*/ 0}, {/*lvl*/ 1, /*dim*/ 1}});
 
-    checkMultiBatchVmapTransform({batched_x, y}, {x, y.view({1, 1}).expand({B0, B1})});
-    checkMultiBatchVmapTransform({y, batched_x}, {y.view({1, 1}).expand({B0, B1}), x});
+    checkMultiBatchVmapTransform(
+        {batched_x, y}, {x, y.view({1, 1}).expand({B0, B1})});
+    checkMultiBatchVmapTransform(
+        {y, batched_x}, {y.view({1, 1}).expand({B0, B1}), x});
   }
 }
 
@@ -1037,7 +1081,7 @@ TEST(VmapTest, TestMultiBatchVmapTransformMaxLevels) {
     auto y_bdims_vector = fmap(
         ArrayRef<BatchDim>(tmp.begin() + split, tmp.end()),
         [&](const BatchDim& bdim) -> BatchDim {
-          return { bdim.level(), dim++ };
+          return {bdim.level(), dim++};
         });
     BatchDims y_bdims(y_bdims_vector.begin(), y_bdims_vector.end());
 
@@ -1046,8 +1090,7 @@ TEST(VmapTest, TestMultiBatchVmapTransformMaxLevels) {
 
     auto expected_size = std::vector<int64_t>(kVmapNumLevels, 1);
     checkMultiBatchVmapTransform(
-        {batched_x, batched_y},
-        {x.view(expected_size), y.view(expected_size)});
+        {batched_x, batched_y}, {x.view(expected_size), y.view(expected_size)});
   }
 }
 
@@ -1058,16 +1101,19 @@ TEST(VmapTest, TestMultiBatchVmapTransformMultipleTensors) {
     Tensor x = at::randn({2, B0, 3, B1});
     Tensor y = at::randn({B1, 4});
     Tensor z = at::randn({2, B2});
-    Tensor batched_x = makeBatched(x, {{/*lvl*/0, /*dim*/1}, {/*lvl*/1, /*dim*/3}});
-    Tensor batched_y = makeBatched(y, {{/*lvl*/1, /*dim*/0}});
-    Tensor batched_z = makeBatched(z, {{/*lvl*/2, /*dim*/1}});
+    Tensor batched_x =
+        makeBatched(x, {{/*lvl*/ 0, /*dim*/ 1}, {/*lvl*/ 1, /*dim*/ 3}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/ 1, /*dim*/ 0}});
+    Tensor batched_z = makeBatched(z, {{/*lvl*/ 2, /*dim*/ 1}});
 
     checkMultiBatchVmapTransform(
         {batched_x, batched_y, batched_z},
         {
-          at::movedim(x, {1, 3}, {0, 1}).view({B0, B1, 1, 2, 3}).expand({B0, B1, B2, 2, 3}),
-          y.view({1, B1, 1, 4}).expand({B0, B1, B2, 4}),
-          z.t().view({1, 1, B2, 2}).expand({B0, B1, B2, 2}),
+            at::movedim(x, {1, 3}, {0, 1})
+                .view({B0, B1, 1, 2, 3})
+                .expand({B0, B1, B2, 2, 3}),
+            y.view({1, B1, 1, 4}).expand({B0, B1, B2, 4}),
+            z.t().view({1, 1, B2, 2}).expand({B0, B1, B2, 2}),
         });
   }
   // Test with three tensors, some batched, some unbatched
@@ -1076,18 +1122,18 @@ TEST(VmapTest, TestMultiBatchVmapTransformMultipleTensors) {
     Tensor x = at::randn({2, 3});
     Tensor y = at::randn({4, B0});
     Tensor z = at::randn({B1, 2, B2});
-    Tensor batched_y = makeBatched(y, {{/*lvl*/0, /*dim*/1}});
-    Tensor batched_z = makeBatched(z, {{/*lvl*/1, /*dim*/0}, {/*lvl*/2, /*dim*/2}});
+    Tensor batched_y = makeBatched(y, {{/*lvl*/ 0, /*dim*/ 1}});
+    Tensor batched_z =
+        makeBatched(z, {{/*lvl*/ 1, /*dim*/ 0}, {/*lvl*/ 2, /*dim*/ 2}});
 
     checkMultiBatchVmapTransform(
         {x, batched_y, batched_z},
         {
-          x.view({1, 1, 1, 2, 3}).expand({B0, B1, B2, 2, 3}),
-          y.t().view({B0, 1, 1, 4}).expand({B0, B1, B2, 4}),
-          z.permute({0, 2, 1}).view({1, B1, B2, 2}).expand({B0, B1, B2, 2}),
+            x.view({1, 1, 1, 2, 3}).expand({B0, B1, B2, 2, 3}),
+            y.t().view({B0, 1, 1, 4}).expand({B0, B1, B2, 4}),
+            z.permute({0, 2, 1}).view({1, B1, B2, 2}).expand({B0, B1, B2, 2}),
         });
   }
 }
-
 
 } // namespace

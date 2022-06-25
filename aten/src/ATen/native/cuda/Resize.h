@@ -5,11 +5,16 @@
 
 #include <c10/cuda/CUDAGuard.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-TORCH_CUDA_CPP_API void resize_bytes_cuda(StorageImpl* storage, size_t size_bytes);
+TORCH_CUDA_CPP_API void resize_bytes_cuda(
+    StorageImpl* storage,
+    size_t size_bytes);
 
-static inline void maybe_resize_storage_cuda(TensorImpl* self, size_t new_size_bytes) {
+static inline void maybe_resize_storage_cuda(
+    TensorImpl* self,
+    size_t new_size_bytes) {
   // It does not make sense to try to resize a storage
   // to hold 0 elements, and this can break
   // if storage_offset is positive but
@@ -19,7 +24,7 @@ static inline void maybe_resize_storage_cuda(TensorImpl* self, size_t new_size_b
     return;
   }
 
-  const Storage &storage = self->unsafe_storage();
+  const Storage& storage = self->unsafe_storage();
   TORCH_CHECK(storage, "Tensor: invalid null storage");
   if (new_size_bytes > storage.nbytes()) {
     resize_bytes_cuda(storage.unsafeGetStorageImpl(), new_size_bytes);
@@ -58,4 +63,5 @@ inline TensorImpl* resize_impl_cuda_(
   return self;
 }
 
-}}
+} // namespace native
+} // namespace at

@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/PackedParams.h>
-#include <ATen/native/quantized/cpu/conv_serialization.h>
-#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
-#include <ATen/native/quantized/cpu/OnednnUtils.h>
 #include <ATen/native/TensorFactories.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/conv_serialization.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/QScheme.h>
@@ -110,7 +110,10 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
   std::array<int, kSpatialDim> dilations_;
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   std::array<int, kSpatialDim> output_padding_;
-  std::move(image_shape.begin(), image_shape.begin() + image_shape.size(), image_shape_.begin());
+  std::move(
+      image_shape.begin(),
+      image_shape.begin() + image_shape.size(),
+      image_shape_.begin());
   std::move(
       kernels.begin(), kernels.begin() + kernels.size(), kernels_.begin());
   std::move(
@@ -124,7 +127,8 @@ fbgemm::conv_param_t<kSpatialDim> MakeFbgemmConvParam(
       output_padding.begin() + output_padding.size(),
       output_padding_.begin());
   std::copy(pads.begin(), pads.begin() + pads.size(), pads_.begin());
-  std::move(pads.begin(), pads.begin() + pads.size(), pads_.begin() + pads.size());
+  std::move(
+      pads.begin(), pads.begin() + pads.size(), pads_.begin() + pads.size());
 
   return fbgemm::conv_param_t<kSpatialDim>(
       N, // batch size
@@ -160,12 +164,10 @@ Tensor MakeStridedQTensorCPU(
       allocator->allocate(size_bytes),
       allocator,
       /* resizable = */ true);
-  constexpr auto quantized_cpu_ks = at::DispatchKeySet(at::DispatchKey::QuantizedCPU);
+  constexpr auto quantized_cpu_ks =
+      at::DispatchKeySet(at::DispatchKey::QuantizedCPU);
   auto tensor = detail::make_tensor<QTensorImpl>(
-      storage,
-      quantized_cpu_ks,
-      dtype,
-      quantizer);
+      storage, quantized_cpu_ks, dtype, quantizer);
   get_qtensorimpl(tensor)->set_sizes_and_strides(sizes, strides);
   return tensor;
 }
@@ -359,69 +361,77 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 } // namespace native
 } // namespace at
 
-
 #endif // USE_FBGEMM
 
 namespace {
-  // This is really terrible, but couldnt figure out a better way to constexpr convert int to
-  // string and then perform string concatenation on/with it
-  constexpr const char* _hack_int_to_class_name(int x) {
-    switch(x) {
-      case 2:
-        return "Conv2dPackedParamsBase";
-      case 3:
-        return "Conv3dPackedParamsBase";
-      default:
-        assert(false);
-        return "NotAValidDimension";
-    }
+// This is really terrible, but couldnt figure out a better way to constexpr
+// convert int to string and then perform string concatenation on/with it
+constexpr const char* _hack_int_to_class_name(int x) {
+  switch (x) {
+    case 2:
+      return "Conv2dPackedParamsBase";
+    case 3:
+      return "Conv3dPackedParamsBase";
+    default:
+      assert(false);
+      return "NotAValidDimension";
   }
 }
+} // namespace
 
 template <int kSpatialDim = 2>
-TORCH_API int
-register_conv_params() {
+TORCH_API int register_conv_params() {
   static auto register_conv_params =
-    torch::selective_class_<ConvPackedParamsBase<kSpatialDim>>(
-        "quantized", TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
-    .def_pickle(
-        [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params)
-        -> ConvParamsSerializationType { // __getstate__
-          return serialize_conv<kSpatialDim>(params);
-        },
-        // __setstate__ takes c10::IValue because we support parsing historical
-        // serialization versions.
-        [](c10::IValue v)
-        -> c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> { // __setstate__
-          ConvParamsSerializationTypeV3 state = parse_conv_serialized_state<kSpatialDim>(v);
-          return deserialize_conv<kSpatialDim>(state);
-        })
-    .def("weight", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
-                     at::Tensor weight;
-                     c10::optional<at::Tensor> bias;
-                     std::tie(weight, bias) = self->unpack();
-                     return weight;
-                   })
-    .def("bias", [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& self) {
-                   at::Tensor weight;
-                   c10::optional<at::Tensor> bias;
-                   std::tie(weight, bias) = self->unpack();
-                   return bias;
-                 })
-    .def("unpack", &ConvPackedParamsBase<kSpatialDim>::unpack)
-    .def("stride", &ConvPackedParamsBase<kSpatialDim>::stride)
-    .def("padding", &ConvPackedParamsBase<kSpatialDim>::padding)
-    .def("output_padding", &ConvPackedParamsBase<kSpatialDim>::output_padding)
-    .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
-    .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups)
-    .def("transpose", &ConvPackedParamsBase<kSpatialDim>::transpose);
+      torch::selective_class_<ConvPackedParamsBase<kSpatialDim>>(
+          "quantized",
+          TORCH_SELECTIVE_CLASS(_hack_int_to_class_name(kSpatialDim)))
+          .def_pickle(
+              [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>&
+                     params) -> ConvParamsSerializationType { // __getstate__
+                return serialize_conv<kSpatialDim>(params);
+              },
+              // __setstate__ takes c10::IValue because we support parsing
+              // historical
+              // serialization versions.
+              [](c10::IValue v)
+                  -> c10::intrusive_ptr<
+                      ConvPackedParamsBase<kSpatialDim>> { // __setstate__
+                ConvParamsSerializationTypeV3 state =
+                    parse_conv_serialized_state<kSpatialDim>(v);
+                return deserialize_conv<kSpatialDim>(state);
+              })
+          .def(
+              "weight",
+              [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>&
+                     self) {
+                at::Tensor weight;
+                c10::optional<at::Tensor> bias;
+                std::tie(weight, bias) = self->unpack();
+                return weight;
+              })
+          .def(
+              "bias",
+              [](const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>&
+                     self) {
+                at::Tensor weight;
+                c10::optional<at::Tensor> bias;
+                std::tie(weight, bias) = self->unpack();
+                return bias;
+              })
+          .def("unpack", &ConvPackedParamsBase<kSpatialDim>::unpack)
+          .def("stride", &ConvPackedParamsBase<kSpatialDim>::stride)
+          .def("padding", &ConvPackedParamsBase<kSpatialDim>::padding)
+          .def(
+              "output_padding",
+              &ConvPackedParamsBase<kSpatialDim>::output_padding)
+          .def("dilation", &ConvPackedParamsBase<kSpatialDim>::dilation)
+          .def("groups", &ConvPackedParamsBase<kSpatialDim>::groups)
+          .def("transpose", &ConvPackedParamsBase<kSpatialDim>::transpose);
   return 0;
 }
 
-template
-TORCH_API int register_conv_params<2>();
-template
-TORCH_API int register_conv_params<3>();
+template TORCH_API int register_conv_params<2>();
+template TORCH_API int register_conv_params<3>();
 
 int register_linear_params() {
   using SerializationType = std::tuple<at::Tensor, c10::optional<at::Tensor>>;
@@ -484,18 +494,20 @@ int register_linear_params() {
 #endif // #if AT_MKLDNN_ENABLED()
                 TORCH_CHECK(false, "Unknown qengine");
               })
-              .def("bias", [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
-                   at::Tensor weight;
-                   c10::optional<at::Tensor> bias;
-                   std::tie(weight, bias) = self->unpack();
-                   return bias;
-                 })
-              .def("unpack", &LinearPackedParamsBase::unpack);
-  // (1) we can't (easily) return the static initializer itself because it can have a different type because of selective build
-  // (2) we can't return void and be able to call the function in the global scope
+          .def(
+              "bias",
+              [](const c10::intrusive_ptr<LinearPackedParamsBase>& self) {
+                at::Tensor weight;
+                c10::optional<at::Tensor> bias;
+                std::tie(weight, bias) = self->unpack();
+                return bias;
+              })
+          .def("unpack", &LinearPackedParamsBase::unpack);
+  // (1) we can't (easily) return the static initializer itself because it can
+  // have a different type because of selective build (2) we can't return void
+  // and be able to call the function in the global scope
   return 0;
 }
-
 
 int register_embedding_params() {
   // Type for __getstate__/__setstate__ serialization
@@ -506,48 +518,54 @@ int register_embedding_params() {
   // Element 3 is the int values (if any) contained in the Param instance
 
   using EmbeddingParamsSerializationType = std::tuple<
-    int64_t, // version
-    std::vector<at::Tensor>,
-    std::vector<double>,
-    std::vector<int64_t>>;
+      int64_t, // version
+      std::vector<at::Tensor>,
+      std::vector<double>,
+      std::vector<int64_t>>;
 
   static auto register_embedding_params =
-    torch::selective_class_<EmbeddingPackedParamsBase>(
-      "quantized", TORCH_SELECTIVE_CLASS("EmbeddingPackedParamsBase"))
-      .def_pickle(
-          [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
-              -> EmbeddingParamsSerializationType { // __getstate__ call
-            at::Tensor weight = params->unpack();
-            std::vector<at::Tensor> tensors_to_serialize = {weight};
-            std::vector<double> doubles_to_serialize = {};
-            int64_t bit_rate = params->bit_rate();
-            int64_t version = params->version();
-            std::vector<int64_t> longs_to_serialize = {bit_rate};
-            return EmbeddingParamsSerializationType(
-              version,
-              std::move(tensors_to_serialize),
-              std::move(doubles_to_serialize),
-              std::move(longs_to_serialize));
-          },
-          [](EmbeddingParamsSerializationType state)
-              -> c10::intrusive_ptr<EmbeddingPackedParamsBase> { // __setstate__ call
+      torch::selective_class_<EmbeddingPackedParamsBase>(
+          "quantized", TORCH_SELECTIVE_CLASS("EmbeddingPackedParamsBase"))
+          .def_pickle(
+              [](const c10::intrusive_ptr<EmbeddingPackedParamsBase>& params)
+                  -> EmbeddingParamsSerializationType { // __getstate__ call
+                at::Tensor weight = params->unpack();
+                std::vector<at::Tensor> tensors_to_serialize = {weight};
+                std::vector<double> doubles_to_serialize = {};
+                int64_t bit_rate = params->bit_rate();
+                int64_t version = params->version();
+                std::vector<int64_t> longs_to_serialize = {bit_rate};
+                return EmbeddingParamsSerializationType(
+                    version,
+                    std::move(tensors_to_serialize),
+                    std::move(doubles_to_serialize),
+                    std::move(longs_to_serialize));
+              },
+              [](EmbeddingParamsSerializationType state)
+                  -> c10::intrusive_ptr<EmbeddingPackedParamsBase> { // __setstate__
+                                                                     // call
+                std::vector<at::Tensor> tensors;
+                std::vector<double> doubles;
+                std::vector<int64_t> longs;
+                // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+                int64_t version;
+                std::tie(version, tensors, doubles, longs) = std::move(state);
 
-            std::vector<at::Tensor> tensors;
-            std::vector<double> doubles;
-            std::vector<int64_t> longs;
-            // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-            int64_t version;
-            std::tie(version, tensors, doubles, longs) = std::move(state);
+                TORCH_INTERNAL_ASSERT(
+                    tensors.size() == 1,
+                    "EmbeddingPackedParams: Expected weight tensor to be serialized");
+                TORCH_INTERNAL_ASSERT(
+                    longs.size() == 1,
+                    "EmbeddingPackedParams: Expected bit_rate to be serialized");
+                TORCH_CHECK(
+                    version == 1,
+                    "EmbeddingPackedParams: Currently only version 1 supported.");
 
-            TORCH_INTERNAL_ASSERT(tensors.size() == 1, "EmbeddingPackedParams: Expected weight tensor to be serialized");
-            TORCH_INTERNAL_ASSERT(longs.size() == 1, "EmbeddingPackedParams: Expected bit_rate to be serialized");
-            TORCH_CHECK(version == 1, "EmbeddingPackedParams: Currently only version 1 supported.");
-
-            at::Tensor weight = std::move(tensors[0]);
-            return PackedEmbeddingBagWeight::prepack(weight);
-          })
-      .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
-      .def("version", &EmbeddingPackedParamsBase::version);
+                at::Tensor weight = std::move(tensors[0]);
+                return PackedEmbeddingBagWeight::prepack(weight);
+              })
+          .def("bit_rate", &EmbeddingPackedParamsBase::bit_rate)
+          .def("version", &EmbeddingPackedParamsBase::version);
 
   return 0;
 }

@@ -5,9 +5,9 @@
 
 @interface MetalOpTestRunner : NSObject
 
-typedef BOOL(^testBlock)(void);
+typedef BOOL (^testBlock)(void);
 
 + (instancetype)sharedInstance;
-- (NSDictionary<NSString *, testBlock> *)tests;
+- (NSDictionary<NSString*, testBlock>*)tests;
 
 @end

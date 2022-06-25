@@ -17,10 +17,14 @@
 
 ${static_dispatch_ops_headers}
 
-${operator_includes}
+$ {
+  operator_includes
+}
 
 namespace at {
 
-${function_definitions}
-
+$ {
+  function_definitions
 }
+
+} // namespace at

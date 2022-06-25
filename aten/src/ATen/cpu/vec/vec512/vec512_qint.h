@@ -34,8 +34,8 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
-// iterations.
+// point operations will be carried out in a loop over
+// Vectorized<T>::float_num_vecs iterations.
 
 namespace at {
 namespace vec {
@@ -54,7 +54,6 @@ struct Vectorizedqi {
     return vals;
   }
 };
-
 
 template <typename T>
 __m512i pack_saturate_and_clamp(
@@ -97,7 +96,6 @@ inline __m512i pack_saturate_and_clamp<uint8_t>(
       _mm512_min_epu8(packed_and_sat, _mm512_set1_epi8(max_val)));
 }
 
-
 template <typename T>
 inline void __attribute__((always_inline)) QuantizeAvx512(
     const float* src,
@@ -134,12 +132,40 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
       0xff, 0xff, 0xff, 0xff,
       0x0c, 0x08, 0x04, 0x00);
   // clang-format on
-  __m512i permute_mask_v =
-      _mm512_set_epi32(0x0f, 0x0b, 0x07, 0x03, 0x0e, 0x0a, 0x06, 0x02,
-                       0x0d, 0x09, 0x05, 0x01, 0x0c, 0x08, 0x04, 0x00);
-  __m512i permute_mask_l8_v =
-      _mm512_set_epi32(0x08, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0c, 0x08,
-                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00);
+  __m512i permute_mask_v = _mm512_set_epi32(
+      0x0f,
+      0x0b,
+      0x07,
+      0x03,
+      0x0e,
+      0x0a,
+      0x06,
+      0x02,
+      0x0d,
+      0x09,
+      0x05,
+      0x01,
+      0x0c,
+      0x08,
+      0x04,
+      0x00);
+  __m512i permute_mask_l8_v = _mm512_set_epi32(
+      0x08,
+      0x08,
+      0x08,
+      0x08,
+      0x08,
+      0x08,
+      0x0c,
+      0x08,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x00,
+      0x04,
+      0x00);
   int len_aligned = len / (VLEN * 4) * (VLEN * 4);
   for (; i < len_aligned; i += 4 * VLEN) {
     // x
@@ -182,8 +208,7 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
     __m512i xyzw_clamped_v = pack_saturate_and_clamp<typename T::underlying>(
         xy_packed_v, zw_packed_v, min_val, max_val);
 
-    xyzw_clamped_v =
-        _mm512_permutexvar_epi32(permute_mask_v, xyzw_clamped_v);
+    xyzw_clamped_v = _mm512_permutexvar_epi32(permute_mask_v, xyzw_clamped_v);
     _mm512_storeu_si512(reinterpret_cast<__m512i*>(dst + i), xyzw_clamped_v);
   }
 
@@ -225,113 +250,117 @@ inline void __attribute__((always_inline)) QuantizeAvx512(
   }
 }
 
-template<>
+template <>
 struct Vectorized<c10::qint32> : public Vectorizedqi {
-    using size_type = int;
-    static constexpr size_type size() {
-        return 16;
-    }
+  using size_type = int;
+  static constexpr size_type size() {
+    return 16;
+  }
 
-    static constexpr int float_num_vecs() {
-        return 1;
-    }
+  static constexpr int float_num_vecs() {
+    return 1;
+  }
 
-    static constexpr int int_num_vecs() {
-        return 1;
-    }
+  static constexpr int int_num_vecs() {
+    return 1;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, 1>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, 1>;
-    using value_type = c10::qint32::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, 1>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, 1>;
+  using value_type = c10::qint32::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
-    Vectorized() {}
+  using Vectorizedqi::Vectorizedqi;
+  Vectorized() {}
 
-    Vectorized(__m512i vals_) { vals = vals_;}
+  Vectorized(__m512i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::qint32& val) {
-        value_type uw = val.val_;
-        vals = _mm512_set1_epi32(uw);
+  // Broadcast constructor
+  Vectorized(const c10::qint32& val) {
+    value_type uw = val.val_;
+    vals = _mm512_set1_epi32(uw);
+  }
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm512_storeu_si512((__m512i*)ptr, vals);
     }
+  }
 
-    void store(void* ptr, int count = size()) const {
-      if (count != size()) {
-        memcpy(ptr, &vals, count * sizeof(value_type));
-      } else {
-        _mm512_storeu_si512((__m512i*)ptr, vals);
-      }
-    }
+  static Vectorized<c10::qint32> loadu(const void* ptr) {
+    return Vectorized<c10::qint32>(ptr);
+  }
 
-    static Vectorized<c10::qint32> loadu(const void* ptr) {
-        return Vectorized<c10::qint32>(ptr);
-    }
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point,
+      Vectorized<float> scale_zp_premul) const {
+    __m512 float_vals = _mm512_cvtepi32_ps(vals);
+    return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
+  }
 
-    float_vec_return_type dequantize(
-        Vectorized<float> scale,
-        Vectorized<float> zero_point,
-        Vectorized<float> scale_zp_premul) const {
-      __m512 float_vals = _mm512_cvtepi32_ps(vals);
-      return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
-    }
+  static Vectorized<c10::qint32> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point,
+      float inverse_scale) {
+    Vectorized<c10::qint32> retval;
+    auto rhs_data = (__m512)rhs[0];
+    at::native::quantize_vec<c10::qint32, /*precision=*/32>(
+        scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, 16);
+    return retval;
+  }
 
-    static Vectorized<c10::qint32> quantize(
-        const float_vec_return_type& rhs,
-        float scale,
-        int32_t zero_point,
-        float inverse_scale) {
-      Vectorized<c10::qint32> retval;
-      auto rhs_data = (__m512)rhs[0];
-      at::native::quantize_vec<c10::qint32, /*precision=*/32>(
-          scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, 16);
-      return retval;
-    }
+  Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
+    return _mm512_max_epi32(vals, b.vals);
+  }
 
-    Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
-      return _mm512_max_epi32(vals, b.vals);
-    }
+  Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
+    return _mm512_min_epi32(vals, b.vals);
+  }
 
-    Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
-      return _mm512_min_epi32(vals, b.vals);
-    }
+  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
-        return maximum(zero_point);
-    }
+  Vectorized<c10::qint32> relu6(
+      Vectorized<c10::qint32> zero_point,
+      Vectorized<c10::qint32> q_six) {
+    return _mm512_min_epi32(
+        _mm512_max_epi32(vals, zero_point.vals), q_six.vals);
+  }
 
-    Vectorized<c10::qint32> relu6(
-        Vectorized<c10::qint32> zero_point,
-        Vectorized<c10::qint32> q_six) {
-      return _mm512_min_epi32(
-          _mm512_max_epi32(vals, zero_point.vals), q_six.vals);
-    }
+  int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
+    return {_mm512_sub_epi32(vals, b)};
+  }
 
-    int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
-      return {_mm512_sub_epi32(vals, b)};
-    }
+  static Vectorized<c10::qint32> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m512 multiplier_v = _mm512_set1_ps(multiplier);
+    __m512i zero_point_v = _mm512_set1_epi32(zero_point);
 
-    static Vectorized<c10::qint32> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m512 multiplier_v = _mm512_set1_ps(multiplier);
-      __m512i zero_point_v = _mm512_set1_epi32(zero_point);
-
-      __m512 scaled = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[0]), multiplier_v);
-      __m512i rounded = _mm512_cvtps_epi32(scaled);
-      return _mm512_add_epi32(rounded, zero_point_v);
-    }
+    __m512 scaled = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[0]), multiplier_v);
+    __m512i rounded = _mm512_cvtps_epi32(scaled);
+    return _mm512_add_epi32(rounded, zero_point_v);
+  }
 
  private:
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-      vals = _mm512_loadu_si512((const __m512i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm512_loadu_si512((const __m512i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::qint32> inline maximum(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+Vectorized<c10::qint32> inline maximum(
+    const Vectorized<c10::qint32>& a,
+    const Vectorized<c10::qint32>& b) {
   return a.maximum(b);
 }
 
@@ -362,9 +391,23 @@ __m512i RequantizeAvx512(
       "Only int8_t/uint8_t are supported");
   constexpr auto min_val = std::numeric_limits<T>::min();
   constexpr auto max_val = std::numeric_limits<T>::max();
-  __m512i permute_mask_v =
-      _mm512_set_epi32(0x0f, 0x0b, 0x07, 0x03, 0x0e, 0x0a, 0x06, 0x02,
-                       0x0d, 0x09, 0x05, 0x01, 0x0c, 0x08, 0x04, 0x00);
+  __m512i permute_mask_v = _mm512_set_epi32(
+      0x0f,
+      0x0b,
+      0x07,
+      0x03,
+      0x0e,
+      0x0a,
+      0x06,
+      0x02,
+      0x0d,
+      0x09,
+      0x05,
+      0x01,
+      0x0c,
+      0x08,
+      0x04,
+      0x00);
   __m512 x_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[0]), multiplier);
   __m512 y_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[1]), multiplier);
   __m512 z_scaled_v = _mm512_mul_ps(_mm512_cvtepi32_ps(inp[2]), multiplier);
@@ -390,67 +433,70 @@ __m512i RequantizeAvx512(
 
   /*
    * xyzw_clamped_v has results in the following layout so we need to
-   * permute: x0-3 y0-3 z0-3 w0-3 x4-7 y4-7 z4-7 w4-7 x8-11 y8-11 z8-11 w8-11 x12-15 y12-15 z12-15 w12-15
+   * permute: x0-3 y0-3 z0-3 w0-3 x4-7 y4-7 z4-7 w4-7 x8-11 y8-11 z8-11 w8-11
+   * x12-15 y12-15 z12-15 w12-15
    */
   xyzw_clamped_v = _mm512_permutexvar_epi32(permute_mask_v, xyzw_clamped_v);
   return xyzw_clamped_v;
 }
 
-template<>
+template <>
 struct Vectorized<c10::qint8> : public Vectorizedqi {
-    static constexpr int size() {
-        return 64;
-    }
+  static constexpr int size() {
+    return 64;
+  }
 
-    static constexpr int float_num_vecs() {
-        return 4;
-    }
+  static constexpr int float_num_vecs() {
+    return 4;
+  }
 
-    static constexpr int int_num_vecs() {
-        return 4;
-    }
+  static constexpr int int_num_vecs() {
+    return 4;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, 4>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
-    using value_type = typename c10::qint8::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, 4>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
+  using value_type = typename c10::qint8::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
+  using Vectorizedqi::Vectorizedqi;
 
-    Vectorized() {}
-    Vectorized(__m512i vals_) { vals = vals_;}
+  Vectorized() {}
+  Vectorized(__m512i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::qint8& val) {
-        value_type uw = val.val_;
-        vals = _mm512_set1_epi8(uw);
+  // Broadcast constructor
+  Vectorized(const c10::qint8& val) {
+    value_type uw = val.val_;
+    vals = _mm512_set1_epi8(uw);
+  }
+
+  // This is needed because the compiler emits awful code for the default
+  // constructor for moving the enum
+  Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) {}
+
+  // This is added to avoid error: definition of implicit copy assignment
+  // operator for 'Vectorized<c10::qint8>' is deprecated because it has a
+  // user-declared copy constructor [-Werror,-Wdeprecated-copy]
+  Vectorized& operator=(const Vectorized<c10::qint8>&) = default;
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm512_storeu_si512((__m512i*)ptr, vals);
     }
+  }
 
-    // This is needed because the compiler emits awful code for the default
-    // constructor for moving the enum
-    Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) { }
-
-    // This is added to avoid error: definition of implicit copy assignment operator
-    // for 'Vectorized<c10::qint8>' is deprecated because it has a user-declared
-    // copy constructor [-Werror,-Wdeprecated-copy]
-    Vectorized& operator=(const Vectorized<c10::qint8>&) = default;
-
-    void store(void* ptr, int count = size()) const {
-        if (count != size()) {
-            memcpy(ptr, &vals, count * sizeof(value_type));
-        } else {
-            _mm512_storeu_si512((__m512i*)ptr, vals);
-        }
-    }
-
-    static Vectorized<c10::qint8> loadu(const void* ptr) {
-        return Vectorized<c10::qint8>(ptr);
-    }
+  static Vectorized<c10::qint8> loadu(const void* ptr) {
+    return Vectorized<c10::qint8>(ptr);
+  }
 
  private:
-    __m512i cvtepi8_epi32(__m128i epi8_vals) const {
-        return _mm512_cvtepi8_epi32(epi8_vals);
-    }
+  __m512i cvtepi8_epi32(__m128i epi8_vals) const {
+    return _mm512_cvtepi8_epi32(epi8_vals);
+  }
 
  public:
   float_vec_return_type dequantize(
@@ -491,130 +537,134 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
   }
 
   Vectorized<c10::qint8> maximum(Vectorized<c10::qint8> b) const {
-      return _mm512_max_epi8(vals, b.vals);
-    }
+    return _mm512_max_epi8(vals, b.vals);
+  }
 
   Vectorized<c10::qint8> minimum(Vectorized<c10::qint8> b) const {
-      return _mm512_min_epi8(vals, b.vals);
-    }
+    return _mm512_min_epi8(vals, b.vals);
+  }
 
-    Vectorized<c10::qint8> relu(Vectorized<c10::qint8> zero_point) const {
-        return maximum(zero_point);
-    }
+  Vectorized<c10::qint8> relu(Vectorized<c10::qint8> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::qint8> relu6(
-        Vectorized<c10::qint8> zero_point,
-        Vectorized<c10::qint8> q_six) {
-      return _mm512_min_epi8(
-          _mm512_max_epi8(vals, zero_point.vals), q_six.vals);
-    }
+  Vectorized<c10::qint8> relu6(
+      Vectorized<c10::qint8> zero_point,
+      Vectorized<c10::qint8> q_six) {
+    return _mm512_min_epi8(_mm512_max_epi8(vals, zero_point.vals), q_six.vals);
+  }
 
-    int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
-      __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
-      __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
-      __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
-      __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
+  int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
+    __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
+    __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
+    __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
+    __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
 
-      __m512i int32_val0 = cvtepi8_epi32(int_val0);
-      __m512i int32_val1 = cvtepi8_epi32(int_val1);
-      __m512i int32_val2 = cvtepi8_epi32(int_val2);
-      __m512i int32_val3 = cvtepi8_epi32(int_val3);
+    __m512i int32_val0 = cvtepi8_epi32(int_val0);
+    __m512i int32_val1 = cvtepi8_epi32(int_val1);
+    __m512i int32_val2 = cvtepi8_epi32(int_val2);
+    __m512i int32_val3 = cvtepi8_epi32(int_val3);
 
-      __m128i int_b0 = _mm_set_epi64x(b.vals[1], b.vals[0]);
-      __m128i int_b1 = _mm_set_epi64x(b.vals[3], b.vals[2]);
-      __m128i int_b2 = _mm_set_epi64x(b.vals[5], b.vals[4]);
-      __m128i int_b3 = _mm_set_epi64x(b.vals[7], b.vals[6]);
+    __m128i int_b0 = _mm_set_epi64x(b.vals[1], b.vals[0]);
+    __m128i int_b1 = _mm_set_epi64x(b.vals[3], b.vals[2]);
+    __m128i int_b2 = _mm_set_epi64x(b.vals[5], b.vals[4]);
+    __m128i int_b3 = _mm_set_epi64x(b.vals[7], b.vals[6]);
 
-      __m512i int32_b0 = cvtepi8_epi32(int_b0);
-      __m512i int32_b1 = cvtepi8_epi32(int_b1);
-      __m512i int32_b2 = cvtepi8_epi32(int_b2);
-      __m512i int32_b3 = cvtepi8_epi32(int_b3);
+    __m512i int32_b0 = cvtepi8_epi32(int_b0);
+    __m512i int32_b1 = cvtepi8_epi32(int_b1);
+    __m512i int32_b2 = cvtepi8_epi32(int_b2);
+    __m512i int32_b3 = cvtepi8_epi32(int_b3);
 
-      __m512i res_0 = _mm512_sub_epi32(int32_val0, int32_b0);
-      __m512i res_1 = _mm512_sub_epi32(int32_val1, int32_b1);
-      __m512i res_2 = _mm512_sub_epi32(int32_val2, int32_b2);
-      __m512i res_3 = _mm512_sub_epi32(int32_val3, int32_b3);
+    __m512i res_0 = _mm512_sub_epi32(int32_val0, int32_b0);
+    __m512i res_1 = _mm512_sub_epi32(int32_val1, int32_b1);
+    __m512i res_2 = _mm512_sub_epi32(int32_val2, int32_b2);
+    __m512i res_3 = _mm512_sub_epi32(int32_val3, int32_b3);
 
-      return {Vectorized<c10::qint32>(res_0),
-              Vectorized<c10::qint32>(res_1),
-              Vectorized<c10::qint32>(res_2),
-              Vectorized<c10::qint32>(res_3)};
-    }
+    return {
+        Vectorized<c10::qint32>(res_0),
+        Vectorized<c10::qint32>(res_1),
+        Vectorized<c10::qint32>(res_2),
+        Vectorized<c10::qint32>(res_3)};
+  }
 
-    static Vectorized<c10::qint8> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m512 multiplier_v = _mm512_set1_ps(multiplier);
-      __m512i zero_point_v = _mm512_set1_epi32(zero_point);
-      return RequantizeAvx512<value_type>(inp, multiplier_v, zero_point_v);
-    }
+  static Vectorized<c10::qint8> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m512 multiplier_v = _mm512_set1_ps(multiplier);
+    __m512i zero_point_v = _mm512_set1_epi32(zero_point);
+    return RequantizeAvx512<value_type>(inp, multiplier_v, zero_point_v);
+  }
 
  private:
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-        vals = _mm512_loadu_si512((const __m512i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm512_loadu_si512((const __m512i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::qint8> inline maximum(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+Vectorized<c10::qint8> inline maximum(
+    const Vectorized<c10::qint8>& a,
+    const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
 
-template<>
+template <>
 struct Vectorized<c10::quint8> : public Vectorizedqi {
-    static constexpr int size() {
-        return 64;
-    }
+  static constexpr int size() {
+    return 64;
+  }
 
-    static constexpr int float_num_vecs() {
-        return 4;
-    }
+  static constexpr int float_num_vecs() {
+    return 4;
+  }
 
-    static constexpr int int_num_vecs() {
-        return 4;
-    }
+  static constexpr int int_num_vecs() {
+    return 4;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, 4>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
-    using value_type = typename c10::quint8::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, 4>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
+  using value_type = typename c10::quint8::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
-    Vectorized() {}
+  using Vectorizedqi::Vectorizedqi;
+  Vectorized() {}
 
-    Vectorized(__m512i vals_) { vals = vals_;}
+  Vectorized(__m512i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::quint8& val) {
-        value_type uw = val.val_;
-        vals = _mm512_set1_epi8(uw);
+  // Broadcast constructor
+  Vectorized(const c10::quint8& val) {
+    value_type uw = val.val_;
+    vals = _mm512_set1_epi8(uw);
+  }
+
+  Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) {}
+
+  // This is added to avoid error: definition of implicit copy assignment
+  // operator for 'Vectorized<c10::quint8>' is deprecated because it has a
+  // user-declared copy constructor [-Werror,-Wdeprecated-copy]
+  Vectorized& operator=(const Vectorized<c10::quint8>&) = default;
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm512_storeu_si512((__m512i*)ptr, vals);
     }
+  }
 
-    Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) { }
-
-    // This is added to avoid error: definition of implicit copy assignment operator
-    // for 'Vectorized<c10::quint8>' is deprecated because it has a user-declared
-    // copy constructor [-Werror,-Wdeprecated-copy]
-    Vectorized& operator=(const Vectorized<c10::quint8>&) = default;
-
-    void store(void* ptr, int count = size()) const {
-        if (count != size()) {
-            memcpy(ptr, &vals, count * sizeof(value_type));
-        } else {
-            _mm512_storeu_si512((__m512i*)ptr, vals);
-        }
-    }
-
-    static Vectorized<c10::quint8> loadu(const void* ptr) {
-        return Vectorized<c10::quint8>(ptr);
-    }
+  static Vectorized<c10::quint8> loadu(const void* ptr) {
+    return Vectorized<c10::quint8>(ptr);
+  }
 
  private:
-    __m512i cvtepu8_epi32(__m128i epu8_vals) const {
-        return _mm512_cvtepu8_epi32(epu8_vals);
-    }
+  __m512i cvtepu8_epi32(__m128i epu8_vals) const {
+    return _mm512_cvtepu8_epi32(epu8_vals);
+  }
 
  public:
   float_vec_return_type dequantize(
@@ -656,74 +706,75 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
   }
 
   Vectorized<c10::quint8> maximum(Vectorized<c10::quint8> b) const {
-      return _mm512_max_epu8(vals, b.vals);
-    }
+    return _mm512_max_epu8(vals, b.vals);
+  }
 
   Vectorized<c10::quint8> minimum(Vectorized<c10::quint8> b) const {
-      return _mm512_min_epu8(vals, b.vals);
-    }
+    return _mm512_min_epu8(vals, b.vals);
+  }
 
-    Vectorized<c10::quint8> relu(Vectorized<c10::quint8> zero_point) const {
-        return maximum(zero_point);
-    }
+  Vectorized<c10::quint8> relu(Vectorized<c10::quint8> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::quint8> relu6(
-        Vectorized<c10::quint8> zero_point,
-        Vectorized<c10::quint8> q_six) {
-      return _mm512_min_epu8(
-          _mm512_max_epu8(vals, zero_point.vals), q_six.vals);
-    }
+  Vectorized<c10::quint8> relu6(
+      Vectorized<c10::quint8> zero_point,
+      Vectorized<c10::quint8> q_six) {
+    return _mm512_min_epu8(_mm512_max_epu8(vals, zero_point.vals), q_six.vals);
+  }
 
-    int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
-      __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
-      __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
-      __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
-      __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
+  int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
+    __m128i int_val0 = _mm_set_epi64x(vals[1], vals[0]);
+    __m128i int_val1 = _mm_set_epi64x(vals[3], vals[2]);
+    __m128i int_val2 = _mm_set_epi64x(vals[5], vals[4]);
+    __m128i int_val3 = _mm_set_epi64x(vals[7], vals[6]);
 
-      __m512i int32_val0 = cvtepu8_epi32(int_val0);
-      __m512i int32_val1 = cvtepu8_epi32(int_val1);
-      __m512i int32_val2 = cvtepu8_epi32(int_val2);
-      __m512i int32_val3 = cvtepu8_epi32(int_val3);
+    __m512i int32_val0 = cvtepu8_epi32(int_val0);
+    __m512i int32_val1 = cvtepu8_epi32(int_val1);
+    __m512i int32_val2 = cvtepu8_epi32(int_val2);
+    __m512i int32_val3 = cvtepu8_epi32(int_val3);
 
-      __m128i int_b0 = _mm_set_epi64x(b.vals[1], b.vals[0]);
-      __m128i int_b1 = _mm_set_epi64x(b.vals[3], b.vals[2]);
-      __m128i int_b2 = _mm_set_epi64x(b.vals[5], b.vals[4]);
-      __m128i int_b3 = _mm_set_epi64x(b.vals[7], b.vals[6]);
+    __m128i int_b0 = _mm_set_epi64x(b.vals[1], b.vals[0]);
+    __m128i int_b1 = _mm_set_epi64x(b.vals[3], b.vals[2]);
+    __m128i int_b2 = _mm_set_epi64x(b.vals[5], b.vals[4]);
+    __m128i int_b3 = _mm_set_epi64x(b.vals[7], b.vals[6]);
 
-      __m512i int32_b0 = cvtepu8_epi32(int_b0);
-      __m512i int32_b1 = cvtepu8_epi32(int_b1);
-      __m512i int32_b2 = cvtepu8_epi32(int_b2);
-      __m512i int32_b3 = cvtepu8_epi32(int_b3);
+    __m512i int32_b0 = cvtepu8_epi32(int_b0);
+    __m512i int32_b1 = cvtepu8_epi32(int_b1);
+    __m512i int32_b2 = cvtepu8_epi32(int_b2);
+    __m512i int32_b3 = cvtepu8_epi32(int_b3);
 
-      __m512i res_0 = _mm512_sub_epi32(int32_val0, int32_b0);
-      __m512i res_1 = _mm512_sub_epi32(int32_val1, int32_b1);
-      __m512i res_2 = _mm512_sub_epi32(int32_val2, int32_b2);
-      __m512i res_3 = _mm512_sub_epi32(int32_val3, int32_b3);
-      return {Vectorized<c10::qint32>(res_0),
-              Vectorized<c10::qint32>(res_1),
-              Vectorized<c10::qint32>(res_2),
-              Vectorized<c10::qint32>(res_3)};
-    }
+    __m512i res_0 = _mm512_sub_epi32(int32_val0, int32_b0);
+    __m512i res_1 = _mm512_sub_epi32(int32_val1, int32_b1);
+    __m512i res_2 = _mm512_sub_epi32(int32_val2, int32_b2);
+    __m512i res_3 = _mm512_sub_epi32(int32_val3, int32_b3);
+    return {
+        Vectorized<c10::qint32>(res_0),
+        Vectorized<c10::qint32>(res_1),
+        Vectorized<c10::qint32>(res_2),
+        Vectorized<c10::qint32>(res_3)};
+  }
 
-    static Vectorized<c10::quint8> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m512 multiplier_v = _mm512_set1_ps(multiplier);
-      __m512i zero_point_v = _mm512_set1_epi32(zero_point);
-      return RequantizeAvx512<value_type>(inp, multiplier_v, zero_point_v);
-    }
+  static Vectorized<c10::quint8> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m512 multiplier_v = _mm512_set1_ps(multiplier);
+    __m512i zero_point_v = _mm512_set1_epi32(zero_point);
+    return RequantizeAvx512<value_type>(inp, multiplier_v, zero_point_v);
+  }
 
  private:
-
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-        vals = _mm512_loadu_si512((const __m512i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm512_loadu_si512((const __m512i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+Vectorized<c10::quint8> inline maximum(
+    const Vectorized<c10::quint8>& a,
+    const Vectorized<c10::quint8>& b) {
   return a.maximum(b);
 }
 
@@ -780,7 +831,8 @@ struct VectorizedQuantizedConverter {
         tmp_vals[j] = at::native::dequantize_val<T>(
             scale[j], zero_point[j], T(vals[16 * i + j]));
       }
-      rv[i] = Vectorized<float>(tmp_vals[0],
+      rv[i] = Vectorized<float>(
+          tmp_vals[0],
           tmp_vals[1],
           tmp_vals[2],
           tmp_vals[3],
@@ -806,10 +858,10 @@ struct VectorizedQuantizedConverter {
 
 template <>
 struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
-                                 c10::qint32,
-                                 std::array<Vectorized<float>, 1>,
-                                 std::array<Vectorized<c10::qint32>, 1>,
-                                 16> {
+                                     c10::qint32,
+                                     std::array<Vectorized<float>, 1>,
+                                     std::array<Vectorized<c10::qint32>, 1>,
+                                     16> {
   Vectorized()
       : VectorizedQuantizedConverter<
             c10::qint32,
@@ -871,10 +923,9 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     return retval;
   }
 
-  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const  {
+  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
     return maximum(zero_point);
   }
-
 
   Vectorized<c10::qint32> relu6(
       Vectorized<c10::qint32> zero_point,
@@ -910,7 +961,9 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::qint32> inline maximum(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+Vectorized<c10::qint32> inline maximum(
+    const Vectorized<c10::qint32>& a,
+    const Vectorized<c10::qint32>& b) {
   return a.maximum(b);
 }
 
@@ -938,10 +991,10 @@ Vectorized<c10::qint32> inline operator+(
 
 template <>
 struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
-                                c10::qint8,
-                                std::array<Vectorized<float>, 4>,
-                                std::array<Vectorized<c10::qint32>, 4>,
-                                64> {
+                                    c10::qint8,
+                                    std::array<Vectorized<float>, 4>,
+                                    std::array<Vectorized<c10::qint32>, 4>,
+                                    64> {
   Vectorized()
       : VectorizedQuantizedConverter<
             c10::qint8,
@@ -1052,16 +1105,18 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::qint8> inline maximum(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+Vectorized<c10::qint8> inline maximum(
+    const Vectorized<c10::qint8>& a,
+    const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
 
 template <>
 struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
-                                 c10::quint8,
-                                 std::array<Vectorized<float>, 4>,
-                                 std::array<Vectorized<c10::qint32>, 4>,
-                                 64> {
+                                     c10::quint8,
+                                     std::array<Vectorized<float>, 4>,
+                                     std::array<Vectorized<c10::qint32>, 4>,
+                                     64> {
   Vectorized()
       : VectorizedQuantizedConverter<
             c10::quint8,
@@ -1127,7 +1182,6 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     return maximum(zero_point);
   }
 
-
   Vectorized<c10::quint8> relu6(
       Vectorized<c10::quint8> zero_point,
       Vectorized<c10::quint8> q_six) {
@@ -1173,10 +1227,14 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+Vectorized<c10::quint8> inline maximum(
+    const Vectorized<c10::quint8>& a,
+    const Vectorized<c10::quint8>& b) {
   return a.maximum(b);
 }
 
 #endif // defined(CPU_CAPABILITY_AVX512) && !defined(MSVC)
 
-}}}
+} // namespace CPU_CAPABILITY
+} // namespace vec
+} // namespace at

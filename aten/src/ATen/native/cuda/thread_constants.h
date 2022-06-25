@@ -18,5 +18,9 @@ constexpr uint32_t num_threads() {
 }
 #endif
 
-constexpr int thread_work_size() { return 4; }
-constexpr int block_work_size() { return thread_work_size() * num_threads(); }
+constexpr int thread_work_size() {
+  return 4;
+}
+constexpr int block_work_size() {
+  return thread_work_size() * num_threads();
+}

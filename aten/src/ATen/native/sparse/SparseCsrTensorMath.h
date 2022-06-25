@@ -41,12 +41,18 @@ inline void _check_is_cuda(const Tensor& self, c10::string_view name) {
       " tensor");
 }
 
-inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view name) {
+inline void _check_dim(
+    const Tensor& self,
+    int64_t target_dim,
+    c10::string_view name) {
   if (target_dim == 2) {
     TORCH_CHECK(
         self.dim() == target_dim,
-        name, " must be a matrix, ",
-        "got ", self.dim(), "-D tensor");
+        name,
+        " must be a matrix, ",
+        "got ",
+        self.dim(),
+        "-D tensor");
   }
   TORCH_CHECK(
       self.dim() == target_dim,
@@ -59,7 +65,7 @@ inline void _check_dim(const Tensor& self, int64_t target_dim, c10::string_view 
       " instead.");
 }
 
-}
-}
-}
-}
+} // namespace impl
+} // namespace sparse
+} // namespace native
+} // namespace at

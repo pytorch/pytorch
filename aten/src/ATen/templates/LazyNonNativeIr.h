@@ -8,4 +8,6 @@ ${namespace_prologue}
 
 ${non_native_ir_nodes}
 
-${namespace_epilogue}
+$ {
+  namespace_epilogue
+}

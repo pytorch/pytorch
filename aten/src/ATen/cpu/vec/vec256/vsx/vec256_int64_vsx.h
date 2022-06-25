@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 namespace at {
 namespace vec {
 // See Note [CPU_CAPABILITY namespace]
@@ -35,7 +35,8 @@ class Vectorized<int64_t> {
   C10_ALWAYS_INLINE Vectorized(vint64 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool64 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
   C10_ALWAYS_INLINE Vectorized(vint64 v1, vint64 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2)
+      : _vecb0{v1}, _vecb1{v2} {}
   C10_ALWAYS_INLINE Vectorized(int64_t scalar)
       : _vec0{vec_splats(scalar)}, _vec1{vec_splats(scalar)} {}
   C10_ALWAYS_INLINE Vectorized(
@@ -65,14 +66,16 @@ class Vectorized<int64_t> {
   }
 
   template <uint64_t mask>
-  static std::enable_if_t<(mask & 15) == 15, Vectorized<int64_t>> C10_ALWAYS_INLINE
-  blend(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+  static std::enable_if_t<(mask & 15) == 15, Vectorized<int64_t>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
     return b;
   }
 
   template <uint64_t mask>
-  static std::enable_if_t<(mask > 0 && mask < 3), Vectorized<int64_t>> C10_ALWAYS_INLINE
-  blend(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+  static std::enable_if_t<(mask > 0 && mask < 3), Vectorized<int64_t>>
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
     constexpr uint64_t g0 = (mask & 1) * 0xffffffffffffffff;
     constexpr uint64_t g1 = ((mask & 2) >> 1) * 0xffffffffffffffff;
     const vbool64 mask_1st = (vbool64){g0, g1};
@@ -81,7 +84,8 @@ class Vectorized<int64_t> {
 
   template <uint64_t mask>
   static std::enable_if_t<(mask > 3) && (mask & 3) == 0, Vectorized<int64_t>>
-      C10_ALWAYS_INLINE blend(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
     constexpr uint64_t g0_2 = ((mask & 4) >> 2) * 0xffffffffffffffff;
     constexpr uint64_t g1_2 = ((mask & 8) >> 3) * 0xffffffffffffffff;
 
@@ -93,7 +97,8 @@ class Vectorized<int64_t> {
   static std::enable_if_t<
       (mask > 3) && (mask & 3) != 0 && (mask & 15) != 15,
       Vectorized<int64_t>>
-      C10_ALWAYS_INLINE blend(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
+      C10_ALWAYS_INLINE
+      blend(const Vectorized<int64_t>& a, const Vectorized<int64_t>& b) {
     constexpr uint64_t g0 = (mask & 1) * 0xffffffffffffffff;
     constexpr uint64_t g1 = ((mask & 2) >> 1) * 0xffffffffffffffff;
     constexpr uint64_t g0_2 = ((mask & 4) >> 2) * 0xffffffffffffffff;
@@ -117,8 +122,11 @@ class Vectorized<int64_t> {
         vec_sel(a._vec1, b._vec1, mask._vecb1)};
   }
   template <typename step_t>
-  static Vectorized<int64_t> arange(int64_t base = 0., step_t step = static_cast<step_t>(1)) {
-    return Vectorized<int64_t>(base, base + step, base + 2 * step, base + 3 * step);
+  static Vectorized<int64_t> arange(
+      int64_t base = 0.,
+      step_t step = static_cast<step_t>(1)) {
+    return Vectorized<int64_t>(
+        base, base + step, base + 2 * step, base + 3 * step);
   }
 
   static Vectorized<int64_t> C10_ALWAYS_INLINE
@@ -173,7 +181,9 @@ class Vectorized<int64_t> {
 
   Vectorized<int64_t> angle() const {
     return blendv(
-      Vectorized<int64_t>(0), Vectorized<int64_t>(c10::pi<int64_t>), *this < Vectorized<int64_t>(0));
+        Vectorized<int64_t>(0),
+        Vectorized<int64_t>(c10::pi<int64_t>),
+        *this < Vectorized<int64_t>(0));
   }
   Vectorized<int64_t> real() const {
     return *this;
@@ -231,6 +241,6 @@ Vectorized<int64_t> inline minimum(
   return a.minimum(b);
 }
 
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

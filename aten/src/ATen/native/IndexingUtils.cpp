@@ -1,6 +1,7 @@
 #include <ATen/native/IndexingUtils.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 bool canUse32BitIndexMath(const TensorBase& t, int64_t max_elem) {
   int64_t elements = t.numel();
@@ -30,4 +31,5 @@ bool canUse32BitIndexMath(const TensorBase& t, int64_t max_elem) {
   return true;
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

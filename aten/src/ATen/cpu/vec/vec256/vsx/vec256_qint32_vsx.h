@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/qint32.h>
 #include <array>
 
@@ -24,8 +24,8 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
-// iterations.
+// point operations will be carried out in a loop over
+// Vectorized<T>::float_num_vecs iterations.
 
 namespace at {
 namespace vec {
@@ -68,7 +68,8 @@ struct Vectorized<c10::qint32> {
   C10_ALWAYS_INLINE Vectorized(vint32 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool32 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
   C10_ALWAYS_INLINE Vectorized(vint32 v1, vint32 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool32 v1, vbool32 v2)
+      : _vecb0{v1}, _vecb1{v2} {}
 
   Vectorized(const c10::qint32& val)
       : _vec0(vec_splats(val.val_)), _vec1(vec_splats(val.val_)) {}
@@ -140,8 +141,8 @@ struct Vectorized<c10::qint32> {
     vecf1 = vec_mul(vecf1, inverse_scale_v);
     vecf0 = vec_add(vec_rint(vecf0), vec_zero_point);
     vecf1 = vec_add(vec_rint(vecf1), vec_zero_point);
-    vint32 veci0  = vec_signed(vecf0);
-    vint32 veci1  = vec_signed(vecf1);
+    vint32 veci0 = vec_signed(vecf0);
+    vint32 veci1 = vec_signed(vecf1);
 
     veci0 = vec_max(veci0, vmin);
     veci1 = vec_max(veci1, vmin);
@@ -185,8 +186,8 @@ struct Vectorized<c10::qint32> {
     vecf0 = vec_rint(vecf0);
     vecf1 = vec_rint(vecf1);
 
-    vint32 veci0  = vec_add(vec_signed(vecf0),vec_zero_point);
-    vint32 veci1  = vec_add(vec_signed(vecf1),vec_zero_point);
+    vint32 veci0 = vec_add(vec_signed(vecf0), vec_zero_point);
+    vint32 veci1 = vec_add(vec_signed(vecf1), vec_zero_point);
 
     veci0 = vec_max(veci0, vmin);
     veci1 = vec_max(veci1, vmin);
@@ -226,6 +227,6 @@ Vectorized<c10::qint32> inline minimum(
     const Vectorized<c10::qint32>& b) {
   return a.minimum(b);
 }
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

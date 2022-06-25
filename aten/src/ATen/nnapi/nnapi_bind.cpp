@@ -2,8 +2,8 @@
 
 #include <ATen/ATen.h>
 #include <ATen/nnapi/nnapi_bind.h>
-#include <ATen/nnapi/nnapi_wrapper.h>
 #include <ATen/nnapi/nnapi_model_loader.h>
+#include <ATen/nnapi/nnapi_wrapper.h>
 #include <c10/util/irange.h>
 
 namespace torch {
@@ -16,7 +16,7 @@ nnapi_wrapper* nnapi;
 nnapi_wrapper* check_nnapi;
 
 void load_platform_library() {
-  static int run_once = [](){
+  static int run_once = []() {
     nnapi_wrapper_load(&nnapi, &check_nnapi);
     CAFFE_ENFORCE(nnapi);
     CAFFE_ENFORCE(nnapi->Model_free);
@@ -34,21 +34,19 @@ void load_platform_library() {
 // Instead, delay all work until the explicit init call.
 void NnapiCompilation::init(
     at::Tensor serialized_model_tensor,
-    std::vector<at::Tensor> parameter_buffers
-) {
+    std::vector<at::Tensor> parameter_buffers) {
   init2(
-    serialized_model_tensor,
-    std::move(parameter_buffers),
-    ANEURALNETWORKS_PREFER_SUSTAINED_SPEED,
-    false);
+      serialized_model_tensor,
+      std::move(parameter_buffers),
+      ANEURALNETWORKS_PREFER_SUSTAINED_SPEED,
+      false);
 }
 
 void NnapiCompilation::init2(
     at::Tensor serialized_model_tensor,
     std::vector<at::Tensor> parameter_buffers,
     int64_t compilation_preference,
-    bool relax_f32_to_f16
-  ) {
+    bool relax_f32_to_f16) {
   TORCH_CHECK(!model_, "Attempted to re-initialize NnapiCompilation.");
 
   load_platform_library();
@@ -65,13 +63,11 @@ void NnapiCompilation::init2(
   // This is currently always int32_t, but support uint8_t for old models
   // and possible future changes to the generator.
   uint8_t* ser_model_ptr =
-    serialized_model_tensor.scalar_type() == at::ScalarType::Byte
+      serialized_model_tensor.scalar_type() == at::ScalarType::Byte
       ? serialized_model_tensor.data_ptr<uint8_t>()
       : reinterpret_cast<uint8_t*>(serialized_model_tensor.data_ptr<int32_t>());
   c10::ArrayRef<uint8_t> ser_model = {
-    ser_model_ptr,
-    serialized_model_tensor.nbytes()
-  };
+      ser_model_ptr, serialized_model_tensor.nbytes()};
   TORCH_CHECK(ser_model.size() > 0);
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -105,7 +101,8 @@ void NnapiCompilation::init2(
   ANeuralNetworksCompilation* compilation;
   check_nnapi->Compilation_create(model_.get(), &compilation);
   // TODO: Make this configurable.
-  check_nnapi->Compilation_setPreference(compilation, static_cast<int32_t>(compilation_preference));
+  check_nnapi->Compilation_setPreference(
+      compilation, static_cast<int32_t>(compilation_preference));
   check_nnapi->Compilation_finish(compilation);
   compilation_.reset(compilation);
 }
@@ -128,22 +125,14 @@ void NnapiCompilation::run(
     std::vector<uint32_t> dim;
     get_operand_type(t, &op_type, &dim);
     check_nnapi->Execution_setInput(
-        execution,
-        i,
-        &op_type,
-        t.data_ptr(),
-        t.nbytes());
+        execution, i, &op_type, t.data_ptr(), t.nbytes());
   }
 
   for (const auto i : c10::irange(outputs.size())) {
     auto& t = outputs[i];
     // TODO: Check contiguous and dtype.
     check_nnapi->Execution_setOutput(
-        execution,
-        i,
-        nullptr,
-        t.data_ptr(),
-        t.nbytes());
+        execution, i, nullptr, t.data_ptr(), t.nbytes());
   }
 
   check_nnapi->Execution_compute(execution);
@@ -155,14 +144,18 @@ void NnapiCompilation::run(
     uint32_t rank;
     check_nnapi->Execution_getOutputOperandRank(execution, i, &rank);
     std::vector<uint32_t> dims(rank);
-    check_nnapi->Execution_getOutputOperandDimensions(execution, i, dims.data());
+    check_nnapi->Execution_getOutputOperandDimensions(
+        execution, i, dims.data());
     std::vector<int64_t> long_dims(dims.begin(), dims.end());
     // TODO: Maybe check that only the batch dimension is changed?
     t.resize_(long_dims);
   }
 }
 
-void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOperandType* operand, std::vector<uint32_t>* dims) {
+void NnapiCompilation::get_operand_type(
+    const at::Tensor& t,
+    ANeuralNetworksOperandType* operand,
+    std::vector<uint32_t>* dims) {
   operand->dimensionCount = t.dim();
   TORCH_CHECK(operand->dimensionCount == t.dim()); // Check for overflow.
   dims->resize(t.dim());
@@ -193,9 +186,9 @@ void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOper
   }
   if (t.scalar_type() == c10::kShort) {
     TORCH_WARN(
-      "NNAPI qint16 inputs to model are only supported for ",
-      "testing with fixed scale, zero_point. Please change your ",
-      "inputs if you see this in production");
+        "NNAPI qint16 inputs to model are only supported for ",
+        "testing with fixed scale, zero_point. Please change your ",
+        "inputs if you see this in production");
     operand->type = ANEURALNETWORKS_TENSOR_QUANT16_ASYMM;
     // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
     operand->scale = 0.125;
@@ -204,7 +197,8 @@ void NnapiCompilation::get_operand_type(const at::Tensor& t, ANeuralNetworksOper
   }
 
   // TODO: Support more dtypes.
-  CAFFE_THROW("Bad dtype: " + std::to_string(static_cast<int8_t>(t.scalar_type())));
+  CAFFE_THROW(
+      "Bad dtype: " + std::to_string(static_cast<int8_t>(t.scalar_type())));
 }
 
 } // namespace bind

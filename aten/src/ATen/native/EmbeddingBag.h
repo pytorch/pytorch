@@ -45,76 +45,86 @@ void make_offset2bag_out(
 
 #ifdef USE_FBGEMM
 
-template<bool has_weight, typename TIndex, typename TData>
+template <bool has_weight, typename TIndex, typename TData>
 struct _CallbackAndBlockSize {
-    using TCallback = typename fbgemm::EmbeddingSpMDMKernelSignature<TData, TIndex, TIndex, TData>::Type;
+  using TCallback = typename fbgemm::
+      EmbeddingSpMDMKernelSignature<TData, TIndex, TIndex, TData>::Type;
 
-    int64_t blockSize = -1;
-    TCallback callback = nullptr;
+  int64_t blockSize = -1;
+  TCallback callback = nullptr;
 
-    static TCallback generateCallback(int64_t block_size) {
-        return fbgemm::GenerateEmbeddingSpMDM<TData, TIndex, TIndex, TData>(
-                block_size,
-                has_weight,
-                /* normalize_by_lengths */false,
-                /* prefetch */16,
-                /* is_weight_positional */false,
-                /* use_offsets */true);
-    }
+  static TCallback generateCallback(int64_t block_size) {
+    return fbgemm::GenerateEmbeddingSpMDM<TData, TIndex, TIndex, TData>(
+        block_size,
+        has_weight,
+        /* normalize_by_lengths */ false,
+        /* prefetch */ 16,
+        /* is_weight_positional */ false,
+        /* use_offsets */ true);
+  }
 
-    _CallbackAndBlockSize() = default;
+  _CallbackAndBlockSize() = default;
 
-    explicit _CallbackAndBlockSize(c10::optional<int64_t> maybe_block_size)
-      : blockSize(maybe_block_size.value_or(-1))
-      , callback(maybe_block_size.has_value() ? generateCallback(maybe_block_size.value()) : nullptr)
-    {}
+  explicit _CallbackAndBlockSize(c10::optional<int64_t> maybe_block_size)
+      : blockSize(maybe_block_size.value_or(-1)),
+        callback(
+            maybe_block_size.has_value()
+                ? generateCallback(maybe_block_size.value())
+                : nullptr) {}
 };
 
-template<typename... StorageMixins>
+template <typename... StorageMixins>
 struct _EmbeddingBagKernelCacheImpl : private StorageMixins... {
+  _EmbeddingBagKernelCacheImpl() = default;
+  // use each of the mixins to store corresponding kernel and block size
+  explicit _EmbeddingBagKernelCacheImpl(c10::optional<int64_t> maybe_block_size)
+      : StorageMixins(maybe_block_size)... {}
 
-    _EmbeddingBagKernelCacheImpl() = default;
-    // use each of the mixins to store corresponding kernel and block size
-    explicit _EmbeddingBagKernelCacheImpl(c10::optional<int64_t> maybe_block_size)
-      : StorageMixins(maybe_block_size)...
-    {}
-
-    // this method is thread safe (call sites may call from different threads)
-    template<bool has_weight, typename TIndex, typename TData>
-    typename _CallbackAndBlockSize<has_weight, TIndex, TData>::TCallback
-    getCallback(int64_t block_size) const {
-        // if the cache doesn't store the kernel for the incoming block size
-        // (so it is different from the one stored in corresponding mixin)
-        // regenerate the kernel (not writing it into the cache so we avoid locks)
-        if (block_size != _CallbackAndBlockSize<has_weight, TIndex, TData>::blockSize) {
-            return _CallbackAndBlockSize<has_weight, TIndex, TData>::generateCallback(block_size);
-        }
-        // else retrieve the cached kernel from the corresponding mixin
-        return _CallbackAndBlockSize<has_weight, TIndex, TData>::callback;
+  // this method is thread safe (call sites may call from different threads)
+  template <bool has_weight, typename TIndex, typename TData>
+  typename _CallbackAndBlockSize<has_weight, TIndex, TData>::TCallback
+  getCallback(int64_t block_size) const {
+    // if the cache doesn't store the kernel for the incoming block size
+    // (so it is different from the one stored in corresponding mixin)
+    // regenerate the kernel (not writing it into the cache so we avoid locks)
+    if (block_size !=
+        _CallbackAndBlockSize<has_weight, TIndex, TData>::blockSize) {
+      return _CallbackAndBlockSize<has_weight, TIndex, TData>::generateCallback(
+          block_size);
     }
+    // else retrieve the cached kernel from the corresponding mixin
+    return _CallbackAndBlockSize<has_weight, TIndex, TData>::callback;
+  }
 };
 
 // instantiate the cache with the list of storage mixins
-// for each of the 8 _EmbeddingBagKernelCache* usages in the EmbeddingBag.cpp impl file
+// for each of the 8 _EmbeddingBagKernelCache* usages in the EmbeddingBag.cpp
+// impl file
 using _EmbeddingBagKernelCache = _EmbeddingBagKernelCacheImpl<
-      _CallbackAndBlockSize<true, int32_t, float>,
-      _CallbackAndBlockSize<false, int32_t, float>,
-      _CallbackAndBlockSize<true, int64_t, float>,
-      _CallbackAndBlockSize<false, int64_t, float>,
-      _CallbackAndBlockSize<true, int32_t, unsigned short>,
-      _CallbackAndBlockSize<false, int32_t, unsigned short>,
-      _CallbackAndBlockSize<true, int64_t, unsigned short>,
-      _CallbackAndBlockSize<false, int64_t, unsigned short>>;
+    _CallbackAndBlockSize<true, int32_t, float>,
+    _CallbackAndBlockSize<false, int32_t, float>,
+    _CallbackAndBlockSize<true, int64_t, float>,
+    _CallbackAndBlockSize<false, int64_t, float>,
+    _CallbackAndBlockSize<true, int32_t, unsigned short>,
+    _CallbackAndBlockSize<false, int32_t, unsigned short>,
+    _CallbackAndBlockSize<true, int64_t, unsigned short>,
+    _CallbackAndBlockSize<false, int64_t, unsigned short>>;
 #else
 struct _EmbeddingBagKernelCache {
-    explicit _EmbeddingBagKernelCache(c10::optional<int64_t> /* maybe_block_size */) {}
+  explicit _EmbeddingBagKernelCache(
+      c10::optional<int64_t> /* maybe_block_size */) {}
 };
 #endif
 
-void _embedding_bag_cpu_impl_out(Tensor& output, Tensor& offset2bag,
-    Tensor& bag_size, Tensor* max_indices,
-    const Tensor &weight, const Tensor &indices,
-    const Tensor &offsets, const int64_t mode = 0,
+void _embedding_bag_cpu_impl_out(
+    Tensor& output,
+    Tensor& offset2bag,
+    Tensor& bag_size,
+    Tensor* max_indices,
+    const Tensor& weight,
+    const Tensor& indices,
+    const Tensor& offsets,
+    const int64_t mode = 0,
     const c10::optional<Tensor>& per_sample_weights = c10::nullopt,
     bool include_last_offset = false,
     int64_t padding_idx = -1,
@@ -136,5 +146,5 @@ void _embedding_bag_cpu_out(
     const c10::optional<int64_t>& padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache = nullptr);
 
-} // native
-} // at
+} // namespace native
+} // namespace at

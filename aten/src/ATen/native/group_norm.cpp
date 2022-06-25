@@ -24,7 +24,8 @@ void check_group_norm_inputs(
     int64_t num_groups) {
   TORCH_CHECK(
       num_groups > 0,
-      "Expected num groups to be greater than 0, got ", num_groups);
+      "Expected num groups to be greater than 0, got ",
+      num_groups);
   TORCH_CHECK(
       C % num_groups == 0,
       "Expected number of channels in input to be divisible by ",
@@ -67,8 +68,8 @@ std::tuple<Tensor, Tensor, Tensor> native_group_norm(
   // repeated check so expanded weights can call native_group_norm directly but
   // save mean and variance from forward
   check_group_norm_inputs(X, gamma, beta, C, group);
-  auto memory_format = X.device().is_cpu() ?
-      X.suggest_memory_format() : at::MemoryFormat::Contiguous;
+  auto memory_format = X.device().is_cpu() ? X.suggest_memory_format()
+                                           : at::MemoryFormat::Contiguous;
 
   TORCH_CHECK(X.is_contiguous(memory_format));
 
@@ -172,8 +173,8 @@ Tensor group_norm(
 
   const Tensor kEmpty;
   auto memory_format = input.suggest_memory_format();
-  const auto& X = input.device().is_cpu() ?
-      input.contiguous(memory_format) : input.contiguous();
+  const auto& X = input.device().is_cpu() ? input.contiguous(memory_format)
+                                          : input.contiguous();
   const auto& gamma = weight.defined() ? weight.contiguous() : kEmpty;
   const auto& beta = bias.defined() ? bias.contiguous() : kEmpty;
   TORCH_CHECK(!gamma.defined() || gamma.numel() == C);

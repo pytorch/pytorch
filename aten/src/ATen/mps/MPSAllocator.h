@@ -1,22 +1,22 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <ATen/Tensor.h>
 #include <ATen/ATen.h>
+#include <ATen/Tensor.h>
 #include <ATen/Utils.h>
-#include <torch/library.h>
 #include <c10/util/flat_hash_map.h>
+#include <torch/library.h>
 
 #include <ATen/mps/MPSDevice.h>
+#include <mach/vm_page_size.h>
 #include <cstdio>
 #include <mutex>
 #include <set>
 #include <utility>
-#include <mach/vm_page_size.h>
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
-#include <Metal/Metal.h>
 #include <Metal/MTLHeap.h>
+#include <Metal/Metal.h>
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 #endif
 
@@ -30,15 +30,16 @@ class IMpsAllocatorCallback {
  public:
   enum class EventType {
     ALLOCATED, // buffer got allocated to be used immediately
-    RECYCLED,  // buffer pulled from free list to be reused
-    FREED,     // buffer put to free list for future recycling
-    RELEASED,  // buffer memory released
+    RECYCLED, // buffer pulled from free list to be reused
+    FREED, // buffer put to free list for future recycling
+    RELEASED, // buffer memory released
   };
   virtual ~IMpsAllocatorCallback() = default;
   virtual void executeMPSAllocatorCallback(void* ptr, EventType event) = 0;
 };
 
-// MPS allocator will execute every registered callback when a block of memory is freed.
+// MPS allocator will execute every registered callback when a block of memory
+// is freed.
 C10_DECLARE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback);
 #define REGISTER_MPS_ALLOCATOR_CALLBACK(name, ...) \
   C10_REGISTER_CLASS(MPSAllocatorCallbacksRegistry, name, __VA_ARGS__);
@@ -47,32 +48,43 @@ namespace HeapAllocator {
 
 #define MB(x) round_page(x * 1048576UL)
 
-static const size_t kMaxSmallAlloc = MB(1);  // largest "small" allocation is 1 MiB
-static const size_t kMinLargeAlloc = MB(10); // allocations between 1 and 10 MiB may use kLargeHeap
-static const size_t kSmallHeap     = MB(8);  // "small" allocations are packed in 8 MiB heaps
-static const size_t kLargeHeap     = MB(32); // "large" allocations may be packed in 32 MiB heaps
-static const size_t kRoundLarge    = MB(2);  // round up large allocations to 2 MiB
+static const size_t kMaxSmallAlloc =
+    MB(1); // largest "small" allocation is 1 MiB
+static const size_t kMinLargeAlloc =
+    MB(10); // allocations between 1 and 10 MiB may use kLargeHeap
+static const size_t kSmallHeap =
+    MB(8); // "small" allocations are packed in 8 MiB heaps
+static const size_t kLargeHeap =
+    MB(32); // "large" allocations may be packed in 32 MiB heaps
+static const size_t kRoundLarge = MB(2); // round up large allocations to 2 MiB
 
 // TODO: check the caching performance of write-combined mode
-constexpr MTLResourceOptions kCPUCacheMode = MTLResourceOptionCPUCacheModeDefault;
-constexpr MTLResourceOptions kPrivateResourceOptions = kCPUCacheMode | MTLResourceStorageModePrivate;
-constexpr MTLResourceOptions kSharedResourceOptions  = kCPUCacheMode | MTLResourceStorageModeShared;
+constexpr MTLResourceOptions kCPUCacheMode =
+    MTLResourceOptionCPUCacheModeDefault;
+constexpr MTLResourceOptions kPrivateResourceOptions =
+    kCPUCacheMode | MTLResourceStorageModePrivate;
+constexpr MTLResourceOptions kSharedResourceOptions =
+    kCPUCacheMode | MTLResourceStorageModeShared;
 
 struct HeapBlock;
 
-struct BufferBlock
-{
+struct BufferBlock {
   id<MTLBuffer> buffer;
   size_t size;
   bool in_use;
   HeapBlock* heap;
   id_t buf_id;
 
-  BufferBlock(size_t Size, const id<MTLBuffer> Buffer = nullptr, HeapBlock* Heap = nullptr, id_t BufID = 0) :
-            buffer(Buffer), size(Size), in_use(false), heap(Heap), buf_id(BufID) { }
+  BufferBlock(
+      size_t Size,
+      const id<MTLBuffer> Buffer = nullptr,
+      HeapBlock* Heap = nullptr,
+      id_t BufID = 0)
+      : buffer(Buffer), size(Size), in_use(false), heap(Heap), buf_id(BufID) {}
 
   static bool Comparator(const BufferBlock* a, const BufferBlock* b) {
-    return (a->size != b->size) ? a->size < b->size : (uintptr_t)a->buffer < (uintptr_t)b->buffer;
+    return (a->size != b->size) ? a->size < b->size
+                                : (uintptr_t)a->buffer < (uintptr_t)b->buffer;
   }
   static size_t alignUp(size_t Size, size_t Alignment) {
     assert(((Alignment - 1) & Alignment) == 0);
@@ -83,21 +95,33 @@ typedef bool (*BufferComparison)(const BufferBlock*, const BufferBlock*);
 
 struct BufferPool;
 
-struct HeapBlock
-{
+struct HeapBlock {
   id<MTLHeap> heap;
-  struct { size_t total, available; } size;
+  struct {
+    size_t total, available;
+  } size;
   BufferPool* pool;
   unsigned int n_buffers;
 
-  HeapBlock(size_t Size, const id<MTLHeap> Heap = nullptr, BufferPool *Pool = nullptr) :
-            heap(Heap), size({.total = Size, .available = Size}), pool(Pool), n_buffers(0) { }
+  HeapBlock(
+      size_t Size,
+      const id<MTLHeap> Heap = nullptr,
+      BufferPool* Pool = nullptr)
+      : heap(Heap),
+        size({.total = Size, .available = Size}),
+        pool(Pool),
+        n_buffers(0) {}
 
-  static MTLResourceOptions getOptions(bool SharedStorage = false) { return SharedStorage ? kSharedResourceOptions : kPrivateResourceOptions; }
+  static MTLResourceOptions getOptions(bool SharedStorage = false) {
+    return SharedStorage ? kSharedResourceOptions : kPrivateResourceOptions;
+  }
 
-  static id<MTLHeap> createMTLHeap(id<MTLDevice> device, size_t size, bool is_shared) {
+  static id<MTLHeap> createMTLHeap(
+      id<MTLDevice> device,
+      size_t size,
+      bool is_shared) {
     id<MTLHeap> heap = nil;
-    MTLHeapDescriptor *d = [MTLHeapDescriptor new];
+    MTLHeapDescriptor* d = [MTLHeapDescriptor new];
     if (d) {
       if (size <= kMaxSmallAlloc) {
         d.size = kSmallHeap;
@@ -111,9 +135,10 @@ struct HeapBlock
       // this automatically handles Metal buffer access synchronizations at the
       // cost of slightly lower performance.
       d.hazardTrackingMode = MTLHazardTrackingModeTracked;
-      d.resourceOptions = getOptions(is_shared) | (MTLHazardTrackingModeTracked << MTLResourceHazardTrackingModeShift);
+      d.resourceOptions = getOptions(is_shared) |
+          (MTLHazardTrackingModeTracked << MTLResourceHazardTrackingModeShift);
       d.type = MTLHeapTypeAutomatic;
-      heap = [device newHeapWithDescriptor: d];
+      heap = [device newHeapWithDescriptor:d];
       if (heap) {
         [heap setPurgeableState:MTLPurgeableStateNonVolatile];
       }
@@ -124,11 +149,14 @@ struct HeapBlock
   static bool Comparator(const HeapBlock* a, const HeapBlock* b) {
     return a->size.available < b->size.available;
   }
-  static NSUInteger heapAvailableSize(id<MTLHeap> heap, size_t Alignment = vm_page_size) {
-      return [heap maxAvailableSizeWithAlignment:Alignment];
+  static NSUInteger heapAvailableSize(
+      id<MTLHeap> heap,
+      size_t Alignment = vm_page_size) {
+    return [heap maxAvailableSizeWithAlignment:Alignment];
   }
   id<MTLBuffer> newMTLBuffer(size_t length, bool is_shared) {
-    id<MTLBuffer> buf = [heap newBufferWithLength:length options:getOptions(is_shared)];
+    id<MTLBuffer> buf = [heap newBufferWithLength:length
+                                          options:getOptions(is_shared)];
     if (buf) {
       size.available = heapAvailableSize(heap);
       n_buffers++;
@@ -148,16 +176,19 @@ struct HeapBlock
 };
 typedef bool (*HeapComparison)(const HeapBlock*, const HeapBlock*);
 
-struct BufferPool
-{
-  BufferPool(const id<MTLDevice> Device, bool Small, bool Shared) :
-           device(Device), is_small(Small), is_shared(Shared),
-           heaps(HeapBlock::Comparator), buffers(BufferBlock::Comparator) { }
+struct BufferPool {
+  BufferPool(const id<MTLDevice> Device, bool Small, bool Shared)
+      : device(Device),
+        is_small(Small),
+        is_shared(Shared),
+        heaps(HeapBlock::Comparator),
+        buffers(BufferBlock::Comparator) {}
 
   const id<MTLDevice> device;
   // small heaps have sizes of kSmallHeap, and large ones kLargeHeap
   const bool is_small;
-  // private pools allocated on device memory; otherwise, shared between host/device
+  // private pools allocated on device memory; otherwise, shared between
+  // host/device
   const bool is_shared;
   // list of heaps ordered by their "available" (not total) memory size
   std::set<HeapBlock*, HeapComparison> heaps;
@@ -165,12 +196,15 @@ struct BufferPool
   std::set<BufferBlock*, BufferComparison> buffers;
 };
 
-struct AllocParams
-{
-  AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool) :
-            search_key(Alloc_Size), pool(Pool),
-            buffer_block(nullptr), requested_size(Requested_Size) {}
-  size_t size() const { return search_key.size; }
+struct AllocParams {
+  AllocParams(size_t Alloc_Size, size_t Requested_Size, BufferPool* Pool)
+      : search_key(Alloc_Size),
+        pool(Pool),
+        buffer_block(nullptr),
+        requested_size(Requested_Size) {}
+  size_t size() const {
+    return search_key.size;
+  }
 
   BufferBlock search_key;
   BufferPool* pool;
@@ -178,15 +212,18 @@ struct AllocParams
   size_t requested_size;
 };
 
-class MPSHeapAllocatorImpl
-{
-public:
-  explicit MPSHeapAllocatorImpl() :
-                      m_device(at::mps::MPSDevice::getInstance()->device()),
-                      m_large_pool_shared(m_device, false, true), m_large_pool_private(m_device, false, false),
-                      m_small_pool_shared(m_device, true , true), m_small_pool_private(m_device, true , false),
-                      m_total_allocated_memory(0), m_max_buffer_size([m_device maxBufferLength]),
-                      m_set_fraction(false), m_enable_debug_info(false) { }
+class MPSHeapAllocatorImpl {
+ public:
+  explicit MPSHeapAllocatorImpl()
+      : m_device(at::mps::MPSDevice::getInstance()->device()),
+        m_large_pool_shared(m_device, false, true),
+        m_large_pool_private(m_device, false, false),
+        m_small_pool_shared(m_device, true, true),
+        m_small_pool_private(m_device, true, false),
+        m_total_allocated_memory(0),
+        m_max_buffer_size([m_device maxBufferLength]),
+        m_set_fraction(false),
+        m_enable_debug_info(false) {}
 
   // interface exposed to at::Allocator
   id<MTLBuffer> Malloc(size_t size, bool sharedStorage);
@@ -194,12 +231,18 @@ public:
   void EmptyCache();
   bool isSharedBuffer(void* ptr);
 
-  inline id<MTLDevice> Device() const { return m_device; }
-  void enable_debug_info() { m_enable_debug_info = true; }
-  bool debug_info_enabled() const { return m_enable_debug_info; }
+  inline id<MTLDevice> Device() const {
+    return m_device;
+  }
+  void enable_debug_info() {
+    m_enable_debug_info = true;
+  }
+  bool debug_info_enabled() const {
+    return m_enable_debug_info;
+  }
   void set_shared_storage_mode(bool useSharedStorage);
 
-private:
+ private:
   const id<MTLDevice> m_device;
   std::mutex m_mutex;
   // allocated buffers by device pointer
@@ -226,32 +269,46 @@ private:
   void release_buffers(BufferPool& pool);
   bool release_available_cached_buffers(const AllocParams& p);
   bool release_cached_buffers();
-  void trigger_memory_callbacks(BufferBlock* buffer_block, IMpsAllocatorCallback::EventType event);
+  void trigger_memory_callbacks(
+      BufferBlock* buffer_block,
+      IMpsAllocatorCallback::EventType event);
 
   BufferPool& get_pool(size_t Size, bool useShared) {
-      return Size <= kMaxSmallAlloc ? (useShared ? m_small_pool_shared : m_small_pool_private) :
-                                      (useShared ? m_large_pool_shared : m_large_pool_private);
+    return Size <= kMaxSmallAlloc
+        ? (useShared ? m_small_pool_shared : m_small_pool_private)
+        : (useShared ? m_large_pool_shared : m_large_pool_private);
   }
 
   size_t get_allocation_size(size_t Length, bool useShared) {
-    MTLSizeAndAlign sizeAlign = [m_device heapBufferSizeAndAlignWithLength:Length
-                                                                   options:HeapBlock::getOptions(useShared)];
+    MTLSizeAndAlign sizeAlign = [m_device
+        heapBufferSizeAndAlignWithLength:Length
+                                 options:HeapBlock::getOptions(useShared)];
     return BufferBlock::alignUp(sizeAlign.size, sizeAlign.align);
   }
   // TODO: make this configurable
-  static size_t max_split_size() { return std::numeric_limits<size_t>::max(); }
+  static size_t max_split_size() {
+    return std::numeric_limits<size_t>::max();
+  }
   // maximum size of device memory available for allocation in current process
-  size_t max_available_size() const { return [m_device recommendedMaxWorkingSetSize] - [m_device currentAllocatedSize]; }
+  size_t max_available_size() const {
+    return [m_device recommendedMaxWorkingSetSize] -
+        [m_device currentAllocatedSize];
+  }
 
   // TODO: make a common function to do size unit conversions in PyTorch.
   static std::string format_size(uint64_t size) {
     std::ostringstream os;
     os.precision(2);
     os << std::fixed;
-    if (size <= 1024UL) { os << size << " bytes"; }
-    else if (size <= 1048576UL) { os << ((float) size / 1024.0) << " KB"; }
-    else if (size <= 1073741824UL) { os << ((float) size / 1048576.0) << " MB"; }
-    else { os << ((float) size / 1073741824.0) << " GB"; }
+    if (size <= 1024UL) {
+      os << size << " bytes";
+    } else if (size <= 1048576UL) {
+      os << ((float)size / 1024.0) << " KB";
+    } else if (size <= 1073741824UL) {
+      os << ((float)size / 1048576.0) << " MB";
+    } else {
+      os << ((float)size / 1073741824.0) << " GB";
+    }
     return os.str();
   }
 };

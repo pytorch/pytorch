@@ -31,7 +31,8 @@ static inline void pytorch_pack_q8gemm_wdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
+      *((int32_t*)packed_w) =
+          b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -98,16 +99,16 @@ static inline void pytorch_pack_q8gemm_wrq(
                 (kr_block_start + kr_block_offset)];
           *(packed.as_uint8_ptr++) = kv;
         }
-        // Weights need to be prepacked with the zero points, in their tail space
-        // where packed blocks are not multiple of input sizes
-        // e.g for ukernels with kr=2 and k is 3 then the second block must be
-        // padded with zero point. This is because when subtracting with zero point
-        // we just get zero for the padded value, which is what we want.
+        // Weights need to be prepacked with the zero points, in their tail
+        // space where packed blocks are not multiple of input sizes e.g for
+        // ukernels with kr=2 and k is 3 then the second block must be padded
+        // with zero point. This is because when subtracting with zero point we
+        // just get zero for the padded value, which is what we want.
         if (kzp != 0) {
-          for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+          for (size_t kr_block_offset = 0;
+               kr_block_offset < (kr - kr_block_size);
                kr_block_offset++) {
-            const uint8_t kv =
-                kzp[(nr_block_start + nr_block_offset)];
+            const uint8_t kv = kzp[(nr_block_start + nr_block_offset)];
             *(packed.as_uint8_ptr++) = kv;
           }
         } else {
@@ -115,10 +116,10 @@ static inline void pytorch_pack_q8gemm_wrq(
         }
       }
       if (kzp != 0) {
-        // This part fills the packed weights with zero points for output channels
-        // when they are not divisble by nr blocking parameter.
-        // This is needed because in some kernels, sse2 ones, it relies on this
-        // to produce zero as a result of subtracting zero point from weight value.
+        // This part fills the packed weights with zero points for output
+        // channels when they are not divisble by nr blocking parameter. This is
+        // needed because in some kernels, sse2 ones, it relies on this to
+        // produce zero as a result of subtracting zero point from weight value.
         size_t remaining_nr_blocks = ((nr - nr_block_size) & (np - 1));
         for (size_t nr_block_offset = 0; nr_block_offset < remaining_nr_blocks;
              nr_block_offset++) {
@@ -153,7 +154,8 @@ static inline void pytorch_pack_q8conv_wdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
+      *((int32_t*)packed_w) =
+          b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -221,16 +223,16 @@ static inline void pytorch_pack_q8conv_wrq(
                   (kr_block_start + kr_block_offset)];
             *(packed.as_uint8_ptr++) = kv;
           }
-          // Weights need to be prepacked with the zero points, in their tail space
-          // where packed blocks are not multiple of input sizes
-          // e.g for ukernels with kr=2 and k is 3 then the second block must be
-          // padded with zero point. This is because when subtracting with zero point
+          // Weights need to be prepacked with the zero points, in their tail
+          // space where packed blocks are not multiple of input sizes e.g for
+          // ukernels with kr=2 and k is 3 then the second block must be padded
+          // with zero point. This is because when subtracting with zero point
           // we just get zero for the padded value, which is what we want.
           if (kzp != 0) {
-            for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+            for (size_t kr_block_offset = 0;
+                 kr_block_offset < (kr - kr_block_size);
                  kr_block_offset++) {
-              const uint8_t kv =
-                  kzp[(nr_block_start + nr_block_offset)];
+              const uint8_t kv = kzp[(nr_block_start + nr_block_offset)];
               *(packed.as_uint8_ptr++) = kv;
             }
           } else {
@@ -238,10 +240,11 @@ static inline void pytorch_pack_q8conv_wrq(
           }
         }
         if (kzp != 0) {
-          // This part fills the packed wights with zero points for output channels
-          // when they are not divisble by nr blocking parameter.
-          // In that case
-          for (size_t nr_block_offset = 0; nr_block_offset < (nr - nr_block_size);
+          // This part fills the packed wights with zero points for output
+          // channels when they are not divisble by nr blocking parameter. In
+          // that case
+          for (size_t nr_block_offset = 0;
+               nr_block_offset < (nr - nr_block_size);
                nr_block_offset++) {
             for (size_t kr_block_offset = 0; kr_block_offset < kr;
                  kr_block_offset++) {
@@ -275,7 +278,8 @@ static inline void pytorch_pack_q8deconv_wdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
+      *((int32_t*)packed_w) =
+          b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -343,16 +347,16 @@ static inline void pytorch_pack_q8deconv_wrq(
                   (nr_block_start + nr_block_offset)];
             *(packed.as_uint8_ptr++) = kv;
           }
-          // Weights need to be prepacked with the zero points, in their tail space
-          // where packed blocks are not multiple of input sizes
-          // e.g for ukernels with kr=2 and k is 3 then the second block must be
-          // padded with zero point. This is because when subtracting with zero point
+          // Weights need to be prepacked with the zero points, in their tail
+          // space where packed blocks are not multiple of input sizes e.g for
+          // ukernels with kr=2 and k is 3 then the second block must be padded
+          // with zero point. This is because when subtracting with zero point
           // we just get zero for the padded value, which is what we want.
           if (kzp != 0) {
-            for (size_t kr_block_offset = 0; kr_block_offset < (kr - kr_block_size);
+            for (size_t kr_block_offset = 0;
+                 kr_block_offset < (kr - kr_block_size);
                  kr_block_offset++) {
-              const uint8_t kv =
-                  kzp[(nr_block_start + nr_block_offset)];
+              const uint8_t kv = kzp[(nr_block_start + nr_block_offset)];
               *(packed.as_uint8_ptr++) = kv;
             }
           } else {
@@ -360,10 +364,11 @@ static inline void pytorch_pack_q8deconv_wrq(
           }
         }
         if (kzp != 0) {
-          // This part fills the packed wights with zero points for output channels
-          // when they are not divisble by nr blocking parameter.
-          // In that case
-          for (size_t nr_block_offset = 0; nr_block_offset < (nr - nr_block_size);
+          // This part fills the packed wights with zero points for output
+          // channels when they are not divisble by nr blocking parameter. In
+          // that case
+          for (size_t nr_block_offset = 0;
+               nr_block_offset < (nr - nr_block_size);
                nr_block_offset++) {
             for (size_t kr_block_offset = 0; kr_block_offset < kr;
                  kr_block_offset++) {
@@ -396,10 +401,9 @@ static inline void pytorch_pack_q8dw_wdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
          cr_block_offset++) {
-      *((int32_t*)packed_w) =
-        b ?
-            b[cr_block_start + cr_block_offset] +
-            boff * kzp[cr_block_start + cr_block_offset] : 0.0f;
+      *((int32_t*)packed_w) = b ? b[cr_block_start + cr_block_offset] +
+              boff * kzp[cr_block_start + cr_block_offset]
+                                : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =
@@ -480,20 +484,19 @@ static inline void pytorch_pack_q8dw_3d_w_dilation(
         *((int32_t*)packed_w) = b ? b[cr_block_start + cr_block_offset] : 0.0f;
         packed_w = (void*)((int32_t*)packed_w + 1);
       }
-      packed_w =
-          (void*)((int32_t*)packed_w + (cr - cr_block_size));
+      packed_w = (void*)((int32_t*)packed_w + (cr - cr_block_size));
     }
     for (size_t x = x_start; x < x_end; x++) {
       for (size_t y = y_start; y < y_end; y++) {
         for (size_t z = z_start; z < z_end; z++) {
           for (size_t cr_block_offset = 0; cr_block_offset < cr_block_size;
-              cr_block_offset++) {
+               cr_block_offset++) {
             *((uint8_t*)packed_w) =
-                k[(((cr_block_start + cr_block_offset) * d + z) * h + y) * w + x];
+                k[(((cr_block_start + cr_block_offset) * d + z) * h + y) * w +
+                  x];
             packed_w = (void*)((uint8_t*)packed_w + 1);
           }
-          packed_w =
-              (void*)((uint8_t*)packed_w + (cr - cr_block_size));
+          packed_w = (void*)((uint8_t*)packed_w + (cr - cr_block_size));
         }
       }
     }
@@ -548,7 +551,8 @@ static inline void pytorch_pack_swizzle_q8gemm_bdq(
     int32_t* packed_b = (int32_t*)packed_w;
     for (size_t nr_block_offset = 0; nr_block_offset < nr_block_size;
          nr_block_offset++) {
-      *((int32_t*)packed_w) = b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
+      *((int32_t*)packed_w) =
+          b ? b[nr_block_start + nr_block_offset] + boff : 0.0f;
       packed_w = (void*)((uintptr_t)packed_w + sizeof(int32_t));
     }
     packed_w =

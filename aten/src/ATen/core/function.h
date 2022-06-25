@@ -29,7 +29,9 @@ using Kwargs = std::unordered_map<std::string, at::IValue>;
 struct RecursiveMethodCallError : public std::exception {};
 using TaskLauncher = std::function<void(std::function<void()>)>;
 
-TORCH_API void preoptimizeGraph(std::shared_ptr<Graph>& graph, bool disable_autocast=false);
+TORCH_API void preoptimizeGraph(
+    std::shared_ptr<Graph>& graph,
+    bool disable_autocast = false);
 
 // A Function is a pure Graph with no implicit `self` object bound.
 // It contains schema information and the executor that manages the
@@ -55,9 +57,7 @@ struct TORCH_API Function {
     return {};
   }
 
-  at::IValue operator()(
-    Stack stack,
-    const Kwargs& kwargs = Kwargs()) {
+  at::IValue operator()(Stack stack, const Kwargs& kwargs = Kwargs()) {
     getSchema().checkAndNormalizeInputs(stack, kwargs);
     run(stack);
     return stack.front();
@@ -89,8 +89,12 @@ struct TORCH_API Function {
   // If call() returns true, then callback completes successfully, otherwise
   // call() returns false.
 
-  // Overload for server interpreter, a bailout size is needed for graph executor.
-  virtual bool call(Stack&, c10::optional<size_t>, c10::function_ref<void(const Code&)>) {
+  // Overload for server interpreter, a bailout size is needed for graph
+  // executor.
+  virtual bool call(
+      Stack&,
+      c10::optional<size_t>,
+      c10::function_ref<void(const Code&)>) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(false);
     return false;
   }

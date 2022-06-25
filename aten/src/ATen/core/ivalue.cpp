@@ -1,15 +1,15 @@
-#include <ATen/core/ivalue.h>
 #include <ATen/core/Dict.h>
 #include <ATen/core/Formatting.h>
 #include <ATen/core/class_type.h>
 #include <ATen/core/enum_type.h>
 #include <ATen/core/function.h>
+#include <ATen/core/ivalue.h>
 #include <ATen/core/jit_type.h>
 #include <ATen/core/stack.h>
 #include <ATen/core/type_factory.h>
-#include <c10/util/irange.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/hash.h>
+#include <c10/util/irange.h>
 #include <cmath>
 #include <iostream>
 
@@ -27,15 +27,18 @@ namespace ivalue {
 
 // This is in ivalue.cpp because we need to access Type::annotation_str, which
 // is declared in jit_type.h
-void checkCustomClassType(const ClassType* expected_type, const Type* actual_type) {
+void checkCustomClassType(
+    const ClassType* expected_type,
+    const Type* actual_type) {
   // NB: doing pointer comparison here
-  // If in the future there ever arises a need to call operator== on custom class
-  // Type's, this needs to be changed!
-  TORCH_CHECK(actual_type == static_cast<const Type*>(expected_type),
-              "Tried to convert an IValue of type ",
-              actual_type ? actual_type->repr_str() : std::string("*NULL*"),
-              " to custom class type ",
-              expected_type ? expected_type->repr_str() : std::string("*NULL*"));
+  // If in the future there ever arises a need to call operator== on custom
+  // class Type's, this needs to be changed!
+  TORCH_CHECK(
+      actual_type == static_cast<const Type*>(expected_type),
+      "Tried to convert an IValue of type ",
+      actual_type ? actual_type->repr_str() : std::string("*NULL*"),
+      " to custom class type ",
+      expected_type ? expected_type->repr_str() : std::string("*NULL*"));
 }
 
 TORCH_API c10::intrusive_ptr<ConstantString> ConstantString::create(
@@ -79,62 +82,62 @@ const std::string ivalue::EnumHolder::unqualifiedClassName() const {
 
 c10::TypePtr IValue::TagType<c10::Type>::get(const IValue& v) {
   switch (v.tag) {
-      case Tag::None:
-        return NoneType::get();
-      case Tag::Tensor:
-        return TensorType::create(v.toTensor());
-      case Tag::Storage:
-        return StorageType::get();
-      case Tag::Double:
-        return FloatType::get();
-      case Tag::ComplexDouble:
-        return ComplexType::get();
-      case Tag::Int:
-        return IntType::get();
-      case Tag::SymInt:
-        return c10::SymIntType::get();
-      case Tag::Bool:
-        return BoolType::get();
-      case Tag::String:
-        return StringType::get();
-      case Tag::Blob:
-        return AnyType::get();
-      case Tag::GenericDict: {
-        auto d = v.toGenericDict();
-        return DictType::create(d.keyType(), d.valueType());
-      }
-      case Tag::GenericList:
-        return ListType::create(v.toList().elementType());
-      case Tag::Future:
-        return FutureType::create(v.toFuture()->elementType());
-      case Tag::RRef:
-        return RRefType::create(v.toRRef()->type());
-      case Tag::Device:
-        return DeviceObjType::get();
-      case Tag::Stream:
-        return StreamObjType::get();
-      case Tag::Object:
-        return v.toObjectRef().type();
-      case Tag::PyObject:
-        return PyObjectType::get();
-      case Tag::Uninitialized:
-        return AnyType::get();
-      case Tag::Capsule:
-        return CapsuleType::get();
-      case Tag::Tuple:
-        return v.toTupleRef().type();
-      case Tag::Generator:
-        return GeneratorType::get();
-      case Tag::Quantizer:
-        return QuantizerType::get();
-      case Tag::Enum:
-        return v.toEnumHolder()->type();
+    case Tag::None:
+      return NoneType::get();
+    case Tag::Tensor:
+      return TensorType::create(v.toTensor());
+    case Tag::Storage:
+      return StorageType::get();
+    case Tag::Double:
+      return FloatType::get();
+    case Tag::ComplexDouble:
+      return ComplexType::get();
+    case Tag::Int:
+      return IntType::get();
+    case Tag::SymInt:
+      return c10::SymIntType::get();
+    case Tag::Bool:
+      return BoolType::get();
+    case Tag::String:
+      return StringType::get();
+    case Tag::Blob:
+      return AnyType::get();
+    case Tag::GenericDict: {
+      auto d = v.toGenericDict();
+      return DictType::create(d.keyType(), d.valueType());
+    }
+    case Tag::GenericList:
+      return ListType::create(v.toList().elementType());
+    case Tag::Future:
+      return FutureType::create(v.toFuture()->elementType());
+    case Tag::RRef:
+      return RRefType::create(v.toRRef()->type());
+    case Tag::Device:
+      return DeviceObjType::get();
+    case Tag::Stream:
+      return StreamObjType::get();
+    case Tag::Object:
+      return v.toObjectRef().type();
+    case Tag::PyObject:
+      return PyObjectType::get();
+    case Tag::Uninitialized:
+      return AnyType::get();
+    case Tag::Capsule:
+      return CapsuleType::get();
+    case Tag::Tuple:
+      return v.toTupleRef().type();
+    case Tag::Generator:
+      return GeneratorType::get();
+    case Tag::Quantizer:
+      return QuantizerType::get();
+    case Tag::Enum:
+      return v.toEnumHolder()->type();
   }
   // switch above is complete but this silences compiler warnings
   TORCH_INTERNAL_ASSERT(false, "unhandled case in IValue::type()");
 }
 
-void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
+void IValue::visit(const std::function<bool(const IValue&)>& visitor) const {
   if (visitor(*this)) {
     // Shortcut
     return;
@@ -163,14 +166,15 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
       auto obj_type = type()->expect<ClassType>();
       auto obj_value = toObject();
       auto attributes = obj_type->getAttributes();
-      for (const auto& attr: attributes) {
+      for (const auto& attr : attributes) {
         auto attribute = obj_value->getAttr(attr.getName());
         attribute.visit(visitor);
       }
       break;
     }
     case Tag::PyObject: {
-      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj =
+          toPyObjectHolder();
       auto match = py_obj->tryToInferType();
       if (match.success()) {
         auto contained_value = py_obj->toIValue(match.type());
@@ -180,7 +184,7 @@ void IValue::visit(const std::function<bool (const IValue &)>& visitor) const {
     }
     default:
       break;
- }
+  }
 }
 
 void IValue::getSubValues(HashAliasedIValues& subValues) const {
@@ -215,7 +219,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
       auto obj_type = type()->expect<ClassType>();
       auto obj_value = toObject();
       auto attributes = obj_type->getAttributes();
-      for (const auto& attr: attributes) {
+      for (const auto& attr : attributes) {
         auto attribute = obj_value->getAttr(attr.getName());
         attribute.getSubValues(subValues);
       }
@@ -223,10 +227,15 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     }
     case Tag::PyObject: {
       subValues.insert(*this);
-      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj = toPyObjectHolder();
+      c10::intrusive_ptr<at::ivalue::PyObjectHolder> py_obj =
+          toPyObjectHolder();
       auto match = py_obj->tryToInferType();
-      TORCH_CHECK_TYPE(match.success(),
-            "Cannot infer type of ", py_obj->toStr(), ": ", match.reason());
+      TORCH_CHECK_TYPE(
+          match.success(),
+          "Cannot infer type of ",
+          py_obj->toStr(),
+          ": ",
+          match.reason());
       auto contained_value = py_obj->toIValue(match.type());
       contained_value.getSubValues(subValues);
       break;
@@ -235,8 +244,7 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Device:
     case Tag::Uninitialized:
     case Tag::Capsule:
-      TORCH_CHECK_TYPE(
-          false, "Cannot inspect value of type ", this->tagKind());
+      TORCH_CHECK_TYPE(false, "Cannot inspect value of type ", this->tagKind());
       // Fall through
     default:
       // don't record scalars.
@@ -293,11 +301,14 @@ IValue IValue::equals(const IValue& rhs) const {
       return lhs.toTensor().eq(rhs.toTensor());
     }
     case Tag::Storage:
-      return rhs.isStorage() && lhs.toStorage().unsafeGetStorageImpl() == rhs.toStorage().unsafeGetStorageImpl();
+      return rhs.isStorage() &&
+          lhs.toStorage().unsafeGetStorageImpl() ==
+          rhs.toStorage().unsafeGetStorageImpl();
     case Tag::Double:
       return rhs.isDouble() && lhs.toDouble() == rhs.toDouble();
     case Tag::ComplexDouble:
-      return rhs.isComplexDouble() && lhs.toComplexDouble() == rhs.toComplexDouble();
+      return rhs.isComplexDouble() &&
+          lhs.toComplexDouble() == rhs.toComplexDouble();
     case Tag::Int:
       return rhs.isInt() && lhs.toInt() == rhs.toInt();
     case Tag::SymInt:
@@ -412,11 +423,13 @@ bool IValue::is(const IValue& rhs) const {
 
 template <typename T>
 inline bool IValue::isListOf() const {
-  // note: avoids calling type() to avoid extra referencing counting for the returned type.
+  // note: avoids calling type() to avoid extra referencing counting for the
+  // returned type.
   if (!isList()) {
     return false;
   }
-  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
+  const auto& ty =
+      static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
   if (ty->kind() == T::Kind) {
     return true;
   }
@@ -439,7 +452,8 @@ bool IValue::isOptionalTensorList() const {
   if (!isList()) {
     return false;
   }
-  const auto& ty = static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
+  const auto& ty =
+      static_cast<detail::ListImpl*>(payload.u.as_intrusive_ptr)->elementType;
   const auto expected_ty = c10::getTypePtr<c10::optional<at::Tensor>>();
   return expected_ty == ty;
 }
@@ -513,7 +527,7 @@ std::ostream& printDict(
   out << "}";
   return out;
 }
-}
+} // namespace
 
 // Properly disambiguate the type of an empty dict
 std::ostream& printMaybeAnnotatedDict(
@@ -531,7 +545,7 @@ std::ostream& printMaybeAnnotatedDict(
   return out;
 }
 
-std::ostream& printComplex(std::ostream & out, const IValue & v) {
+std::ostream& printComplex(std::ostream& out, const IValue& v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
   auto sign = "";
@@ -545,9 +559,9 @@ std::ostream& printComplex(std::ostream & out, const IValue & v) {
 
 std::ostream& IValue::repr(
     std::ostream& out,
-    std::function<bool(std::ostream&, const IValue& v)>
-        customFormatter) const {
-  // First check if the caller has provided a custom formatter. Use that if possible.
+    std::function<bool(std::ostream&, const IValue& v)> customFormatter) const {
+  // First check if the caller has provided a custom formatter. Use that if
+  // possible.
   if (customFormatter(out, *this)) {
     return out;
   }
@@ -563,7 +577,7 @@ std::ostream& IValue::repr(
     case IValue::Tag::Double: {
       double d = v.toDouble();
       int c = std::fpclassify(d);
-      if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
+      if ((c == FP_NORMAL || c == FP_ZERO) && std::abs(d) < 1e10) {
         int64_t i = int64_t(d);
         if (double(i) == d) {
           // -0.0 (signed zero) needs to be parsed as -0.
@@ -608,11 +622,15 @@ std::ostream& IValue::repr(
       return printMaybeAnnotatedDict(out, v, formatter);
     case IValue::Tag::Enum: {
       auto enum_holder = v.toEnumHolder();
-      return out << enum_holder->qualifiedClassName() << "." <<
-          enum_holder->name();
+      return out << enum_holder->qualifiedClassName() << "."
+                 << enum_holder->name();
     }
     case IValue::Tag::Object: {
-      TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind(), ". Perhaps you've frozen a module with custom classes?");
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "repr() not defined on: ",
+          v.tagKind(),
+          ". Perhaps you've frozen a module with custom classes?");
     }
     default:
       TORCH_INTERNAL_ASSERT(false, "repr() not defined on: ", v.tagKind());
@@ -623,86 +641,86 @@ bool simpleClassTypeArg(const Argument& arg, const ClassTypePtr& type) {
   return arg.type() == type && !arg.kwarg_only() && !arg.default_value();
 }
 
-torch::jit::Function* checkObjectSortSchema(const c10::ClassTypePtr& t, std::stringstream& why_not) {
+torch::jit::Function* checkObjectSortSchema(
+    const c10::ClassTypePtr& t,
+    std::stringstream& why_not) {
   if (auto method = t->findMethod("__lt__")) {
-      const auto& lt_schema = method->getSchema();
-      const auto& schema_args = lt_schema.arguments();
-      bool error =
-          (schema_args.size() != 2 ||
-           !simpleClassTypeArg(schema_args[0], t) ||
-           !simpleClassTypeArg(schema_args[1], t) ||
-           lt_schema.returns().size() != 1 ||
-           lt_schema.returns()[0].type() != BoolType::get());
-      if (!error) {
-        return method;
-      }
+    const auto& lt_schema = method->getSchema();
+    const auto& schema_args = lt_schema.arguments();
+    bool error =
+        (schema_args.size() != 2 || !simpleClassTypeArg(schema_args[0], t) ||
+         !simpleClassTypeArg(schema_args[1], t) ||
+         lt_schema.returns().size() != 1 ||
+         lt_schema.returns()[0].type() != BoolType::get());
+    if (!error) {
+      return method;
     }
+  }
 
-    why_not << "To sort a list of " << t->repr_str()
-            << " it must define a "
-            << "__lt__ method with two inputs of type "
-            << t->repr_str() << " that "
-            << "returns a bool";
-    return nullptr;
+  why_not << "To sort a list of " << t->repr_str() << " it must define a "
+          << "__lt__ method with two inputs of type " << t->repr_str()
+          << " that "
+          << "returns a bool";
+  return nullptr;
 }
 
 IValueComparator getLessThanComparator(const IValue& v) {
   if (v.isTensor()) {
-      return [](const IValue& a, const IValue& b) {
-        return a.toTensor().lt(b.toTensor()).is_nonzero();
-      };
+    return [](const IValue& a, const IValue& b) {
+      return a.toTensor().lt(b.toTensor()).is_nonzero();
+    };
   }
 
   if (v.isDouble()) {
-      return [](const IValue& a, const IValue& b) {
-        return a.toDouble() < b.toDouble();
-      };
+    return [](const IValue& a, const IValue& b) {
+      return a.toDouble() < b.toDouble();
+    };
   }
 
   if (v.isInt()) {
-      return [](const IValue& a, const IValue& b) {
-        return a.toInt() < b.toInt();
-      };
+    return
+        [](const IValue& a, const IValue& b) { return a.toInt() < b.toInt(); };
   }
 
   if (v.isBool()) {
-      return [](const IValue& a, const IValue& b) {
-        return a.toBool() == false && b.toBool() == true;
-      };
+    return [](const IValue& a, const IValue& b) {
+      return a.toBool() == false && b.toBool() == true;
+    };
   }
 
   if (v.isString()) {
-      return [](const IValue& a, const IValue& b) {
-       return a.toStringRef() < b.toStringRef();
-      };
+    return [](const IValue& a, const IValue& b) {
+      return a.toStringRef() < b.toStringRef();
+    };
   }
 
   if (v.isTuple()) {
-      const auto& elements = v.toTupleRef().elements();
-      size_t n = elements.size();
+    const auto& elements = v.toTupleRef().elements();
+    size_t n = elements.size();
 
-      std::vector<IValueComparator> elements_lts;
-      elements_lts.reserve(n);
+    std::vector<IValueComparator> elements_lts;
+    elements_lts.reserve(n);
+    for (const auto i : c10::irange(n)) {
+      elements_lts.push_back(getLessThanComparator(elements[i]));
+    }
+
+    return [elements_lts = std::move(elements_lts), n](
+               const IValue& a, const IValue& b) {
+      const auto& a_elements = a.toTupleRef().elements();
+      const auto& b_elements = b.toTupleRef().elements();
+
       for (const auto i : c10::irange(n)) {
-        elements_lts.push_back(getLessThanComparator(elements[i]));
-      }
-
-      return [elements_lts=std::move(elements_lts), n](const IValue& a, const IValue& b) {
-        const auto& a_elements = a.toTupleRef().elements();
-        const auto& b_elements = b.toTupleRef().elements();
-
-        for (const auto i : c10::irange(n)) {
-          if (elements_lts[i](a_elements[i], b_elements[i])) {
-            return true;
-          }
-          if (a_elements[i] == b_elements[i]) {
-            continue;
-          }
-          return false;
+        if (elements_lts[i](a_elements[i], b_elements[i])) {
+          return true;
         }
-        // Reaching here means two tuples are equal.
+        if (a_elements[i] == b_elements[i]) {
+          continue;
+        }
         return false;
-      };
+      }
+      // Reaching here means two tuples are equal.
+      return false;
+    };
   }
 
   if (v.isObject()) {
@@ -732,7 +750,7 @@ IValueComparator getLessThanComparator(const IValue& v) {
 IValueComparator getGreaterThanComparator(const IValue& v) {
   auto lt = getLessThanComparator(v);
   return [lt = std::move(lt)](const IValue& a, const IValue& b) {
-    return lt(b, a);  // gt(a, b) === lt(b, a)
+    return lt(b, a); // gt(a, b) === lt(b, a)
   };
 }
 
@@ -741,11 +759,9 @@ std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
   return out;
 }
 
-std::ostream& operator<<(std::ostream & out, const IValue & v) {
-  auto formatter = [&](std::ostream& out, const IValue& v) {
-    out << v;
-  };
-  switch(v.tag) {
+std::ostream& operator<<(std::ostream& out, const IValue& v) {
+  auto formatter = [&](std::ostream& out, const IValue& v) { out << v; };
+  switch (v.tag) {
     case IValue::Tag::None:
       return out << v.toNone();
     case IValue::Tag::Tensor:
@@ -762,13 +778,13 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
         }
       }
       auto orig_prec = out.precision();
-      return out
-        << std::setprecision(std::numeric_limits<double>::max_digits10)
-        << v.toDouble()
-        << std::setprecision(orig_prec);
-    } case IValue::Tag::ComplexDouble: {
+      return out << std::setprecision(std::numeric_limits<double>::max_digits10)
+                 << v.toDouble() << std::setprecision(orig_prec);
+    }
+    case IValue::Tag::ComplexDouble: {
       return printComplex(out, v);
-    } case IValue::Tag::Int:
+    }
+    case IValue::Tag::Int:
       return out << v.toInt();
     case IValue::Tag::SymInt:
       return out << v.toSymInt();
@@ -815,10 +831,9 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
     }
     case IValue::Tag::Enum: {
       auto enum_holder = v.toEnumHolder();
-      return out << "Enum<" << enum_holder->unqualifiedClassName() << "." <<
-          enum_holder->name() << ">";
+      return out << "Enum<" << enum_holder->unqualifiedClassName() << "."
+                 << enum_holder->name() << ">";
     }
-
   }
   AT_ERROR("Tag not found: ", v.tagKind());
 }
@@ -834,24 +849,23 @@ std::shared_ptr<ClassType> ivalue::Object::type() const {
 }
 
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::create(
-    ClassTypePtr classType, size_t numSlots) {
+    ClassTypePtr classType,
+    size_t numSlots) {
   return ivalue::Object::create(
       StrongTypePtr(nullptr, std::move(classType)), numSlots);
 }
-
 
 IValue IValue::deepcopy() const {
   IValue::HashAliasedIValueMap memo;
   return deepcopy(memo);
 }
 
-IValue IValue::deepcopy(
-    IValue::HashAliasedIValueMap& memo) const {
+IValue IValue::deepcopy(IValue::HashAliasedIValueMap& memo) const {
   if (memo.count(*this)) {
     return memo.at(*this);
   }
   IValue copy;
-  switch(tag) {
+  switch (tag) {
     case IValue::Tag::Tensor:
       copy = IValue(toTensor().clone());
       break;
@@ -861,8 +875,7 @@ IValue IValue::deepcopy(
         copied_tuple.push_back(e.deepcopy(memo));
       }
       copy = IValue(ivalue::Tuple::create(copied_tuple));
-    }
-      break;
+    } break;
     case IValue::Tag::GenericList: {
       auto list = toList();
       auto copied_list = c10::impl::GenericList(list.elementType());
@@ -870,17 +883,17 @@ IValue IValue::deepcopy(
         copied_list.push_back(v.deepcopy(memo));
       }
       copy = IValue(copied_list);
-    }
-      break;
+    } break;
     case IValue::Tag::GenericDict: {
       auto dict = toGenericDict();
-      auto copied_dict = c10::impl::GenericDict(dict.keyType(), dict.valueType());
+      auto copied_dict =
+          c10::impl::GenericDict(dict.keyType(), dict.valueType());
       for (const auto& entry : dict) {
-        copied_dict.insert(entry.key().deepcopy(memo), entry.value().deepcopy(memo));
+        copied_dict.insert(
+            entry.key().deepcopy(memo), entry.value().deepcopy(memo));
       }
       copy = IValue(copied_dict);
-    }
-      break;
+    } break;
     case IValue::Tag::Object: {
       auto class_type = type()->expect<ClassType>();
       if (class_type->hasMethod("__getstate__") &&
@@ -952,7 +965,6 @@ void ivalue::Object::resizeObject(size_t slot) {
   slots_.resize(type()->numAttributes());
 }
 
-
 c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
   auto object = ivalue::Object::create(type_, type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
@@ -961,7 +973,8 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy() const {
   return object;
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::copy_to_weak_compilation_ref() const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::
+    copy_to_weak_compilation_ref() const {
   auto object = ivalue::Object::create(
       WeakOrStrongTypePtr(type_.asWeakTypePtr()), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
@@ -975,9 +988,11 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy() const {
   return deepcopy(memo);
 }
 
-c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedIValueMap& memo) const {
+c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
+    IValue::HashAliasedIValueMap& memo) const {
   auto cu = type_.cu_;
-  auto object = ivalue::Object::create(WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
+  auto object = ivalue::Object::create(
+      WeakOrStrongTypePtr(type_.cu_, type_.type_), type()->numAttributes());
   for (const auto i : c10::irange(slots_.size())) {
     if (*slots_[i].type() == *c10::TypeFactory::get<CapsuleType>()) {
       // If we've gotten here, it means that we have *not* copied this
@@ -990,7 +1005,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(IValue::HashAliasedI
         err << " " << qualname->qualifiedName();
       }
       err << ". Please define serialization methods via def_pickle() for "
-            "this class.";
+             "this class.";
       AT_ERROR(err.str());
     }
     object->setSlot(i, slots_[i].deepcopy(memo));
@@ -1024,8 +1039,8 @@ WeakTypePtr WeakOrStrongTypePtr::asWeakTypePtr() const {
 }
 
 // Needs to be in this .cpp file to access the full definition of PyObjectHolder
-std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractStorages(
-    const at::IValue& value) {
+std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::
+    extractStorages(const at::IValue& value) {
   std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> weakStorageImpls;
   // getSubValues works poorly on Python objects: it only works if they can be
   // converted to a "regular" IValue type hence, for example, it doesn't support
@@ -1050,8 +1065,10 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
       if (tensor.is_sparse()) {
         // Sparse tensor is indices and values. Both are tensors
         // and contain storage.
-        weakStorageImpls.push_back(tensor.indices().storage().getWeakStorageImpl());
-        weakStorageImpls.push_back(tensor.values().storage().getWeakStorageImpl());
+        weakStorageImpls.push_back(
+            tensor.indices().storage().getWeakStorageImpl());
+        weakStorageImpls.push_back(
+            tensor.values().storage().getWeakStorageImpl());
       } else {
         // A dense/strided tensor contains 1 storage
         weakStorageImpls.push_back(tensor.storage().getWeakStorageImpl());
@@ -1064,7 +1081,8 @@ std::vector<c10::weak_intrusive_ptr<c10::StorageImpl>> ivalue::Future::extractSt
     value.getSubValues(sub_values);
     for (const at::IValue& sub_value : sub_values) {
       if (sub_value.isTensor()) {
-        weakStorageImpls.push_back(sub_value.toTensor().storage().getWeakStorageImpl());
+        weakStorageImpls.push_back(
+            sub_value.toTensor().storage().getWeakStorageImpl());
       }
     }
   }
@@ -1093,7 +1111,6 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAll(
   } else {
     auto typePtr = ctx->srcFutures.get(0)->elementType();
     for (const auto i : c10::irange(ctx->srcFutures.size())) {
-
       std::function<void(ivalue::Future&)> func = [ctx](ivalue::Future& fut) {
         // Set error and exit early if encountered.
         if (fut.hasError()) {
@@ -1124,7 +1141,7 @@ std::string formatSetOfDevices(const std::vector<c10::Device>& devices) {
   return oss.str();
 }
 
-}
+} // namespace
 
 TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     List<intrusive_ptr<ivalue::Future>> srcs) {
@@ -1141,13 +1158,20 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
     }
     TORCH_CHECK_TYPE(
         i == 0 || (*typePtr == *srcs.get(i)->elementType()),
-        "Expected all futures to have the same type, but found ", *typePtr,
-        " in position 0 and ", *srcs.get(i)->elementType(), " in position ", i);
+        "Expected all futures to have the same type, but found ",
+        *typePtr,
+        " in position 0 and ",
+        *srcs.get(i)->elementType(),
+        " in position ",
+        i);
     TORCH_CHECK_VALUE(
         i == 0 || (devices == srcs.get(i)->devices()),
         "Expected all futures to have the same devices, but found ",
-        formatSetOfDevices(devices), " in position 0 and ",
-        formatSetOfDevices(srcs.get(i)->devices()), " in position ", i);
+        formatSetOfDevices(devices),
+        " in position 0 and ",
+        formatSetOfDevices(srcs.get(i)->devices()),
+        " in position ",
+        i);
   }
   struct Ctx {
     explicit Ctx(
@@ -1155,7 +1179,8 @@ TORCH_API intrusive_ptr<ivalue::Future> collectAny(
         TypePtr typePtr,
         std::vector<c10::Device> devices)
         : srcFutures(std::move(srcs)),
-          dstFuture(make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
+          dstFuture(
+              make_intrusive<ivalue::Future>(typePtr, std::move(devices))) {}
     std::atomic<bool> done{false};
     List<intrusive_ptr<ivalue::Future>> srcFutures;
     intrusive_ptr<ivalue::Future> dstFuture;

@@ -35,8 +35,8 @@
 // specified by float_vec_return_type.
 //
 // When writing kernels with these vectors, it is expected that floating-
-// point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
-// iterations.
+// point operations will be carried out in a loop over
+// Vectorized<T>::float_num_vecs iterations.
 
 namespace at {
 namespace vec {
@@ -214,113 +214,117 @@ inline void __attribute__((always_inline)) QuantizeAvx2(
   }
 }
 
-template<>
+template <>
 struct Vectorized<c10::qint32> : public Vectorizedqi {
-    using size_type = int;
-    static constexpr size_type size() {
-        return 8;
-    }
+  using size_type = int;
+  static constexpr size_type size() {
+    return 8;
+  }
 
-    static constexpr int float_num_vecs() {
-        return 1;
-    }
+  static constexpr int float_num_vecs() {
+    return 1;
+  }
 
-    static constexpr int int_num_vecs() {
-        return 1;
-    }
+  static constexpr int int_num_vecs() {
+    return 1;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, 1>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, 1>;
-    using value_type = c10::qint32::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, 1>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, 1>;
+  using value_type = c10::qint32::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
-    Vectorized() {}
+  using Vectorizedqi::Vectorizedqi;
+  Vectorized() {}
 
-    Vectorized(__m256i vals_) { vals = vals_;}
+  Vectorized(__m256i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::qint32& val) {
-        value_type uw = val.val_;
-        vals = _mm256_set1_epi32(uw);
+  // Broadcast constructor
+  Vectorized(const c10::qint32& val) {
+    value_type uw = val.val_;
+    vals = _mm256_set1_epi32(uw);
+  }
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm256_storeu_si256((__m256i*)ptr, vals);
     }
+  }
 
-    void store(void* ptr, int count = size()) const {
-      if (count != size()) {
-        memcpy(ptr, &vals, count * sizeof(value_type));
-      } else {
-        _mm256_storeu_si256((__m256i*)ptr, vals);
-      }
-    }
+  static Vectorized<c10::qint32> loadu(const void* ptr) {
+    return Vectorized<c10::qint32>(ptr);
+  }
 
-    static Vectorized<c10::qint32> loadu(const void* ptr) {
-        return Vectorized<c10::qint32>(ptr);
-    }
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> /*zero_point*/,
+      Vectorized<float> scale_zp_premul) const {
+    __m256 float_vals = _mm256_cvtepi32_ps(vals);
+    return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
+  }
 
-    float_vec_return_type dequantize(
-        Vectorized<float> scale,
-        Vectorized<float> /*zero_point*/,
-        Vectorized<float> scale_zp_premul) const {
-      __m256 float_vals = _mm256_cvtepi32_ps(vals);
-      return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
-    }
+  static Vectorized<c10::qint32> quantize(
+      const float_vec_return_type& rhs,
+      float scale,
+      int32_t zero_point,
+      float /*inverse_scale*/) {
+    Vectorized<c10::qint32> retval;
+    auto rhs_data = (__m256)rhs[0];
+    at::native::quantize_vec<c10::qint32, /*precision=*/32>(
+        scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, 8);
+    return retval;
+  }
 
-    static Vectorized<c10::qint32> quantize(
-        const float_vec_return_type& rhs,
-        float scale,
-        int32_t zero_point,
-        float /*inverse_scale*/) {
-      Vectorized<c10::qint32> retval;
-      auto rhs_data = (__m256)rhs[0];
-      at::native::quantize_vec<c10::qint32, /*precision=*/32>(
-          scale, zero_point, (float*)&rhs_data, (c10::qint32*)&retval.vals, 8);
-      return retval;
-    }
+  Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
+    return _mm256_max_epi32(vals, b.vals);
+  }
 
-    Vectorized<c10::qint32> maximum(Vectorized<c10::qint32> b) const {
-      return _mm256_max_epi32(vals, b.vals);
-    }
+  Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
+    return _mm256_min_epi32(vals, b.vals);
+  }
 
-    Vectorized<c10::qint32> minimum(Vectorized<c10::qint32> b) const {
-      return _mm256_min_epi32(vals, b.vals);
-    }
+  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
-        return maximum(zero_point);
-    }
+  Vectorized<c10::qint32> relu6(
+      Vectorized<c10::qint32> zero_point,
+      Vectorized<c10::qint32> q_six) {
+    return _mm256_min_epi32(
+        _mm256_max_epi32(vals, zero_point.vals), q_six.vals);
+  }
 
-    Vectorized<c10::qint32> relu6(
-        Vectorized<c10::qint32> zero_point,
-        Vectorized<c10::qint32> q_six) {
-      return _mm256_min_epi32(
-          _mm256_max_epi32(vals, zero_point.vals), q_six.vals);
-    }
+  int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
+    return {_mm256_sub_epi32(vals, b)};
+  }
 
-    int_vec_return_type widening_subtract(Vectorized<c10::qint32> b) const {
-      return {_mm256_sub_epi32(vals, b)};
-    }
+  static Vectorized<c10::qint32> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m256 multiplier_v = _mm256_set1_ps(multiplier);
+    __m256i zero_point_v = _mm256_set1_epi32(zero_point);
 
-    static Vectorized<c10::qint32> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m256 multiplier_v = _mm256_set1_ps(multiplier);
-      __m256i zero_point_v = _mm256_set1_epi32(zero_point);
-
-      __m256 scaled = _mm256_mul_ps(_mm256_cvtepi32_ps(inp[0]), multiplier_v);
-      __m256i rounded = _mm256_cvtps_epi32(scaled);
-      return _mm256_add_epi32(rounded, zero_point_v);
-    }
+    __m256 scaled = _mm256_mul_ps(_mm256_cvtepi32_ps(inp[0]), multiplier_v);
+    __m256i rounded = _mm256_cvtps_epi32(scaled);
+    return _mm256_add_epi32(rounded, zero_point_v);
+  }
 
  private:
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-      vals = _mm256_loadu_si256((const __m256i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm256_loadu_si256((const __m256i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::qint32> inline maximum(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+Vectorized<c10::qint32> inline maximum(
+    const Vectorized<c10::qint32>& a,
+    const Vectorized<c10::qint32>& b) {
   return a.maximum(b);
 }
 
@@ -384,60 +388,62 @@ __m256i RequantizeAvx2(
   return xyzw_clamped_v;
 }
 
-template<>
+template <>
 struct Vectorized<c10::qint8> : public Vectorizedqi {
-    static constexpr int size() {
-        return 32;
-    }
+  static constexpr int size() {
+    return 32;
+  }
 
-    static constexpr int float_num_vecs() {
-        return 4;
-    }
+  static constexpr int float_num_vecs() {
+    return 4;
+  }
 
-    static constexpr int int_num_vecs() {
-        return 4;
-    }
+  static constexpr int int_num_vecs() {
+    return 4;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, 4>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
-    using value_type = typename c10::qint8::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, 4>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
+  using value_type = typename c10::qint8::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
+  using Vectorizedqi::Vectorizedqi;
 
-    Vectorized() {}
-    Vectorized(__m256i vals_) { vals = vals_;}
+  Vectorized() {}
+  Vectorized(__m256i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::qint8& val) {
-        value_type uw = val.val_;
-        vals = _mm256_set1_epi8(uw);
+  // Broadcast constructor
+  Vectorized(const c10::qint8& val) {
+    value_type uw = val.val_;
+    vals = _mm256_set1_epi8(uw);
+  }
+
+// This is needed because the compiler emits awful code for the default
+// constructor for moving the enum
+// NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-copy"
+  Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) {}
+#pragma clang diagnostic pop
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm256_storeu_si256((__m256i*)ptr, vals);
     }
+  }
 
-    // This is needed because the compiler emits awful code for the default
-    // constructor for moving the enum
-    // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wdeprecated-copy"
-    Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) { }
-    #pragma clang diagnostic pop
-
-    void store(void* ptr, int count = size()) const {
-        if (count != size()) {
-            memcpy(ptr, &vals, count * sizeof(value_type));
-        } else {
-            _mm256_storeu_si256((__m256i*)ptr, vals);
-        }
-    }
-
-    static Vectorized<c10::qint8> loadu(const void* ptr) {
-        return Vectorized<c10::qint8>(ptr);
-    }
+  static Vectorized<c10::qint8> loadu(const void* ptr) {
+    return Vectorized<c10::qint8>(ptr);
+  }
 
  private:
-    __m256i cvtepi8_epi32(__m128i epi8_vals) const {
-        return _mm256_cvtepi8_epi32(epi8_vals);
-    }
+  __m256i cvtepi8_epi32(__m128i epi8_vals) const {
+    return _mm256_cvtepi8_epi32(epi8_vals);
+  }
 
  public:
   float_vec_return_type dequantize(
@@ -478,129 +484,133 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
   }
 
   Vectorized<c10::qint8> maximum(Vectorized<c10::qint8> b) const {
-      return _mm256_max_epi8(vals, b.vals);
-    }
+    return _mm256_max_epi8(vals, b.vals);
+  }
 
   Vectorized<c10::qint8> minimum(Vectorized<c10::qint8> b) const {
-      return _mm256_min_epi8(vals, b.vals);
-    }
+    return _mm256_min_epi8(vals, b.vals);
+  }
 
-    Vectorized<c10::qint8> relu(Vectorized<c10::qint8> zero_point) const {
-        return maximum(zero_point);
-    }
+  Vectorized<c10::qint8> relu(Vectorized<c10::qint8> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::qint8> relu6(
-        Vectorized<c10::qint8> zero_point,
-        Vectorized<c10::qint8> q_six) {
-      return _mm256_min_epi8(
-          _mm256_max_epi8(vals, zero_point.vals), q_six.vals);
-    }
+  Vectorized<c10::qint8> relu6(
+      Vectorized<c10::qint8> zero_point,
+      Vectorized<c10::qint8> q_six) {
+    return _mm256_min_epi8(_mm256_max_epi8(vals, zero_point.vals), q_six.vals);
+  }
 
-    int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
-      __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
-      __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
-      __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
-      __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
+  int_vec_return_type widening_subtract(Vectorized<c10::qint8> b) const {
+    __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
+    __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
+    __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
+    __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
 
-      __m256i int32_val0 = cvtepi8_epi32(int_val0);
-      __m256i int32_val1 = cvtepi8_epi32(int_val1);
-      __m256i int32_val2 = cvtepi8_epi32(int_val2);
-      __m256i int32_val3 = cvtepi8_epi32(int_val3);
+    __m256i int32_val0 = cvtepi8_epi32(int_val0);
+    __m256i int32_val1 = cvtepi8_epi32(int_val1);
+    __m256i int32_val2 = cvtepi8_epi32(int_val2);
+    __m256i int32_val3 = cvtepi8_epi32(int_val3);
 
-      __m128i int_b0 = _mm_set1_epi64x(_mm256_extract_epi64(b, 0));
-      __m128i int_b1 = _mm_set1_epi64x(_mm256_extract_epi64(b, 1));
-      __m128i int_b2 = _mm_set1_epi64x(_mm256_extract_epi64(b, 2));
-      __m128i int_b3 = _mm_set1_epi64x(_mm256_extract_epi64(b, 3));
+    __m128i int_b0 = _mm_set1_epi64x(_mm256_extract_epi64(b, 0));
+    __m128i int_b1 = _mm_set1_epi64x(_mm256_extract_epi64(b, 1));
+    __m128i int_b2 = _mm_set1_epi64x(_mm256_extract_epi64(b, 2));
+    __m128i int_b3 = _mm_set1_epi64x(_mm256_extract_epi64(b, 3));
 
-      __m256i int32_b0 = cvtepi8_epi32(int_b0);
-      __m256i int32_b1 = cvtepi8_epi32(int_b1);
-      __m256i int32_b2 = cvtepi8_epi32(int_b2);
-      __m256i int32_b3 = cvtepi8_epi32(int_b3);
+    __m256i int32_b0 = cvtepi8_epi32(int_b0);
+    __m256i int32_b1 = cvtepi8_epi32(int_b1);
+    __m256i int32_b2 = cvtepi8_epi32(int_b2);
+    __m256i int32_b3 = cvtepi8_epi32(int_b3);
 
-      __m256i res_0 = _mm256_sub_epi32(int32_val0, int32_b0);
-      __m256i res_1 = _mm256_sub_epi32(int32_val1, int32_b1);
-      __m256i res_2 = _mm256_sub_epi32(int32_val2, int32_b2);
-      __m256i res_3 = _mm256_sub_epi32(int32_val3, int32_b3);
+    __m256i res_0 = _mm256_sub_epi32(int32_val0, int32_b0);
+    __m256i res_1 = _mm256_sub_epi32(int32_val1, int32_b1);
+    __m256i res_2 = _mm256_sub_epi32(int32_val2, int32_b2);
+    __m256i res_3 = _mm256_sub_epi32(int32_val3, int32_b3);
 
-      return {Vectorized<c10::qint32>(res_0),
-              Vectorized<c10::qint32>(res_1),
-              Vectorized<c10::qint32>(res_2),
-              Vectorized<c10::qint32>(res_3)};
-    }
+    return {
+        Vectorized<c10::qint32>(res_0),
+        Vectorized<c10::qint32>(res_1),
+        Vectorized<c10::qint32>(res_2),
+        Vectorized<c10::qint32>(res_3)};
+  }
 
-    static Vectorized<c10::qint8> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m256 multiplier_v = _mm256_set1_ps(multiplier);
-      __m256i zero_point_v = _mm256_set1_epi32(zero_point);
-      return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
-    }
+  static Vectorized<c10::qint8> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m256 multiplier_v = _mm256_set1_ps(multiplier);
+    __m256i zero_point_v = _mm256_set1_epi32(zero_point);
+    return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
+  }
 
  private:
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-        vals = _mm256_loadu_si256((const __m256i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm256_loadu_si256((const __m256i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::qint8> inline maximum(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+Vectorized<c10::qint8> inline maximum(
+    const Vectorized<c10::qint8>& a,
+    const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
 
-template<>
+template <>
 struct Vectorized<c10::quint8> : public Vectorizedqi {
-    static constexpr int size() {
-        return 32;
-    }
+  static constexpr int size() {
+    return 32;
+  }
 
-    static constexpr int float_num_vecs() {
-        return 4;
-    }
+  static constexpr int float_num_vecs() {
+    return 4;
+  }
 
-    static constexpr int int_num_vecs() {
-        return 4;
-    }
+  static constexpr int int_num_vecs() {
+    return 4;
+  }
 
-    using float_vec_return_type = std::array<Vectorized<float>, 4>;
-    using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
-    using value_type = typename c10::quint8::underlying;
+  using float_vec_return_type = std::array<Vectorized<float>, 4>;
+  using int_vec_return_type = std::array<Vectorized<c10::qint32>, 4>;
+  using value_type = typename c10::quint8::underlying;
 
  public:
-    using Vectorizedqi::Vectorizedqi;
-    Vectorized() {}
+  using Vectorizedqi::Vectorizedqi;
+  Vectorized() {}
 
-    Vectorized(__m256i vals_) { vals = vals_;}
+  Vectorized(__m256i vals_) {
+    vals = vals_;
+  }
 
-    // Broadcast constructor
-    Vectorized(const c10::quint8& val) {
-        value_type uw = val.val_;
-        vals = _mm256_set1_epi8(uw);
+  // Broadcast constructor
+  Vectorized(const c10::quint8& val) {
+    value_type uw = val.val_;
+    vals = _mm256_set1_epi8(uw);
+  }
+
+// NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-copy"
+  Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) {}
+#pragma clang diagnostic pop
+
+  void store(void* ptr, int count = size()) const {
+    if (count != size()) {
+      memcpy(ptr, &vals, count * sizeof(value_type));
+    } else {
+      _mm256_storeu_si256((__m256i*)ptr, vals);
     }
+  }
 
-    // NOLINTNEXTLINE(clang-diagnostic-deprecated-copy)
-    #pragma clang diagnostic push
-    #pragma clang diagnostic ignored "-Wdeprecated-copy"
-    Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) { }
-    #pragma clang diagnostic pop
-
-    void store(void* ptr, int count = size()) const {
-        if (count != size()) {
-            memcpy(ptr, &vals, count * sizeof(value_type));
-        } else {
-            _mm256_storeu_si256((__m256i*)ptr, vals);
-        }
-    }
-
-    static Vectorized<c10::quint8> loadu(const void* ptr) {
-        return Vectorized<c10::quint8>(ptr);
-    }
+  static Vectorized<c10::quint8> loadu(const void* ptr) {
+    return Vectorized<c10::quint8>(ptr);
+  }
 
  private:
-    __m256i cvtepu8_epi32(__m128i epu8_vals) const {
-        return _mm256_cvtepu8_epi32(epu8_vals);
-    }
+  __m256i cvtepu8_epi32(__m128i epu8_vals) const {
+    return _mm256_cvtepu8_epi32(epu8_vals);
+  }
 
  public:
   float_vec_return_type dequantize(
@@ -641,74 +651,75 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
   }
 
   Vectorized<c10::quint8> maximum(Vectorized<c10::quint8> b) const {
-      return _mm256_max_epu8(vals, b.vals);
-    }
+    return _mm256_max_epu8(vals, b.vals);
+  }
 
   Vectorized<c10::quint8> minimum(Vectorized<c10::quint8> b) const {
-      return _mm256_min_epu8(vals, b.vals);
-    }
+    return _mm256_min_epu8(vals, b.vals);
+  }
 
-    Vectorized<c10::quint8> relu(Vectorized<c10::quint8> zero_point) const {
-        return maximum(zero_point);
-    }
+  Vectorized<c10::quint8> relu(Vectorized<c10::quint8> zero_point) const {
+    return maximum(zero_point);
+  }
 
-    Vectorized<c10::quint8> relu6(
-        Vectorized<c10::quint8> zero_point,
-        Vectorized<c10::quint8> q_six) {
-      return _mm256_min_epu8(
-          _mm256_max_epu8(vals, zero_point.vals), q_six.vals);
-    }
+  Vectorized<c10::quint8> relu6(
+      Vectorized<c10::quint8> zero_point,
+      Vectorized<c10::quint8> q_six) {
+    return _mm256_min_epu8(_mm256_max_epu8(vals, zero_point.vals), q_six.vals);
+  }
 
-    int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
-      __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
-      __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
-      __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
-      __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
+  int_vec_return_type widening_subtract(Vectorized<c10::quint8> b) const {
+    __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
+    __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
+    __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
+    __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
 
-      __m256i int32_val0 = cvtepu8_epi32(int_val0);
-      __m256i int32_val1 = cvtepu8_epi32(int_val1);
-      __m256i int32_val2 = cvtepu8_epi32(int_val2);
-      __m256i int32_val3 = cvtepu8_epi32(int_val3);
+    __m256i int32_val0 = cvtepu8_epi32(int_val0);
+    __m256i int32_val1 = cvtepu8_epi32(int_val1);
+    __m256i int32_val2 = cvtepu8_epi32(int_val2);
+    __m256i int32_val3 = cvtepu8_epi32(int_val3);
 
-      __m128i int_b0 = _mm_set1_epi64x(_mm256_extract_epi64(b, 0));
-      __m128i int_b1 = _mm_set1_epi64x(_mm256_extract_epi64(b, 1));
-      __m128i int_b2 = _mm_set1_epi64x(_mm256_extract_epi64(b, 2));
-      __m128i int_b3 = _mm_set1_epi64x(_mm256_extract_epi64(b, 3));
+    __m128i int_b0 = _mm_set1_epi64x(_mm256_extract_epi64(b, 0));
+    __m128i int_b1 = _mm_set1_epi64x(_mm256_extract_epi64(b, 1));
+    __m128i int_b2 = _mm_set1_epi64x(_mm256_extract_epi64(b, 2));
+    __m128i int_b3 = _mm_set1_epi64x(_mm256_extract_epi64(b, 3));
 
-      __m256i int32_b0 = cvtepu8_epi32(int_b0);
-      __m256i int32_b1 = cvtepu8_epi32(int_b1);
-      __m256i int32_b2 = cvtepu8_epi32(int_b2);
-      __m256i int32_b3 = cvtepu8_epi32(int_b3);
+    __m256i int32_b0 = cvtepu8_epi32(int_b0);
+    __m256i int32_b1 = cvtepu8_epi32(int_b1);
+    __m256i int32_b2 = cvtepu8_epi32(int_b2);
+    __m256i int32_b3 = cvtepu8_epi32(int_b3);
 
-      __m256i res_0 = _mm256_sub_epi32(int32_val0, int32_b0);
-      __m256i res_1 = _mm256_sub_epi32(int32_val1, int32_b1);
-      __m256i res_2 = _mm256_sub_epi32(int32_val2, int32_b2);
-      __m256i res_3 = _mm256_sub_epi32(int32_val3, int32_b3);
-      return {Vectorized<c10::qint32>(res_0),
-              Vectorized<c10::qint32>(res_1),
-              Vectorized<c10::qint32>(res_2),
-              Vectorized<c10::qint32>(res_3)};
-    }
+    __m256i res_0 = _mm256_sub_epi32(int32_val0, int32_b0);
+    __m256i res_1 = _mm256_sub_epi32(int32_val1, int32_b1);
+    __m256i res_2 = _mm256_sub_epi32(int32_val2, int32_b2);
+    __m256i res_3 = _mm256_sub_epi32(int32_val3, int32_b3);
+    return {
+        Vectorized<c10::qint32>(res_0),
+        Vectorized<c10::qint32>(res_1),
+        Vectorized<c10::qint32>(res_2),
+        Vectorized<c10::qint32>(res_3)};
+  }
 
-    static Vectorized<c10::quint8> requantize_from_int(
-        const int_vec_return_type& inp,
-        float multiplier,
-        int32_t zero_point) {
-      __m256 multiplier_v = _mm256_set1_ps(multiplier);
-      __m256i zero_point_v = _mm256_set1_epi32(zero_point);
-      return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
-    }
+  static Vectorized<c10::quint8> requantize_from_int(
+      const int_vec_return_type& inp,
+      float multiplier,
+      int32_t zero_point) {
+    __m256 multiplier_v = _mm256_set1_ps(multiplier);
+    __m256i zero_point_v = _mm256_set1_epi32(zero_point);
+    return RequantizeAvx2<value_type>(inp, multiplier_v, zero_point_v);
+  }
 
  private:
-
-    // Load from memory constructor
-    Vectorized(const void* ptr) {
-        vals = _mm256_loadu_si256((const __m256i*)ptr);
-    }
+  // Load from memory constructor
+  Vectorized(const void* ptr) {
+    vals = _mm256_loadu_si256((const __m256i*)ptr);
+  }
 };
 
 template <>
-Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+Vectorized<c10::quint8> inline maximum(
+    const Vectorized<c10::quint8>& a,
+    const Vectorized<c10::quint8>& b) {
   return a.maximum(b);
 }
 
@@ -771,7 +782,8 @@ struct VectorizedQuantizedConverter {
         tmp_vals[j] = at::native::dequantize_val<T>(
             scale[j], zero_point[j], T(vals[8 * i + j]));
       }
-      rv[i] = Vectorized<float>(tmp_vals[0],
+      rv[i] = Vectorized<float>(
+          tmp_vals[0],
           tmp_vals[1],
           tmp_vals[2],
           tmp_vals[3],
@@ -789,10 +801,10 @@ struct VectorizedQuantizedConverter {
 
 template <>
 struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
-                                 c10::qint32,
-                                 std::array<Vectorized<float>, 1>,
-                                 std::array<Vectorized<c10::qint32>, 1>,
-                                 8> {
+                                     c10::qint32,
+                                     std::array<Vectorized<float>, 1>,
+                                     std::array<Vectorized<c10::qint32>, 1>,
+                                     8> {
   Vectorized()
       : VectorizedQuantizedConverter<
             c10::qint32,
@@ -854,10 +866,9 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
     return retval;
   }
 
-  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const  {
+  Vectorized<c10::qint32> relu(Vectorized<c10::qint32> zero_point) const {
     return maximum(zero_point);
   }
-
 
   Vectorized<c10::qint32> relu6(
       Vectorized<c10::qint32> zero_point,
@@ -893,7 +904,9 @@ struct Vectorized<c10::qint32> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::qint32> inline maximum(const Vectorized<c10::qint32>& a, const Vectorized<c10::qint32>& b) {
+Vectorized<c10::qint32> inline maximum(
+    const Vectorized<c10::qint32>& a,
+    const Vectorized<c10::qint32>& b) {
   return a.maximum(b);
 }
 
@@ -921,10 +934,10 @@ Vectorized<c10::qint32> inline operator+(
 
 template <>
 struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
-                                c10::qint8,
-                                std::array<Vectorized<float>, 4>,
-                                std::array<Vectorized<c10::qint32>, 4>,
-                                32> {
+                                    c10::qint8,
+                                    std::array<Vectorized<float>, 4>,
+                                    std::array<Vectorized<c10::qint32>, 4>,
+                                    32> {
   Vectorized()
       : VectorizedQuantizedConverter<
             c10::qint8,
@@ -1035,16 +1048,18 @@ struct Vectorized<c10::qint8> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::qint8> inline maximum(const Vectorized<c10::qint8>& a, const Vectorized<c10::qint8>& b) {
+Vectorized<c10::qint8> inline maximum(
+    const Vectorized<c10::qint8>& a,
+    const Vectorized<c10::qint8>& b) {
   return a.maximum(b);
 }
 
 template <>
 struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
-                                 c10::quint8,
-                                 std::array<Vectorized<float>, 4>,
-                                 std::array<Vectorized<c10::qint32>, 4>,
-                                 32> {
+                                     c10::quint8,
+                                     std::array<Vectorized<float>, 4>,
+                                     std::array<Vectorized<c10::qint32>, 4>,
+                                     32> {
   Vectorized()
       : VectorizedQuantizedConverter<
             c10::quint8,
@@ -1110,7 +1125,6 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
     return maximum(zero_point);
   }
 
-
   Vectorized<c10::quint8> relu6(
       Vectorized<c10::quint8> zero_point,
       Vectorized<c10::quint8> q_six) {
@@ -1156,9 +1170,13 @@ struct Vectorized<c10::quint8> : public VectorizedQuantizedConverter<
 };
 
 template <>
-Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const Vectorized<c10::quint8>& b) {
+Vectorized<c10::quint8> inline maximum(
+    const Vectorized<c10::quint8>& a,
+    const Vectorized<c10::quint8>& b) {
   return a.maximum(b);
 }
 
 #endif // if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-}}}
+} // namespace CPU_CAPABILITY
+} // namespace vec
+} // namespace at

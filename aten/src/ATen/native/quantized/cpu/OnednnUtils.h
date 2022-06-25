@@ -3,9 +3,9 @@
 #include <ATen/Config.h>
 #if AT_MKLDNN_ENABLED()
 #include <ATen/Tensor.h>
-#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/quantized/PackedParams.h>
 
 struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
   PackedLinearWeightsOnednn(
@@ -31,8 +31,10 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
       double output_scale,
       int64_t output_zero_point) override;
 
-  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range=false) override;
-  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range=false) override;
+  at::Tensor apply_dynamic(at::Tensor input, bool reduce_range = false)
+      override;
+  at::Tensor apply_dynamic_relu(at::Tensor input, bool reduce_range = false)
+      override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 
@@ -52,7 +54,7 @@ struct PackedLinearWeightsOnednn : public LinearPackedParamsBase {
       int64_t output_zero_point);
 
   template <bool ReluFused>
-  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range=false);
+  at::Tensor apply_dynamic_impl(at::Tensor input, bool reduce_range = false);
 };
 
 template <int kSpatialDim = 2>
@@ -68,16 +70,16 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
       torch::List<int64_t> dilation,
       int64_t groups,
       uint8_t transpose)
-    : weight_(std::move(weight)),
-    bias_(std::move(bias)),
-    orig_weight_(std::move(orig_weight)),
-    orig_bias_(std::move(orig_bias)),
-    stride_(std::move(stride)),
-    padding_(std::move(padding)),
-    output_padding_(std::move(output_padding)),
-    dilation_(std::move(dilation)),
-    groups_(groups),
-    transpose_(transpose) {}
+      : weight_(std::move(weight)),
+        bias_(std::move(bias)),
+        orig_weight_(std::move(orig_weight)),
+        orig_bias_(std::move(orig_bias)),
+        stride_(std::move(stride)),
+        padding_(std::move(padding)),
+        output_padding_(std::move(output_padding)),
+        dilation_(std::move(dilation)),
+        groups_(groups),
+        transpose_(transpose) {}
 
   std::unique_ptr<ideep::tensor> weight_;
   c10::optional<ideep::tensor> bias_;
@@ -100,9 +102,7 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
       double output_scale,
       int64_t output_zero_point) override;
 
-  at::Tensor apply_dynamic(
-      const at::Tensor& input,
-      bool reduce_range) override;
+  at::Tensor apply_dynamic(const at::Tensor& input, bool reduce_range) override;
 
   std::tuple<at::Tensor, c10::optional<at::Tensor>> unpack() override;
 

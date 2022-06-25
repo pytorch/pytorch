@@ -2,17 +2,18 @@
 #include <algorithm>
 #include <vector>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 inline int64_t ensure_nonempty_dim(int64_t dim) {
   return std::max<int64_t>(dim, 1);
 }
 
-inline int64_t ensure_nonempty_size(const TensorBase &t, int64_t dim) {
+inline int64_t ensure_nonempty_size(const TensorBase& t, int64_t dim) {
   return t.dim() == 0 ? 1 : t.size(dim);
 }
 
-inline int64_t ensure_nonempty_stride(const TensorBase &t, int64_t dim) {
+inline int64_t ensure_nonempty_stride(const TensorBase& t, int64_t dim) {
   return t.dim() == 0 ? 1 : t.stride(dim);
 }
 
@@ -24,4 +25,5 @@ inline IdxVec ensure_nonempty_vec(IdxVec vec) {
   return vec;
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

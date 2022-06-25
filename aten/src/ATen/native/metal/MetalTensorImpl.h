@@ -22,8 +22,7 @@ struct TORCH_API MetalTensorImpl : public OpaqueTensorImpl<OpaqueHandle> {
             device,
             opaque_handle,
             sizes),
-        strides_(strides.vec()) {
-  }
+        strides_(strides.vec()) {}
 
   // TODO: manually storing strides here is dumb
 

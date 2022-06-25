@@ -3,10 +3,10 @@
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/native/quantized/cpu/QuantizedOps.h>
-#include <ATen/quantized/Quantizer.h>
-#include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
+#include <ATen/native/quantized/cpu/init_qnnpack.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/core/TensorOptions.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
@@ -17,14 +17,12 @@ namespace native {
 
 #ifdef USE_PYTORCH_QNNPACK
 namespace {
-Tensor quantized_channel_shuffle_impl(
-    const Tensor& self,
-    int64_t groups) {
-
+Tensor quantized_channel_shuffle_impl(const Tensor& self, int64_t groups) {
   TORCH_CHECK(
       groups > 0,
       "Number of groups to divide channels in must be positive.",
-      " Value of groups:", groups);
+      " Value of groups:",
+      groups);
   TORCH_CHECK(
       self.dim() == 4,
       "channel_shuffle expects 4D input, but got input with sizes ",
@@ -33,7 +31,8 @@ Tensor quantized_channel_shuffle_impl(
       self.scalar_type() == kQUInt8,
       "Quantized channel shuffle works only on ",
       toString(c10::kQUInt8),
-      " but got ", self.scalar_type());
+      " but got ",
+      self.scalar_type());
   const Tensor self_nhwc = self.contiguous(MemoryFormat::ChannelsLast);
   Tensor qy = at::native::empty_affine_quantized(
       self_nhwc.sizes(),
@@ -52,21 +51,26 @@ Tensor quantized_channel_shuffle_impl(
   }
 
   int64_t channels = self.size(1);
-  TORCH_CHECK(channels > 0,
-             "Number of channels must be positive, got:", channels);
-  TORCH_CHECK((channels % groups) == 0,
-             "Number of channels must be divisible gy groups. Got ",
-             channels, " channels and ", groups, " groups.");
+  TORCH_CHECK(
+      channels > 0, "Number of channels must be positive, got:", channels);
+  TORCH_CHECK(
+      (channels % groups) == 0,
+      "Number of channels must be divisible gy groups. Got ",
+      channels,
+      " channels and ",
+      groups,
+      " groups.");
 
   initQNNPACK();
 
   pytorch_qnnp_operator_t qnnpack_operator{nullptr};
 
-  const pytorch_qnnp_status createStatus = pytorch_qnnp_create_channel_shuffle_nc_x8(
-      groups /* groups */,
-      channels / groups /* group channels */,
-      0 /* flags */,
-      &qnnpack_operator);
+  const pytorch_qnnp_status createStatus =
+      pytorch_qnnp_create_channel_shuffle_nc_x8(
+          groups /* groups */,
+          channels / groups /* group channels */,
+          0 /* flags */,
+          &qnnpack_operator);
   TORCH_INTERNAL_ASSERT(
       createStatus == pytorch_qnnp_status_success,
       "failed to create QNNPACK ChannelShuffle operator");
@@ -74,13 +78,14 @@ Tensor quantized_channel_shuffle_impl(
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
       qnnpack_uniq_ptr(qnnpack_operator);
 
-  const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_channel_shuffle_nc_x8(
-      qnnpack_uniq_ptr.get(),
-      self_nhwc.numel() / channels /* batch size */,
-      (uint8_t*)self_nhwc.data_ptr<c10::quint8>() /* self data */,
-      channels /* self stride */,
-      (uint8_t*)qy.data_ptr<c10::quint8>() /* qy data */,
-      channels /* qy stride */);
+  const pytorch_qnnp_status setupStatus =
+      pytorch_qnnp_setup_channel_shuffle_nc_x8(
+          qnnpack_uniq_ptr.get(),
+          self_nhwc.numel() / channels /* batch size */,
+          (uint8_t*)self_nhwc.data_ptr<c10::quint8>() /* self data */,
+          channels /* self stride */,
+          (uint8_t*)qy.data_ptr<c10::quint8>() /* qy data */,
+          channels /* qy stride */);
   TORCH_INTERNAL_ASSERT(
       setupStatus == pytorch_qnnp_status_success,
       "failed to setup QNNPACK ChannelShuffle operator");
@@ -98,9 +103,7 @@ Tensor quantized_channel_shuffle_impl(
 #endif
 
 // at::native functions for the native_functions.yaml
-Tensor channel_shuffle_quantized_cpu(
-    const Tensor& self,
-    int64_t groups) {
+Tensor channel_shuffle_quantized_cpu(const Tensor& self, int64_t groups) {
 #ifdef USE_PYTORCH_QNNPACK
   return quantized_channel_shuffle_impl(self, groups);
 #endif

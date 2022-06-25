@@ -1,11 +1,11 @@
 #include <ATen/ATen.h>
-#include <torch/library.h>
 #include <ATen/cpu/vec/vec.h>
 #include <ATen/native/SortingUtils.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
+#include <ATen/quantized/Quantizer.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -50,14 +50,12 @@ std::tuple<Tensor, Tensor> topk_quantized_cpu(
           qscheme == QScheme::PER_TENSOR_SYMMETRIC,
       "Top-K is only supported on per-tensor quantization");
   Tensor values = at::_empty_affine_quantized(
-    {0},
-    self.options(),
-    self.q_scale(),
-    self.q_zero_point());
+      {0}, self.options(), self.q_scale(), self.q_zero_point());
   Tensor indices = at::empty({0}, self.options().dtype(kLong));
   return quantized_topk_out_cpu(values, indices, self, k, dim, largest, sorted);
 }
 
 DEFINE_DISPATCH(qtopk_stub);
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

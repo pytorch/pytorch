@@ -1,8 +1,8 @@
-#include <ATen/core/Tensor.h>
-#include <ATen/core/Formatting.h>
-#include <ATen/core/VariableHooksInterface.h>
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/FunctionalTensorWrapper.h>
+#include <ATen/core/Formatting.h>
+#include <ATen/core/LegacyTypeDispatch.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/core/VariableHooksInterface.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/MethodOperators.h>
@@ -17,16 +17,17 @@
 
 namespace at {
 
-const TensorBase& get_tensor_base(const Tensor &t) {
+const TensorBase& get_tensor_base(const Tensor& t) {
   return t;
 }
 
-TensorBase TensorBase::__dispatch_contiguous(c10::MemoryFormat memory_format) const {
+TensorBase TensorBase::__dispatch_contiguous(
+    c10::MemoryFormat memory_format) const {
   OptionalTensorRef self(*this);
   return at::_ops::contiguous::call(*self, memory_format);
 }
 
-const TensorBase& TensorBase::fill_(const c10::Scalar &fill_value) const {
+const TensorBase& TensorBase::fill_(const c10::Scalar& fill_value) const {
   Tensor self(*this);
   at::_ops::fill__Scalar::call(self, fill_value);
   return *this;
@@ -45,9 +46,14 @@ TensorBase TensorBase::to(
     c10::optional<at::MemoryFormat> memory_format) const {
   Tensor self(*this);
   return at::_ops::to_dtype_layout::call(
-      self, optTypeMetaToScalarType(options.dtype_opt()),
-      options.layout_opt(), options.device_opt(),
-      options.pinned_memory_opt(), non_blocking, copy, memory_format);
+      self,
+      optTypeMetaToScalarType(options.dtype_opt()),
+      options.layout_opt(),
+      options.device_opt(),
+      options.pinned_memory_opt(),
+      non_blocking,
+      copy,
+      memory_format);
 }
 
 void TensorBase::enforce_invariants() {
@@ -65,7 +71,8 @@ void TensorBase::enforce_invariants() {
         !impl_->is_sparse(),
         "Sparse Tensors are supported by Tensor, but invariant checking isn't implemented.  Please file a bug.");
     TORCH_INTERNAL_ASSERT(
-        !impl_->has_storage() || impl_->is_meta() || impl_->storage_initialized(),
+        !impl_->has_storage() || impl_->is_meta() ||
+            impl_->storage_initialized(),
         "Partially-initialized tensor not supported by Tensor");
   }
 }
@@ -83,7 +90,8 @@ std::string TensorBase::toString() const {
   if (scalar_type() == ScalarType::Undefined) {
     base_str = "UndefinedType";
   } else {
-    base_str = std::string(at::toString(options().computeDispatchKey())) + at::toString(scalar_type()) + "Type";
+    base_str = std::string(at::toString(options().computeDispatchKey())) +
+        at::toString(scalar_type()) + "Type";
   }
   return base_str;
 }
@@ -104,7 +112,7 @@ int64_t TensorBase::output_nr() const {
   return impl::GetVariableHooks()->output_nr(*this);
 }
 
-void TensorBase::set_data(const TensorBase & new_data) const {
+void TensorBase::set_data(const TensorBase& new_data) const {
   impl::GetVariableHooks()->set_data(*this, new_data);
 }
 
@@ -124,11 +132,13 @@ bool TensorBase::retains_grad() const {
   return impl::GetVariableHooks()->retains_grad(*this);
 }
 
-void Tensor::_backward(TensorList inputs,
-        const c10::optional<Tensor>& gradient,
-        c10::optional<bool> keep_graph,
-        bool create_graph) const {
-  return impl::GetVariableHooks()->_backward(*this, inputs, gradient, keep_graph, create_graph);
+void Tensor::_backward(
+    TensorList inputs,
+    const c10::optional<Tensor>& gradient,
+    c10::optional<bool> keep_graph,
+    bool create_graph) const {
+  return impl::GetVariableHooks()->_backward(
+      *this, inputs, gradient, keep_graph, create_graph);
 }
 
 const TensorBase& TensorBase::requires_grad_(bool _requires_grad) const {
@@ -159,7 +169,8 @@ void TensorBase::remove_hook(unsigned pos) const {
   impl::GetVariableHooks()->remove_hook(*this, pos);
 }
 
-unsigned TensorBase::_register_hook(std::function<TensorBase(const TensorBase&)> hook) const {
+unsigned TensorBase::_register_hook(
+    std::function<TensorBase(const TensorBase&)> hook) const {
   return impl::GetVariableHooks()->_register_hook(*this, std::move(hook));
 }
 

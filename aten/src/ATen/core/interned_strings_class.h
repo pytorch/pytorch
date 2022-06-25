@@ -1,11 +1,11 @@
+#include <ATen/core/symbol.h>
+#include <c10/util/Exception.h>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <ATen/core/symbol.h>
-#include <c10/util/Exception.h>
 
 namespace c10 {
 

@@ -1,7 +1,7 @@
 #pragma once
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
 
@@ -36,8 +36,10 @@ class Vectorized<ComplexDbl> {
   Vectorized() {}
   C10_ALWAYS_INLINE Vectorized(vfloat64 v) : _vec0{v}, _vec1{v} {}
   C10_ALWAYS_INLINE Vectorized(vbool64 vmask) : _vecb0{vmask}, _vecb1{vmask} {}
-  C10_ALWAYS_INLINE Vectorized(vfloat64 v1, vfloat64 v2) : _vec0{v1}, _vec1{v2} {}
-  C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2) : _vecb0{v1}, _vecb1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vfloat64 v1, vfloat64 v2)
+      : _vec0{v1}, _vec1{v2} {}
+  C10_ALWAYS_INLINE Vectorized(vbool64 v1, vbool64 v2)
+      : _vecb0{v1}, _vecb1{v2} {}
 
   Vectorized(ComplexDbl val) {
     double real_value = val.real();
@@ -58,30 +60,38 @@ class Vectorized<ComplexDbl> {
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceComplexDbl(mask) == 0, Vectorized<ComplexDbl>>
-      C10_ALWAYS_INLINE
-      blend(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  static std::
+      enable_if_t<blendChoiceComplexDbl(mask) == 0, Vectorized<ComplexDbl>>
+          C10_ALWAYS_INLINE blend(
+              const Vectorized<ComplexDbl>& a,
+              const Vectorized<ComplexDbl>& b) {
     return a;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceComplexDbl(mask) == 1, Vectorized<ComplexDbl>>
-      C10_ALWAYS_INLINE
-      blend(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  static std::
+      enable_if_t<blendChoiceComplexDbl(mask) == 1, Vectorized<ComplexDbl>>
+          C10_ALWAYS_INLINE blend(
+              const Vectorized<ComplexDbl>& a,
+              const Vectorized<ComplexDbl>& b) {
     return b;
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceComplexDbl(mask) == 2, Vectorized<ComplexDbl>>
-      C10_ALWAYS_INLINE
-      blend(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  static std::
+      enable_if_t<blendChoiceComplexDbl(mask) == 2, Vectorized<ComplexDbl>>
+          C10_ALWAYS_INLINE blend(
+              const Vectorized<ComplexDbl>& a,
+              const Vectorized<ComplexDbl>& b) {
     return {b._vec0, a._vec1};
   }
 
   template <int64_t mask>
-  static std::enable_if_t<blendChoiceComplexDbl(mask) == 3, Vectorized<ComplexDbl>>
-      C10_ALWAYS_INLINE
-      blend(const Vectorized<ComplexDbl>& a, const Vectorized<ComplexDbl>& b) {
+  static std::
+      enable_if_t<blendChoiceComplexDbl(mask) == 3, Vectorized<ComplexDbl>>
+          C10_ALWAYS_INLINE blend(
+              const Vectorized<ComplexDbl>& a,
+              const Vectorized<ComplexDbl>& b) {
     return {a._vec0, b._vec1};
   }
 
@@ -100,8 +110,8 @@ class Vectorized<ComplexDbl> {
       const Vectorized<ComplexDbl>& b,
       const Vectorized<ComplexDbl>& mask) {
     // convert std::complex<V> index mask to V index mask: xy -> xxyy
-    auto mask_complex =
-        Vectorized<ComplexDbl>(vec_splat(mask._vec0, 0), vec_splat(mask._vec1, 0));
+    auto mask_complex = Vectorized<ComplexDbl>(
+        vec_splat(mask._vec0, 0), vec_splat(mask._vec1, 0));
     return {
         vec_sel(a._vec0, b._vec0, mask_complex._vecb0),
         vec_sel(a._vec1, b._vec1, mask_complex._vecb1)};
@@ -400,7 +410,8 @@ class Vectorized<ComplexDbl> {
     return el_mergee(first_ret, second_ret); // 2 mergee's
   }
 
-  Vectorized<ComplexDbl> inline operator*(const Vectorized<ComplexDbl>& b) const {
+  Vectorized<ComplexDbl> inline operator*(
+      const Vectorized<ComplexDbl>& b) const {
     //(a + bi)  * (c + di) = (ac - bd) + (ad + bc)i
 #if 1
     // this is more vsx friendly than simulating horizontal from x86
@@ -420,7 +431,8 @@ class Vectorized<ComplexDbl> {
     return ret;
   }
 
-  Vectorized<ComplexDbl> inline operator/(const Vectorized<ComplexDbl>& b) const {
+  Vectorized<ComplexDbl> inline operator/(
+      const Vectorized<ComplexDbl>& b) const {
     // re + im*i = (a + bi)  / (c + di)
     // re = (ac + bd)/abs_2()
     // im = (bc - ad)/abs_2()
@@ -466,11 +478,11 @@ class Vectorized<ComplexDbl> {
   }
 
   Vectorized<ComplexDbl> hypot(const Vectorized<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexDbl> nextafter(const Vectorized<ComplexDbl>& b) const {
-      TORCH_CHECK(false, "not supported for complex numbers");
+    TORCH_CHECK(false, "not supported for complex numbers");
   }
 
   Vectorized<ComplexDbl> igamma(const Vectorized<ComplexDbl>& x) const {
@@ -584,7 +596,6 @@ Vectorized<ComplexDbl> inline minimum(
   // return _mm256_or_ps(min, isnan);
 }
 
-
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

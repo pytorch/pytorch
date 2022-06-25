@@ -1,10 +1,11 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
-namespace at { namespace cuda {
+namespace at {
+namespace cuda {
 namespace {
 
-void createCusparseHandle(cusparseHandle_t *handle) {
+void createCusparseHandle(cusparseHandle_t* handle) {
   TORCH_CUDASPARSE_CHECK(cusparseCreate(handle));
 }
 
@@ -17,11 +18,14 @@ void destroyCusparseHandle(cusparseHandle_t handle) {
 //   - Comments of @soumith copied from cuDNN handle pool implementation
 #ifdef NO_CUDNN_DESTROY_HANDLE
 #else
-    cusparseDestroy(handle);
+  cusparseDestroy(handle);
 #endif
 }
 
-using CuSparsePoolType = DeviceThreadHandlePool<cusparseHandle_t, createCusparseHandle, destroyCusparseHandle>;
+using CuSparsePoolType = DeviceThreadHandlePool<
+    cusparseHandle_t,
+    createCusparseHandle,
+    destroyCusparseHandle>;
 
 } // namespace
 
@@ -39,8 +43,10 @@ cusparseHandle_t getCurrentCUDASparseHandle() {
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);
-  TORCH_CUDASPARSE_CHECK(cusparseSetStream(handle, c10::cuda::getCurrentCUDAStream()));
+  TORCH_CUDASPARSE_CHECK(
+      cusparseSetStream(handle, c10::cuda::getCurrentCUDAStream()));
   return handle;
 }
 
-}} // namespace at::cuda
+} // namespace cuda
+} // namespace at

@@ -10,7 +10,8 @@
   See NOTE: [Tensor vs. TensorBase]
 #endif
 
-#if defined(AT_PER_OPERATOR_HEADERS) && defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
+#if defined(AT_PER_OPERATOR_HEADERS) && \
+    defined(TORCH_ASSERT_ONLY_METHOD_OPERATORS)
 #error This change adds a dependency on all pytorch operators, meaning the     \
   file will need to be re-compiled every time an operator is changed or added. \
   Consider including a specific operator from <ATen/ops/{my_operator}.h> and   \
@@ -62,10 +63,10 @@
 #include <ATen/TracerMode.h>
 #include <ATen/core/Generator.h>
 #include <ATen/core/Reduction.h>
-#include <c10/core/SymInt.h>
 #include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/Storage.h>
+#include <c10/core/SymInt.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Deprecated.h>
 #include <c10/util/Optional.h>
@@ -74,25 +75,33 @@
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/tensor.h>
 
-${Functions_includes}
+$ {
+  Functions_includes
+}
 
 namespace at {
 
 ${Functions_declarations}
 
 // Special C++ only overloads for std()-like functions (See gh-40287)
-// These are needed because int -> bool conversion takes precedence over int -> IntArrayRef
-// So, for example std(0) would select the std(unbiased=False) overload
-TORCH_API inline Tensor var(const Tensor& self, int dim) {
+// These are needed because int -> bool conversion takes precedence over int ->
+// IntArrayRef So, for example std(0) would select the std(unbiased=False)
+// overload
+TORCH_API inline Tensor
+var(const Tensor& self, int dim) {
   return at::var(self, IntArrayRef{dim});
 }
-TORCH_API inline std::tuple<Tensor, Tensor> var_mean(const Tensor& self, int dim) {
+TORCH_API inline std::tuple<Tensor, Tensor> var_mean(
+    const Tensor& self,
+    int dim) {
   return at::var_mean(self, IntArrayRef{dim});
 }
 TORCH_API inline Tensor std(const Tensor& self, int dim) {
   return at::std(self, IntArrayRef{dim});
 }
-TORCH_API inline std::tuple<Tensor, Tensor> std_mean(const Tensor& self, int dim) {
+TORCH_API inline std::tuple<Tensor, Tensor> std_mean(
+    const Tensor& self,
+    int dim) {
   return at::std_mean(self, IntArrayRef{dim});
 }
 
@@ -140,4 +149,4 @@ inline bool is_neg(const Tensor& tensor) {
   return tensor.is_neg();
 }
 
-}
+} // namespace at

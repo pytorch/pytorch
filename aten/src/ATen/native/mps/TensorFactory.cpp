@@ -3,14 +3,17 @@
 #include <ATen/ATen.h>
 #include <ATen/Tensor.h>
 #include <ATen/Utils.h>
-#include <torch/library.h>
 #include <ATen/mps/EmptyTensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/TensorFactory.h>
-namespace at { namespace native {
+#include <torch/library.h>
+namespace at {
+namespace native {
 
-static inline void maybe_resize_storage_mps(TensorImpl* self, uint64_t new_size) {
+static inline void maybe_resize_storage_mps(
+    TensorImpl* self,
+    uint64_t new_size) {
   if (new_size == 0) {
     return;
   }
@@ -19,16 +22,20 @@ static inline void maybe_resize_storage_mps(TensorImpl* self, uint64_t new_size)
   if (!storage) {
     TORCH_CHECK(false, "Tensor: invalid null storage");
   }
-  uint64_t new_size_bytes = (new_size + self->storage_offset()) * self->dtype().itemsize();
+  uint64_t new_size_bytes =
+      (new_size + self->storage_offset()) * self->dtype().itemsize();
   if (new_size_bytes > self->storage().nbytes()) {
     if (new_size_bytes == 0) {
-      storage->set_data_ptr_noswap(at::DataPtr(nullptr, at::Device(at::DeviceType::MPS, 0)));
+      storage->set_data_ptr_noswap(
+          at::DataPtr(nullptr, at::Device(at::DeviceType::MPS, 0)));
       storage->set_nbytes(0);
     } else {
       at::DataPtr new_data = storage->allocator()->allocate(new_size_bytes);
-      size_t copy_capacity = std::min<size_t>(new_size_bytes, storage->nbytes());
+      size_t copy_capacity =
+          std::min<size_t>(new_size_bytes, storage->nbytes());
       if (storage->data() && copy_capacity > 0) {
-        at::native::mps::copy_blit_mps(new_data.get(), storage->data(), copy_capacity);
+        at::native::mps::copy_blit_mps(
+            new_data.get(), storage->data(), copy_capacity);
       }
       // Destructively overwrite data_ptr
       storage->set_data_ptr_noswap(std::move(new_data));
@@ -67,8 +74,13 @@ Tensor empty_mps(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
-
-  return at::detail::empty_mps(size, dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
+  return at::detail::empty_mps(
+      size,
+      dtype_opt,
+      layout_opt,
+      device_opt,
+      pin_memory_opt,
+      memory_format_opt);
 }
 
 Tensor empty_strided_mps(
@@ -81,11 +93,7 @@ Tensor empty_strided_mps(
   check_size_nonnegative(size);
   // empty memory formatempty
   auto t = at::native::empty_mps(
-      {0},
-      dtype_opt,
-      layout_opt,
-      device_opt,
-      pin_memory_opt);
+      {0}, dtype_opt, layout_opt, device_opt, pin_memory_opt);
   resize_impl_mps_(t.unsafeGetTensorImpl(), size, stride);
   return t;
 }
@@ -100,8 +108,7 @@ const Tensor& resize_mps_(
   auto* self_ = self.unsafeGetTensorImpl();
   resize_impl_mps_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
-    auto memory_format =
-        optional_memory_format.value();
+    auto memory_format = optional_memory_format.value();
     TORCH_CHECK(
         memory_format != MemoryFormat::Preserve,
         "Unsupported memory format",
@@ -114,21 +121,25 @@ const Tensor& resize_mps_(
 Tensor& set_mps_(Tensor& result) {
   caffe2::TypeMeta dtype = result.dtype();
   Storage storage(
-      Storage::use_byte_size_t(),
-      0,
-      at::mps::GetMPSAllocator(),
-      true);
+      Storage::use_byte_size_t(), 0, at::mps::GetMPSAllocator(), true);
   result.set_(storage, 0, {0}, {});
   TORCH_INTERNAL_ASSERT(dtype == result.dtype());
   return result;
 }
 
-Tensor& set_storage_mps_(Tensor& result, Storage storage, int64_t storage_offset, IntArrayRef size, IntArrayRef stride) {
+Tensor& set_storage_mps_(
+    Tensor& result,
+    Storage storage,
+    int64_t storage_offset,
+    IntArrayRef size,
+    IntArrayRef stride) {
   checkSetStorage(result, storage, storage_offset, size, stride);
-  //std::cout << "set storage_mps " << storage_offset << " stride " << stride << std::endl;
+  // std::cout << "set storage_mps " << storage_offset << " stride " << stride
+  // << std::endl;
   result.unsafeGetTensorImpl()->set_storage_offset(storage_offset);
-  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr ?
-                                          c10::optional<IntArrayRef>(stride) : c10::nullopt;
+  c10::optional<IntArrayRef> stride_opt = stride.data() != nullptr
+      ? c10::optional<IntArrayRef>(stride)
+      : c10::nullopt;
   at::native::resize_impl_mps_(result.unsafeGetTensorImpl(), size, stride_opt);
   return result;
 }

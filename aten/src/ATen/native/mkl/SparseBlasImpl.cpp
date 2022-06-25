@@ -22,8 +22,7 @@ namespace mkl {
 
 namespace {
 
-c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(
-    const Tensor& tensor) {
+c10::MaybeOwned<Tensor> prepare_dense_matrix_for_mkl(const Tensor& tensor) {
   if (tensor.is_non_overlapping_and_dense() ||
       is_blas_compatible_row_major_order(tensor) ||
       is_blas_compatible_column_major_order(tensor)) {
@@ -351,7 +350,8 @@ void addmm_out_sparse_csr(
     const Scalar& beta,
     const Scalar& alpha,
     const Tensor& result) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      mat1.dim() == 2 && mat2.dim() == 2 && result.dim() == 2);
   if ((mat1.layout() == kSparseCsr || mat1.layout() == kSparseBsr) &&
       mat2.layout() == kStrided && result.layout() == kStrided) {
     return addmm_dense_result(mat1, mat2, beta, alpha, result);
@@ -367,14 +367,21 @@ void addmm_out_sparse_csr(
         alpha,
         result.transpose(0, 1));
   }
-  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.layout() == kStrided) {
+  if (mat1.is_sparse_csr() && mat2.is_sparse_csr() &&
+      result.layout() == kStrided) {
     return addmm_sparse_input_dense_result(mat1, mat2, beta, alpha, result);
   }
   if (mat1.is_sparse_csr() && mat2.is_sparse_csr() && result.is_sparse_csr()) {
     return addmm_sparse_result(mat1, mat2, beta, alpha, result);
   }
-  TORCH_CHECK(false, "addmm: computation on CPU is not implemented for ",
-              result.layout(), " + ", mat1.layout(), " @ ", mat2.layout());
+  TORCH_CHECK(
+      false,
+      "addmm: computation on CPU is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout());
 }
 
 /*
@@ -511,7 +518,8 @@ void triangular_solve_out_sparse_csr(
   // MKL requires same storage layout of matrices
   c10::MaybeOwned<Tensor> B_ = prepare_dense_matrix_for_mkl(B, is_X_row_major);
 
-  sparse_operation_t opA = transpose ? SPARSE_OPERATION_TRANSPOSE : SPARSE_OPERATION_NON_TRANSPOSE;
+  sparse_operation_t opA =
+      transpose ? SPARSE_OPERATION_TRANSPOSE : SPARSE_OPERATION_NON_TRANSPOSE;
   matrix_descr descrA;
   descrA.type = SPARSE_MATRIX_TYPE_TRIANGULAR;
   descrA.mode = upper ? SPARSE_FILL_MODE_UPPER : SPARSE_FILL_MODE_LOWER;
@@ -536,7 +544,8 @@ void triangular_solve_out_sparse_csr(
           bool is_B_row_major = (B_strides[ndim - 1] == 1);
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!(is_X_row_major ^ is_B_row_major));
 
-          auto order = is_X_row_major ? SPARSE_LAYOUT_ROW_MAJOR : SPARSE_LAYOUT_COLUMN_MAJOR;
+          auto order = is_X_row_major ? SPARSE_LAYOUT_ROW_MAJOR
+                                      : SPARSE_LAYOUT_COLUMN_MAJOR;
           auto nrhs = mkl_int_cast(B.size(-1), "nrhs");
           auto ldx = is_X_row_major ? X_strides[ndim - 2] : X_strides[ndim - 1];
           auto ldb = is_B_row_major ? B_strides[ndim - 2] : B_strides[ndim - 1];

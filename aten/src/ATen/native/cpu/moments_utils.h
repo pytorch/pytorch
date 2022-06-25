@@ -27,7 +27,8 @@ void AddMoments(
     T& m1,
     T& m2) {
   const int64_t n = m0 + m0_add;
-  const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
+  const T c =
+      n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
   const T delta = m1_add - m1;
   m1 += c * delta;
   m2 += m2_add + delta * delta * c * static_cast<T>(m0);
@@ -44,7 +45,8 @@ C10_ALWAYS_INLINE void AddMomentsVec(
     vec::Vectorized<T>& m2) {
   using Vec = vec::Vectorized<T>;
   const int64_t n = m0 + m0_add;
-  const T c = n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
+  const T c =
+      n == 0 ? static_cast<T>(0) : static_cast<T>(m0_add) / static_cast<T>(n);
   const Vec c_vec(c);
   const Vec delta = m1_add - m1;
   m1 += c_vec * delta;

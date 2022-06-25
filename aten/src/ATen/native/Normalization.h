@@ -6,7 +6,9 @@
 namespace at {
 namespace native {
 
-using renorm_scale_factor_fn = void (*) (TensorIteratorBase& iter, double maxnorm);
+using renorm_scale_factor_fn =
+    void (*)(TensorIteratorBase& iter, double maxnorm);
 DECLARE_DISPATCH(renorm_scale_factor_fn, renorm_scale_factor_stub);
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

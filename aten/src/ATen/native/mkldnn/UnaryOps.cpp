@@ -38,8 +38,10 @@ Tensor mkldnn_sigmoid(const Tensor& self) {
   ideep::tensor y;
   ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_logistic, ideep::prop_kind::forward);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
-                                 self.options().device_opt());
+  return new_with_itensor_mkldnn(
+      std::move(y),
+      optTypeMetaToScalarType(self.options().dtype_opt()),
+      self.options().device_opt());
 }
 
 Tensor& mkldnn_sigmoid_(Tensor& self) {
@@ -54,8 +56,10 @@ Tensor mkldnn_tanh(const Tensor& self) {
   ideep::tensor y;
   ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_tanh, ideep::prop_kind::forward);
-  return new_with_itensor_mkldnn(std::move(y), optTypeMetaToScalarType(self.options().dtype_opt()),
-                                 self.options().device_opt());
+  return new_with_itensor_mkldnn(
+      std::move(y),
+      optTypeMetaToScalarType(self.options().dtype_opt()),
+      self.options().device_opt());
 }
 
 Tensor& mkldnn_tanh_(Tensor& self) {

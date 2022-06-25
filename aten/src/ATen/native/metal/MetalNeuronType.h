@@ -62,7 +62,8 @@ static inline MPSNNNeuronDescriptor* neuronDescriptor(NeuronType type) {
   } else if (type == NeuronType::HardSigmoid) {
     return [MPSCNNNeuronOpDescriptor hardSigmoidDescriptor];
   } else {
-    return [MPSNNNeuronDescriptor cnnNeuronDescriptorWithType:MPSCNNNeuronTypeNone];
+    return [MPSNNNeuronDescriptor
+        cnnNeuronDescriptorWithType:MPSCNNNeuronTypeNone];
   }
 }
 

@@ -2,9 +2,9 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Allocator.h>
 #include <ATen/native/vulkan/api/Cache.h>
+#include <ATen/native/vulkan/api/Common.h>
 #include <c10/util/hash.h>
 
 namespace at {
@@ -52,24 +52,23 @@ struct Resource final {
         Write = 1u << 1u,
       };
 
-      template<typename Type, Flags access>
-      using Pointer = std::add_pointer_t<
-          std::conditional_t<
-              0u != (access & Write),
-              Type,
-              std::add_const_t<Type>>>;
+      template <typename Type, Flags access>
+      using Pointer = std::add_pointer_t<std::conditional_t<
+          0u != (access & Write),
+          Type,
+          std::add_const_t<Type>>>;
     };
 
     class Scope;
-    template<typename Type>
+    template <typename Type>
     using Handle = Handle<Type, Scope>;
 
-    template<
+    template <
         typename Type,
         typename Pointer = Access::Pointer<Type, Access::Read>>
-    Handle<Pointer> map() const &;
+    Handle<Pointer> map() const&;
 
-    template<
+    template <
         typename Type,
         Access::Flags kAccess,
         typename Pointer = Access::Pointer<Type, kAccess>>
@@ -85,10 +84,10 @@ struct Resource final {
     // of accessing the underlying memory out of the expected scope making
     // for seemingly ineffective memory writes and hard to hunt down bugs.
 
-    template<typename Type, typename Pointer>
-    Handle<Pointer> map() const && = delete;
+    template <typename Type, typename Pointer>
+    Handle<Pointer> map() const&& = delete;
 
-    template<typename Type, Access::Flags kAccess, typename Pointer>
+    template <typename Type, Access::Flags kAccess, typename Pointer>
     Handle<Pointer> map() && = delete;
   };
 
@@ -187,9 +186,7 @@ struct Resource final {
       typedef api::Cache<Factory> Cache;
       Cache cache;
 
-      explicit Sampler(const GPU& gpu)
-        : cache(Factory(gpu)) {
-      }
+      explicit Sampler(const GPU& gpu) : cache(Factory(gpu)) {}
     };
 
     /*
@@ -314,18 +311,18 @@ struct Resource final {
     };
 
     VkDevice device_;
-    Handle<VmaAllocator, void(*)(VmaAllocator)> allocator_;
+    Handle<VmaAllocator, void (*)(VmaAllocator)> allocator_;
 
     struct {
       std::unique_ptr<Policy> policy;
     } memory_;
 
     struct {
-      std::vector<Handle<Buffer, void(*)(const Buffer&)>> pool;
+      std::vector<Handle<Buffer, void (*)(const Buffer&)>> pool;
     } buffer_;
 
     struct {
-      std::vector<Handle<Image, void(*)(const Image&)>> pool;
+      std::vector<Handle<Image, void (*)(const Image&)>> pool;
       Image::Sampler sampler;
     } image_;
 
@@ -336,9 +333,7 @@ struct Resource final {
     } fence_;
   } pool;
 
-  explicit Resource(const GPU& gpu)
-    : pool(gpu, nullptr) {
-  }
+  explicit Resource(const GPU& gpu) : pool(gpu, nullptr) {}
 };
 
 void release_buffer(const Resource::Buffer& buffer);
@@ -351,10 +346,7 @@ void release_image(const Resource::Image& image);
 
 class Resource::Memory::Scope final {
  public:
-  Scope(
-      VmaAllocator allocator,
-      VmaAllocation allocation,
-      Access::Flags access);
+  Scope(VmaAllocator allocator, VmaAllocation allocation, Access::Flags access);
 
   void operator()(const void* data) const;
 
@@ -364,31 +356,30 @@ class Resource::Memory::Scope final {
   Access::Flags access_;
 };
 
-template<typename, typename Pointer>
-inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const & {
+template <typename, typename Pointer>
+inline Resource::Memory::Handle<Pointer> Resource::Memory::map() const& {
   // Forward declaration
   void* map(const Memory&, Access::Flags);
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this, Access::Read)),
-    Scope(allocator, allocation, Access::Read),
+      reinterpret_cast<Pointer>(map(*this, Access::Read)),
+      Scope(allocator, allocation, Access::Read),
   };
 }
 
-template<typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
+template <typename, Resource::Memory::Access::Flags kAccess, typename Pointer>
 inline Resource::Memory::Handle<Pointer> Resource::Memory::map() & {
   // Forward declaration
   void* map(const Memory&, Access::Flags);
 
   static_assert(
-      (kAccess == Access::Read) ||
-      (kAccess == Access::Write) ||
-      (kAccess == (Access::Read | Access::Write)),
+      (kAccess == Access::Read) || (kAccess == Access::Write) ||
+          (kAccess == (Access::Read | Access::Write)),
       "Invalid memory access!");
 
   return Handle<Pointer>{
-    reinterpret_cast<Pointer>(map(*this, kAccess)),
-    Scope(allocator, allocation, kAccess),
+      reinterpret_cast<Pointer>(map(*this, kAccess)),
+      Scope(allocator, allocation, kAccess),
   };
 }
 
@@ -403,11 +394,9 @@ inline Resource::Buffer::operator bool() const {
 inline bool operator==(
     const Resource::Image::Sampler::Descriptor& _1,
     const Resource::Image::Sampler::Descriptor& _2) {
-
-  return (_1.filter == _2.filter && \
-          _1.mipmap_mode == _2.mipmap_mode && \
-          _1.address_mode == _2.address_mode && \
-          _1.border == _2.border);
+  return (
+      _1.filter == _2.filter && _1.mipmap_mode == _2.mipmap_mode &&
+      _1.address_mode == _2.address_mode && _1.border == _2.border);
 }
 
 inline size_t Resource::Image::Sampler::Factory::Hasher::operator()(
@@ -431,25 +420,24 @@ inline Resource::Fence::operator bool() const {
   return pool;
 }
 
-template<typename Block>
+template <typename Block>
 inline Resource::Buffer Resource::Pool::uniform(const Block& block) {
   Buffer uniform = this->create_buffer({
       sizeof(Block),
       {
-        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-        {
-          VMA_MEMORY_USAGE_CPU_TO_GPU,
-          0u,
-          0u,
-        },
+          VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+          {
+              VMA_MEMORY_USAGE_CPU_TO_GPU,
+              0u,
+              0u,
+          },
       },
-    });
+  });
   this->register_buffer_cleanup(uniform);
 
   {
-    Memory::Handle<Block*> memory = uniform.memory.template map<
-        Block,
-        Memory::Access::Write>();
+    Memory::Handle<Block*> memory =
+        uniform.memory.template map<Block, Memory::Access::Write>();
 
     *memory.get() = block;
   }

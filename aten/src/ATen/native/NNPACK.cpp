@@ -10,7 +10,8 @@ namespace native {
 
 at::Tensor _nnpack_spatial_convolution(
     const Tensor& input,
-    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
   throw std::runtime_error(
@@ -28,10 +29,10 @@ bool _nnpack_available() {
 
 #include <nnpack.h>
 
-#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/Parallel.h>
+#include <ATen/native/ConvUtils.h>
 #include <c10/util/irange.h>
+#include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 
 namespace at {
 namespace native {
@@ -48,7 +49,8 @@ static bool init_nnpack() {
       if (nnpack_status == nnp_status_out_of_memory) {
         LOG(WARNING) << "Could not initialize NNPACK! Reason: Out of memory.";
       } else if (nnpack_status == nnp_status_unsupported_hardware) {
-        LOG(WARNING) << "Could not initialize NNPACK! Reason: Unsupported hardware.";
+        LOG(WARNING)
+            << "Could not initialize NNPACK! Reason: Unsupported hardware.";
       } else {
         LOG(WARNING) << "Could not initialize NNPACK! Reason: Unknown error!";
       }
@@ -76,7 +78,8 @@ static pthreadpool_t nnpack_threadpool() {
 
     nnpack_threadpool_ = pthreadpool_create(threads);
     if (!nnpack_threadpool_) {
-      LOG(WARNING) << "Failed to initialize pthreadpool! Running NNPACK in single-threaded mode.";
+      LOG(WARNING)
+          << "Failed to initialize pthreadpool! Running NNPACK in single-threaded mode.";
     }
   }
 
@@ -115,11 +118,13 @@ static inline void allocate_workspace() {
 
 Tensor _nnpack_spatial_convolution(
     const Tensor& input,
-    const Tensor& weight, const c10::optional<Tensor>& bias_opt,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
     const IntArrayRef padding,
     const IntArrayRef stride) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
+  c10::MaybeOwned<Tensor> bias_maybe_owned =
+      at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
   at::Tensor output = at::empty(
@@ -169,7 +174,8 @@ Tensor _nnpack_spatial_convolution(
   if (input.device().type() != kCPU || input.scalar_type() != kFloat ||
       weight.device().type() != kCPU || weight.scalar_type() != kFloat ||
       output.device().type() != kCPU || output.scalar_type() != kFloat ||
-      (bias.defined() && (bias.device().type() != kCPU || bias.scalar_type() != kFloat))) {
+      (bias.defined() &&
+       (bias.device().type() != kCPU || bias.scalar_type() != kFloat))) {
     throw std::runtime_error(
         "Mismatched Tensor types in NNPack convolutionOutput");
   }
@@ -202,13 +208,19 @@ Tensor _nnpack_spatial_convolution(
 
   const auto input_ = input.contiguous();
   const auto weight_ = weight.contiguous();
-  // If we don't have a defined bias Tensor, we need to create one filled with zeroes
-  const auto bias_ = bias.defined() ? bias.contiguous() : at::zeros({weight.size(0)}, input.options());
+  // If we don't have a defined bias Tensor, we need to create one filled with
+  // zeroes
+  const auto bias_ = bias.defined()
+      ? bias.contiguous()
+      : at::zeros({weight.size(0)}, input.options());
 
   const auto compute = [&](const size_t batch_size) -> nnp_status {
-    if ((batch_size == 1) || (output_subsample.width != 1) || (output_subsample.height != 1)) {
-      const size_t input_size_per_batch = input_channels * input_size.width * input_size.height;
-      const size_t output_size_per_batch = output_channels * output_size.width * output_size.height;
+    if ((batch_size == 1) || (output_subsample.width != 1) ||
+        (output_subsample.height != 1)) {
+      const size_t input_size_per_batch =
+          input_channels * input_size.width * input_size.height;
+      const size_t output_size_per_batch =
+          output_channels * output_size.width * output_size.height;
 
       for (const auto batch : c10::irange(0u, batch_size)) {
         const nnp_status status = nnp_convolution_inference(
@@ -229,7 +241,7 @@ Tensor _nnpack_spatial_convolution(
             nnp_activation_identity,
             nullptr,
             nnpack_threadpool(),
-            nullptr );
+            nullptr);
 
         if (nnp_status_success != status) {
           return status;
@@ -237,26 +249,25 @@ Tensor _nnpack_spatial_convolution(
       }
 
       return nnp_status_success;
-    }
-    else {
+    } else {
       return nnp_convolution_output(
-        algorithm,
-        batch_size,
-        input_channels,
-        output_channels,
-        input_size,
-        input_padding,
-        kernel_size,
-        input_.data_ptr<float>(),
-        weight_.data_ptr<float>(),
-        bias_.data_ptr<float>(),
-        output.data_ptr<float>(),
-        workspace,
-        &workspace_size,
-        nnp_activation_identity,
-        nullptr,
-        nnpack_threadpool(),
-        nullptr );
+          algorithm,
+          batch_size,
+          input_channels,
+          output_channels,
+          input_size,
+          input_padding,
+          kernel_size,
+          input_.data_ptr<float>(),
+          weight_.data_ptr<float>(),
+          bias_.data_ptr<float>(),
+          output.data_ptr<float>(),
+          workspace,
+          &workspace_size,
+          nnp_activation_identity,
+          nullptr,
+          nnpack_threadpool(),
+          nullptr);
     }
   };
 

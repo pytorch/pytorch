@@ -16,9 +16,7 @@ Tensor _clamp(
     const c10::optional<Scalar>& max,
     const api::Shader::Descriptor& shader_descriptor,
     const std::string& op_name) {
-  TORCH_CHECK(
-      min || max,
-      "At least one of 'min' or 'max' must not be None");
+  TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
   api::Context* const context = api::context();
 
@@ -26,9 +24,9 @@ Tensor _clamp(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
+      context,
+      v_self.sizes(),
+      v_self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -36,26 +34,26 @@ Tensor _clamp(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
         vec2 clamp;
-      } block {
-        v_output.extents(),
-        0u,
-        {
-          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-        },
+      } block{
+          v_output.extents(),
+          0u,
+          {
+              min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+              max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+          },
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_output.extents(),
@@ -63,19 +61,14 @@ Tensor _clamp(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -99,9 +92,7 @@ Tensor& _clamp_(
     const std::string& op_name) {
   api::Context* const context = api::context();
 
-  TORCH_CHECK(
-      min || max,
-      "At least one of 'min' or 'max' must not be None");
+  TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
   TORCH_CHECK(
       self.is_vulkan(),
@@ -114,25 +105,25 @@ Tensor& _clamp_(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY (v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
         vec2 clamp;
-      } block {
-        v_self.extents(),
-        0u,
-        {
-          min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
-          max ? max->to<float>() : std::numeric_limits<float>::infinity(),
-        },
+      } block{
+          v_self.extents(),
+          0u,
+          {
+              min ? min->to<float>() : -std::numeric_limits<float>::infinity(),
+              max ? max->to<float>() : std::numeric_limits<float>::infinity(),
+          },
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_self.extents(),
@@ -146,8 +137,7 @@ Tensor& _clamp_(
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -160,7 +150,8 @@ Tensor threshold(
     const Tensor& self,
     const Scalar& threshold,
     const Scalar& value) {
-  return _clamp(self, threshold, value, VK_KERNEL(threshold), "aten::threshold");
+  return _clamp(
+      self, threshold, value, VK_KERNEL(threshold), "aten::threshold");
 }
 
 Tensor& clamp_(
@@ -180,9 +171,9 @@ Tensor activation(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
+      context,
+      v_self.sizes(),
+      v_self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -190,21 +181,21 @@ Tensor activation(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
-      } block {
-        v_output.extents(),
-        0u,
+      } block{
+          v_output.extents(),
+          0u,
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_output.extents(),
@@ -212,19 +203,14 @@ Tensor activation(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -250,20 +236,20 @@ Tensor& activation_(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY (v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
-      } block {
-        v_self.extents(),
-        0u,
+      } block{
+          v_self.extents(),
+          0u,
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_self.extents(),
@@ -277,8 +263,7 @@ Tensor& activation_(
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -287,17 +272,11 @@ Tensor& activation_(
   return self;
 }
 
-Tensor hardtanh(
-    const Tensor& self,
-    const Scalar& min,
-    const Scalar& max) {
+Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
   return ops::_clamp(self, min, max, VK_KERNEL(clamp), "aten::hardtanh");
 }
 
-Tensor& hardtanh_(
-    Tensor& self,
-    const Scalar& min,
-    const Scalar& max) {
+Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
   return ops::_clamp_(self, min, max, VK_KERNEL(clamp_), "aten::hardtanh_");
 }
 
@@ -336,9 +315,9 @@ Tensor activation_scalar(
   const vTensor& v_self = convert(self);
 
   vTensor v_output{
-    context,
-    v_self.sizes(),
-    v_self.options(),
+      context,
+      v_self.sizes(),
+      v_self.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
@@ -346,23 +325,23 @@ Tensor activation_scalar(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
         float scalar_value;
-      } block {
-        v_output.extents(),
-        0u,
-        scalar_arg.to<float>(),
+      } block{
+          v_output.extents(),
+          0u,
+          scalar_arg.to<float>(),
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_output.extents(),
@@ -370,19 +349,14 @@ Tensor activation_scalar(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_self.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -409,22 +383,22 @@ Tensor& activation_scalar_(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY (v_self.has_image()) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
         float scalar_value;
-      } block {
-        v_self.extents(),
-        0u,
-        scalar_arg.to<float>(),
+      } block{
+          v_self.extents(),
+          0u,
+          scalar_arg.to<float>(),
       };
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           shader_descriptor,
           v_self.extents(),
@@ -438,8 +412,7 @@ Tensor& activation_scalar_(
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);
-    }
-    else {
+    } else {
       TORCH_CHECK(false, "Not implemented!");
     }
   }
@@ -448,28 +421,24 @@ Tensor& activation_scalar_(
   return self;
 }
 
-Tensor hardshrink(
-    const Tensor& self_arg,
-    const Scalar& lambd) {
-  return ops::activation_scalar(self_arg, lambd, VK_KERNEL(hardshrink), "aten::hardshrink");
+Tensor hardshrink(const Tensor& self_arg, const Scalar& lambd) {
+  return ops::activation_scalar(
+      self_arg, lambd, VK_KERNEL(hardshrink), "aten::hardshrink");
 }
 
-Tensor& hardshrink_(
-    Tensor& self,
-    const Scalar& lambd) {
-  return ops::activation_scalar_(self, lambd, VK_KERNEL(hardshrink_), "aten::hardshrink_");
+Tensor& hardshrink_(Tensor& self, const Scalar& lambd) {
+  return ops::activation_scalar_(
+      self, lambd, VK_KERNEL(hardshrink_), "aten::hardshrink_");
 }
 
-Tensor leaky_relu(
-    const Tensor& self_arg,
-    const Scalar& negative_slope) {
-  return ops::activation_scalar(self_arg, negative_slope, VK_KERNEL(leaky_relu), "aten::leaky_relu");
+Tensor leaky_relu(const Tensor& self_arg, const Scalar& negative_slope) {
+  return ops::activation_scalar(
+      self_arg, negative_slope, VK_KERNEL(leaky_relu), "aten::leaky_relu");
 }
 
-Tensor& leaky_relu_(
-    Tensor& self,
-    const Scalar& negative_slope) {
-  return ops::activation_scalar_(self, negative_slope, VK_KERNEL(leaky_relu_), "aten::leaky_relu_");
+Tensor& leaky_relu_(Tensor& self, const Scalar& negative_slope) {
+  return ops::activation_scalar_(
+      self, negative_slope, VK_KERNEL(leaky_relu_), "aten::leaky_relu_");
 }
 
 Tensor sigmoid(const Tensor& self) {
@@ -487,7 +456,6 @@ Tensor tanh(const Tensor& self) {
 Tensor& tanh_(Tensor& self) {
   return ops::activation_(self, VK_KERNEL(tanh_), "aten::tanh_");
 }
-
 
 #ifdef USE_VULKAN_API
 

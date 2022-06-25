@@ -14,7 +14,6 @@ C10_ALWAYS_INLINE std::pair<int64_t, int64_t> _check_layer_norm_inputs(
     IntArrayRef normalized_shape,
     const Tensor& weight /* optional */,
     const Tensor& bias /* optional */) {
-
   const int normalized_ndim = normalized_shape.size();
   TORCH_CHECK(
       normalized_ndim >= 1,

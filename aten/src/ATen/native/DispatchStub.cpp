@@ -6,7 +6,8 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 static CPUCapability compute_cpu_capability() {
   auto envar = std::getenv("ATEN_CPU_CAPABILITY");
@@ -44,7 +45,7 @@ static CPUCapability compute_cpu_capability() {
     // versions 9 & beyond. So, we want to ensure that only releases built with
     // supported compilers on supported hardware return CPU Capability AVX512,
     // if it's supported on the hardware PyTorch is running on.
-    if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() &&  \
+    if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() &&
         cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_fma3()) {
       return CPUCapability::AVX512;
     }
@@ -71,19 +72,23 @@ CPUCapability get_cpu_capability() {
 }
 
 void* DispatchStubImpl::get_call_ptr(
-  DeviceType device_type
-  , void *DEFAULT
+    DeviceType device_type,
+    void* DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
-  , void *AVX512
+    ,
+    void* AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-  , void *AVX2
+    ,
+    void* AVX2
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-  , void *VSX
+    ,
+    void* VSX
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
-  , void *ZVECTOR
+    ,
+    void* ZVECTOR
 #endif
 ) {
   switch (device_type) {
@@ -93,18 +98,22 @@ void* DispatchStubImpl::get_call_ptr(
       auto fptr = cpu_dispatch_ptr.load(std::memory_order_relaxed);
       if (!fptr) {
         fptr = choose_cpu_impl(
-          DEFAULT
+            DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
-          , AVX512
+            ,
+            AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-          , AVX2
+            ,
+            AVX2
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-          , VSX
+            ,
+            VSX
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
-          , ZVECTOR
+            ,
+            ZVECTOR
 #endif
         );
         cpu_dispatch_ptr.store(fptr, std::memory_order_relaxed);
@@ -113,11 +122,13 @@ void* DispatchStubImpl::get_call_ptr(
     }
 
     case DeviceType::CUDA:
-      TORCH_INTERNAL_ASSERT(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
+      TORCH_INTERNAL_ASSERT(
+          cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
       return cuda_dispatch_ptr;
 
     case DeviceType::HIP:
-      TORCH_INTERNAL_ASSERT(hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
+      TORCH_INTERNAL_ASSERT(
+          hip_dispatch_ptr, "DispatchStub: missing HIP kernel");
       return hip_dispatch_ptr;
 
     default:
@@ -126,18 +137,22 @@ void* DispatchStubImpl::get_call_ptr(
 }
 
 void* DispatchStubImpl::choose_cpu_impl(
-  void *DEFAULT
+    void* DEFAULT
 #ifdef HAVE_AVX512_CPU_DEFINITION
-  , void *AVX512
+    ,
+    void* AVX512
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
-  , void *AVX2
+    ,
+    void* AVX2
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
-  , void *VSX
+    ,
+    void* VSX
 #endif
 #ifdef HAVE_ZVECTOR_CPU_DEFINITION
-  , void *ZVECTOR
+    ,
+    void* ZVECTOR
 #endif
 ) {
   auto capability = static_cast<int>(get_cpu_capability());
@@ -178,4 +193,5 @@ void* DispatchStubImpl::choose_cpu_impl(
   return DEFAULT;
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at

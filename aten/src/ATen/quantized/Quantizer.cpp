@@ -1,13 +1,13 @@
-#include <ATen/ArrayRef.h>
 #include <ATen/ATen.h>
+#include <ATen/ArrayRef.h>
+#include <ATen/Dispatch.h>
+#include <ATen/NativeFunctions.h>
+#include <ATen/Parallel.h>
 #include <ATen/ceil_div.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/Dispatch.h>
-#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/native/TensorFactories.h>
-#include <ATen/NativeFunctions.h>
-#include <ATen/Parallel.h>
+#include <ATen/native/quantized/AffineQuantizer.h>
 #include <ATen/quantized/QTensorImpl.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/core/CPUAllocator.h>
@@ -20,14 +20,14 @@ namespace at {
 
 namespace {
 
-  void checkPerChannelParamDims(const Tensor& scales, const Tensor& zero_points) {
-    TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
-    TORCH_CHECK(
-        zero_points.dim() == 1, "zero_points tensor must have dimension 1");
-    TORCH_CHECK(
-        scales.numel() == zero_points.numel(),
-        "number of elements in scales and zero_points must match");
-  }
+void checkPerChannelParamDims(const Tensor& scales, const Tensor& zero_points) {
+  TORCH_CHECK(scales.dim() == 1, "scale tensor must have dimension 1");
+  TORCH_CHECK(
+      zero_points.dim() == 1, "zero_points tensor must have dimension 1");
+  TORCH_CHECK(
+      scales.numel() == zero_points.numel(),
+      "number of elements in scales and zero_points must match");
+}
 
 } // anonymous namespace
 
@@ -42,8 +42,8 @@ QuantizerPtr make_per_tensor_affine_quantizer(
     double scale,
     int64_t zero_point,
     ScalarType scalar_type) {
-  return c10::make_intrusive<PerTensorAffineQuantizer>(scalar_type,
-      scale, zero_point);
+  return c10::make_intrusive<PerTensorAffineQuantizer>(
+      scalar_type, scale, zero_point);
 }
 
 QuantizerPtr make_per_channel_affine_quantizer(
@@ -59,33 +59,31 @@ QuantizerPtr make_per_channel_affine_quantizer(
   if (isFloatingType(zero_points.scalar_type())) {
     Tensor scales_float = scales.to(kFloat).contiguous();
     Tensor zero_points_float = zero_points.to(kFloat).contiguous();
-    return c10::make_intrusive<PerChannelAffineFloatQParamsQuantizer>(scalar_type,
-                                                                      scales_float,
-                                                                      zero_points_float,
-                                                                      axis);
-  }
-  else {
+    return c10::make_intrusive<PerChannelAffineFloatQParamsQuantizer>(
+        scalar_type, scales_float, zero_points_float, axis);
+  } else {
     Tensor scales_double = scales.to(kDouble).contiguous();
     Tensor zero_points_int64 = zero_points.to(kLong).contiguous();
-    return c10::make_intrusive<PerChannelAffineQuantizer>(scalar_type,
-                                                          scales_double,
-                                                          zero_points_int64,
-                                                          axis);
+    return c10::make_intrusive<PerChannelAffineQuantizer>(
+        scalar_type, scales_double, zero_points_int64, axis);
   }
 }
 
 QTensorImpl* get_qtensorimpl(const TensorBase& self) {
   TORCH_CHECK(
-      !self.requires_grad(),
-      "quantized tensors do not support autograd");
-  TORCH_INTERNAL_ASSERT(self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
+      !self.requires_grad(), "quantized tensors do not support autograd");
+  TORCH_INTERNAL_ASSERT(
+      self.is_quantized(), "get_qtensorimpl: not a quantized tensor");
   return static_cast<QTensorImpl*>(self.unsafeGetTensorImpl());
 }
 
-int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::ScalarType t) {
+int64_t get_sub_byte_tensor_size(
+    IntArrayRef sizes,
+    size_t dtype_itemsize,
+    at::ScalarType t) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t element_per_byte;
-  switch(t) {
+  switch (t) {
     case at::ScalarType::QUInt4x2:
       element_per_byte = 2;
       break;
@@ -100,20 +98,23 @@ int64_t get_sub_byte_tensor_size(IntArrayRef sizes, size_t dtype_itemsize, at::S
     return c10::multiply_integers(sizes) * dtype_itemsize;
   }
   // Consider most inner dim as cols
-  int64_t cols = sizes.at(sizes.size()-1);
+  int64_t cols = sizes.at(sizes.size() - 1);
   int64_t bytes_per_row = cols * dtype_itemsize;
-  // align qtensor most inner dim, compute ceil (bytes_per_row / element_per_byte)
-  return c10::multiply_integers(IntArrayRef(sizes.data(), sizes.size() - 1)) * at::ceil_div(bytes_per_row, element_per_byte);
+  // align qtensor most inner dim, compute ceil (bytes_per_row /
+  // element_per_byte)
+  return c10::multiply_integers(IntArrayRef(sizes.data(), sizes.size() - 1)) *
+      at::ceil_div(bytes_per_row, element_per_byte);
 }
 
 inline Tensor new_qtensor(
     IntArrayRef sizes,
     const TensorOptions& options,
     QuantizerPtr quantizer) {
-  auto memory_format = options.memory_format_opt().value_or(MemoryFormat::Contiguous);
+  auto memory_format =
+      options.memory_format_opt().value_or(MemoryFormat::Contiguous);
   at::Allocator* allocator = options.device().is_cuda()
-    ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
-    : at::getCPUAllocator();
+      ? at::detail::getCUDAHooks().getCUDADeviceAllocator()
+      : at::getCPUAllocator();
 
 #ifdef USE_PYTORCH_QNNPACK
   if (at::globalContext().qEngine() == at::QEngine::QNNPACK) {
@@ -130,7 +131,8 @@ inline Tensor new_qtensor(
       typeMetaToScalarType(dtype),
       " is not supported in new_qtensor.");
   auto scalar_type = typeMetaToScalarType(dtype);
-  int64_t size_bytes = get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
+  int64_t size_bytes =
+      get_sub_byte_tensor_size(sizes, dtype.itemsize(), scalar_type);
 
   auto storage = c10::make_intrusive<StorageImpl>(
       StorageImpl::use_byte_size_t(),
@@ -148,7 +150,8 @@ inline Tensor new_qtensor(
 Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
   TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
-      "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
+      "Quantize only works on Float Tensor, got ",
+      rtensor.scalar_type());
   // Here we need a std::intrusive_ptr<Quantizer>.. but actually "this" is the
   // quantizer that can be reused, so I'm using intrusive_from_this here
   Tensor qtensor = new_qtensor(
@@ -158,7 +161,8 @@ Tensor PerTensorAffineQuantizer::quantize(const Tensor& rtensor) {
           .memory_format(rtensor.suggest_memory_format()),
       intrusive_from_this());
 
-  auto rtensor_contig = rtensor.expect_contiguous(rtensor.suggest_memory_format());
+  auto rtensor_contig =
+      rtensor.expect_contiguous(rtensor.suggest_memory_format());
   native::quantize_tensor_per_tensor_affine(
       *rtensor_contig, qtensor, scale_, zero_point_);
   return qtensor;
@@ -170,17 +174,18 @@ void per_tensor_affine_dequantize_impl(
     const double scale,
     const int64_t zero_point) {
   const auto qtensor_contig =
-    qtensor.expect_contiguous(qtensor.suggest_memory_format());
+      qtensor.expect_contiguous(qtensor.suggest_memory_format());
   native::dequantize_tensor_per_tensor_affine(
       *qtensor_contig, rtensor, scale, zero_point);
 }
 
 Tensor& PerTensorAffineQuantizer::dequantize_out(
-    Tensor& rtensor, const Tensor& qtensor) {
+    Tensor& rtensor,
+    const Tensor& qtensor) {
   rtensor.resize_(qtensor.sizes());
   TORCH_CHECK(
       rtensor.is_contiguous(qtensor.suggest_memory_format()) &&
-      rtensor.scalar_type() == kFloat,
+          rtensor.scalar_type() == kFloat,
       "Dequantize out should be a contiguous Float Tensor; instead got type ",
       rtensor.scalar_type(),
       ", and is_contiguous ",
@@ -208,7 +213,8 @@ Tensor PerChannelAffineQuantizer::quantize(const Tensor& rtensor) {
           .dtype(scalar_type_)
           .memory_format(rtensor.suggest_memory_format()),
       intrusive_from_this());
-  auto rtensor_contig = rtensor.expect_contiguous(rtensor.suggest_memory_format());
+  auto rtensor_contig =
+      rtensor.expect_contiguous(rtensor.suggest_memory_format());
   native::quantize_tensor_per_channel_affine(
       *rtensor_contig, qtensor, scales_, zero_points_, axis_);
   return qtensor;
@@ -221,7 +227,7 @@ void per_channel_affine_dequantize_impl(
     const Tensor& zero_point,
     const int64_t axis) {
   const auto qtensor_contig =
-    qtensor.expect_contiguous(qtensor.suggest_memory_format());
+      qtensor.expect_contiguous(qtensor.suggest_memory_format());
   native::dequantize_tensor_per_channel_affine(
       *qtensor_contig, rtensor, scale, zero_point, axis);
 }
@@ -232,35 +238,39 @@ Tensor PerChannelAffineQuantizer::dequantize(const Tensor& qtensor) {
       qtensor.options()
           .dtype(at::kFloat)
           .memory_format(qtensor.suggest_memory_format()));
-  per_channel_affine_dequantize_impl(rtensor, qtensor, scales_, zero_points_, axis_);
+  per_channel_affine_dequantize_impl(
+      rtensor, qtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
 Tensor& PerChannelAffineQuantizer::dequantize_out(
-    Tensor& rtensor, const Tensor& qtensor) {
+    Tensor& rtensor,
+    const Tensor& qtensor) {
   rtensor.resize_(qtensor.sizes());
   TORCH_CHECK(
       rtensor.is_contiguous(qtensor.suggest_memory_format()) &&
-      rtensor.scalar_type() == kFloat,
+          rtensor.scalar_type() == kFloat,
       "Dequantize out should be a contiguous Float Tensor; instead got type ",
       rtensor.scalar_type(),
       ", and is_contiguous ",
       rtensor.is_contiguous(qtensor.suggest_memory_format()));
-  per_channel_affine_dequantize_impl(rtensor, qtensor, scales_, zero_points_, axis_);
+  per_channel_affine_dequantize_impl(
+      rtensor, qtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
 Tensor PerChannelAffineFloatQParamsQuantizer::quantize(const Tensor& rtensor) {
- TORCH_CHECK(
+  TORCH_CHECK(
       rtensor.scalar_type() == kFloat,
-      "Quantize only works on Float Tensor, got ", rtensor.scalar_type());
- Tensor qtensor = new_qtensor(
+      "Quantize only works on Float Tensor, got ",
+      rtensor.scalar_type());
+  Tensor qtensor = new_qtensor(
       rtensor.sizes(),
       rtensor.options().dtype(scalar_type_),
       intrusive_from_this());
- auto rtensor_contig = rtensor.expect_contiguous();
- native::quantize_tensor_per_channel_float_qparams(
-   *rtensor_contig, qtensor, scales_, zero_points_, axis_);
+  auto rtensor_contig = rtensor.expect_contiguous();
+  native::quantize_tensor_per_channel_float_qparams(
+      *rtensor_contig, qtensor, scales_, zero_points_, axis_);
   return qtensor;
 }
 
@@ -271,24 +281,27 @@ void per_channel_affine_float_q_params_dequantize_impl(
     const Tensor& zero_point,
     const int64_t axis) {
   const auto qtensor_contig =
-    qtensor.expect_contiguous(qtensor.suggest_memory_format());
+      qtensor.expect_contiguous(qtensor.suggest_memory_format());
   native::dequantize_tensor_per_channel_float_qparams(
       *qtensor_contig, rtensor, scale, zero_point, axis);
 }
 
-Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(const Tensor& qtensor) {
-  Tensor rtensor = at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
+Tensor PerChannelAffineFloatQParamsQuantizer::dequantize(
+    const Tensor& qtensor) {
+  Tensor rtensor =
+      at::empty(qtensor.sizes(), qtensor.options().dtype(at::kFloat));
   per_channel_affine_float_q_params_dequantize_impl(
       rtensor, qtensor, scales_, zero_points_, axis_);
   return rtensor;
 }
 
 Tensor& PerChannelAffineFloatQParamsQuantizer::dequantize_out(
-    Tensor& rtensor, const Tensor& qtensor) {
+    Tensor& rtensor,
+    const Tensor& qtensor) {
   rtensor.resize_(qtensor.sizes());
   TORCH_CHECK(
       rtensor.is_contiguous(qtensor.suggest_memory_format()) &&
-      rtensor.scalar_type() == kFloat,
+          rtensor.scalar_type() == kFloat,
       "Dequantize out should be a contiguous Float Tensor; instead got type ",
       rtensor.scalar_type(),
       ", and is_contiguous ",
@@ -300,7 +313,9 @@ Tensor& PerChannelAffineFloatQParamsQuantizer::dequantize_out(
 
 Quantizer::~Quantizer() = default;
 
-C10_EXPORT void set_quantizer_(const Tensor& self, ConstQuantizerPtr quantizer) {
+C10_EXPORT void set_quantizer_(
+    const Tensor& self,
+    ConstQuantizerPtr quantizer) {
   get_qtensorimpl(self)->set_quantizer_(quantizer);
 }
 
@@ -315,7 +330,8 @@ Tensor from_blob_quantized_per_tensor_affine(
   auto dtype = typeMetaToScalarType(options.dtype());
   TORCH_CHECK(
       isQIntType(dtype),
-      "from_blob_quantized_per_tensor_affine expects QInt dtypes, got ", dtype);
+      "from_blob_quantized_per_tensor_affine expects QInt dtypes, got ",
+      dtype);
 
   const std::size_t itemsize = options.dtype().itemsize();
   std::size_t size = 1;
@@ -361,13 +377,7 @@ Tensor from_blob_quantized_per_tensor_affine(
     }
   }
   return from_blob_quantized_per_tensor_affine(
-      data,
-      sizes,
-      strides,
-      deleter,
-      scale,
-      zeroPoint,
-      options);
+      data, sizes, strides, deleter, scale, zeroPoint, options);
 }
 
 Tensor from_blob_quantized_per_channel_affine(
@@ -382,15 +392,22 @@ Tensor from_blob_quantized_per_channel_affine(
   int64_t channel = sizes[axis];
   TORCH_CHECK(
       channel == int64_t(scales.numel()),
-      "length of scales must equal to channel, expected ", channel, " got, ", scales.numel());
+      "length of scales must equal to channel, expected ",
+      channel,
+      " got, ",
+      scales.numel());
   TORCH_CHECK(
       channel == int64_t(zero_points.numel()),
-      "length of zero_points must equal to channel, expected ", channel, " got, ", zero_points.numel());
+      "length of zero_points must equal to channel, expected ",
+      channel,
+      " got, ",
+      zero_points.numel());
 
   auto dtype = typeMetaToScalarType(options.dtype());
   TORCH_CHECK(
       isQIntType(dtype),
-      "from_blob_quantized_per_channel_affine expects QInt dtypes, got ", dtype);
+      "from_blob_quantized_per_channel_affine expects QInt dtypes, got ",
+      dtype);
 
   const std::size_t itemsize = options.dtype().itemsize();
   std::size_t size = 1;
@@ -423,13 +440,16 @@ Tensor UnknownQuantizer::quantize(const Tensor& tensor) {
 Tensor UnknownQuantizer::dequantize(const Tensor& qtensor) {
   TORCH_INTERNAL_ASSERT(false, "cannot call dequantize on UnknownQuantizer");
 }
-Tensor& UnknownQuantizer::dequantize_out(Tensor& rtensor, const Tensor& qtensor) {
-  TORCH_INTERNAL_ASSERT(false, "cannot call dequantize_out on UnknownQuantizer");
+Tensor& UnknownQuantizer::dequantize_out(
+    Tensor& rtensor,
+    const Tensor& qtensor) {
+  TORCH_INTERNAL_ASSERT(
+      false, "cannot call dequantize_out on UnknownQuantizer");
 }
 QScheme UnknownQuantizer::qscheme() const {
   TORCH_INTERNAL_ASSERT(false, "cannot call qscheme on UnknownQuantizer");
 }
-bool UnknownQuantizer::equalTo(QuantizerPtr other) const{
+bool UnknownQuantizer::equalTo(QuantizerPtr other) const {
   TORCH_INTERNAL_ASSERT(false, "cannot call equalTo on UnknownQuantizer");
 }
 QuantizerPtr make_unknown_quantizer(ScalarType scalar_type) {

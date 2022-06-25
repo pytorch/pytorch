@@ -2,12 +2,12 @@
 #include <vector>
 
 #include <ATen/ATen.h>
-#include <torch/library.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
-#include <ATen/native/quantized/cpu/OnednnUtils.h>
-#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <torch/library.h>
 
 #ifdef USE_FBGEMM
 template <int kSpatialDim>
@@ -85,7 +85,7 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeight<
   int8_t* unpacked_weights_p =
       reinterpret_cast<int8_t*>(unpacked_weights.data_ptr<c10::qint8>());
   packed_weights_p->unpack(unpacked_weights_p);
-  if(transpose()){
+  if (transpose()) {
     unpacked_weights =
         at::native::fbgemm_utils::TransposeConvTensorUnpackConversion<
             kSpatialDim>(unpacked_weights, groups);
@@ -109,9 +109,9 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsQnnp<
       "QNNPACK only supports conv2d_unpack right "
       "now.");
   TORCH_CHECK(
-        orig_weight.defined(),
-        "Cannot unpack weights. "
-        "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
+      orig_weight.defined(),
+      "Cannot unpack weights. "
+      "Call at::globalContext()::setReleaseOriginalWeights(false) before packing or loading to enable unpacking.");
   return std::tuple<at::Tensor, c10::optional<at::Tensor>>(orig_weight, bias);
 }
 
@@ -129,8 +129,8 @@ std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
       orig_weight_, orig_bias_);
 }
 
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
-    2>::unpack();
-template std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedConvWeightsOnednn<
-    3>::unpack();
+template std::tuple<at::Tensor, c10::optional<at::Tensor>>
+PackedConvWeightsOnednn<2>::unpack();
+template std::tuple<at::Tensor, c10::optional<at::Tensor>>
+PackedConvWeightsOnednn<3>::unpack();
 #endif // #if AT_MKLDNN_ENABLED()

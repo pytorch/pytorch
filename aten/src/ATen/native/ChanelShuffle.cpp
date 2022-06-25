@@ -19,34 +19,41 @@ Tensor channel_shuffle_cpu(const Tensor& self, int64_t groups) {
   auto input = self.contiguous(memory_format);
   channel_shuffle_kernel(kCPU, output, input, groups);
   return namedinference::propagate_names_if_nonempty(
-      output,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+      output, self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
 }
 
 Tensor channel_shuffle(const Tensor& self, int64_t groups) {
-  TORCH_CHECK(self.dim() > 2,
-              "channel_shuffle expects input with > 2 dims, but got input with sizes ",
-              self.sizes());
+  TORCH_CHECK(
+      self.dim() > 2,
+      "channel_shuffle expects input with > 2 dims, but got input with sizes ",
+      self.sizes());
   int64_t c = self.size(1);
-  TORCH_CHECK(groups > 0,
-              "Number of groups to divide channels in must be positive.",
-              " Value of groups:", groups);
-  TORCH_CHECK((c % groups) == 0,
-              "Number of channels must be divisible by groups. Got ",
-              c, " channels and ", groups, " groups.");
+  TORCH_CHECK(
+      groups > 0,
+      "Number of groups to divide channels in must be positive.",
+      " Value of groups:",
+      groups);
+  TORCH_CHECK(
+      (c % groups) == 0,
+      "Number of channels must be divisible by groups. Got ",
+      c,
+      " channels and ",
+      groups,
+      " groups.");
 
 #if defined(C10_MOBILE) && defined(USE_XNNPACK)
   if (self.is_contiguous(MemoryFormat::ChannelsLast) &&
       xnnpack::use_channel_shuffle(self, groups)) {
-    auto output = self.numel() == 0 ? self : xnnpack::channel_shuffle(self, groups);
+    auto output =
+        self.numel() == 0 ? self : xnnpack::channel_shuffle(self, groups);
     return output;
   }
 #endif
 
-  auto output = self.numel() == 0 ? self : at::native_channel_shuffle(self, groups);
+  auto output =
+      self.numel() == 0 ? self : at::native_channel_shuffle(self, groups);
   return namedinference::propagate_names_if_nonempty(
-      output,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+      output, self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
 }
 
 Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
@@ -69,13 +76,13 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
   // a fast custom implementation perhaps.
   Tensor output_tensor =
       input_reshaped.permute({0 /* b */, 2 /* oc */, 1 /* groups */, 3})
-      .contiguous()
-      .reshape(self.sizes());
+          .contiguous()
+          .reshape(self.sizes());
   return namedinference::propagate_names_if_nonempty(
-      output_tensor,
-      self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
+      output_tensor, self.has_names() ? self.names() : at::ArrayRef<Dimname>{});
 }
 
 DEFINE_DISPATCH(channel_shuffle_kernel);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

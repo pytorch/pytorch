@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
+#include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>

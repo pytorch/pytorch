@@ -1,13 +1,13 @@
 #pragma once
 
-#include <cstdint>
+#include <ATen/core/Variadic.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/jit_type.h>
-#include <c10/util/Bitset.h>
-#include <c10/core/DispatchKeySet.h>
-#include <c10/util/irange.h>
-#include <ATen/core/Variadic.h>
 #include <ATen/core/stack.h>
+#include <c10/core/DispatchKeySet.h>
+#include <c10/util/Bitset.h>
+#include <c10/util/irange.h>
+#include <cstdint>
 
 namespace c10 {
 
@@ -35,9 +35,9 @@ static inline DispatchKeySet computeDispatchKeySet(
     // AFTER TLS (since the backend may have been introduced for consideration
     // by the included TLS), which is why you have to pass them in to this
     // function (as opposed to just applying it to the input 'ks').
-    DispatchKeySet key_mask
-) {
-  c10::impl::LocalDispatchKeySet local = c10::impl::tls_local_dispatch_key_set();
+    DispatchKeySet key_mask) {
+  c10::impl::LocalDispatchKeySet local =
+      c10::impl::tls_local_dispatch_key_set();
   // TODO: It's a bit irritating that we have to do logical ORs here, it would
   // be nice to only do one.  Can always_included be folded into the TLS?  Well,
   // it's a bit troublesome, because fastpath TLS access requires the type of
@@ -46,61 +46,61 @@ static inline DispatchKeySet computeDispatchKeySet(
   return (((ks | local.included_) - local.excluded_) & key_mask);
 }
 
-}
+} // namespace impl
 
 namespace detail {
-  // A small gadget to extract the DispatchKeySet from types which are known
-  // to have it.  Used to extract dispatch keys from unboxed calls.
-  struct MultiDispatchKeySet : at::IterArgs<MultiDispatchKeySet> {
-    DispatchKeySet ts;
-    void operator()(const at::Tensor& x) {
+// A small gadget to extract the DispatchKeySet from types which are known
+// to have it.  Used to extract dispatch keys from unboxed calls.
+struct MultiDispatchKeySet : at::IterArgs<MultiDispatchKeySet> {
+  DispatchKeySet ts;
+  void operator()(const at::Tensor& x) {
+    ts = ts | x.key_set();
+  }
+  void operator()(const c10::optional<at::Tensor>& x) {
+    if (x.has_value()) {
+      ts = ts | x->key_set();
+    }
+  }
+  void operator()(at::ArrayRef<at::Tensor> xs) {
+    for (const auto& x : xs) {
       ts = ts | x.key_set();
     }
-    void operator()(const c10::optional<at::Tensor>& x) {
-      if (x.has_value()) {
-        ts = ts | x->key_set();
-      }
-    }
-    void operator()(at::ArrayRef<at::Tensor> xs) {
-      for (const auto& x : xs) {
-        ts = ts | x.key_set();
-      }
-    }
-    // Tensor?[] translates to this case.
-    void operator()(const c10::List<c10::optional<at::Tensor>>& xs) {
-      for (c10::optional<at::Tensor> x : xs) {
-        if (x.has_value()) {
-          ts = ts | x.value().key_set();
-        }
-      }
-    }
-    void operator()(at::ArrayRef<c10::optional<at::Tensor>>) {
-      // Just checking that the handling of Tensor?[] didn't change.
-      TORCH_INTERNAL_ASSERT(false);
-    }
-    void operator()(const at::Generator& gen) {
-      if (gen.defined()) {
-        ts = ts | gen.key_set();
-      }
-    }
-    void operator()(const c10::optional<at::Generator>& gen) {
-      if (gen.has_value() && gen->defined()) {
-        ts = ts | gen->key_set();
-      }
-    }
-    template <typename T>
-    void operator()(const T&) {
-      // do nothing
-    }
-  };
-
-  // NB: take by const reference (Don't do universal forwarding here! You
-  // don't want to move into this function!)
-  template <typename... Args>
-  DispatchKeySet multi_dispatch_key_set(const Args&... args) {
-    return MultiDispatchKeySet().apply(args...).ts;
   }
+  // Tensor?[] translates to this case.
+  void operator()(const c10::List<c10::optional<at::Tensor>>& xs) {
+    for (c10::optional<at::Tensor> x : xs) {
+      if (x.has_value()) {
+        ts = ts | x.value().key_set();
+      }
+    }
+  }
+  void operator()(at::ArrayRef<c10::optional<at::Tensor>>) {
+    // Just checking that the handling of Tensor?[] didn't change.
+    TORCH_INTERNAL_ASSERT(false);
+  }
+  void operator()(const at::Generator& gen) {
+    if (gen.defined()) {
+      ts = ts | gen.key_set();
+    }
+  }
+  void operator()(const c10::optional<at::Generator>& gen) {
+    if (gen.has_value() && gen->defined()) {
+      ts = ts | gen->key_set();
+    }
+  }
+  template <typename T>
+  void operator()(const T&) {
+    // do nothing
+  }
+};
+
+// NB: take by const reference (Don't do universal forwarding here! You
+// don't want to move into this function!)
+template <typename... Args>
+DispatchKeySet multi_dispatch_key_set(const Args&... args) {
+  return MultiDispatchKeySet().apply(args...).ts;
 }
+} // namespace detail
 
 /**
  * An instance of DispatchKeyExtractor knows how to get a dispatch key given
@@ -116,7 +116,7 @@ namespace detail {
  *    fallthrough with custom behavior.
  */
 struct TORCH_API DispatchKeyExtractor final {
-public:
+ public:
   static DispatchKeyExtractor make(const FunctionSchema& schema) {
     return DispatchKeyExtractor(makeBitsetForDispatchArgs(schema));
   }
@@ -135,7 +135,8 @@ public:
 
   DispatchKeySet getDispatchKeySetBoxed(const torch::jit::Stack* stack) const {
     DispatchKeySet ks;
-    dispatch_arg_indices_reverse_.for_each_set_bit([&] (size_t reverse_arg_index) {
+    dispatch_arg_indices_reverse_.for_each_set_bit([&](size_t
+                                                           reverse_arg_index) {
       const auto& ivalue = torch::jit::peek(*stack, 0, reverse_arg_index + 1);
       if (C10_LIKELY(ivalue.isTensor())) {
         // NB: Take care not to introduce a refcount bump (there's
@@ -158,19 +159,21 @@ public:
     // Keys that are fallthrough should be skipped
     if (requiresBitsetPerBackend_) {
       auto backend_idx = ks.getBackendIndex();
-      return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
+      return impl::computeDispatchKeySet(
+          ks, nonFallthroughKeysPerBackend_[backend_idx]);
     } else {
       return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
     }
   }
 
-  template<class... Args>
+  template <class... Args>
   DispatchKeySet getDispatchKeySetUnboxed(const Args&... args) const {
     auto ks = detail::multi_dispatch_key_set(args...);
     // Keys that are fallthrough should be skipped
     if (requiresBitsetPerBackend_) {
       auto backend_idx = ks.getBackendIndex();
-      return impl::computeDispatchKeySet(ks, nonFallthroughKeysPerBackend_[backend_idx]);
+      return impl::computeDispatchKeySet(
+          ks, nonFallthroughKeysPerBackend_[backend_idx]);
     } else {
       return impl::computeDispatchKeySet(ks, nonFallthroughKeys_);
     }
@@ -181,11 +184,15 @@ public:
   std::string dumpState() const;
   void checkInvariants(const FunctionSchema& schema) const;
 
-private:
-  static c10::utils::bitset makeBitsetForDispatchArgs(const FunctionSchema& schema) {
-    TORCH_CHECK(schema.arguments().size() <= c10::utils::bitset::NUM_BITS(),
-        "The function schema has ", schema.arguments().size(),
-        " arguments but this PyTorch build only supports ", c10::utils::bitset::NUM_BITS());
+ private:
+  static c10::utils::bitset makeBitsetForDispatchArgs(
+      const FunctionSchema& schema) {
+    TORCH_CHECK(
+        schema.arguments().size() <= c10::utils::bitset::NUM_BITS(),
+        "The function schema has ",
+        schema.arguments().size(),
+        " arguments but this PyTorch build only supports ",
+        c10::utils::bitset::NUM_BITS());
     c10::utils::bitset dispatch_arg_indices_reverse;
     for (const auto index : c10::irange(schema.arguments().size())) {
       if (schema.arguments()[index].type()->isSubtypeOf(*TensorType::get()) ||
@@ -202,9 +209,9 @@ private:
   }
 
   explicit DispatchKeyExtractor(c10::utils::bitset dispatch_arg_indices_reverse)
-  : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse)
-  , nonFallthroughKeys_(DispatchKeySet::FULL)
-  , requiresBitsetPerBackend_(false) {
+      : dispatch_arg_indices_reverse_(dispatch_arg_indices_reverse),
+        nonFallthroughKeys_(DispatchKeySet::FULL),
+        requiresBitsetPerBackend_(false) {
     for (const auto i : c10::irange(nonFallthroughKeysPerBackend_.size())) {
       nonFallthroughKeysPerBackend_[i] = DispatchKeySet::FULL;
     }
@@ -216,18 +223,21 @@ private:
   // dispatch_arg_indices_reverse_[i] == true, then the i-th argument from
   // the top of the stack (i.e. the i-th last argument of the function)
   // is relevant for dispatch.
-  // dispatch_arg_indices_reverse_ is allowed to have zero bits set; that just means you must do the
-  // fallthrough
+  // dispatch_arg_indices_reverse_ is allowed to have zero bits set; that just
+  // means you must do the fallthrough
   c10::utils::bitset dispatch_arg_indices_reverse_;
 
-  // Set of functionality keys for which the operator does NOT have fallthrough kernel.
+  // Set of functionality keys for which the operator does NOT have fallthrough
+  // kernel.
   DispatchKeySet nonFallthroughKeys_;
-  // Set of functionality keys for which the operator does NOT have fallthrough kernel, defined PER BACKEND.
-  // This is only needed if we know that the operator has a different set of fallthroughs defined for some backends.
+  // Set of functionality keys for which the operator does NOT have fallthrough
+  // kernel, defined PER BACKEND. This is only needed if we know that the
+  // operator has a different set of fallthroughs defined for some backends.
   std::array<DispatchKeySet, num_backends> nonFallthroughKeysPerBackend_;
-  // Flag to tell us if we can use the single set of nonFallthroughKeys_ (fast path),
-  // or if we need to fall back to the slower path and check nonFallthroughKeysPerBackend_
+  // Flag to tell us if we can use the single set of nonFallthroughKeys_ (fast
+  // path), or if we need to fall back to the slower path and check
+  // nonFallthroughKeysPerBackend_
   bool requiresBitsetPerBackend_;
 };
 
-}
+} // namespace c10

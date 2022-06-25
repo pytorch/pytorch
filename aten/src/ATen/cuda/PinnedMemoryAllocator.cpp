@@ -1,10 +1,10 @@
-#include <ATen/cuda/PinnedMemoryAllocator.h>
-#include <ATen/Context.h>
-#include <ATen/Config.h>
-#include <ATen/TensorUtils.h>
-#include <c10/core/Storage.h>
 #include <ATen/ATen.h>
 #include <ATen/CPUFunctions.h>
+#include <ATen/Config.h>
+#include <ATen/Context.h>
+#include <ATen/TensorUtils.h>
+#include <ATen/cuda/PinnedMemoryAllocator.h>
+#include <c10/core/Storage.h>
 
 namespace at {
 
@@ -25,11 +25,11 @@ Tensor _pin_memory_cuda(const Tensor& self, c10::optional<Device> device) {
           self.sizes(), self.strides(), self.dtype().itemsize()),
       allocator,
       /*resizable=*/false);
-  auto tensor = at::cpu::empty({0}, self.options()).set_(storage, 0, self.sizes(), self.strides());
+  auto tensor = at::cpu::empty({0}, self.options())
+                    .set_(storage, 0, self.sizes(), self.strides());
   tensor.copy_(self);
   return tensor;
 }
-
 
 } // namespace native
 } // namespace at

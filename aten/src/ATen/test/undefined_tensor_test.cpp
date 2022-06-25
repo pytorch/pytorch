@@ -9,7 +9,8 @@ using namespace at;
 TEST(TestUndefined, UndefinedTest) {
   manual_seed(123);
 
-  // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
+  // mainly test ops on undefined tensors don't segfault and give a reasonable
+  // errror message.
   Tensor und;
   Tensor ft = ones({1}, CPU(kFloat));
 
@@ -50,7 +51,8 @@ TEST(TestUndefined, UndefinedTest) {
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
   ASSERT_ANY_THROW(und.remove_hook(0));
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  ASSERT_ANY_THROW(und.register_hook([](const Tensor& x) -> Tensor { return x; }));
+  ASSERT_ANY_THROW(
+      und.register_hook([](const Tensor& x) -> Tensor { return x; }));
 
   // copy_
   // NOLINTNEXTLINE(hicpp-avoid-goto,cppcoreguidelines-avoid-goto)

@@ -1,12 +1,12 @@
 #pragma once
 
-#include <c10/core/QScheme.h>
 #include <c10/core/MemoryFormat.h>
+#include <c10/core/QScheme.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
-#include <c10/core/ScalarType.h>
-#include <c10/core/TensorOptions.h>
 
 #include <ATen/Tensor.h>
 #include <ATen/TensorUtils.h>
@@ -25,8 +25,7 @@ namespace at {
  * quantizer will be.
  */
 struct TORCH_API UnknownQuantizer : public Quantizer {
-  explicit UnknownQuantizer(ScalarType scalar_type)
-    : Quantizer(scalar_type) {}
+  explicit UnknownQuantizer(ScalarType scalar_type) : Quantizer(scalar_type) {}
 
   Tensor quantize(const Tensor& tensor) override;
   Tensor dequantize(const Tensor& qtensor) override;
@@ -51,7 +50,8 @@ struct TORCH_API UniformQuantizer : public Quantizer {
  * value. K-means quantization is a representative example in this category.
  */
 struct TORCH_API NonUniformQuantizer : public Quantizer {
-  explicit NonUniformQuantizer(ScalarType scalar_type) : Quantizer(scalar_type) {}
+  explicit NonUniformQuantizer(ScalarType scalar_type)
+      : Quantizer(scalar_type) {}
 };
 
 // There is also StochasticQuantizer which is uniform but not affine
@@ -65,7 +65,8 @@ struct TORCH_API NonUniformQuantizer : public Quantizer {
  * X = (Y - zero_point) * scale
  */
 struct TORCH_API AffineQuantizer : public UniformQuantizer {
-  explicit AffineQuantizer(ScalarType scalar_type) : UniformQuantizer(scalar_type) {}
+  explicit AffineQuantizer(ScalarType scalar_type)
+      : UniformQuantizer(scalar_type) {}
 };
 
 // Note that we will not have Symmetric Quantizer in backend to reduce
@@ -76,10 +77,11 @@ struct TORCH_API AffineQuantizer : public UniformQuantizer {
  * all the values in the Tensor.
  */
 struct TORCH_API PerTensorAffineQuantizer : public AffineQuantizer {
-  explicit PerTensorAffineQuantizer(ScalarType scalar_type, double scale, int64_t zero_point)
-    : AffineQuantizer(scalar_type),
-        scale_(scale),
-        zero_point_(zero_point) {}
+  explicit PerTensorAffineQuantizer(
+      ScalarType scalar_type,
+      double scale,
+      int64_t zero_point)
+      : AffineQuantizer(scalar_type), scale_(scale), zero_point_(zero_point) {}
 
   Tensor quantize(const Tensor& tensor) override;
   Tensor dequantize(const Tensor& qtensor) override;
@@ -175,29 +177,28 @@ struct TORCH_API PerChannelAffineQuantizer : public AffineQuantizer {
 };
 
 /**
- * PerChannelAffineFloatQParamsQuantizer is the same as PerChannelAffineQuantizer
- * except that it expects both scale and zero point to be floating point values.
+ * PerChannelAffineFloatQParamsQuantizer is the same as
+ * PerChannelAffineQuantizer except that it expects both scale and zero point to
+ * be floating point values.
  *
- * This quantizer uses the kPerChannelAffineFloatQParams qscheme which is a variant of
- * kPerChannelAffine.
+ * This quantizer uses the kPerChannelAffineFloatQParams qscheme which is a
+ * variant of kPerChannelAffine.
  *
  * The quantize equation in this case looks like -
  * Xq = (Xf - zero_point) * inv_scale, where inv_scale = 1.0/scale
  *
- * Note: Usage of floating point zero point is useful in cases where 0 doesn't need to
- * be exactly represented in the quantized space. We can get additional precision by
- * using floating point values for zero point.
+ * Note: Usage of floating point zero point is useful in cases where 0 doesn't
+ * need to be exactly represented in the quantized space. We can get additional
+ * precision by using floating point values for zero point.
  */
-struct TORCH_API PerChannelAffineFloatQParamsQuantizer : public PerChannelAffineQuantizer {
+struct TORCH_API PerChannelAffineFloatQParamsQuantizer
+    : public PerChannelAffineQuantizer {
   explicit PerChannelAffineFloatQParamsQuantizer(
       ScalarType scalar_type,
       Tensor scales,
       Tensor zero_points,
       int64_t axis)
-      : PerChannelAffineQuantizer(scalar_type,
-        scales,
-        zero_points,
-        axis) {}
+      : PerChannelAffineQuantizer(scalar_type, scales, zero_points, axis) {}
 
   QScheme qscheme() const override {
     return kPerChannelAffineFloatQParams;
@@ -229,9 +230,10 @@ TORCH_API QTensorImpl* get_qtensorimpl(const TensorBase& self);
 
 // double and int64_t are because of the native function API, we only have these
 // argument types right now in native functions
-TORCH_API QuantizerPtr
-make_per_tensor_affine_quantizer(
-    double scale, int64_t zero_point, ScalarType scalar_type);
+TORCH_API QuantizerPtr make_per_tensor_affine_quantizer(
+    double scale,
+    int64_t zero_point,
+    ScalarType scalar_type);
 
 TORCH_API QuantizerPtr make_per_channel_affine_quantizer(
     const Tensor& scales,

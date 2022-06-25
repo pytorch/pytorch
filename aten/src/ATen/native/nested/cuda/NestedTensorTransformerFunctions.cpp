@@ -9,8 +9,8 @@
 #include <ATen/ops/_nested_from_padded.h>
 #endif
 
-#include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorMath.h>
+#include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 
 namespace at {
 namespace native {
@@ -40,7 +40,8 @@ Tensor nested_from_padded_cuda(
       TORCH_WARN_ONCE(
           "nested_from_padded CUDA kernels only support fp32/fp16; falling "
           "back to slower generic kernel");
-      return at::native::nested_from_padded_generic(padded, sizes, do_transform_0213);
+      return at::native::nested_from_padded_generic(
+          padded, sizes, do_transform_0213);
     }
     TORCH_CHECK(
         (padded.dim() == 4 && do_transform_0213) ||
@@ -146,8 +147,7 @@ Tensor NestedTensor_to_padded_tensor_cuda(
       Tensor result = at::detail::make_tensor<NestedTensorImpl>(
           nt_input->get_buffer(), sizes_dim1 * sizes_dim2[0]);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(result.dim() == 2);
-      result =
-          NestedTensor_to_padded_tensor_cuda(result, padding, output_size);
+      result = NestedTensor_to_padded_tensor_cuda(result, padding, output_size);
       return result.reshape({result.sizes()[0], -1, *nt_input->opt_size(2)});
     }
 

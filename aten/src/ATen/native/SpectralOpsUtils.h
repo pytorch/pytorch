@@ -1,17 +1,18 @@
 #pragma once
 
-#include <string>
-#include <stdexcept>
-#include <sstream>
 #include <ATen/native/DispatchStub.h>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // Normalization types used in _fft_with_size
 enum class fft_norm_mode {
-  none,       // No normalization
-  by_root_n,  // Divide by sqrt(signal_size)
-  by_n,       // Divide by signal_size
+  none, // No normalization
+  by_root_n, // Divide by sqrt(signal_size)
+  by_n, // Divide by signal_size
 };
 
 // NOTE [ Fourier Transform Conjugate Symmetry ]
@@ -40,14 +41,16 @@ enum class fft_norm_mode {
 // to infer the twosided size from given onesided size.
 //
 // cuFFT doc: http://docs.nvidia.com/cuda/cufft/index.html#multi-dimensional
-// MKL doc: https://software.intel.com/en-us/mkl-developer-reference-c-dfti-complex-storage-dfti-real-storage-dfti-conjugate-even-storage#CONJUGATE_EVEN_STORAGE
+// MKL doc:
+// https://software.intel.com/en-us/mkl-developer-reference-c-dfti-complex-storage-dfti-real-storage-dfti-conjugate-even-storage#CONJUGATE_EVEN_STORAGE
 
 inline int64_t infer_ft_real_to_complex_onesided_size(int64_t real_size) {
   return (real_size / 2) + 1;
 }
 
-inline int64_t infer_ft_complex_to_real_onesided_size(int64_t complex_size,
-                                                      int64_t expected_size=-1) {
+inline int64_t infer_ft_complex_to_real_onesided_size(
+    int64_t complex_size,
+    int64_t expected_size = -1) {
   int64_t base = (complex_size - 1) * 2;
   if (expected_size < 0) {
     return base + 1;
@@ -63,11 +66,17 @@ inline int64_t infer_ft_complex_to_real_onesided_size(int64_t complex_size,
   }
 }
 
-using fft_fill_with_conjugate_symmetry_fn =
-    void (*)(ScalarType dtype, IntArrayRef mirror_dims, IntArrayRef half_sizes,
-             IntArrayRef in_strides, const void* in_data,
-             IntArrayRef out_strides, void* out_data);
-DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_symmetry_stub);
+using fft_fill_with_conjugate_symmetry_fn = void (*)(
+    ScalarType dtype,
+    IntArrayRef mirror_dims,
+    IntArrayRef half_sizes,
+    IntArrayRef in_strides,
+    const void* in_data,
+    IntArrayRef out_strides,
+    void* out_data);
+DECLARE_DISPATCH(
+    fft_fill_with_conjugate_symmetry_fn,
+    fft_fill_with_conjugate_symmetry_stub);
 
 // In real-to-complex transform, cuFFT and MKL only fill half of the values
 // due to conjugate symmetry. This function fills in the other half of the full
@@ -75,6 +84,9 @@ DECLARE_DISPATCH(fft_fill_with_conjugate_symmetry_fn, fft_fill_with_conjugate_sy
 // self should be the shape of the full signal and dims.back() should be the
 // one-sided dimension.
 // See NOTE [ Fourier Transform Conjugate Symmetry ]
-TORCH_API void _fft_fill_with_conjugate_symmetry_(const Tensor& self, IntArrayRef dims);
+TORCH_API void _fft_fill_with_conjugate_symmetry_(
+    const Tensor& self,
+    IntArrayRef dims);
 
-}} // at::native
+} // namespace native
+} // namespace at

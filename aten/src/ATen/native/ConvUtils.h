@@ -1,76 +1,209 @@
 #pragma once
-#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/DispatchStub.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-using conv_depthwise2d_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, std::array<bool, 2>);
+using conv_depthwise2d_backward_fn = std::tuple<at::Tensor, at::Tensor> (*)(
+    const at::Tensor&,
+    const at::Tensor&,
+    const at::Tensor&,
+    at::IntArrayRef,
+    at::IntArrayRef,
+    at::IntArrayRef,
+    at::IntArrayRef,
+    std::array<bool, 2>);
 DECLARE_DISPATCH(conv_depthwise2d_backward_fn, conv_depthwise2d_backward_stub);
-using conv_depthwise3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
+using conv_depthwise3d_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        std::array<bool, 3>);
 DECLARE_DISPATCH(conv_depthwise3d_backward_fn, conv_depthwise3d_backward_stub);
-using cudnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
-DECLARE_DISPATCH(cudnn_convolution_backward_fn, cudnn_convolution_backward_stub);
-using mps_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, std::array<bool,3>);
+using cudnn_convolution_backward_fn = std::tuple<at::Tensor, at::Tensor> (*)(
+    const at::Tensor&,
+    const at::Tensor&,
+    const at::Tensor&,
+    at::IntArrayRef,
+    at::IntArrayRef,
+    at::IntArrayRef,
+    int64_t,
+    bool,
+    bool,
+    bool,
+    std::array<bool, 2>);
+DECLARE_DISPATCH(
+    cudnn_convolution_backward_fn,
+    cudnn_convolution_backward_stub);
+using mps_convolution_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        int64_t,
+        std::array<bool, 3>);
 DECLARE_DISPATCH(mps_convolution_backward_fn, mps_convolution_backward_stub);
-using cudnn_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, bool, std::array<bool,2>);
-DECLARE_DISPATCH(cudnn_convolution_transpose_backward_fn, cudnn_convolution_transpose_backward_stub);
-using miopen_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_convolution_backward_fn, miopen_convolution_backward_stub);
-using miopen_convolution_transpose_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_convolution_transpose_backward_fn, miopen_convolution_transpose_backward_stub);
-using miopen_depthwise_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, bool, bool, std::array<bool,3>);
-DECLARE_DISPATCH(miopen_depthwise_convolution_backward_fn, miopen_depthwise_convolution_backward_stub);
-using mkldnn_convolution_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, int64_t, std::array<bool,3>);
-DECLARE_DISPATCH(mkldnn_convolution_backward_fn, mkldnn_convolution_backward_stub);
-using slow_conv_dilated2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
-DECLARE_DISPATCH(slow_conv_dilated2d_backward_fn, slow_conv_dilated2d_backward_stub);
-using slow_conv_dilated3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, std::array<bool, 3>);
-DECLARE_DISPATCH(slow_conv_dilated3d_backward_fn, slow_conv_dilated3d_backward_stub);
-using slow_conv_transpose2d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, std::array<bool,3>);
-DECLARE_DISPATCH(slow_conv_transpose2d_backward_fn, slow_conv_transpose2d_backward_stub);
-using slow_conv_transpose3d_backward_fn = std::tuple<at::Tensor,at::Tensor,at::Tensor>(*)(
-    const at::Tensor&, const at::Tensor&, const at::Tensor&, at::IntArrayRef, at::IntArrayRef,
-    at::IntArrayRef, at::IntArrayRef, at::IntArrayRef, std::array<bool,3>);
-DECLARE_DISPATCH(slow_conv_transpose3d_backward_fn, slow_conv_transpose3d_backward_stub);
+using cudnn_convolution_transpose_backward_fn =
+    std::tuple<at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        int64_t,
+        bool,
+        bool,
+        bool,
+        std::array<bool, 2>);
+DECLARE_DISPATCH(
+    cudnn_convolution_transpose_backward_fn,
+    cudnn_convolution_transpose_backward_stub);
+using miopen_convolution_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        int64_t,
+        bool,
+        bool,
+        std::array<bool, 3>);
+DECLARE_DISPATCH(
+    miopen_convolution_backward_fn,
+    miopen_convolution_backward_stub);
+using miopen_convolution_transpose_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        int64_t,
+        bool,
+        bool,
+        std::array<bool, 3>);
+DECLARE_DISPATCH(
+    miopen_convolution_transpose_backward_fn,
+    miopen_convolution_transpose_backward_stub);
+using miopen_depthwise_convolution_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        int64_t,
+        bool,
+        bool,
+        std::array<bool, 3>);
+DECLARE_DISPATCH(
+    miopen_depthwise_convolution_backward_fn,
+    miopen_depthwise_convolution_backward_stub);
+using mkldnn_convolution_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        int64_t,
+        std::array<bool, 3>);
+DECLARE_DISPATCH(
+    mkldnn_convolution_backward_fn,
+    mkldnn_convolution_backward_stub);
+using slow_conv_dilated2d_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        std::array<bool, 3>);
+DECLARE_DISPATCH(
+    slow_conv_dilated2d_backward_fn,
+    slow_conv_dilated2d_backward_stub);
+using slow_conv_dilated3d_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        std::array<bool, 3>);
+DECLARE_DISPATCH(
+    slow_conv_dilated3d_backward_fn,
+    slow_conv_dilated3d_backward_stub);
+using slow_conv_transpose2d_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        std::array<bool, 3>);
+DECLARE_DISPATCH(
+    slow_conv_transpose2d_backward_fn,
+    slow_conv_transpose2d_backward_stub);
+using slow_conv_transpose3d_backward_fn =
+    std::tuple<at::Tensor, at::Tensor, at::Tensor> (*)(
+        const at::Tensor&,
+        const at::Tensor&,
+        const at::Tensor&,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        at::IntArrayRef,
+        std::array<bool, 3>);
+DECLARE_DISPATCH(
+    slow_conv_transpose3d_backward_fn,
+    slow_conv_transpose3d_backward_stub);
 
 namespace {
-  static bool cudnnv8_heuristic_mode_b = c10::utils::check_env("TORCH_CUDNN_USE_HEURISTIC_MODE_B") == true;
+static bool cudnnv8_heuristic_mode_b =
+    c10::utils::check_env("TORCH_CUDNN_USE_HEURISTIC_MODE_B") == true;
 }
 
 static inline bool cudnnv8_enabled_check_debug() {
-  static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_ENABLED") == true;
-  static bool cudnnv8_debug = c10::utils::check_env("TORCH_CUDNN_V8_API_DEBUG") == true;
+  static bool cudnnv8_flag =
+      c10::utils::check_env("TORCH_CUDNN_V8_API_ENABLED") == true;
+  static bool cudnnv8_debug =
+      c10::utils::check_env("TORCH_CUDNN_V8_API_DEBUG") == true;
   static uint8_t cudnnv8_debugcount = 0;
   if (cudnnv8_debug == 1 && cudnnv8_debugcount < 10) {
-    TORCH_WARN("TORCH_CUDNN_V8_DEBUG ON, V8_FLAG: ", cudnnv8_flag, " TORCH_CUDNN_USE_HEURISTIC_MODE B: ", cudnnv8_heuristic_mode_b);
+    TORCH_WARN(
+        "TORCH_CUDNN_V8_DEBUG ON, V8_FLAG: ",
+        cudnnv8_flag,
+        " TORCH_CUDNN_USE_HEURISTIC_MODE B: ",
+        cudnnv8_heuristic_mode_b);
     cudnnv8_debugcount++;
   }
   return cudnnv8_flag == 1;
@@ -101,15 +234,25 @@ struct ConvParams {
   bool is_padding_neg() const;
   bool is_stride_nonpos() const;
   void view1d_as_2d();
-  bool use_cpu_depthwise3x3_winograd(const at::Tensor& input, const at::Tensor& weight) const;
-  bool needs_64bit_indexing_no_split(const at::Tensor& input, const at::Tensor& weight) const;
+  bool use_cpu_depthwise3x3_winograd(
+      const at::Tensor& input,
+      const at::Tensor& weight) const;
+  bool needs_64bit_indexing_no_split(
+      const at::Tensor& input,
+      const at::Tensor& weight) const;
   bool use_cudnn(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const;
+  bool use_cudnn_depthwise(const at::Tensor& input, const at::Tensor& weight)
+      const;
+  bool use_miopen(
+      const at::Tensor& input,
+      const at::Tensor& weight,
+      bool bias_defined) const;
   bool use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const;
   bool use_nnpack(const at::Tensor& input, const at::Tensor& weight) const;
-  bool use_xnnpack(const at::Tensor& input, const at::Tensor& weight,
-                   const at::OptionalIntArrayRef bias_sizes_opt) const;
+  bool use_xnnpack(
+      const at::Tensor& input,
+      const at::Tensor& weight,
+      const at::OptionalIntArrayRef bias_sizes_opt) const;
   bool use_mps(const at::Tensor& input, const at::Tensor& weight) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
@@ -140,10 +283,10 @@ enum class ConvBackend {
 };
 
 // Function to select the convolution backend based on the inputs and params.
-// This overload is used within the convolution internals but not exposed to python.
-// NB: The forward pass provides a bias tensor while the backward pass provides
-// a bool indicating whether the bias is defined. This is done to save memory by
-// avoiding saving the full bias tensor for backward.
+// This overload is used within the convolution internals but not exposed to
+// python. NB: The forward pass provides a bias tensor while the backward pass
+// provides a bool indicating whether the bias is defined. This is done to save
+// memory by avoiding saving the full bias tensor for backward.
 TORCH_API ConvBackend select_conv_backend(
     const Tensor& input,
     const Tensor& weight,
@@ -151,12 +294,18 @@ TORCH_API ConvBackend select_conv_backend(
     const bool need_backward,
     const ConvParams& params);
 
-// Overload for selecting the convolution backend from the full set of convolution inputs.
-// This overload is exposed to python for testing, etc.
+// Overload for selecting the convolution backend from the full set of
+// convolution inputs. This overload is exposed to python for testing, etc.
 TORCH_API ConvBackend select_conv_backend(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt,
-    IntArrayRef stride, IntArrayRef padding, IntArrayRef dilation,
-    bool transposed, IntArrayRef output_padding, int64_t groups);
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
+    IntArrayRef stride,
+    IntArrayRef padding,
+    IntArrayRef dilation,
+    bool transposed,
+    IntArrayRef output_padding,
+    int64_t groups);
 
 // ---------------------------------------------------------------------
 //
@@ -164,9 +313,9 @@ TORCH_API ConvBackend select_conv_backend(
 //
 // ---------------------------------------------------------------------
 
-constexpr int input_batch_size_dim = 0;  // also grad_input
+constexpr int input_batch_size_dim = 0; // also grad_input
 constexpr int input_channels_dim = 1;
-constexpr int output_batch_size_dim = 0;  // also grad_output
+constexpr int output_batch_size_dim = 0; // also grad_output
 constexpr int output_channels_dim = 1;
 constexpr int weight_output_channels_dim = 0;
 constexpr int weight_input_channels_dim = 1;
@@ -181,25 +330,46 @@ constexpr int max_dim = 3;
 // ---------------------------------------------------------------------
 
 // Used on pad, stride and dilation
-static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, const char* arg_name)
-{
-  TORCH_CHECK(args.size() <= expected_size,
-           "Too many ", arg_name, " values (", args.size(), ") supplied, expecting ",
-           expected_size, " (while checking arguments for ", c, ")");
-  TORCH_CHECK(args.size() >= expected_size,
-           "Not enough ", arg_name, " values (", args.size(), ") supplied, expecting ",
-           expected_size, " (while checking arguments for ", c, ")");
+static void check_args(
+    CheckedFrom c,
+    IntArrayRef args,
+    size_t expected_size,
+    const char* arg_name) {
+  TORCH_CHECK(
+      args.size() <= expected_size,
+      "Too many ",
+      arg_name,
+      " values (",
+      args.size(),
+      ") supplied, expecting ",
+      expected_size,
+      " (while checking arguments for ",
+      c,
+      ")");
+  TORCH_CHECK(
+      args.size() >= expected_size,
+      "Not enough ",
+      arg_name,
+      " values (",
+      args.size(),
+      ") supplied, expecting ",
+      expected_size,
+      " (while checking arguments for ",
+      c,
+      ")");
 
-  auto num_negative_values = std::count_if(args.begin(), args.end(), [](int x){return x < 0;});
-  if (num_negative_values > 0){
+  auto num_negative_values =
+      std::count_if(args.begin(), args.end(), [](int x) { return x < 0; });
+  if (num_negative_values > 0) {
     std::stringstream ss;
     ss << arg_name << " should be greater than zero but got (";
-    std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
-    ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
+    std::copy(
+        args.begin(), args.end() - 1, std::ostream_iterator<int>(ss, ", "));
+    ss << args.back() << ")"
+       << " (while checking arguments for " << c << ")";
     AT_ERROR(ss.str());
   }
 }
-
 
 // NOTE [ Convolution checks ]
 //
@@ -218,9 +388,13 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
 // come up with a general framework to handle such situations.)
 static void convolution_shape_check(
     CheckedFrom c,
-    const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
-{
+    const TensorGeometryArg& input,
+    const TensorGeometryArg& weight,
+    const TensorGeometryArg& output,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
   check_args(c, dilation, padding.size(), "dilation");
@@ -242,9 +416,11 @@ static void convolution_shape_check(
 // takes an extra output_padding argument to resolve the ambiguity.
 
 static inline std::vector<int64_t> conv_output_size(
-    IntArrayRef input_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
-) {
+    IntArrayRef input_size,
+    IntArrayRef weight_size,
+    IntArrayRef padding,
+    IntArrayRef stride,
+    IntArrayRef dilation = IntArrayRef()) {
   // ASSERT(input_size.size() > 2)
   // ASSERT(input_size.size() == weight_size.size())
   bool has_dilation = dilation.size() > 0;
@@ -255,15 +431,20 @@ static inline std::vector<int64_t> conv_output_size(
   for (const auto d : c10::irange(2, dim)) {
     auto dilation_ = has_dilation ? dilation[d - 2] : 1;
     auto kernel = dilation_ * (weight_size[d] - 1) + 1;
-    output_size[d] = (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
+    output_size[d] =
+        (input_size[d] + (2 * padding[d - 2]) - kernel) / stride[d - 2] + 1;
   }
   return output_size;
 }
 
 static inline std::vector<int64_t> conv_input_size(
-    IntArrayRef output_size, IntArrayRef weight_size,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
-) {
+    IntArrayRef output_size,
+    IntArrayRef weight_size,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
   // ASSERT(output_size.size() > 2)
   // ASSERT(output_size.size() == weight_size.size())
   auto dim = output_size.size();
@@ -272,23 +453,27 @@ static inline std::vector<int64_t> conv_input_size(
   input_size[1] = weight_size[weight_input_channels_dim] * groups;
   for (const auto d : c10::irange(2, dim)) {
     int kernel = dilation[d - 2] * (weight_size[d] - 1) + 1;
-    input_size[d] = (output_size[d] - 1) * stride[d - 2] - (2 * padding[d - 2]) +
-                     kernel + output_padding[d - 2];
+    input_size[d] = (output_size[d] - 1) * stride[d - 2] -
+        (2 * padding[d - 2]) + kernel + output_padding[d - 2];
   }
   return input_size;
 }
 
 static inline std::vector<int64_t> conv_weight_size(
-    IntArrayRef input_size, IntArrayRef output_size,
-    IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
-) {
+    IntArrayRef input_size,
+    IntArrayRef output_size,
+    IntArrayRef padding,
+    IntArrayRef output_padding,
+    IntArrayRef stride,
+    IntArrayRef dilation,
+    int64_t groups) {
   auto dim = input_size.size();
   std::vector<int64_t> weight_size(dim);
   weight_size[0] = output_size[1];
   weight_size[1] = input_size[1] / groups;
   for (const auto d : c10::irange(2, dim)) {
-    int kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2]
-               + 2 * padding[d - 2] - output_padding[d - 2];
+    int kernel = input_size[d] - (output_size[d] - 1) * stride[d - 2] +
+        2 * padding[d - 2] - output_padding[d - 2];
     weight_size[d] = (kernel - 1) / dilation[d - 2] + 1;
   }
   return weight_size;
@@ -300,7 +485,9 @@ static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
   return bias.reshape(shape);
 }
 
-static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
+static inline at::MemoryFormat cudnn_conv_suggest_memory_format(
+    const at::Tensor& input,
+    const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithCuDNN() ||
       input.scalar_type() == at::kDouble ||
@@ -312,18 +499,18 @@ static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor
   auto weight_memory_format = weight.suggest_memory_format();
   auto weight_ndim = weight.ndimension();
 
-  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (weight_ndim == 4) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast)
-  );
+  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) &&
+      (weight_ndim == 4) &&
+      ((input_memory_format == at::MemoryFormat::ChannelsLast) ||
+       (weight_memory_format == at::MemoryFormat::ChannelsLast));
   if (can_use_cudnn_channels_last_2d) {
     return at::MemoryFormat::ChannelsLast;
   }
 
-  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (weight_ndim == 5) && (
-    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
-    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
-  );
+  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) &&
+      (weight_ndim == 5) &&
+      ((input_memory_format == at::MemoryFormat::ChannelsLast3d) ||
+       (weight_memory_format == at::MemoryFormat::ChannelsLast3d));
   if (can_use_cudnn_channels_last_3d) {
     return at::MemoryFormat::ChannelsLast3d;
   }
@@ -331,8 +518,9 @@ static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor
   return at::MemoryFormat::Contiguous;
 }
 
-static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
+static inline bool miopen_conv_use_channels_last(
+    const at::Tensor& input,
+    const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
       input.scalar_type() == at::kDouble ||
@@ -342,17 +530,18 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
 
   bool can_use_miopen_channels_last_2d = false;
 #if defined(USE_ROCM) && (ROCM_VERSION >= 40300)
-  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-  // See #64427
-  static c10::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
+  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC
+  // in MIOpen See #64427
+  static c10::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC =
+      c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
 
-  can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&  *PYTORCH_MIOPEN_SUGGEST_NHWC && (
-            ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-            (weight_memory_format == at::MemoryFormat::ChannelsLast) )
-        );
+  can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&
+      *PYTORCH_MIOPEN_SUGGEST_NHWC &&
+      (((input_memory_format == at::MemoryFormat::ChannelsLast) ||
+        (weight_memory_format == at::MemoryFormat::ChannelsLast)));
 #endif
 
   bool can_use_miopen_channels_last_3d = false;
@@ -360,8 +549,9 @@ static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const 
   return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
 }
 
-static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
+static inline bool mkldnn_conv_use_channels_last(
+    const at::Tensor& input,
+    const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (input.scalar_type() == at::kDouble ||
       weight.scalar_type() == at::kDouble) {
@@ -377,7 +567,7 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
   auto weight_memory_format = weight.suggest_memory_format();
 
   bool can_use_mkldnn_channels_last_2d =
-      (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+      (input_memory_format == at::MemoryFormat::ChannelsLast) ||
       (weight_memory_format == at::MemoryFormat::ChannelsLast);
 
   // TODO: add channels last 3d support
@@ -386,16 +576,18 @@ static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const 
   return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
 }
 
-static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
+static inline bool thnn_conv_use_channels_last(
+    const at::Tensor& input,
+    const at::Tensor& weight) {
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
 
-  bool can_use_thnn_channels_last_2d = input.device().is_cpu() && (
-      (input_memory_format  == at::MemoryFormat::ChannelsLast) || (
-       weight_memory_format == at::MemoryFormat::ChannelsLast));
+  bool can_use_thnn_channels_last_2d = input.device().is_cpu() &&
+      ((input_memory_format == at::MemoryFormat::ChannelsLast) ||
+       (weight_memory_format == at::MemoryFormat::ChannelsLast));
 
   return can_use_thnn_channels_last_2d;
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

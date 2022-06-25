@@ -1,7 +1,7 @@
 #include <ATen/Config.h>
 #if AT_PARALLEL_OPENMP || AT_PARALLEL_NATIVE || AT_PARALLEL_NATIVE_TBB
-#include <ATen/Parallel.h>
 #include <ATen/PTThreadPool.h>
+#include <ATen/Parallel.h>
 #include <ATen/ThreadLocalState.h>
 
 #include <atomic>
@@ -51,7 +51,8 @@ void set_num_interop_threads(int nthreads) {
   TORCH_CHECK(nthreads > 0, "Expected positive number of threads");
 
   int no_value = NOT_SET;
-  TORCH_CHECK(num_interop_threads.compare_exchange_strong(no_value, nthreads),
+  TORCH_CHECK(
+      num_interop_threads.compare_exchange_strong(no_value, nthreads),
       "Error: cannot set number of interop threads after parallel work "
       "has started or set_num_interop_threads called");
 }
@@ -81,15 +82,14 @@ void launch_no_thread_state(std::function<void()> fn) {
 
 void launch(std::function<void()> func) {
   // NOLINTNEXTLINE(modernize-avoid-bind)
-  internal::launch_no_thread_state(std::bind([](
-    std::function<void()> f, ThreadLocalState thread_locals) {
-      // NOLINTNEXTLINE(performance-move-const-arg)
-      ThreadLocalStateGuard guard(std::move(thread_locals));
-      f();
-    },
-    std::move(func),
-    ThreadLocalState()
-  ));
+  internal::launch_no_thread_state(std::bind(
+      [](std::function<void()> f, ThreadLocalState thread_locals) {
+        // NOLINTNEXTLINE(performance-move-const-arg)
+        ThreadLocalStateGuard guard(std::move(thread_locals));
+        f();
+      },
+      std::move(func),
+      ThreadLocalState()));
 }
 
 } // namespace at

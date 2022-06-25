@@ -2,6 +2,9 @@
 #undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/interned_strings.h>
+#include <ATen/core/interned_strings_class.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Optional.h>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -10,10 +13,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include <c10/util/Exception.h>
-#include <ATen/core/interned_strings_class.h>
-#include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 
 namespace c10 {
 
@@ -36,7 +35,7 @@ std::pair<const char*, const char*> InternedStrings::string(Symbol sym) {
   return customString(sym);
 #else
   switch (sym) {
-#define DEFINE_CASE(ns, s) \
+#define DEFINE_CASE(ns, s)           \
   case static_cast<unique_t>(ns::s): \
     return {#ns "::" #s, #s};
     FORALL_NS_SYMBOLS(DEFINE_CASE)
@@ -53,7 +52,7 @@ Symbol InternedStrings::ns(Symbol sym) {
   return sym_to_info_.at(sym).ns;
 #else
   switch (sym) {
-#define DEFINE_CASE(ns, s) \
+#define DEFINE_CASE(ns, s)           \
   case static_cast<unique_t>(ns::s): \
     return namespaces::ns;
     // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -75,7 +74,8 @@ Symbol InternedStrings::_symbol(const std::string& s) {
   auto pos = s.find("::");
   if (pos == std::string::npos) {
     std::stringstream ss;
-    ss << "all symbols must have a namespace, <namespace>::<string>, but found: " << s;
+    ss << "all symbols must have a namespace, <namespace>::<string>, but found: "
+       << s;
     throw std::runtime_error(ss.str());
   }
   Symbol ns = _symbol("namespaces::" + s.substr(0, pos));
@@ -92,24 +92,24 @@ std::pair<const char*, const char*> InternedStrings::customString(Symbol sym) {
   return {s.qual_name.c_str(), s.unqual_name.c_str()};
 }
 
-static InternedStrings & globalStrings() {
+static InternedStrings& globalStrings() {
   static InternedStrings s;
   return s;
 }
 
-Symbol Symbol::fromQualString(const std::string & s) {
+Symbol Symbol::fromQualString(const std::string& s) {
   return globalStrings().symbol(s);
 }
 
-const char * Symbol::toUnqualString() const {
+const char* Symbol::toUnqualString() const {
   return globalStrings().string(*this).second;
 }
 
-const char * Symbol::toQualString() const {
+const char* Symbol::toQualString() const {
   return globalStrings().string(*this).first;
 }
 
-const char * Symbol::toDisplayString() const {
+const char* Symbol::toDisplayString() const {
   // TODO: Make this actually return something that's "user friendly".
   // The trouble is that, for this to be usable in printf-style assert
   // statements, this has to return a const char* (whose lifetime is
@@ -125,7 +125,9 @@ std::string Symbol::domainString() const {
   return domain_prefix() + ns().toUnqualString();
 }
 
-Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::string & s) {
+Symbol Symbol::fromDomainAndUnqualString(
+    const std::string& d,
+    const std::string& s) {
   if (d.compare(0, domain_prefix().size(), domain_prefix()) != 0) {
     std::ostringstream ss;
     ss << "Symbol: domain string is expected to be prefixed with '"
@@ -136,13 +138,29 @@ Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::strin
   return fromQualString(qualString);
 }
 
-bool Symbol::is_attr() const { return ns() == namespaces::attr; }
-bool Symbol::is_aten() const { return ns() == namespaces::aten; }
-bool Symbol::is_cuda() const { return ns() == namespaces::cuda; }
-bool Symbol::is_prim() const { return ns() == namespaces::prim; }
-bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
-bool Symbol::is_user() const { return ns() == namespaces::user; }
-bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }
-bool Symbol::is_dimname() const { return ns() == namespaces::dimname; }
+bool Symbol::is_attr() const {
+  return ns() == namespaces::attr;
+}
+bool Symbol::is_aten() const {
+  return ns() == namespaces::aten;
+}
+bool Symbol::is_cuda() const {
+  return ns() == namespaces::cuda;
+}
+bool Symbol::is_prim() const {
+  return ns() == namespaces::prim;
+}
+bool Symbol::is_onnx() const {
+  return ns() == namespaces::onnx;
+}
+bool Symbol::is_user() const {
+  return ns() == namespaces::user;
+}
+bool Symbol::is_caffe2() const {
+  return ns() == namespaces::_caffe2;
+}
+bool Symbol::is_dimname() const {
+  return ns() == namespaces::dimname;
+}
 
 } // namespace c10

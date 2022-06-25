@@ -44,8 +44,11 @@ Tensor& dequantize_tensor_per_channel_float_qparams(
     Tensor zero_points,
     int64_t axis);
 
-using quantize_tensor_per_tensor_affine_fn =
-    void (*)(const Tensor& rtensor, Tensor& qtensor, double scale, int64_t zero_point);
+using quantize_tensor_per_tensor_affine_fn = void (*)(
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    double scale,
+    int64_t zero_point);
 
 using quantize_tensor_per_channel_affine_fn = void (*)(
     const Tensor& rtensor,
@@ -61,8 +64,11 @@ using quantize_tensor_per_channel_float_qparams_fn = void (*)(
     const Tensor& zero_points,
     int64_t axis);
 
-using dequantize_tensor_per_tensor_affine_fn =
-    void (*)(const Tensor& qtensor, Tensor& rtensor, double scale, int64_t zero_point);
+using dequantize_tensor_per_tensor_affine_fn = void (*)(
+    const Tensor& qtensor,
+    Tensor& rtensor,
+    double scale,
+    int64_t zero_point);
 
 using dequantize_tensor_per_channel_affine_fn = void (*)(
     const Tensor& qtensor,
@@ -78,11 +84,17 @@ using dequantize_tensor_per_channel_float_qparams_fn = void (*)(
     const Tensor& zero_points,
     int64_t axis);
 
-using quantize_tensor_per_tensor_affine_sub_byte_fn =
-    void (*)(const Tensor& rtensor, Tensor& qtensor, float scale, float zero_point);
+using quantize_tensor_per_tensor_affine_sub_byte_fn = void (*)(
+    const Tensor& rtensor,
+    Tensor& qtensor,
+    float scale,
+    float zero_point);
 
-using dequantize_tensor_per_tensor_affine_sub_byte_fn =
-    void (*)(const Tensor& qtensor, Tensor& rtensor, float scale, float zero_point);
+using dequantize_tensor_per_tensor_affine_sub_byte_fn = void (*)(
+    const Tensor& qtensor,
+    Tensor& rtensor,
+    float scale,
+    float zero_point);
 
 DECLARE_DISPATCH(
     quantize_tensor_per_tensor_affine_fn,

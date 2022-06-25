@@ -2,15 +2,15 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/Reduction.h>
-#include <torch/cuda.h>
 #include <ATen/test/test_assert.h>
 #include <c10/util/irange.h>
+#include <torch/cuda.h>
 
 // for TH compat test only...
 struct THFloatTensor;
 
-#include <iostream>
 #include <chrono>
+#include <iostream>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <string.h>
 #include <sstream>
@@ -78,9 +78,9 @@ void TestAdd(DeprecatedTypeProperties& type) {
   // TODO:0-dim Tensor d(3.f);
   Scalar d = 3.f;
   if (type.backend() == Backend::CPU && type.scalarType() == kHalf) {
-      ASSERT_TRUE(add(c, d).allclose(a + a + b + d, 1e-2));
+    ASSERT_TRUE(add(c, d).allclose(a + a + b + d, 1e-2));
   } else {
-      ASSERT_TRUE(add(c, d).allclose(a + a + b + d));
+    ASSERT_TRUE(add(c, d).allclose(a + a + b + d));
   }
 }
 
@@ -98,8 +98,8 @@ void TestZeros(DeprecatedTypeProperties& type) {
                    .count()
             << " ms" << std::endl;
 
-   std::srand(std::time(nullptr));
-   ASSERT_EQ(norm(a).item<double>(), 0.0);
+  std::srand(std::time(nullptr));
+  ASSERT_EQ(norm(a).item<double>(), 0.0);
 }
 
 void TestLoadsOfAdds(DeprecatedTypeProperties& type) {
@@ -319,7 +319,8 @@ void TestView(DeprecatedTypeProperties& type) {
   // Testing the tensor view path, which is different from
   // the Variable view path, see https://github.com/pytorch/pytorch/pull/23452
   // for details
-  Tensor tensor = randn({3, 4}, type);;
+  Tensor tensor = randn({3, 4}, type);
+  ;
   Tensor viewed = tensor.view({3, 4});
   tensor.resize_({6, 2});
   ASSERT_TRUE(tensor.sizes().equals({6, 2}));
@@ -419,7 +420,8 @@ TEST(BasicTest, FactoryMethodsTest) {
   // Sparse tensor CPU test to avoid requiring CUDA to catch simple bugs.
   // Sparse tensors do not work with static CPU dispatch.
 #ifndef ATEN_CPU_STATIC_DISPATCH
-  tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf).layout(at::kSparse));
+  tensor1 =
+      at::empty({4}, at::TensorOptions().dtype(at::kHalf).layout(at::kSparse));
   ASSERT_EQ(tensor1.dtype(), at::kHalf);
   ASSERT_EQ(tensor1.layout(), at::kSparse);
   ASSERT_EQ(tensor1.device(), at::kCPU);
@@ -447,7 +449,13 @@ TEST(BasicTest, FactoryMethodsTest) {
     ASSERT_FALSE(tensor1.is_pinned());
 
     // Test set everything
-    tensor1 = at::empty({4}, at::TensorOptions().dtype(at::kHalf).device(at::kCUDA).layout(at::kSparse).requires_grad(false));
+    tensor1 = at::empty(
+        {4},
+        at::TensorOptions()
+            .dtype(at::kHalf)
+            .device(at::kCUDA)
+            .layout(at::kSparse)
+            .requires_grad(false));
     ASSERT_EQ(tensor1.dtype(), at::kHalf);
     ASSERT_EQ(tensor1.layout(), at::kSparse);
     ASSERT_TRUE(tensor1.device().is_cuda());

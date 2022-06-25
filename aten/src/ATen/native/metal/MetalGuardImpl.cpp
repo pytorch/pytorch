@@ -54,8 +54,8 @@ struct MetalGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   bool queryEvent(void* event) const override {
     TORCH_CHECK(false, "Metal backend doesn't support events.")
   }
-  void destroyEvent(void* event, const DeviceIndex device_index) const
-      noexcept override {}
+  void destroyEvent(void* event, const DeviceIndex device_index)
+      const noexcept override {}
 };
 
 C10_REGISTER_GUARD_IMPL(Metal, MetalGuardImpl);

@@ -34,7 +34,8 @@ class Runtime final {
  public:
   explicit Runtime(const RuntimeConfiguration config);
 
-  // Do not allow copying. There should be only one global instance of this class.
+  // Do not allow copying. There should be only one global instance of this
+  // class.
   Runtime(const Runtime&) = delete;
   Runtime& operator=(const Runtime&) = delete;
 
@@ -81,7 +82,7 @@ class Runtime final {
     return default_adapter_i_;
   }
 
-  using Selector = std::function<uint32_t (const std::vector<Adapter>&)>;
+  using Selector = std::function<uint32_t(const std::vector<Adapter>&)>;
   uint32_t init_adapter(const Selector& selector);
 };
 

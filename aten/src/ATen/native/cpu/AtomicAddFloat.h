@@ -9,8 +9,7 @@
 
 #include <atomic>
 
-static inline void cpu_atomic_add_float(float* dst, float fvalue)
-{
+static inline void cpu_atomic_add_float(float* dst, float fvalue) {
   typedef union {
     unsigned intV;
     float floatV;
@@ -23,7 +22,8 @@ static inline void cpu_atomic_add_float(float* dst, float fvalue)
   new_value.floatV = old_value.floatV + fvalue;
 
   unsigned* old_intV = (unsigned*)(&old_value.intV);
-  while (!std::atomic_compare_exchange_strong(dst_intV, old_intV, new_value.intV)) {
+  while (!std::atomic_compare_exchange_strong(
+      dst_intV, old_intV, new_value.intV)) {
     _mm_pause();
     old_value.floatV = *dst;
     new_value.floatV = old_value.floatV + fvalue;

@@ -4,7 +4,7 @@
 
 using namespace at;
 
-void XLAFree(void *ptr) {
+void XLAFree(void* ptr) {
   // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
   free(ptr);
 }

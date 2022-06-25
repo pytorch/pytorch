@@ -22,7 +22,7 @@ void copy_texture_to_texture(
     api::utils::uvec3 src_offset,
     api::utils::uvec3 dst_offset);
 
-} // namespace utils
+} // namespace helper
 } // namespace api
 } // namespace vulkan
 } // namespace native

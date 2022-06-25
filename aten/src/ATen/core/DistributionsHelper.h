@@ -2,15 +2,15 @@
 
 #include <ATen/core/Array.h>
 #include <ATen/core/TransformationHelper.h>
-#include <c10/util/Half.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Half.h>
 #include <c10/util/MathConstants.h>
 #include <c10/util/Optional.h>
-#include <c10/macros/Macros.h>
 
-#include <type_traits>
-#include <limits>
 #include <cmath>
+#include <limits>
+#include <type_traits>
 
 /**
  * Distributions kernel adapted from THRandom.cpp
@@ -27,60 +27,59 @@
  *      auto sample = uniform(gen);
  */
 
-
 namespace at {
 namespace {
 
 /**
- * Samples a discrete uniform distribution in the range [base, base+range) of type T
+ * Samples a discrete uniform distribution in the range [base, base+range) of
+ * type T
  */
 template <typename T>
 struct uniform_int_from_to_distribution {
-
-  C10_HOST_DEVICE inline uniform_int_from_to_distribution(uint64_t range, int64_t base) {
+  C10_HOST_DEVICE inline uniform_int_from_to_distribution(
+      uint64_t range,
+      int64_t base) {
     range_ = range;
     base_ = base;
   }
 
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
-    if ((
-      std::is_same<T, int64_t>::value ||
-      std::is_same<T, double>::value ||
-      std::is_same<T, float>::value ||
-      std::is_same<T, at::BFloat16>::value) && range_ >= 1ULL << 32)
-    {
-      return transformation::uniform_int_from_to<T>(generator->random64(), range_, base_);
+    if ((std::is_same<T, int64_t>::value || std::is_same<T, double>::value ||
+         std::is_same<T, float>::value ||
+         std::is_same<T, at::BFloat16>::value) &&
+        range_ >= 1ULL << 32) {
+      return transformation::uniform_int_from_to<T>(
+          generator->random64(), range_, base_);
     } else {
-      return transformation::uniform_int_from_to<T>(generator->random(), range_, base_);
+      return transformation::uniform_int_from_to<T>(
+          generator->random(), range_, base_);
     }
   }
 
-  private:
-    uint64_t range_;
-    int64_t base_;
+ private:
+  uint64_t range_;
+  int64_t base_;
 };
 
 /**
- * Samples a discrete uniform distribution in the range [min_value(int64_t), max_value(int64_t)]
+ * Samples a discrete uniform distribution in the range [min_value(int64_t),
+ * max_value(int64_t)]
  */
 template <typename T>
 struct uniform_int_full_range_distribution {
-
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     return transformation::uniform_int_full_range<T>(generator->random64());
   }
-
 };
 
 /**
- * Samples a discrete uniform distribution in the range [0, max_value(T)] for integral types
- * and [0, 2^mantissa] for floating-point types.
+ * Samples a discrete uniform distribution in the range [0, max_value(T)] for
+ * integral types and [0, 2^mantissa] for floating-point types.
  */
 template <typename T>
 struct uniform_int_distribution {
-
   template <typename RNG>
   C10_HOST_DEVICE inline T operator()(RNG generator) {
     if (std::is_same<T, double>::value || std::is_same<T, int64_t>::value) {
@@ -89,7 +88,6 @@ struct uniform_int_distribution {
       return transformation::uniform_int<T>(generator->random());
     }
   }
-
 };
 
 /**
@@ -97,7 +95,6 @@ struct uniform_int_distribution {
  */
 template <typename T>
 struct uniform_real_distribution {
-
   C10_HOST_DEVICE inline uniform_real_distribution(T from, T to) {
     TORCH_CHECK_IF_NOT_ON_CUDA(from <= to);
     TORCH_CHECK_IF_NOT_ON_CUDA(to - from <= std::numeric_limits<T>::max());
@@ -106,76 +103,88 @@ struct uniform_real_distribution {
   }
 
   template <typename RNG>
-  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
-    if(std::is_same<T, double>::value) {
+  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator) {
+    if (std::is_same<T, double>::value) {
       return transformation::uniform_real<T>(generator->random64(), from_, to_);
     } else {
       return transformation::uniform_real<T>(generator->random(), from_, to_);
     }
   }
 
-  private:
-    T from_;
-    T to_;
+ private:
+  T from_;
+  T to_;
 };
 
-// The SFINAE checks introduced in #39816 looks overcomplicated and must revisited
-// https://github.com/pytorch/pytorch/issues/40052
+// The SFINAE checks introduced in #39816 looks overcomplicated and must
+// revisited https://github.com/pytorch/pytorch/issues/40052
 #define DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(member)              \
-template <typename T>                                                \
-struct has_member_##member                                           \
-{                                                                    \
+  template <typename T>                                              \
+  struct has_member_##member {                                       \
     typedef char yes;                                                \
     typedef long no;                                                 \
-    template <typename U> static yes test(decltype(&U::member));     \
-    template <typename U> static no test(...);                       \
+    template <typename U>                                            \
+    static yes test(decltype(&U::member));                           \
+    template <typename U>                                            \
+    static no test(...);                                             \
     static constexpr bool value = sizeof(test<T>(0)) == sizeof(yes); \
-}
+  }
 
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(next_double_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_double_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(next_float_normal_sample);
 DISTRIBUTION_HELPER_GENERATE_HAS_MEMBER(set_next_float_normal_sample);
 
-#define DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(TYPE)                                      \
-                                                                                                    \
-template <typename RNG, typename ret_type,                                                          \
-          typename std::enable_if_t<(                                                               \
-            has_member_next_##TYPE##_normal_sample<RNG>::value &&                                   \
-            has_member_set_next_##TYPE##_normal_sample<RNG>::value                                  \
-          ), int> = 0>                                                                              \
-C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* generator, ret_type* ret) {  \
-  if (generator->next_##TYPE##_normal_sample()) {                                                   \
-    *ret = *(generator->next_##TYPE##_normal_sample());                                             \
-    generator->set_next_##TYPE##_normal_sample(c10::optional<TYPE>());                              \
-    return true;                                                                                    \
-  }                                                                                                 \
-  return false;                                                                                     \
-}                                                                                                   \
-                                                                                                    \
-template <typename RNG, typename ret_type,                                                          \
-          typename std::enable_if_t<(                                                               \
-            !has_member_next_##TYPE##_normal_sample<RNG>::value ||                                  \
-            !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
-          ), int> = 0>                                                                              \
-C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type* /*ret*/) {  \
-  return false;                                                                                     \
-}                                                                                                   \
-                                                                                                    \
-template <typename RNG, typename ret_type,                                                          \
-          typename std::enable_if_t<(                                                               \
-            has_member_set_next_##TYPE##_normal_sample<RNG>::value                                  \
-          ), int> = 0>                                                                              \
-C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* generator, ret_type cache) { \
-  generator->set_next_##TYPE##_normal_sample(cache);                                                \
-}                                                                                                   \
-                                                                                                    \
-template <typename RNG, typename ret_type,                                                          \
-          typename std::enable_if_t<(                                                               \
-            !has_member_set_next_##TYPE##_normal_sample<RNG>::value                                 \
-          ), int> = 0>                                                                              \
-C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(RNG* /*generator*/, ret_type /*cache*/) { \
-}
+#define DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(TYPE)           \
+                                                                         \
+  template <                                                             \
+      typename RNG,                                                      \
+      typename ret_type,                                                 \
+      typename std::enable_if_t<                                         \
+          (has_member_next_##TYPE##_normal_sample<RNG>::value &&         \
+           has_member_set_next_##TYPE##_normal_sample<RNG>::value),      \
+          int> = 0>                                                      \
+  C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(     \
+      RNG* generator, ret_type* ret) {                                   \
+    if (generator->next_##TYPE##_normal_sample()) {                      \
+      *ret = *(generator->next_##TYPE##_normal_sample());                \
+      generator->set_next_##TYPE##_normal_sample(c10::optional<TYPE>()); \
+      return true;                                                       \
+    }                                                                    \
+    return false;                                                        \
+  }                                                                      \
+                                                                         \
+  template <                                                             \
+      typename RNG,                                                      \
+      typename ret_type,                                                 \
+      typename std::enable_if_t<                                         \
+          (!has_member_next_##TYPE##_normal_sample<RNG>::value ||        \
+           !has_member_set_next_##TYPE##_normal_sample<RNG>::value),     \
+          int> = 0>                                                      \
+  C10_HOST_DEVICE inline bool maybe_get_next_##TYPE##_normal_sample(     \
+      RNG* /*generator*/, ret_type* /*ret*/) {                           \
+    return false;                                                        \
+  }                                                                      \
+                                                                         \
+  template <                                                             \
+      typename RNG,                                                      \
+      typename ret_type,                                                 \
+      typename std::enable_if_t<                                         \
+          (has_member_set_next_##TYPE##_normal_sample<RNG>::value),      \
+          int> = 0>                                                      \
+  C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(     \
+      RNG* generator, ret_type cache) {                                  \
+    generator->set_next_##TYPE##_normal_sample(cache);                   \
+  }                                                                      \
+                                                                         \
+  template <                                                             \
+      typename RNG,                                                      \
+      typename ret_type,                                                 \
+      typename std::enable_if_t<                                         \
+          (!has_member_set_next_##TYPE##_normal_sample<RNG>::value),     \
+          int> = 0>                                                      \
+  C10_HOST_DEVICE inline void maybe_set_next_##TYPE##_normal_sample(     \
+      RNG* /*generator*/, ret_type /*cache*/) {}
 
 DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(double);
 DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float);
@@ -188,15 +197,15 @@ DISTRIBUTION_HELPER_GENERATE_NEXT_NORMAL_METHODS(float);
  */
 template <typename T>
 struct normal_distribution {
-
   C10_HOST_DEVICE inline normal_distribution(T mean_in, T stdv_in) {
-    TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in >= 0, "stdv_in must be positive: ", stdv_in);
+    TORCH_CHECK_IF_NOT_ON_CUDA(
+        stdv_in >= 0, "stdv_in must be positive: ", stdv_in);
     mean = mean_in;
     stdv = stdv_in;
   }
 
   template <typename RNG>
-  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
+  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator) {
     dist_acctype<T> ret;
     // return cached values if available
     if (std::is_same<T, double>::value) {
@@ -212,7 +221,8 @@ struct normal_distribution {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     const dist_acctype<T> u1 = uniform(generator);
     const dist_acctype<T> u2 = uniform(generator);
-    const dist_acctype<T> r = ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0)-u2));
+    const dist_acctype<T> r =
+        ::sqrt(static_cast<T>(-2.0) * ::log(static_cast<T>(1.0) - u2));
     const dist_acctype<T> theta = static_cast<T>(2.0) * c10::pi<T> * u1;
     if (std::is_same<T, double>::value) {
       maybe_set_next_double_normal_sample(generator, r * ::sin(theta));
@@ -223,22 +233,26 @@ struct normal_distribution {
     return transformation::normal(ret, mean, stdv);
   }
 
-  private:
-    T mean;
-    T stdv;
+ private:
+  T mean;
+  T stdv;
 };
 
 template <typename T>
-struct DiscreteDistributionType { using type = float; };
+struct DiscreteDistributionType {
+  using type = float;
+};
 
-template <> struct DiscreteDistributionType<double> { using type = double; };
+template <>
+struct DiscreteDistributionType<double> {
+  using type = double;
+};
 
 /**
  * Samples a bernoulli distribution given a probability input
  */
 template <typename T>
 struct bernoulli_distribution {
-
   C10_HOST_DEVICE inline bernoulli_distribution(T p_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(p_in >= 0 && p_in <= 1);
     p = p_in;
@@ -250,8 +264,8 @@ struct bernoulli_distribution {
     return transformation::bernoulli<T>(uniform(generator), p);
   }
 
-  private:
-    T p;
+ private:
+  T p;
 };
 
 /**
@@ -259,7 +273,6 @@ struct bernoulli_distribution {
  */
 template <typename T>
 struct geometric_distribution {
-
   C10_HOST_DEVICE inline geometric_distribution(T p_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(p_in > 0 && p_in < 1);
     p = p_in;
@@ -271,8 +284,8 @@ struct geometric_distribution {
     return transformation::geometric<T>(uniform(generator), p);
   }
 
-  private:
-    T p;
+ private:
+  T p;
 };
 
 /**
@@ -280,7 +293,6 @@ struct geometric_distribution {
  */
 template <typename T>
 struct exponential_distribution {
-
   C10_HOST_DEVICE inline exponential_distribution(T lambda_in) {
     lambda = lambda_in;
   }
@@ -291,8 +303,8 @@ struct exponential_distribution {
     return transformation::exponential<T>(uniform(generator), lambda);
   }
 
-  private:
-    T lambda;
+ private:
+  T lambda;
 };
 
 /**
@@ -300,7 +312,6 @@ struct exponential_distribution {
  */
 template <typename T>
 struct cauchy_distribution {
-
   C10_HOST_DEVICE inline cauchy_distribution(T median_in, T sigma_in) {
     median = median_in;
     sigma = sigma_in;
@@ -312,9 +323,9 @@ struct cauchy_distribution {
     return transformation::cauchy<T>(uniform(generator), median, sigma);
   }
 
-  private:
-    T median;
-    T sigma;
+ private:
+  T median;
+  T sigma;
 };
 
 /**
@@ -324,22 +335,21 @@ struct cauchy_distribution {
  */
 template <typename T>
 struct lognormal_distribution {
-
   C10_HOST_DEVICE inline lognormal_distribution(T mean_in, T stdv_in) {
     TORCH_CHECK_IF_NOT_ON_CUDA(stdv_in > 0);
     mean = mean_in;
     stdv = stdv_in;
   }
 
-  template<typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator){
+  template <typename RNG>
+  C10_HOST_DEVICE inline T operator()(RNG generator) {
     normal_distribution<T> normal(mean, stdv);
     return transformation::log_normal<T>(normal(generator));
   }
 
-  private:
-    T mean;
-    T stdv;
+ private:
+  T mean;
+  T stdv;
 };
-}
+} // namespace
 } // namespace at

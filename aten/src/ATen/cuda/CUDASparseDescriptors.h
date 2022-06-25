@@ -99,7 +99,9 @@ cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
     : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
  public:
-  explicit CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
+  explicit CuSparseDnMatDescriptor(
+      const Tensor& input,
+      int64_t batch_offset = -1);
 };
 
 class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
@@ -114,16 +116,15 @@ class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
 class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     : public CuSparseSpMatDescriptor {
  public:
-  explicit CuSparseSpMatCsrDescriptor(const Tensor& input, int64_t batch_offset = -1);
+  explicit CuSparseSpMatCsrDescriptor(
+      const Tensor& input,
+      int64_t batch_offset = -1);
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
   std::tuple<int64_t, int64_t, int64_t> get_size() {
     int64_t rows, cols, nnz;
-    TORCH_CUDASPARSE_CHECK(cusparseSpMatGetSize(
-        this->descriptor(),
-        &rows,
-        &cols,
-        &nnz));
+    TORCH_CUDASPARSE_CHECK(
+        cusparseSpMatGetSize(this->descriptor(), &rows, &cols, &nnz));
     return std::make_tuple(rows, cols, nnz);
   }
 
@@ -192,7 +193,9 @@ class TORCH_CUDA_CPP_API CuSparseSpSMDescriptor
 
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11000
 class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
-    : public CuSparseDescriptor<cusparseSpGEMMDescr, &cusparseSpGEMM_destroyDescr> {
+    : public CuSparseDescriptor<
+          cusparseSpGEMMDescr,
+          &cusparseSpGEMM_destroyDescr> {
  public:
   CuSparseSpGEMMDescriptor() {
     cusparseSpGEMMDescr_t raw_descriptor;

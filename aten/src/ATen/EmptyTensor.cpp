@@ -19,10 +19,10 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
 constexpr uint64_t storage_max() {
   // int64_t and size_t are used somewhat inconsistently throughout ATen.
   // To be safe, storage size calculations must fit in both types.
-  constexpr auto int64_max = static_cast<uint64_t>(
-      std::numeric_limits<int64_t>::max());
-  constexpr auto size_max = static_cast<uint64_t>(
-      std::numeric_limits<size_t>::max());
+  constexpr auto int64_max =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+  constexpr auto size_max =
+      static_cast<uint64_t>(std::numeric_limits<size_t>::max());
   return std::min(int64_max, size_max);
 }
 
@@ -33,13 +33,12 @@ inline void raise_warning_for_complex_half(ScalarType dtype) {
   }
 }
 
-}  // namespace (anonymous)
+} // namespace
 
 size_t computeStorageNbytesContiguous(
     IntArrayRef sizes,
     size_t itemsize_bytes,
-    size_t storage_offset
-  ) {
+    size_t storage_offset) {
   // Ignore overflow checks on mobile
 #ifndef C10_MOBILE
   uint64_t size = 1;
@@ -47,8 +46,8 @@ size_t computeStorageNbytesContiguous(
   overflowed |= c10::add_overflows(size, storage_offset, &size);
   overflowed |= c10::mul_overflows(size, itemsize_bytes, &size);
   overflowed |= size > storage_max();
-  TORCH_CHECK(!overflowed,
-              "Storage size calculation overflowed with sizes=", sizes);
+  TORCH_CHECK(
+      !overflowed, "Storage size calculation overflowed with sizes=", sizes);
   return static_cast<size_t>(size);
 #else
   const auto numel = c10::multiply_integers(sizes);
@@ -60,8 +59,7 @@ size_t computeStorageNbytes(
     IntArrayRef sizes,
     IntArrayRef strides,
     size_t itemsize_bytes,
-    size_t storage_offset
-  ) {
+    size_t storage_offset) {
   // Ignore overflow checks on mobile
 #ifndef C10_MOBILE
   // size of the underlying storage is 1 bigger than the offset
@@ -79,9 +77,12 @@ size_t computeStorageNbytes(
   }
   overflowed |= c10::mul_overflows(size, itemsize_bytes, &size);
   overflowed |= size > storage_max();
-  TORCH_CHECK(!overflowed,
-              "Storage size calculation overflowed with sizes=",
-              sizes, " and strides=", strides);
+  TORCH_CHECK(
+      !overflowed,
+      "Storage size calculation overflowed with sizes=",
+      sizes,
+      " and strides=",
+      strides);
   return static_cast<size_t>(size);
 #else
   // size of the underlying storage is 1 bigger than the offset
@@ -115,8 +116,8 @@ TensorBase empty_generic(
       allocator,
       /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor_base<TensorImpl>(
-      std::move(storage_impl), ks, dtype);
+  auto tensor =
+      detail::make_tensor_base<TensorImpl>(std::move(storage_impl), ks, dtype);
   // Default TensorImpl has size [0]
   if (size.size() != 1 || size[0] != 0) {
     tensor.unsafeGetTensorImpl()->set_sizes_contiguous(size);
@@ -149,14 +150,17 @@ TensorBase empty_strided_generic(
       allocator,
       /*resizeable=*/true);
 
-  auto tensor = detail::make_tensor_base<TensorImpl>(
-      std::move(storage_impl), ks, dtype);
+  auto tensor =
+      detail::make_tensor_base<TensorImpl>(std::move(storage_impl), ks, dtype);
   tensor.unsafeGetTensorImpl()->set_sizes_and_strides(size, stride);
   return tensor;
 }
 
-TensorBase empty_cpu(IntArrayRef size, ScalarType dtype, bool pin_memory,
-                     c10::optional<c10::MemoryFormat> memory_format_opt) {
+TensorBase empty_cpu(
+    IntArrayRef size,
+    ScalarType dtype,
+    bool pin_memory,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
   auto allocator = GetCPUAllocatorMaybePinned(pin_memory);
   constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
   return empty_generic(size, allocator, cpu_ks, dtype, memory_format_opt);
@@ -171,15 +175,15 @@ TensorBase empty_cpu(
     c10::optional<c10::MemoryFormat> memory_format_opt) {
   auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::CPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      layout_or_default(layout_opt) == Layout::Strided);
 
   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
   auto dtype = dtype_or_default(dtype_opt);
   return empty_cpu(size, dtype, pin_memory, memory_format_opt);
 }
 
-TensorBase empty_cpu(
-    IntArrayRef size, const TensorOptions &options) {
+TensorBase empty_cpu(IntArrayRef size, const TensorOptions& options) {
   return at::detail::empty_cpu(
       size,
       optTypeMetaToScalarType(options.dtype_opt()),
@@ -189,8 +193,11 @@ TensorBase empty_cpu(
       options.memory_format_opt());
 }
 
-TensorBase empty_strided_cpu(IntArrayRef size, IntArrayRef stride,
-                             ScalarType dtype, bool pin_memory) {
+TensorBase empty_strided_cpu(
+    IntArrayRef size,
+    IntArrayRef stride,
+    ScalarType dtype,
+    bool pin_memory) {
   auto allocator = at::detail::GetCPUAllocatorMaybePinned(pin_memory);
   constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
   return at::detail::empty_strided_generic(
@@ -206,7 +213,8 @@ TensorBase empty_strided_cpu(
     c10::optional<bool> pin_memory_opt) {
   auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::CPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      layout_or_default(layout_opt) == Layout::Strided);
 
   auto pin_memory = pinned_memory_or_default(pin_memory_opt);
   auto dtype = dtype_or_default(dtype_opt);
@@ -216,7 +224,7 @@ TensorBase empty_strided_cpu(
 TensorBase empty_strided_cpu(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options) {
+    const TensorOptions& options) {
   return at::detail::empty_strided_cpu(
       size,
       stride,
@@ -246,37 +254,36 @@ static MetaAllocator g_meta_alloc;
 
 REGISTER_ALLOCATOR(kMeta, &g_meta_alloc);
 
-TensorBase empty_meta(IntArrayRef size, ScalarType dtype,
-                     c10::optional<c10::MemoryFormat> memory_format_opt) {
-  auto *allocator = GetAllocator(kMeta);
+TensorBase empty_meta(
+    IntArrayRef size,
+    ScalarType dtype,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
+  auto* allocator = GetAllocator(kMeta);
   constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
   return at::detail::empty_generic(
       size, allocator, meta_dks, dtype, memory_format_opt);
 }
 
 TensorBase empty_meta(
-  IntArrayRef size,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt,
-  c10::optional<c10::MemoryFormat> memory_format_opt
-) {
+    IntArrayRef size,
+    c10::optional<ScalarType> dtype_opt,
+    c10::optional<Layout> layout_opt,
+    c10::optional<Device> device_opt,
+    c10::optional<bool> pin_memory_opt,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
   auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
   // NB: because there is no SparseMeta (yet), non-strided layout is
   // exerciseable
   TORCH_CHECK_NOT_IMPLEMENTED(
-    layout_or_default(layout_opt) == Layout::Strided,
-    "non-strided meta tensors not supported yet"
-  );
+      layout_or_default(layout_opt) == Layout::Strided,
+      "non-strided meta tensors not supported yet");
 
   auto dtype = dtype_or_default(dtype_opt);
   return empty_meta(size, dtype, memory_format_opt);
 }
 
-TensorBase empty_meta(
-    IntArrayRef size, const TensorOptions &options) {
+TensorBase empty_meta(IntArrayRef size, const TensorOptions& options) {
   return at::detail::empty_meta(
       size,
       optTypeMetaToScalarType(options.dtype_opt()),
@@ -286,9 +293,11 @@ TensorBase empty_meta(
       options.memory_format_opt());
 }
 
-TensorBase empty_strided_meta(IntArrayRef size, IntArrayRef stride,
-                              ScalarType dtype) {
-  auto *allocator = GetAllocator(kMeta);
+TensorBase empty_strided_meta(
+    IntArrayRef size,
+    IntArrayRef stride,
+    ScalarType dtype) {
+  auto* allocator = GetAllocator(kMeta);
   constexpr c10::DispatchKeySet meta_dks(c10::DispatchKey::Meta);
   return at::detail::empty_strided_generic(
       size, stride, allocator, meta_dks, dtype);
@@ -303,7 +312,8 @@ TensorBase empty_strided_meta(
     c10::optional<bool> pin_memory_opt) {
   auto device = device_or_default(device_opt);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(device.type() == DeviceType::Meta);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      layout_or_default(layout_opt) == Layout::Strided);
 
   auto dtype = dtype_or_default(dtype_opt);
   return at::detail::empty_strided_meta(size, stride, dtype);
@@ -312,7 +322,7 @@ TensorBase empty_strided_meta(
 TensorBase empty_strided_meta(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options) {
+    const TensorOptions& options) {
   return at::detail::empty_strided_meta(
       size,
       stride,
@@ -322,4 +332,5 @@ TensorBase empty_strided_meta(
       options.pinned_memory_opt());
 }
 
-}} // namespace at::detail
+} // namespace detail
+} // namespace at

@@ -6,13 +6,17 @@
 #if AT_MKLDNN_ENABLED()
 #include <ideep.hpp>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // Mapping ScalarType to ideep tensor data_type
 TORCH_API ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
 
 // Construct aten MKL-DNN tensor given an ideep tensor
-TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device);
+TORCH_API Tensor new_with_itensor_mkldnn(
+    ideep::tensor&& it,
+    c10::optional<ScalarType> dtype,
+    c10::optional<Device> device);
 
 // Retrieve `ideep::tensor` from MKL-DNN tensor
 TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
@@ -21,9 +25,11 @@ TORCH_API ideep::tensor& itensor_from_mkldnn(const Tensor& mkldnn_tensor);
 // ideep::tensor will share the underlying buffer
 TORCH_API ideep::tensor itensor_view_from_dense(const Tensor& tensor);
 
-// Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN tensor.
+// Helper function for getting an ideep tensor out of an aten Tensor or MKL-DNN
+// tensor.
 TORCH_API ideep::tensor itensor_from_tensor(const Tensor& tensor);
 
-}}
+} // namespace native
+} // namespace at
 
 #endif // AT_MKLDNN_ENABLED

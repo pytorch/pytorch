@@ -2,9 +2,9 @@
 
 #include <ATen/cuda/ATenCUDAGeneral.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <c10/cuda/CUDAStream.h>
-#include <c10/cuda/CUDAGuard.h>
 #include <ATen/cuda/Exceptions.h>
+#include <c10/cuda/CUDAGuard.h>
+#include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
 
 #include <cuda_runtime_api.h>
@@ -12,31 +12,31 @@
 #include <cstdint>
 #include <utility>
 
-namespace at { namespace cuda {
+namespace at {
+namespace cuda {
 
 /*
-* CUDAEvents are movable not copyable wrappers around CUDA's events.
-*
-* CUDAEvents are constructed lazily when first recorded unless it is
-* reconstructed from a cudaIpcEventHandle_t. The event has a device, and this
-* device is acquired from the first recording stream. However, if reconstructed
-* from a handle, the device should be explicitly specified; or if ipc_handle() is
-* called before the event is ever recorded, it will use the current device.
-* Later streams that record the event must match this device.
-*/
+ * CUDAEvents are movable not copyable wrappers around CUDA's events.
+ *
+ * CUDAEvents are constructed lazily when first recorded unless it is
+ * reconstructed from a cudaIpcEventHandle_t. The event has a device, and this
+ * device is acquired from the first recording stream. However, if reconstructed
+ * from a handle, the device should be explicitly specified; or if ipc_handle()
+ * is called before the event is ever recorded, it will use the current device.
+ * Later streams that record the event must match this device.
+ */
 struct TORCH_CUDA_CPP_API CUDAEvent {
   // Constructors
   // Default value for `flags` is specified below - it's cudaEventDisableTiming
   CUDAEvent() {}
   CUDAEvent(unsigned int flags) : flags_{flags} {}
 
-  CUDAEvent(
-      DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
-      device_index_ = device_index;
-      CUDAGuard guard(device_index_);
+  CUDAEvent(DeviceIndex device_index, const cudaIpcEventHandle_t* handle) {
+    device_index_ = device_index;
+    CUDAGuard guard(device_index_);
 
-      AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
-      is_created_ = true;
+    AT_CUDA_CHECK(cudaIpcOpenEventHandle(&event_, *handle));
+    is_created_ = true;
   }
 
   // Note: event destruction done on creating device to avoid creating a
@@ -47,19 +47,24 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
         CUDAGuard guard(device_index_);
         cudaEventDestroy(event_);
       }
-    } catch (...) { /* No throw */ }
+    } catch (...) { /* No throw */
+    }
   }
 
   CUDAEvent(const CUDAEvent&) = delete;
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
-  CUDAEvent(CUDAEvent&& other) { moveHelper(std::move(other)); }
+  CUDAEvent(CUDAEvent&& other) {
+    moveHelper(std::move(other));
+  }
   CUDAEvent& operator=(CUDAEvent&& other) {
     moveHelper(std::move(other));
     return *this;
   }
 
-  operator cudaEvent_t() const { return event(); }
+  operator cudaEvent_t() const {
+    return event();
+  }
 
   // Less than operator (to allow use in sets)
   friend bool operator<(const CUDAEvent& left, const CUDAEvent& right) {
@@ -74,9 +79,15 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     }
   }
 
-  bool isCreated() const { return is_created_; }
-  DeviceIndex device_index() const {return device_index_;}
-  cudaEvent_t event() const { return event_; }
+  bool isCreated() const {
+    return is_created_;
+  }
+  DeviceIndex device_index() const {
+    return device_index_;
+  }
+  cudaEvent_t event() const {
+    return event_;
+  }
 
   // Note: cudaEventQuery can be safely called from any device
   bool query() const {
@@ -97,10 +108,13 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
     return false;
   }
 
-  void record() { record(getCurrentCUDAStream()); }
+  void record() {
+    record(getCurrentCUDAStream());
+  }
 
   void recordOnce(const CUDAStream& stream) {
-    if (!was_recorded_) record(stream);
+    if (!was_recorded_)
+      record(stream);
   }
 
   // Note: cudaEventRecord must be called on the same device as the event.
@@ -109,8 +123,13 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
       createEvent(stream.device_index());
     }
 
-    TORCH_CHECK(device_index_ == stream.device_index(), "Event device ", device_index_,
-      " does not match recording stream's device ", stream.device_index(), ".");
+    TORCH_CHECK(
+        device_index_ == stream.device_index(),
+        "Event device ",
+        device_index_,
+        " does not match recording stream's device ",
+        stream.device_index(),
+        ".");
     CUDAGuard guard(device_index_);
     AT_CUDA_CHECK(cudaEventRecord(event_, stream));
     was_recorded_ = true;
@@ -127,8 +146,9 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
 
   // Note: cudaEventElapsedTime can be safely called from any device
   float elapsed_time(const CUDAEvent& other) const {
-    TORCH_CHECK(is_created_ && other.isCreated(),
-      "Both events must be recorded before calculating elapsed time.");
+    TORCH_CHECK(
+        is_created_ && other.isCreated(),
+        "Both events must be recorded before calculating elapsed time.");
     float time_ms = 0;
     // raise cudaErrorNotReady if either event is recorded but not yet completed
     AT_CUDA_CHECK(cudaEventElapsedTime(&time_ms, event_, other.event_));
@@ -143,17 +163,17 @@ struct TORCH_CUDA_CPP_API CUDAEvent {
   }
 
   // Note: cudaIpcGetEventHandle must be called on the same device as the event
-  void ipc_handle(cudaIpcEventHandle_t * handle) {
-      if (!is_created_) {
-        // this CUDAEvent object was initially constructed from flags but event_
-        // is not created yet.
-        createEvent(getCurrentCUDAStream().device_index());
-      }
-      CUDAGuard guard(device_index_);
-      AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
+  void ipc_handle(cudaIpcEventHandle_t* handle) {
+    if (!is_created_) {
+      // this CUDAEvent object was initially constructed from flags but event_
+      // is not created yet.
+      createEvent(getCurrentCUDAStream().device_index());
+    }
+    CUDAGuard guard(device_index_);
+    AT_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
   }
 
-private:
+ private:
   unsigned int flags_ = cudaEventDisableTiming;
   bool is_created_ = false;
   bool was_recorded_ = false;

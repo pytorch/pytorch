@@ -1,12 +1,12 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <c10/util/Optional.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/Parallel.h>
+#include <ATen/quantized/Quantizer.h>
+#include <c10/util/Optional.h>
 
-#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/IndexingUtils.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 
 namespace at {
 namespace native {
@@ -19,7 +19,8 @@ static inline Device ensure_has_index(Device device) {
   if (device.is_cpu() || device.has_index()) {
     return device;
   }
-  const c10::impl::DeviceGuardImplInterface* impl = c10::impl::getDeviceGuardImpl(device.type());
+  const c10::impl::DeviceGuardImplInterface* impl =
+      c10::impl::getDeviceGuardImpl(device.type());
   return impl->getDevice();
 }
 
@@ -38,15 +39,16 @@ Tensor _to_copy(
     c10::optional<bool> pin_memory,
     bool non_blocking,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-  TORCH_CHECK(!layout.has_value() || self.layout() == layout.value(),
-           "to(options) doesn't support converting to a different layout, "
-           "but got self.layout being ", self.layout(),
-           " and options.layout set as ", layout.value());
-  auto options = TensorOptions()
-    .dtype(dtype)
-    .layout(layout)
-    .device(device)
-    .pinned_memory(pin_memory);
+  TORCH_CHECK(
+      !layout.has_value() || self.layout() == layout.value(),
+      "to(options) doesn't support converting to a different layout, "
+      "but got self.layout being ",
+      self.layout(),
+      " and options.layout set as ",
+      layout.value());
+  auto options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
 
   if (options.has_device()) {
     options = options.device(ensure_has_index(options.device()));
@@ -103,8 +105,9 @@ Tensor _to_copy(
         new_values.device());
   }
 
-  bool pin_out = (non_blocking && self.is_cuda() && options.device().is_cpu() &&
-                  (options.layout() == c10::kStrided));
+  bool pin_out =
+      (non_blocking && self.is_cuda() && options.device().is_cpu() &&
+       (options.layout() == c10::kStrided));
 
   if (memory_format == MemoryFormat::Preserve) {
     if (options.device().supports_as_strided()) {
@@ -117,21 +120,17 @@ Tensor _to_copy(
           set_quantizer_(r, quantizer);
         } else {
           r = at::empty_strided(
-              self.sizes(),
-              self.strides(),
-              options.pinned_memory(pin_out));
+              self.sizes(), self.strides(), options.pinned_memory(pin_out));
           r.copy_(self, non_blocking);
         }
         return r;
       } else if (!self.is_quantized() && self.layout() == kStrided) {
-          Tensor r;
-          auto strides = infer_dense_strides(self.sizes(), self.strides());
-          r = at::empty_strided(
-              self.sizes(),
-              strides,
-              options.pinned_memory(pin_out));
-          r.copy_(self, non_blocking);
-          return r;
+        Tensor r;
+        auto strides = infer_dense_strides(self.sizes(), self.strides());
+        r = at::empty_strided(
+            self.sizes(), strides, options.pinned_memory(pin_out));
+        r.copy_(self, non_blocking);
+        return r;
       } else {
         memory_format = self.suggest_memory_format();
       }
@@ -140,19 +139,26 @@ Tensor _to_copy(
     }
   }
   // See Note [Explicit nullopt MemoryFormat argument]
-  // TODO: empty_quantized does not work here. It raises an exception in CheckMemoryFormat.h prior to
+  // TODO: empty_quantized does not work here. It raises an exception in
+  // CheckMemoryFormat.h prior to
   // empty_affine_quantizd/_empty_per_channel_affine_quantized calls
-  // at::empty also does not work here because there is no proper at::empty support for quantized tensors
-  // as it would return a quantized tensor with an UnknownQuantizer
-  auto r = self.is_quantized() ? at::empty_like(self, memory_format)
-                               : at::empty(self.sizes(),
-                                 options.memory_format(memory_format).pinned_memory(pin_out), c10::nullopt);
+  // at::empty also does not work here because there is no proper at::empty
+  // support for quantized tensors as it would return a quantized tensor with an
+  // UnknownQuantizer
+  auto r = self.is_quantized()
+      ? at::empty_like(self, memory_format)
+      : at::empty(
+            self.sizes(),
+            options.memory_format(memory_format).pinned_memory(pin_out),
+            c10::nullopt);
   r.copy_(self, non_blocking);
   return r;
 }
 
 template <typename T>
-static inline bool is_null_or_equal_to(const c10::optional<T>& test, const T& value) {
+static inline bool is_null_or_equal_to(
+    const c10::optional<T>& test,
+    const T& value) {
   if (!test.has_value()) {
     return true;
   }
@@ -172,11 +178,10 @@ bool to_will_alias(
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
 
   return is_null_or_equal_to(dtype, self.dtype().toScalarType()) &&
-    is_null_or_equal_to(layout, self.layout()) &&
-    is_null_or_equal_to(device, self.device()) &&
-    !copy &&
-    (memory_format == MemoryFormat::Preserve ||
-     self.suggest_memory_format() == memory_format);
+      is_null_or_equal_to(layout, self.layout()) &&
+      is_null_or_equal_to(device, self.device()) && !copy &&
+      (memory_format == MemoryFormat::Preserve ||
+       self.suggest_memory_format() == memory_format);
 }
 
 static inline Tensor to_impl(
@@ -188,22 +193,32 @@ static inline Tensor to_impl(
     bool non_blocking,
     bool copy,
     c10::optional<c10::MemoryFormat> optional_memory_format) {
-
   // fast path
-  if (to_will_alias(self, dtype, layout, device, copy, optional_memory_format)) {
+  if (to_will_alias(
+          self, dtype, layout, device, copy, optional_memory_format)) {
     return self;
   }
   return at::_to_copy(
-      self, dtype, layout, device, pin_memory, non_blocking, optional_memory_format);
+      self,
+      dtype,
+      layout,
+      device,
+      pin_memory,
+      non_blocking,
+      optional_memory_format);
 }
 
 // If input tensor is fp32, cast it to fp16, otherwise leave it alone.
 // (this is intended to be used internally by the JIT autocast implementation)
-Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled, ScalarType cuda_dtype, ScalarType cpu_dtype) {
+Tensor _autocast_to_reduced_precision(
+    const Tensor& self,
+    bool cuda_enabled,
+    bool cpu_enabled,
+    ScalarType cuda_dtype,
+    ScalarType cpu_dtype) {
   if (self.dtype() == at::ScalarType::Float &&
       ((self.device().is_cuda() && cuda_enabled) ||
-      (self.device().is_cpu() && cpu_enabled))
-      ) {
+       (self.device().is_cpu() && cpu_enabled))) {
     at::ScalarType target = at::ScalarType::Undefined;
     if (self.device().is_cuda()) {
       target = cuda_dtype;
@@ -211,10 +226,19 @@ Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, boo
       target = cpu_dtype;
     }
 
-    TORCH_INTERNAL_ASSERT(target != at::ScalarType::Undefined, "_autocast_to_reduced_precision requires legit ScalarType argument for given device");
+    TORCH_INTERNAL_ASSERT(
+        target != at::ScalarType::Undefined,
+        "_autocast_to_reduced_precision requires legit ScalarType argument for given device");
 
     return to_impl(
-        self, target, c10::nullopt, c10::nullopt, c10::nullopt, false, false, c10::nullopt);
+        self,
+        target,
+        c10::nullopt,
+        c10::nullopt,
+        c10::nullopt,
+        false,
+        false,
+        c10::nullopt);
   } else {
     return self;
   }
@@ -222,28 +246,37 @@ Tensor _autocast_to_reduced_precision(const Tensor& self, bool cuda_enabled, boo
 
 // If input tensor is fp16, cast it to fp32, otherwise leave it alone.
 // (this is intended to be used internally by the JIT autocast implementation)
-Tensor _autocast_to_full_precision(const Tensor& self, bool cuda_enabled, bool cpu_enabled) {
-  if ((self.dtype() == at::ScalarType::Half || self.dtype() == at::ScalarType::BFloat16) &&
+Tensor _autocast_to_full_precision(
+    const Tensor& self,
+    bool cuda_enabled,
+    bool cpu_enabled) {
+  if ((self.dtype() == at::ScalarType::Half ||
+       self.dtype() == at::ScalarType::BFloat16) &&
       ((self.device().is_cuda() && cuda_enabled) ||
-      (self.device().is_cpu() && cpu_enabled))
-      ) {
+       (self.device().is_cpu() && cpu_enabled))) {
     return to_impl(
-        self, at::ScalarType::Float, c10::nullopt, c10::nullopt, c10::nullopt, false, false, c10::nullopt);
+        self,
+        at::ScalarType::Float,
+        c10::nullopt,
+        c10::nullopt,
+        c10::nullopt,
+        false,
+        false,
+        c10::nullopt);
   } else {
     return self;
   }
 }
 
 Tensor to(
-  const Tensor& self,
+    const Tensor& self,
     c10::optional<ScalarType> dtype,
     c10::optional<Layout> layout,
     c10::optional<Device> device,
     c10::optional<bool> pin_memory,
-  bool non_blocking,
-  bool copy,
-  c10::optional<c10::MemoryFormat> optional_memory_format
-) {
+    bool non_blocking,
+    bool copy,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   return to_impl(
       self,
       dtype,
@@ -255,7 +288,13 @@ Tensor to(
       optional_memory_format);
 }
 
-Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor to(
+    const Tensor& self,
+    Device device,
+    ScalarType dtype,
+    bool non_blocking,
+    bool copy,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   return to_impl(
       self,
       dtype,
@@ -267,7 +306,12 @@ Tensor to(const Tensor& self, Device device, ScalarType dtype, bool non_blocking
       optional_memory_format);
 }
 
-Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor to(
+    const Tensor& self,
+    ScalarType dtype,
+    bool non_blocking,
+    bool copy,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   return to_impl(
       self,
       dtype,
@@ -279,7 +323,12 @@ Tensor to(const Tensor& self, ScalarType dtype, bool non_blocking, bool copy, c1
       optional_memory_format);
 }
 
-Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+Tensor to(
+    const Tensor& self,
+    const Tensor& other,
+    bool non_blocking,
+    bool copy,
+    c10::optional<c10::MemoryFormat> optional_memory_format) {
   auto options = other.options();
   return to_impl(
       self,
@@ -293,14 +342,15 @@ Tensor to(const Tensor& self, const Tensor& other, bool non_blocking, bool copy,
 }
 
 // This op is important primarily for lazy / graph-based backends.
-// While this vanilla implementation loops through each tensor and independently converts it to cpu,
-// a lazy backend like XLA might need to tell sync updates across tensors.
+// While this vanilla implementation loops through each tensor and independently
+// converts it to cpu, a lazy backend like XLA might need to tell sync updates
+// across tensors.
 std::vector<Tensor> _to_cpu(TensorList tensors) {
-    std::vector<Tensor> cpu_tensors;
-    for (const auto& t : tensors) {
-        cpu_tensors.push_back(t.cpu());
-    }
-    return cpu_tensors;
+  std::vector<Tensor> cpu_tensors;
+  for (const auto& t : tensors) {
+    cpu_tensors.push_back(t.cpu());
+  }
+  return cpu_tensors;
 }
 
 Tensor to_dense_backward(const Tensor& grad, const Tensor& input_) {
@@ -370,8 +420,10 @@ Tensor sparse_compressed_to_dense(
   if (self.layout() == kSparseCsc) {
     const auto batch_ndim = self.ccol_indices().dim() - 1;
     auto dst_transposed_sizes = self.sizes().vec();
-    std::swap(dst_transposed_sizes[batch_ndim], dst_transposed_sizes[batch_ndim + 1]);
-    // TODO: write a utility function, or use a transpose once view semantics are there
+    std::swap(
+        dst_transposed_sizes[batch_ndim], dst_transposed_sizes[batch_ndim + 1]);
+    // TODO: write a utility function, or use a transpose once view semantics
+    // are there
     const auto to_transposed_csr = at::native::_sparse_csr_tensor_unsafe(
         self.ccol_indices(),
         self.row_indices(),
@@ -380,7 +432,8 @@ Tensor sparse_compressed_to_dense(
         self.values().scalar_type(),
         kSparseCsr,
         self.values().device());
-    auto dst_transposed = at::zeros(dst_transposed_sizes, self.options().layout(kStrided));
+    auto dst_transposed =
+        at::zeros(dst_transposed_sizes, self.options().layout(kStrided));
     dst_transposed.add_(to_transposed_csr);
     return dst_transposed.transpose(batch_ndim, batch_ndim + 1);
   }
@@ -411,13 +464,21 @@ Tensor sparse_compressed_to_dense(
 
 // Computes the strides for view_dtype output when the view dtype is
 // smaller than the original dtype
-inline DimVector compute_strides_for_view_dtype_downsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
+inline DimVector compute_strides_for_view_dtype_downsize(
+    IntArrayRef old_strides,
+    int64_t size_ratio,
+    ScalarType old_dtype,
+    ScalarType new_dtype) {
   const int64_t ndim = old_strides.size();
 
   TORCH_CHECK(
-    old_strides[ndim - 1] == 1,
-    "self.stride(-1) must be 1 to view ", old_dtype, " as ", new_dtype,
-    " (different element sizes), but got ", old_strides[ndim - 1]);
+      old_strides[ndim - 1] == 1,
+      "self.stride(-1) must be 1 to view ",
+      old_dtype,
+      " as ",
+      new_dtype,
+      " (different element sizes), but got ",
+      old_strides[ndim - 1]);
 
   DimVector new_strides(ndim);
   for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
@@ -429,20 +490,36 @@ inline DimVector compute_strides_for_view_dtype_downsize(IntArrayRef old_strides
 
 // Computes the strides for view_dtype output when the view dtype is
 // larger than the original dtype
-inline DimVector compute_strides_for_view_dtype_upsize(IntArrayRef old_strides, int64_t size_ratio, ScalarType old_dtype, ScalarType new_dtype) {
+inline DimVector compute_strides_for_view_dtype_upsize(
+    IntArrayRef old_strides,
+    int64_t size_ratio,
+    ScalarType old_dtype,
+    ScalarType new_dtype) {
   const int64_t ndim = old_strides.size();
   TORCH_CHECK(
-    old_strides[ndim - 1] == 1,
-    "self.stride(-1) must be 1 to view ", old_dtype, " as ", new_dtype,
-    " (different element sizes), but got ", old_strides[ndim - 1]);
+      old_strides[ndim - 1] == 1,
+      "self.stride(-1) must be 1 to view ",
+      old_dtype,
+      " as ",
+      new_dtype,
+      " (different element sizes), but got ",
+      old_strides[ndim - 1]);
 
   DimVector new_strides(ndim);
   for (int64_t dim_idx = 0; dim_idx < ndim - 1; dim_idx++) {
     TORCH_CHECK(
-      (old_strides[dim_idx] % size_ratio) == 0,
-      "self.stride(", dim_idx, ") must be divisible by ", size_ratio,
-      " to view ", old_dtype, " as ", new_dtype, " (different element sizes), ",
-      "but got ", old_strides[dim_idx]);
+        (old_strides[dim_idx] % size_ratio) == 0,
+        "self.stride(",
+        dim_idx,
+        ") must be divisible by ",
+        size_ratio,
+        " to view ",
+        old_dtype,
+        " as ",
+        new_dtype,
+        " (different element sizes), ",
+        "but got ",
+        old_strides[dim_idx]);
 
     new_strides[dim_idx] = old_strides[dim_idx] / size_ratio;
   }
@@ -455,10 +532,12 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
     return self;
   }
   const auto type_meta = c10::scalarTypeToTypeMeta(dtype);
-  TORCH_CHECK(!self.is_conj(),
-    "torch.Tensor.view is not supported for conjugate view tensors when converting to a different dtype.");
-  TORCH_CHECK(!self.is_neg(),
-    "torch.Tensor.view is not supported for tensors with negative bit set when converting to a different dtype.");
+  TORCH_CHECK(
+      !self.is_conj(),
+      "torch.Tensor.view is not supported for conjugate view tensors when converting to a different dtype.");
+  TORCH_CHECK(
+      !self.is_neg(),
+      "torch.Tensor.view is not supported for tensors with negative bit set when converting to a different dtype.");
 
   int64_t self_element_size = self.element_size();
   int64_t new_element_size = static_cast<int64_t>(type_meta.itemsize());
@@ -473,16 +552,20 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
     impl->set_sizes_and_strides(self.sizes(), self.strides());
 
   } else if (self.dim() == 0) {
-    TORCH_CHECK(false,
-      "self.dim() cannot be 0 to view ", self.scalar_type(), " as ",
-      dtype, " (different element sizes)");
+    TORCH_CHECK(
+        false,
+        "self.dim() cannot be 0 to view ",
+        self.scalar_type(),
+        " as ",
+        dtype,
+        " (different element sizes)");
 
   } else if (self_element_size > new_element_size) {
     // Downsizing element size
 
     int64_t size_ratio = self_element_size / new_element_size;
     auto new_strides = compute_strides_for_view_dtype_downsize(
-      self.strides(), size_ratio, self.scalar_type(), dtype);
+        self.strides(), size_ratio, self.scalar_type(), dtype);
 
     auto old_sizes = self.sizes();
     DimVector new_sizes(self.dim());
@@ -500,19 +583,30 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
     int64_t size_ratio = new_element_size / self_element_size;
 
     TORCH_CHECK(
-      (self.size(-1) % size_ratio) == 0,
-      "self.size(-1) must be divisible by ", size_ratio, " to view ",
-      self.scalar_type(), " as ", dtype, " (different element sizes), ",
-      "but got ", self.size(-1));
+        (self.size(-1) % size_ratio) == 0,
+        "self.size(-1) must be divisible by ",
+        size_ratio,
+        " to view ",
+        self.scalar_type(),
+        " as ",
+        dtype,
+        " (different element sizes), ",
+        "but got ",
+        self.size(-1));
 
     TORCH_CHECK(
-      (self.storage_offset() % size_ratio) == 0,
-      "self.storage_offset() must be divisible by ", size_ratio, " to view ",
-      self.scalar_type(), " as ", dtype, " (different element sizes), but got ",
-      self.storage_offset());
+        (self.storage_offset() % size_ratio) == 0,
+        "self.storage_offset() must be divisible by ",
+        size_ratio,
+        " to view ",
+        self.scalar_type(),
+        " as ",
+        dtype,
+        " (different element sizes), but got ",
+        self.storage_offset());
 
     auto new_strides = compute_strides_for_view_dtype_upsize(
-      self.strides(), size_ratio, self.scalar_type(), dtype);
+        self.strides(), size_ratio, self.scalar_type(), dtype);
 
     auto old_sizes = self.sizes();
     DimVector new_sizes(self.dim());
@@ -569,12 +663,14 @@ std::pair<Tensor, Tensor> _not_zero_mask_to_col_row_indices(
     ScalarType index_dtype,
     Device index_device) {
   auto col_indices =
-      at::native::arange(not_zero_mask.size(-1), index_dtype, kStrided, index_device)
+      at::native::arange(
+          not_zero_mask.size(-1), index_dtype, kStrided, index_device)
           .view({1, not_zero_mask.size(-1)})
           .expand_as(not_zero_mask)
           .masked_select(not_zero_mask);
   auto row_indices =
-      at::native::arange(not_zero_mask.size(-2), index_dtype, kStrided, index_device)
+      at::native::arange(
+          not_zero_mask.size(-2), index_dtype, kStrided, index_device)
           .view({not_zero_mask.size(-2), 1})
           .expand_as(not_zero_mask)
           .masked_select(not_zero_mask);
@@ -607,8 +703,8 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   not_zero_mask = not_zero_mask.any(-1).any(-1);
   Tensor col_indices;
   Tensor row_indices;
-  std::tie(col_indices, row_indices) =
-      _not_zero_mask_to_col_row_indices(not_zero_mask, at::kLong, not_zero_mask.device());
+  std::tie(col_indices, row_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask, at::kLong, not_zero_mask.device());
   Tensor crow_indices = at::_convert_indices_from_coo_to_csr(
       row_indices.view({-1}), block_size_0, false /* out_int32 */);
   values = values.reshape({-1, values.size(-2), values.size(-1)});
@@ -618,7 +714,8 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   // This isn't ideal.
   values = values.index_select(
       0,
-      at::native::arange(not_zero_mask.numel(), at::kLong, kStrided, not_zero_mask.device())
+      at::native::arange(
+          not_zero_mask.numel(), at::kLong, kStrided, not_zero_mask.device())
           .masked_select(not_zero_mask));
 
   return at::native::_sparse_bsr_tensor_unsafe(
@@ -633,7 +730,9 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
 
 Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
+      "Conversion from ",
+      self.layout(),
+      " to SparseBsc is currently not supported.");
   return self;
 }
 
@@ -734,13 +833,17 @@ Tensor coo_to_sparse_csc(const Tensor& self) {
 
 Tensor coo_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsr is currently not supported.");
+      "Conversion from ",
+      self.layout(),
+      " to SparseBsr is currently not supported.");
   return self;
 }
 
 Tensor coo_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
+      "Conversion from ",
+      self.layout(),
+      " to SparseBsc is currently not supported.");
   return self;
 }
 
@@ -1025,7 +1128,9 @@ Tensor _csr_to_block_csr_cpu(const Tensor& self, IntArrayRef blocksize) {
       result_values.device());
 }
 
-Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
+Tensor sparse_compressed_to_sparse_bsr(
+    const Tensor& self,
+    IntArrayRef blocksize) {
   TORCH_CHECK(
       self.is_sparse_csr(),
       "Can only convert CSR to SparseBsr, but got ",
@@ -1059,9 +1164,13 @@ Tensor sparse_compressed_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize
       result_values.device());
 }
 
-Tensor sparse_compressed_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
+Tensor sparse_compressed_to_sparse_bsc(
+    const Tensor& self,
+    IntArrayRef blocksize) {
   AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
+      "Conversion from ",
+      self.layout(),
+      " to SparseBsc is currently not supported.");
   return self;
 }
 
@@ -1078,13 +1187,14 @@ Tensor sparse_compressed_to_sparse_csc(const Tensor& self) {
         self.device());
   }
   AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseCsc is currently not supported.");
+      "Conversion from ",
+      self.layout(),
+      " to SparseCsc is currently not supported.");
 }
 
 Tensor sparse_compressed_to_sparse(const Tensor& self, int64_t sparse_dim) {
   TORCH_CHECK(sparse_dim > 0, "sparse_dim must be >0");
-  TORCH_CHECK(sparse_dim <= 2,
-              "sparse_dim must be less than or equal to 2");
+  TORCH_CHECK(sparse_dim <= 2, "sparse_dim must be less than or equal to 2");
   // TODO: implement coo.to_sparse(sparse_dim) and then use
   // return self.to_sparse().to_sparse(sparse_dim);
   TORCH_CHECK(
@@ -1115,9 +1225,13 @@ Tensor sparse_compressed_to_sparse(const Tensor& self) {
 // Sparse layout conversions End
 
 Tensor to_meta(const Tensor& tensor) {
-  auto out = at::native::empty_strided_meta(tensor.sizes(), tensor.strides(), \
-/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
-/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+  auto out = at::native::empty_strided_meta(
+      tensor.sizes(),
+      tensor.strides(),
+      /*dtype=*/c10::make_optional(tensor.scalar_type()),
+      /*layout=*/c10::make_optional(tensor.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
   // needs to handle wrapped numbers, so dtype promotion works properly.
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
     out.unsafeGetTensorImpl()->set_wrapped_number(true);
@@ -1140,4 +1254,5 @@ std::vector<Tensor> to_meta(const at::TensorList& t_list) {
   return outs;
 }
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

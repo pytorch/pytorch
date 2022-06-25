@@ -13,70 +13,79 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <random>
 #include <vector>
-#include <memory>
 
 #include <pack_block_sparse.h>
 #include <pytorch_qnnpack.h>
-#include <qnnpack_func.h>
 #include <qnnpack/AlignedAllocator.h>
+#include <qnnpack_func.h>
 
 #define MAYBE_UNUSED __attribute__((unused))
 
 namespace {
-  void fillBlockSparseWeights(
-      uint8_t* b,
-      size_t N,
-      size_t K,
-      size_t row_block_size,
-      size_t col_block_size,
-      float sparsity,
-      const uint8_t* zero_points) {
-    std::random_device randomDevice;
-    auto rng = std::mt19937(randomDevice());
-    std::bernoulli_distribution dist{sparsity};
-    for (uint32_t n = 0; n < N ; n += row_block_size) {
-      for (uint32_t k = 0; k < K; k += col_block_size) {
-        if (dist(rng)) {
-          for (uint32_t nb = 0; (nb < row_block_size) && (n + nb < N); ++nb) {
-            for (uint32_t kb = 0; (kb < col_block_size) && (k + kb < K); ++kb) {
-              *(b + (n + nb) * K + k + kb) = zero_points[n + nb];
-            }
+void fillBlockSparseWeights(
+    uint8_t* b,
+    size_t N,
+    size_t K,
+    size_t row_block_size,
+    size_t col_block_size,
+    float sparsity,
+    const uint8_t* zero_points) {
+  std::random_device randomDevice;
+  auto rng = std::mt19937(randomDevice());
+  std::bernoulli_distribution dist{sparsity};
+  for (uint32_t n = 0; n < N; n += row_block_size) {
+    for (uint32_t k = 0; k < K; k += col_block_size) {
+      if (dist(rng)) {
+        for (uint32_t nb = 0; (nb < row_block_size) && (n + nb < N); ++nb) {
+          for (uint32_t kb = 0; (kb < col_block_size) && (k + kb < K); ++kb) {
+            *(b + (n + nb) * K + k + kb) = zero_points[n + nb];
           }
         }
       }
     }
   }
-
-  // Temp Debug utils that will be removed later
-  MAYBE_UNUSED void printMatrix(const char* name, const uint8_t* a, const size_t M, const size_t N) {
-    std::cout << "Matrix START:" << name << "...\n";
-    for (uint32_t m = 0; m < M ; ++m) {
-      for (uint32_t n = 0; n < N; n++) {
-        std::cout << (const uint32_t)(*(a + m * N + n)) << ", ";
-      }
-      std::cout << std::endl;
-    }
-    std::cout << "Matrix END...\n\n";
-  }
-
-  MAYBE_UNUSED void printMatrix(const char* name, const float* a, const size_t M, const size_t N) {
-    std::cout << "Matrix START:" << name << "...\n";
-    for (uint32_t m = 0; m < M ; ++m) {
-      for (uint32_t n = 0; n < N; n++) {
-        std::cout << (*(a + m * N + n)) << ", ";
-      }
-      std::cout << std::endl;
-    }
-    std::cout << "Matrix END...\n\n";
-  }
-
 }
+
+// Temp Debug utils that will be removed later
+MAYBE_UNUSED void printMatrix(
+    const char* name,
+    const uint8_t* a,
+    const size_t M,
+    const size_t N) {
+  std::cout << "Matrix START:" << name << "...\n";
+  for (uint32_t m = 0; m < M; ++m) {
+    for (uint32_t n = 0; n < N; n++) {
+      std::cout << (const uint32_t)(*(a + m * N + n)) << ", ";
+    }
+    std::cout << std::endl;
+  }
+  std::cout << "Matrix END...\n\n";
+}
+
+MAYBE_UNUSED void printMatrix(
+    const char* name,
+    const float* a,
+    const size_t M,
+    const size_t N) {
+  std::cout << "Matrix START:" << name << "...\n";
+  for (uint32_t m = 0; m < M; ++m) {
+    for (uint32_t n = 0; n < N; n++) {
+      std::cout << (*(a + m * N + n)) << ", ";
+    }
+    std::cout << std::endl;
+  }
+  std::cout << "Matrix END...\n\n";
+}
+
+} // namespace
 
 class FullyConnectedSparseOperatorTester {
  public:
-  inline FullyConnectedSparseOperatorTester& inputChannels(size_t inputChannels) {
+  inline FullyConnectedSparseOperatorTester& inputChannels(
+      size_t inputChannels) {
     assert(inputChannels >= 1);
     this->inputChannels_ = inputChannels;
     return *this;
@@ -86,7 +95,8 @@ class FullyConnectedSparseOperatorTester {
     return this->inputChannels_;
   }
 
-  inline FullyConnectedSparseOperatorTester& outputChannels(size_t outputChannels) {
+  inline FullyConnectedSparseOperatorTester& outputChannels(
+      size_t outputChannels) {
     assert(outputChannels >= 1);
     this->outputChannels_ = outputChannels;
     return *this;
@@ -200,8 +210,7 @@ class FullyConnectedSparseOperatorTester {
     auto s32rng =
         std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
-    auto f32rng =
-        std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+    auto f32rng = std::bind(std::uniform_real_distribution<float>(1, 5), rng);
 
     std::vector<uint8_t> input(
         (batchSize() - 1) * inputStride() + inputChannels() + 8);
@@ -223,7 +232,8 @@ class FullyConnectedSparseOperatorTester {
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
-      std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      std::generate(
+          kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
 
       uint8_t max_elem, min_elem;
       do {
@@ -241,13 +251,13 @@ class FullyConnectedSparseOperatorTester {
       } while (max_elem == min_elem);
 
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
-        qnnpack::generateBlockCSRMatrix(
-            kernel.data(),
-            outputChannels(),
-            inputChannels(),
-            rowBlockSize(),
-            colBlockSize(),
-            kernelZeroPoints.data());
+          qnnpack::generateBlockCSRMatrix(
+              kernel.data(),
+              outputChannels(),
+              inputChannels(),
+              rowBlockSize(),
+              colBlockSize(),
+              kernelZeroPoints.data());
 
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(output_dynamic.begin(), output_dynamic.end(), 0.0f);
@@ -293,68 +303,71 @@ class FullyConnectedSparseOperatorTester {
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
       // 1 bcz input_scale and kernel_scale are both 1.
-      std::vector<float>
-        requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
-      auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+      std::vector<float> requantization_scales(
+          num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      auto scale_generator = [&]() -> float {
+        return (f32rng() / outputScale);
+      };
       std::generate(
           requantization_scales.begin(),
           requantization_scales.end(),
           std::ref(scale_generator));
 
-      switch(mode) {
+      switch (mode) {
         case Mode::Runtime:
           break;
         case Mode::Dynamic: {
-            // Attention! Bias size must be a multiple of 8.
-            constexpr size_t kBiasSizeMultiple = 8u;
-            std::vector<float, AlignedAllocator<float, 32>> bias_float(
+          // Attention! Bias size must be a multiple of 8.
+          constexpr size_t kBiasSizeMultiple = 8u;
+          std::vector<float, AlignedAllocator<float, 32>> bias_float(
               (bias.size() + (kBiasSizeMultiple - 1)) & -kBiasSizeMultiple);
-            std::copy(bias.cbegin(), bias.cend(), bias_float.begin());
+          std::copy(bias.cbegin(), bias.cend(), bias_float.begin());
 
-            pytorch_qnnp_operator_t sparse_gemm = nullptr;
+          pytorch_qnnp_operator_t sparse_gemm = nullptr;
 
-            ASSERT_EQ(
-                pytorch_qnnp_status_success,
-                pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
-                    inputChannels(),
-                    outputChannels(),
-                    inputZeroPoint,
-                    kernelZeroPoints.data(),
-                    bcsr_matrix->col_indices.data(),
-                    bcsr_matrix->row_values.data(),
-                    bcsr_matrix->values.data(),
-                    bcsr_matrix->row_block_size,
-                    bcsr_matrix->col_block_size,
-                    outputZeroPoint,
-                    qmin(),
-                    qmax(),
-                    0,
-                    requantization_scales.data(),
-                    false,
-                    &sparse_gemm));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
+                  inputChannels(),
+                  outputChannels(),
+                  inputZeroPoint,
+                  kernelZeroPoints.data(),
+                  bcsr_matrix->col_indices.data(),
+                  bcsr_matrix->row_values.data(),
+                  bcsr_matrix->values.data(),
+                  bcsr_matrix->row_block_size,
+                  bcsr_matrix->col_block_size,
+                  outputZeroPoint,
+                  qmin(),
+                  qmax(),
+                  0,
+                  requantization_scales.data(),
+                  false,
+                  &sparse_gemm));
 
-            ASSERT_EQ(
-                pytorch_qnnp_status_success,
-                pytorch_qnnp_setup_fully_connected_sparse_dq_nc_q8(
-                    sparse_gemm,
-                    batchSize(),
-                    inputPtr,
-                    inputStride(),
-                    bias_float.data(),
-                    output_dynamic.data(),
-                    outputStride()));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_setup_fully_connected_sparse_dq_nc_q8(
+                  sparse_gemm,
+                  batchSize(),
+                  inputPtr,
+                  inputStride(),
+                  bias_float.data(),
+                  output_dynamic.data(),
+                  outputStride()));
 
-            ASSERT_EQ(
-                pytorch_qnnp_status_success,
-                pytorch_qnnp_run_operator(sparse_gemm, nullptr /* thread pool */));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_run_operator(
+                  sparse_gemm, nullptr /* thread pool */));
 
-            ASSERT_EQ(
-                pytorch_qnnp_status_success,
-                pytorch_qnnp_delete_operator(sparse_gemm));
-            sparse_gemm = nullptr;
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_delete_operator(sparse_gemm));
+          sparse_gemm = nullptr;
 
-            break;
-          }
+          break;
+        }
         default:
           // Undefined!
           ASSERT_TRUE(false);
@@ -363,15 +376,15 @@ class FullyConnectedSparseOperatorTester {
       switch (mode) {
         case Mode::Runtime:
           break;
-        case Mode::Dynamic:
-        {
+        case Mode::Dynamic: {
           // Bias is added post scaling, as float.
           for (size_t i = 0; i < batchSize(); i++) {
             for (size_t oc = 0; oc < outputChannels(); oc++) {
               accumulators[i * outputChannels() + oc] -= bias[oc];
               accumulators_float[i * outputChannels() + oc] =
-                (float)accumulators[i * outputChannels() + oc] *
-                  requantization_scales[oc] + float(bias[oc]);
+                  (float)accumulators[i * outputChannels() + oc] *
+                      requantization_scales[oc] +
+                  float(bias[oc]);
             }
           }
           for (size_t i = 0; i < batchSize(); i++) {
@@ -379,14 +392,13 @@ class FullyConnectedSparseOperatorTester {
               ASSERT_EQ(
                   output_dynamic[i * outputChannels() + c],
                   accumulators_float[i * outputChannels() + c])
-                  << "at " << i << ", " << c
-                  << ": reference = " <<
-                  accumulators_float[i * outputChannels() + c]
-                  << ", optimized = " << output_dynamic[i * outputChannels() + c];
+                  << "at " << i << ", " << c << ": reference = "
+                  << accumulators_float[i * outputChannels() + c]
+                  << ", optimized = "
+                  << output_dynamic[i * outputChannels() + c];
             }
           }
-        }
-        break;
+        } break;
 
         default:
           // Undefined!
@@ -401,8 +413,7 @@ class FullyConnectedSparseOperatorTester {
     auto s32rng =
         std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
-    auto f32rng =
-        std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+    auto f32rng = std::bind(std::uniform_real_distribution<float>(1, 5), rng);
 
     std::vector<uint8_t> input(
         (batchSize() - 1) * inputStride() + inputChannels() + 8);
@@ -424,7 +435,8 @@ class FullyConnectedSparseOperatorTester {
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
       std::generate(input.begin(), input.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
-      std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+      std::generate(
+          kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
 
       uint8_t max_elem, min_elem;
       do {
@@ -441,13 +453,13 @@ class FullyConnectedSparseOperatorTester {
         min_elem = *std::min_element(kernel.cbegin(), kernel.cend());
       } while (max_elem == min_elem);
       std::unique_ptr<qnnpack::BCSRMatrix> bcsr_matrix =
-        qnnpack::generateBlockCSRMatrix(
-            kernel.data(),
-            outputChannels(),
-            inputChannels(),
-            rowBlockSize(),
-            colBlockSize(),
-            kernelZeroPoints.data());
+          qnnpack::generateBlockCSRMatrix(
+              kernel.data(),
+              outputChannels(),
+              inputChannels(),
+              rowBlockSize(),
+              colBlockSize(),
+              kernelZeroPoints.data());
 
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(output_dynamic.begin(), output_dynamic.end(), 0.0f);
@@ -493,68 +505,71 @@ class FullyConnectedSparseOperatorTester {
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
       // 1 bcz input_scale and kernel_scale are both 1.
-      std::vector<float>
-        requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
-      auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+      std::vector<float> requantization_scales(
+          num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      auto scale_generator = [&]() -> float {
+        return (f32rng() / outputScale);
+      };
       std::generate(
           requantization_scales.begin(),
           requantization_scales.end(),
           std::ref(scale_generator));
 
-      switch(mode) {
+      switch (mode) {
         case Mode::Runtime:
           break;
         case Mode::Dynamic: {
-            // Attention! Bias size must be a multiple of 8.
-            constexpr size_t kBiasSizeMultiple = 8u;
-            std::vector<float, AlignedAllocator<float, 32>> bias_float(
+          // Attention! Bias size must be a multiple of 8.
+          constexpr size_t kBiasSizeMultiple = 8u;
+          std::vector<float, AlignedAllocator<float, 32>> bias_float(
               (bias.size() + (kBiasSizeMultiple - 1)) & -kBiasSizeMultiple);
-            std::copy(bias.cbegin(), bias.cend(), bias_float.begin());
+          std::copy(bias.cbegin(), bias.cend(), bias_float.begin());
 
-            pytorch_qnnp_operator_t sparse_gemm = nullptr;
+          pytorch_qnnp_operator_t sparse_gemm = nullptr;
 
-            ASSERT_EQ(
-                pytorch_qnnp_status_success,
-                pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
-                    inputChannels(),
-                    outputChannels(),
-                    inputZeroPoint,
-                    kernelZeroPoints.data(),
-                    bcsr_matrix->col_indices.data(),
-                    bcsr_matrix->row_values.data(),
-                    bcsr_matrix->values.data(),
-                    bcsr_matrix->row_block_size,
-                    bcsr_matrix->col_block_size,
-                    outputZeroPoint,
-                    qmin(),
-                    qmax(),
-                    0,
-                    requantization_scales.data(),
-                    true,
-                    &sparse_gemm));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_create_fully_connected_sparse_dq_nc_q8(
+                  inputChannels(),
+                  outputChannels(),
+                  inputZeroPoint,
+                  kernelZeroPoints.data(),
+                  bcsr_matrix->col_indices.data(),
+                  bcsr_matrix->row_values.data(),
+                  bcsr_matrix->values.data(),
+                  bcsr_matrix->row_block_size,
+                  bcsr_matrix->col_block_size,
+                  outputZeroPoint,
+                  qmin(),
+                  qmax(),
+                  0,
+                  requantization_scales.data(),
+                  true,
+                  &sparse_gemm));
 
-            ASSERT_EQ(
-                pytorch_qnnp_status_success,
-                pytorch_qnnp_setup_fully_connected_sparse_dq_nc_q8(
-                    sparse_gemm,
-                    batchSize(),
-                    inputPtr,
-                    inputStride(),
-                    bias_float.data(),
-                    output_dynamic.data(),
-                    outputStride()));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_setup_fully_connected_sparse_dq_nc_q8(
+                  sparse_gemm,
+                  batchSize(),
+                  inputPtr,
+                  inputStride(),
+                  bias_float.data(),
+                  output_dynamic.data(),
+                  outputStride()));
 
-            ASSERT_EQ(
-                pytorch_qnnp_status_success,
-                pytorch_qnnp_run_operator(sparse_gemm, nullptr /* thread pool */));
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_run_operator(
+                  sparse_gemm, nullptr /* thread pool */));
 
-            ASSERT_EQ(
-                pytorch_qnnp_status_success,
-                pytorch_qnnp_delete_operator(sparse_gemm));
-            sparse_gemm = nullptr;
+          ASSERT_EQ(
+              pytorch_qnnp_status_success,
+              pytorch_qnnp_delete_operator(sparse_gemm));
+          sparse_gemm = nullptr;
 
-            break;
-          }
+          break;
+        }
         default:
           // Undefined!
           ASSERT_TRUE(false);
@@ -563,15 +578,15 @@ class FullyConnectedSparseOperatorTester {
       switch (mode) {
         case Mode::Runtime:
           break;
-        case Mode::Dynamic:
-        {
+        case Mode::Dynamic: {
           // Bias is added post scaling, as float.
           for (size_t i = 0; i < batchSize(); i++) {
             for (size_t oc = 0; oc < outputChannels(); oc++) {
               accumulators[i * outputChannels() + oc] -= bias[oc];
               accumulators_float[i * outputChannels() + oc] =
-                (float)accumulators[i * outputChannels() + oc] *
-                  requantization_scales[oc] + float(bias[oc]);
+                  (float)accumulators[i * outputChannels() + oc] *
+                      requantization_scales[oc] +
+                  float(bias[oc]);
             }
           }
 
@@ -580,14 +595,13 @@ class FullyConnectedSparseOperatorTester {
               ASSERT_EQ(
                   output_dynamic[i * outputChannels() + c],
                   accumulators_float[i * outputChannels() + c])
-                  << "at " << i << ", " << c
-                  << ": reference = " <<
-                  accumulators_float[i * outputChannels() + c]
-                  << ", optimized = " << output_dynamic[i * outputChannels() + c];
+                  << "at " << i << ", " << c << ": reference = "
+                  << accumulators_float[i * outputChannels() + c]
+                  << ", optimized = "
+                  << output_dynamic[i * outputChannels() + c];
             }
           }
-        }
-        break;
+        } break;
 
         default:
           // Undefined!

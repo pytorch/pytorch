@@ -30,7 +30,7 @@ struct TORCH_CUDA_CPP_API MPSGeneratorImpl : public c10::GeneratorImpl {
   c10::intrusive_ptr<c10::TensorImpl> get_state() const override;
   static DeviceType device_type();
 
-private:
+ private:
   MPSGeneratorImpl* clone_impl() const override;
   uint64_t seed_ = default_rng_seed_val;
 };
@@ -47,11 +47,16 @@ MPSDataType getMPSDataType(ScalarType scalar_type);
 MPSDataType getMPSScalarType(ScalarType scalar_type);
 std::string getMPSTypeString(ScalarType scalar_type);
 std::string getMPSShapeString(MPSShape* shape);
-std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value = true);
+std::string getTensorsStringKey(
+    const TensorList& tensors,
+    bool use_scalar_value = true);
 double getMPSScalarValue(const Tensor& t);
 std::string getArrayRefString(const IntArrayRef s);
-std::string getStridedKey(const Tensor& self, const IntArrayRef sz,
-                          const IntArrayRef strides, int64_t offset);
+std::string getStridedKey(
+    const Tensor& self,
+    const IntArrayRef sz,
+    const IntArrayRef strides,
+    int64_t offset);
 id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> s);
 
 MPSShape* getMPSShape(const Tensor& t);
@@ -61,8 +66,12 @@ MPSShape* getMPSShape(c10::MaybeOwned<Tensor> t);
 class Placeholder {
  public:
   Placeholder() : _placeholder(nullptr), _value(nullptr) {}
-  Placeholder(MPSGraphTensor* mpsGraphTensor) : _placeholder(mpsGraphTensor), _value(nullptr) {}
-  Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& self, MPSShape *mpsShape = nullptr);
+  Placeholder(MPSGraphTensor* mpsGraphTensor)
+      : _placeholder(mpsGraphTensor), _value(nullptr) {}
+  Placeholder(
+      MPSGraphTensor* mpsGraphTensor,
+      const Tensor& self,
+      MPSShape* mpsShape = nullptr);
   MPSGraphTensor* getMPSGraphTensor() {
     return _placeholder;
   }
@@ -73,16 +82,15 @@ class Placeholder {
     return _value == nullptr;
   }
 
-  void allocateViewTensor(const at::Tensor& src)
-  {
-    assert (!_viewOutput.numel());
+  void allocateViewTensor(const at::Tensor& src) {
+    assert(!_viewOutput.numel());
     _viewOutput = at::native::empty_mps(
-                  src.sizes(),
-                  src.scalar_type(),
-                  c10::nullopt,
-                  kMPS,
-                  c10::nullopt,
-                  c10::nullopt);
+        src.sizes(),
+        src.scalar_type(),
+        c10::nullopt,
+        kMPS,
+        c10::nullopt,
+        c10::nullopt);
   }
 
  private:
@@ -93,16 +101,32 @@ class Placeholder {
 
 void resize_tensor(Tensor* output);
 MPSGraphTensor* trunc_tensor(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor);
-MPSGraphTensor* castMPSTensor(MPSGraph *mpsGraph, MPSGraphTensor* tensor, ScalarType toType);
-MPSGraphTensorData *getMPSGraphTensorData(MPSGraph* mpsGraph, MPSStream* mpsStream, const Tensor& tensor);
-MPSGraphTensorData* getMPSGraphTensorFromScalar(MPSStream* mpsStream, const Scalar& scalar, MPSDataType dataType);
+MPSGraphTensor* castMPSTensor(
+    MPSGraph* mpsGraph,
+    MPSGraphTensor* tensor,
+    ScalarType toType);
+MPSGraphTensorData* getMPSGraphTensorData(
+    MPSGraph* mpsGraph,
+    MPSStream* mpsStream,
+    const Tensor& tensor);
+MPSGraphTensorData* getMPSGraphTensorFromScalar(
+    MPSStream* mpsStream,
+    const Scalar& scalar,
+    MPSDataType dataType);
 
 MPSGraph* make_mps_graph();
 void printTensorNDArray(const Tensor& t);
 
-MPSGraphTensor* mpsGraphUnrankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType);
-MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, MPSDataType dataType, MPSShape* mpsShape);
-MPSGraphTensor* mpsGraphRankedPlaceHolder(MPSGraph *mpsGraph, const Tensor& tensor);
+MPSGraphTensor* mpsGraphUnrankedPlaceHolder(
+    MPSGraph* mpsGraph,
+    MPSDataType dataType);
+MPSGraphTensor* mpsGraphRankedPlaceHolder(
+    MPSGraph* mpsGraph,
+    MPSDataType dataType,
+    MPSShape* mpsShape);
+MPSGraphTensor* mpsGraphRankedPlaceHolder(
+    MPSGraph* mpsGraph,
+    const Tensor& tensor);
 
 string get_mem_format_string(c10::MemoryFormat memory_format);
 
@@ -110,36 +134,39 @@ using MPSCacheKey = uint64_t;
 
 // derive this class to cache a graph and its inputs/ouputs
 // can be used to store any NSObject
-struct MPSCachedGraph
-{
-  MPSCachedGraph(NSObject *object) : _object([object retain]) {}
+struct MPSCachedGraph {
+  MPSCachedGraph(NSObject* object) : _object([object retain]) {}
   virtual ~MPSCachedGraph() {
-   [_object release];
-   _object = nullptr;
+    [_object release];
+    _object = nullptr;
   }
-  MPSGraph *graph() const { return (MPSGraph *)_object; }
-  NSObject *object() const { return _object; }
-private:
-  NSObject *_object = nullptr;
+  MPSGraph* graph() const {
+    return (MPSGraph*)_object;
+  }
+  NSObject* object() const {
+    return _object;
+  }
+
+ private:
+  NSObject* _object = nullptr;
 };
 
 // TODO: Improve the overall design of MPSGraphCache.
 // https://github.com/pytorch/pytorch/issues/77176
 // Cache holding various keys mapped to graphs
-struct MPSGraphCache
-{
-  typedef MPSCachedGraph * (^CreateCachedGraphBlock)();
+struct MPSGraphCache {
+  typedef MPSCachedGraph* (^CreateCachedGraphBlock)();
 
   struct CacheEntry {
-    CacheEntry(std::string key, MPSCachedGraph *cachedGraph) : cachedGraph_(cachedGraph), key_(key) {}
+    CacheEntry(std::string key, MPSCachedGraph* cachedGraph)
+        : cachedGraph_(cachedGraph), key_(key) {}
     MPSCachedGraph* cachedGraph_ = nullptr;
     std::string key_ = nullptr;
   };
 
  public:
-
   static MPSGraphCache* getInstance() {
-    if(_instance_cache == nullptr) {
+    if (_instance_cache == nullptr) {
       _instance_cache = new MPSGraphCache();
     }
     return _instance_cache;
@@ -157,21 +184,22 @@ struct MPSGraphCache
   MPSGraphCache(const MPSGraphCache&) = delete;
   void operator=(const MPSGraphCache&) = delete;
 
-  MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock, void* view_ptr = nullptr) {
-
-    __block MPSCachedGraph * result = nil;
+  MPSCachedGraph* CreateCachedGraph(
+      const std::string& key,
+      CreateCachedGraphBlock createCacheBlock,
+      void* view_ptr = nullptr) {
+    __block MPSCachedGraph* result = nil;
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
     dispatch_sync(serialQueue_, ^() {
-
       // verify the cached entry doesn't already exist
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            key == entry.key_, "Key collision in the MPS cached graph!\n");
         result = entry.cachedGraph_;
-      }
-      else {
+      } else {
         result = createCacheBlock();
         CacheEntry entry(key, result);
         cache_.emplace(hash, entry);
@@ -184,16 +212,15 @@ struct MPSGraphCache
   }
 
   MPSCachedGraph* LookUp(const std::string& key) const {
-
     __block MPSCachedGraph* result = nullptr;
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
     dispatch_sync(serialQueue_, ^() {
-
       if (cache_.count(hash) != 0) {
         auto& entry = cache_.at(hash);
-        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+            key == entry.key_, "Key collision in the MPS cached graph!\n");
         result = entry.cachedGraph_;
       }
     });
@@ -205,7 +232,8 @@ struct MPSGraphCache
     auto views_range = views_list.equal_range(ptr);
     if (views_range.first == views_range.second)
       return;
-    for (auto view_it = views_range.first; view_it != views_range.second; ++view_it) {
+    for (auto view_it = views_range.first; view_it != views_range.second;
+         ++view_it) {
       MPSCacheKey hash = view_it->second;
       // find the cache entry associated with the hash
       auto cache_it = cache_.find(hash);
@@ -229,7 +257,6 @@ struct MPSGraphCache
   // note that multiple view cache entries could use the same buffer pointer
   std::unordered_multimap<void*, MPSCacheKey> views_list;
   dispatch_queue_t serialQueue_ = nullptr;
-
 };
 
 } // namespace mps

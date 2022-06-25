@@ -12,4 +12,5 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
     IntArrayRef padding,
     std::array<bool, 3> output_mask);
 
-}} // namespace at::native
+}
+} // namespace at

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <c10/core/Allocator.h>
 #include <ATen/core/Generator.h>
+#include <c10/core/Allocator.h>
 #include <c10/util/Exception.h>
 
 #include <c10/util/Registry.h>

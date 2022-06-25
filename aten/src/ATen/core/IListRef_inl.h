@@ -6,7 +6,7 @@
 namespace at {
 class Tensor;
 class OptionalTensorRef;
-}
+} // namespace at
 
 namespace c10 {
 namespace detail {
@@ -41,8 +41,9 @@ class IListRefTagImplBase<IListRefTag::Unboxed, T, ListElemT> {
 
   /*
    * We have these function (besides the `unwrap`s above) because the
-   * implementation for both `IListRef::operator[]` and `IListRefIterator::operator*`
-   * weren't syntatically equal for the existing tags at the time
+   * implementation for both `IListRef::operator[]` and
+   * `IListRefIterator::operator*` weren't syntatically equal for the existing
+   * tags at the time
    * (`Unboxed` and `Boxed`).
    */
   static IListRefConstRef<T> front(const list_type& lst) {
@@ -93,7 +94,10 @@ class IListRefTagImplBase<IListRefTag::Boxed, T, ListElemT> {
  * implementation for `IListRefTag::Materialized`.
  */
 template <typename T>
-class IListRefTagImplBase<IListRefTag::Materialized, T, _MaterializedIListRefElem<T>> {
+class IListRefTagImplBase<
+    IListRefTag::Materialized,
+    T,
+    _MaterializedIListRefElem<T>> {
  public:
   using elem_type = _MaterializedIListRefElem<T>;
   using list_type = MaterializedIListRef<T>;
@@ -155,23 +159,27 @@ class IListRefTagImpl<IListRefTag::Materialized, at::Tensor>
  */
 template <>
 class IListRefTagImpl<IListRefTag::Unboxed, at::OptionalTensorRef>
-    : public IListRefTagImplBase<IListRefTag::Unboxed, at::OptionalTensorRef> {};
+    : public IListRefTagImplBase<IListRefTag::Unboxed, at::OptionalTensorRef> {
+};
 
 template <>
 class IListRefTagImpl<IListRefTag::Boxed, at::OptionalTensorRef>
-    : public IListRefTagImplBase<IListRefTag::Boxed, at::OptionalTensorRef, optional<at::Tensor>> {
-
+    : public IListRefTagImplBase<
+          IListRefTag::Boxed,
+          at::OptionalTensorRef,
+          optional<at::Tensor>> {
  public:
   /*
-   * Given an instance of the types corresponding to the `Boxed` tag, we override
-   * the default implementation, so that we can return a `at::OptionalTensorRef`.
+   * Given an instance of the types corresponding to the `Boxed` tag, we
+   * override the default implementation, so that we can return a
+   * `at::OptionalTensorRef`.
    */
   static IListRefConstRef<at::OptionalTensorRef> iterator_get(
       const typename list_type::const_iterator& it) {
     const auto& ivalue = (*it).get();
     if (!ivalue.isNone()) {
-        const auto& tensor = ivalue.toTensor();
-        return (tensor.defined()) ? tensor : at::OptionalTensorRef{};
+      const auto& tensor = ivalue.toTensor();
+      return (tensor.defined()) ? tensor : at::OptionalTensorRef{};
     }
     return {};
   }
@@ -192,10 +200,12 @@ namespace at {
 // [Note: ITensorListRef]
 using ITensorListRef = c10::IListRef<at::Tensor>;
 using ITensorListRefIterator = c10::IListRefIterator<at::Tensor>;
-using MaterializedITensorListRef = c10::detail::MaterializedIListRef<at::Tensor>;
+using MaterializedITensorListRef =
+    c10::detail::MaterializedIListRef<at::Tensor>;
 // [Note: IOptTensorListRef]
 using IOptTensorListRef = c10::IListRef<at::OptionalTensorRef>;
 using IOptTensorListRefIterator = c10::IListRefIterator<at::OptionalTensorRef>;
-using MaterializedIOptTensorListRef = c10::detail::MaterializedIListRef<at::OptionalTensorRef>;
+using MaterializedIOptTensorListRef =
+    c10::detail::MaterializedIListRef<at::OptionalTensorRef>;
 
 } // namespace at

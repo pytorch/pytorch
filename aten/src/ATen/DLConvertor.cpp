@@ -196,8 +196,7 @@ ScalarType toScalarType(const DLDataType& dtype) {
       }
       break;
     default:
-      TORCH_CHECK(
-          false, "Unsupported code " + c10::to_string(dtype.code));
+      TORCH_CHECK(false, "Unsupported code " + c10::to_string(dtype.code));
   }
   return stype;
 }
@@ -245,7 +244,8 @@ Tensor fromDLPack(const DLManagedTensor* src) {
     src->deleter(const_cast<DLManagedTensor*>(src));
   };
   if (!src->dl_tensor.strides) {
-    return at::from_blob(src->dl_tensor.data,
+    return at::from_blob(
+        src->dl_tensor.data,
         IntArrayRef(src->dl_tensor.shape, src->dl_tensor.ndim),
         deleter,
         at::device(device).dtype(stype));
@@ -256,6 +256,6 @@ Tensor fromDLPack(const DLManagedTensor* src) {
       IntArrayRef(src->dl_tensor.strides, src->dl_tensor.ndim),
       deleter,
       at::device(device).dtype(stype),
-      { device });
+      {device});
 }
 } // namespace at

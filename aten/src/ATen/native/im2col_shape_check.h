@@ -1,6 +1,6 @@
 #pragma once
-#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
 
 namespace at {
 namespace native {
@@ -41,7 +41,7 @@ static inline void col2im_shape_check(
   // allow dim=0 only the batch dimension.
   TORCH_CHECK(
       (ndim == 2 && input.size(0) != 0 && input.size(1) != 0) ||
-      (ndim == 3 && input.size(1) != 0 && input.size(2) != 0),
+          (ndim == 3 && input.size(1) != 0 && input.size(2) != 0),
       "Expected 2D or 3D (batch mode) tensor for input with possibly 0 batch size and non-zero dimensions for input, but got: ",
       input.sizes());
 
@@ -61,16 +61,15 @@ static inline void col2im_shape_check(
   }
 
   int64_t input_length = input.size(batch_dim + 2);
-  int64_t n_blocks_height =
-      div_rtn<int64_t>(
-          output_height + 2 * pad_height -
-              dilation_height * (kernel_height - 1) - 1,
-          stride_height) +
+  int64_t n_blocks_height = div_rtn<int64_t>(
+                                output_height + 2 * pad_height -
+                                    dilation_height * (kernel_height - 1) - 1,
+                                stride_height) +
       1;
   int64_t n_blocks_width = div_rtn<int64_t>(
-                                   output_width + 2 * pad_width -
-                                       dilation_width * (kernel_width - 1) - 1,
-                                   stride_width) +
+                               output_width + 2 * pad_width -
+                                   dilation_width * (kernel_width - 1) - 1,
+                               stride_width) +
       1;
 
   if (input_length != (n_blocks_height * n_blocks_width)) {
@@ -108,15 +107,39 @@ static inline void col2im_shape_check(
   }
 
   TORCH_CHECK(
-    n_blocks_height >= 1 && n_blocks_width >= 1,
-    "Given output_size=(", output_height, ", ", output_width, "), ",
-    "kernel_size=(", kernel_height, ", ", kernel_width, "), ",
-    "dilation=(", dilation_height, ", ", dilation_width, "), ",
-    "padding=(", pad_height, ", ", pad_width, "), ",
-    "stride=(", stride_height, ", ", stride_width, "), ",
-    "calculated shape of the array of sliding blocks as ",
-    "(", n_blocks_height, ", ", n_blocks_width, "), ",
-    "which is too small (non-positive)");
+      n_blocks_height >= 1 && n_blocks_width >= 1,
+      "Given output_size=(",
+      output_height,
+      ", ",
+      output_width,
+      "), ",
+      "kernel_size=(",
+      kernel_height,
+      ", ",
+      kernel_width,
+      "), ",
+      "dilation=(",
+      dilation_height,
+      ", ",
+      dilation_width,
+      "), ",
+      "padding=(",
+      pad_height,
+      ", ",
+      pad_width,
+      "), ",
+      "stride=(",
+      stride_height,
+      ", ",
+      stride_width,
+      "), ",
+      "calculated shape of the array of sliding blocks as ",
+      "(",
+      n_blocks_height,
+      ", ",
+      n_blocks_width,
+      "), ",
+      "which is too small (non-positive)");
 
   if (output_width < 1 || output_height < 1) {
     AT_ERROR(
@@ -173,7 +196,7 @@ static inline void im2col_shape_check(
   bool valid_dims = input.size(1) != 0 && input.size(2) != 0;
   TORCH_CHECK(
       (ndim == 3 && input.size(0) && valid_dims) ||
-      (ndim == 4 && valid_dims && input.size(3) != 0),
+          (ndim == 4 && valid_dims && input.size(3) != 0),
       "Expected 3D or 4D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
       input.sizes());
 

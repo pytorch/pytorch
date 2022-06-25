@@ -4,7 +4,6 @@
 #include <test/cpp/tensorexpr/test_base.h>
 #include <thread>
 
-
 // This checks whether threads can see the global
 // numbers of threads set and also whether the scheduler
 // will throw an exception when multiple threads call
@@ -25,16 +24,16 @@ int main() {
 
   at::set_num_threads(4);
   test(4);
-  std::thread t1([](){
+  std::thread t1([]() {
     at::init_num_threads();
     test(4);
   });
   t1.join();
 
-  #if !AT_PARALLEL_NATIVE
+#if !AT_PARALLEL_NATIVE
   at::set_num_threads(5);
   ASSERT_TRUE(at::get_num_threads() == 5);
-  #endif
+#endif
 
   // test inter-op settings
   at::set_num_interop_threads(5);

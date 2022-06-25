@@ -94,7 +94,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   }
 
   void set_conv2dOpPtr(void* ptr) {
-      conv2dOp_ = ptr;
+    conv2dOp_ = ptr;
   }
 
   void* get_conv2dOpPtr() const {
@@ -106,20 +106,20 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   }
 
   std::function<void(void*)>& get_releaseCallback() {
-     return releaseCallback_;
+    return releaseCallback_;
   }
 
-  private:
-    Tensor weight_;
-    c10::optional<Tensor> bias_;
-    std::vector<int64_t> stride_;
-    std::vector<int64_t> padding_;
-    std::vector<int64_t> dilation_;
-    int64_t groups_;
-    c10::optional<Scalar> output_min_;
-    c10::optional<Scalar> output_max_;
-    std::function<void(void*)> releaseCallback_ = nullptr;
-    void* conv2dOp_ = nullptr; // reserved to hold MPSCNNConv2dOp objects
+ private:
+  Tensor weight_;
+  c10::optional<Tensor> bias_;
+  std::vector<int64_t> stride_;
+  std::vector<int64_t> padding_;
+  std::vector<int64_t> dilation_;
+  int64_t groups_;
+  c10::optional<Scalar> output_min_;
+  c10::optional<Scalar> output_max_;
+  std::function<void(void*)> releaseCallback_ = nullptr;
+  void* conv2dOp_ = nullptr; // reserved to hold MPSCNNConv2dOp objects
 };
 
 using SerializationTypeLinearPrePack = std::tuple<

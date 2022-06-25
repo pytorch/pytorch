@@ -91,7 +91,9 @@ at::Tensor PackedEmbeddingBagWeight::unpack() {
 namespace at {
 namespace native {
 
-Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weight) {
+Tensor& qembeddingbag_byte_unpack_out(
+    Tensor& output,
+    const Tensor& packed_weight) {
   // The "last" dimension of an N-Dimensioned batch of embedding bags is
   // quantization channel. E.g. for a 2D embedding bag, this has
   // [ row, col ] dimensions, for batched of embedding bags, dimensions might be
@@ -104,7 +106,8 @@ Tensor& qembeddingbag_byte_unpack_out(Tensor& output, const Tensor& packed_weigh
   // # NOTE: 8 bytes (columns) are added due to fp32 zero_point and scales
   // packed_weights = torch.ops.quantized.embedding_bag_byte_prepack(weights)
   // assert(packed_weights.size() == torch.Size([2, 10, 11]))
-  // unpacked_weights = torch.ops.quantized.embedding_bag_byte_unpack(packed_weights)
+  // unpacked_weights =
+  // torch.ops.quantized.embedding_bag_byte_unpack(packed_weights)
   // assert(unpacked_weights.size() == torch.Size([2, 10, 3]))
   const auto packed_weight_sizes = packed_weight.sizes();
   const auto col_dim = packed_weight_sizes.size() - 1;

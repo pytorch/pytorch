@@ -1,6 +1,7 @@
 #include <ATen/FuncTorchTLS.h>
 
-namespace at { namespace functorch {
+namespace at {
+namespace functorch {
 
 namespace {
 
@@ -27,5 +28,5 @@ std::unique_ptr<FuncTorchTLSBase>& functorchTLSAccessor() {
   return kFuncTorchTLS;
 }
 
-
-}}
+} // namespace functorch
+} // namespace at

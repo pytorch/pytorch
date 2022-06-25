@@ -323,12 +323,20 @@ Tensor add_scalar(
     const Scalar& other,
     const Scalar& alpha) {
   return arithmetic_scalar(
-      self_arg, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar), "aten::add.Scalar");
+      self_arg,
+      other,
+      c10::optional<Scalar>(alpha),
+      VK_KERNEL(add_scalar),
+      "aten::add.Scalar");
 }
 
 Tensor& add_scalar_(Tensor& self, const Scalar& other, const Scalar& alpha) {
   return arithmetic_scalar_(
-      self, other, c10::optional<Scalar>(alpha), VK_KERNEL(add_scalar_), "aten::add_.Scalar");
+      self,
+      other,
+      c10::optional<Scalar>(alpha),
+      VK_KERNEL(add_scalar_),
+      "aten::add_.Scalar");
 }
 
 Tensor add_tensor(
@@ -344,12 +352,23 @@ Tensor add_tensor(
         "aten::add.Tensor");
   }
   return arithmetic_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add), "aten::add.Tensor");
+      self_arg,
+      other_arg,
+      c10::optional<Scalar>(alpha),
+      VK_KERNEL(add),
+      "aten::add.Tensor");
 }
 
-Tensor& add_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
+Tensor& add_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar& alpha) {
   return arithmetic_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(add_), "aten::add_.Tensor");
+      self,
+      other_arg,
+      c10::optional<Scalar>(alpha),
+      VK_KERNEL(add_),
+      "aten::add_.Tensor");
 }
 
 Tensor sub_scalar(
@@ -386,22 +405,41 @@ Tensor sub_tensor(
         "aten::sub.Tensor");
   }
   return arithmetic_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub), "aten::sub.Tensor");
+      self_arg,
+      other_arg,
+      c10::optional<Scalar>(alpha),
+      VK_KERNEL(sub),
+      "aten::sub.Tensor");
 }
 
-Tensor& sub_tensor_(Tensor& self, const Tensor& other_arg, const Scalar& alpha) {
+Tensor& sub_tensor_(
+    Tensor& self,
+    const Tensor& other_arg,
+    const Scalar& alpha) {
   return arithmetic_tensor_(
-      self, other_arg, c10::optional<Scalar>(alpha), VK_KERNEL(sub_), "aten::sub_.Tensor");
+      self,
+      other_arg,
+      c10::optional<Scalar>(alpha),
+      VK_KERNEL(sub_),
+      "aten::sub_.Tensor");
 }
 
 Tensor mul_scalar(const Tensor& self_arg, const Scalar& other) {
   return arithmetic_scalar(
-      self_arg, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar), "aten::mul.Scalar");
+      self_arg,
+      other,
+      c10::optional<Scalar>(),
+      VK_KERNEL(mul_scalar),
+      "aten::mul.Scalar");
 }
 
 Tensor& mul_scalar_(Tensor& self, const Scalar& other) {
   return arithmetic_scalar_(
-      self, other, c10::optional<Scalar>(), VK_KERNEL(mul_scalar_), "aten::mul_.Scalar");
+      self,
+      other,
+      c10::optional<Scalar>(),
+      VK_KERNEL(mul_scalar_),
+      "aten::mul_.Scalar");
 }
 
 Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
@@ -414,12 +452,20 @@ Tensor mul_tensor(const Tensor& self_arg, const Tensor& other_arg) {
         "aten::mul.Tensor");
   }
   return arithmetic_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul), "aten::mul.Tensor");
+      self_arg,
+      other_arg,
+      c10::optional<Scalar>(),
+      VK_KERNEL(mul),
+      "aten::mul.Tensor");
 }
 
 Tensor& mul_tensor_(Tensor& self, const Tensor& other_arg) {
   return arithmetic_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(mul_), "aten::mul_.Tensor");
+      self,
+      other_arg,
+      c10::optional<Scalar>(),
+      VK_KERNEL(mul_),
+      "aten::mul_.Tensor");
 }
 
 Tensor div_scalar(const Tensor& self_arg, const Scalar& other) {
@@ -450,12 +496,20 @@ Tensor div_tensor(const Tensor& self_arg, const Tensor& other_arg) {
         "aten::div.Tensor");
   }
   return arithmetic_tensor(
-      self_arg, other_arg, c10::optional<Scalar>(), VK_KERNEL(div), "aten::div.Tensor");
+      self_arg,
+      other_arg,
+      c10::optional<Scalar>(),
+      VK_KERNEL(div),
+      "aten::div.Tensor");
 }
 
 Tensor& div_tensor_(Tensor& self, const Tensor& other_arg) {
   return arithmetic_tensor_(
-      self, other_arg, c10::optional<Scalar>(), VK_KERNEL(div_), "aten::div_.Tensor");
+      self,
+      other_arg,
+      c10::optional<Scalar>(),
+      VK_KERNEL(div_),
+      "aten::div_.Tensor");
 }
 
 #ifdef USE_VULKAN_API

@@ -5,12 +5,12 @@
 #include <array>
 #include <numeric>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/cpu/vec/vec.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/cpu/vec/functional.h>
-#include <ATen/native/cpu/utils.h>
+#include <ATen/cpu/vec/vec.h>
 #include <ATen/native/cpu/moments_utils.h>
+#include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -108,8 +108,10 @@ std::tuple<T, T> ColumnwiseMoments(
     }
   }
   // TODO: use fast path
-  T mean_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc0_vec, Vec::size());
-  T rstd_val = vec::vec_reduce_all([](Vec& x, Vec& y) { return x + y; }, acc1_vec, Vec::size());
+  T mean_val = vec::vec_reduce_all(
+      [](Vec& x, Vec& y) { return x + y; }, acc0_vec, Vec::size());
+  T rstd_val = vec::vec_reduce_all(
+      [](Vec& x, Vec& y) { return x + y; }, acc1_vec, Vec::size());
   return std::tuple<T, T>(mean_val, rstd_val);
 }
 
@@ -150,8 +152,10 @@ std::tuple<float, float> ColumnwiseMoments(
     }
   }
   // TODO: use fast path
-  float mean_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc0_fvec, fVec::size());
-  float rstd_val = vec::vec_reduce_all([](fVec& x, fVec& y) { return x + y; }, acc1_fvec, fVec::size());
+  float mean_val = vec::vec_reduce_all(
+      [](fVec& x, fVec& y) { return x + y; }, acc0_fvec, fVec::size());
+  float rstd_val = vec::vec_reduce_all(
+      [](fVec& x, fVec& y) { return x + y; }, acc1_fvec, fVec::size());
   return std::tuple<float, float>(mean_val, rstd_val);
 }
 
@@ -200,7 +204,8 @@ void GroupNormKernelImplChannelsLastInternal(
   //   but requires help of extra temp buffer of size {T, N, 2C}.
   //
   // Generally impl-2 has better performance when HxW is large enough, so that
-  //   data per thread {NHWC / T} is much larger then temp buffer per thread {2NC}
+  //   data per thread {NHWC / T} is much larger then temp buffer per thread
+  //   {2NC}
   //
   constexpr int64_t feature_map_threshold = 1024;
   if (HxW < feature_map_threshold) {
@@ -222,11 +227,8 @@ void GroupNormKernelImplChannelsLastInternal(
         // and do a horizontal add just once for each {n, g}.
         //
         T_ACC mean_val, rstd_val;
-        std::tie(mean_val, rstd_val) = ColumnwiseMoments(
-                X_data + n * HxW * C + g * D,
-                HxW,
-                C,
-                D);
+        std::tie(mean_val, rstd_val) =
+            ColumnwiseMoments(X_data + n * HxW * C + g * D, HxW, C, D);
 
         mean_val *= s;
         rstd_val = std::max(rstd_val * s - mean_val * mean_val, T_ACC(0));
@@ -240,7 +242,8 @@ void GroupNormKernelImplChannelsLastInternal(
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
           scale_ptr[d] = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
-          bias_ptr[d] = -scale_ptr[d] * mean_val + (beta_null ? T(0) : beta_data[c]);
+          bias_ptr[d] =
+              -scale_ptr[d] * mean_val + (beta_null ? T(0) : beta_data[c]);
         }
 
         // step-3: apply scale and bias
@@ -273,8 +276,8 @@ void GroupNormKernelImplChannelsLastInternal(
     // we parallel on the all the outer dimensions of N and HxW,
     // leaving the most inner dimension C for vectorization.
     //
-    // Note that parallel on {N, HxW, G} is not feasible for some common configs,
-    // e.g. say input shape is {1, 32, h, w} and G = 8,
+    // Note that parallel on {N, HxW, G} is not feasible for some common
+    // configs, e.g. say input shape is {1, 32, h, w} and G = 8,
     //   this will give D = 4 which is unable to take full SIMD length.
     //
     // To avoid thread conflict, we make use of a temp buffer of {T, N, 2C},
@@ -292,11 +295,7 @@ void GroupNormKernelImplChannelsLastInternal(
         const T* X_ptr = X_data + i * C;
 
         vec::map2<T>(
-            [](Vec x, Vec y) { return x + y; },
-            mean_ptr,
-            X_ptr,
-            mean_ptr,
-            C);
+            [](Vec x, Vec y) { return x + y; }, mean_ptr, X_ptr, mean_ptr, C);
 
         vec::map2<T>(
             [](Vec x, Vec y) { return x * x + y; },
@@ -318,7 +317,7 @@ void GroupNormKernelImplChannelsLastInternal(
             T* buffer_ptr = buffer_data + t * N * 2 * C + n * 2 * C;
             mean_val += buffer_ptr[g * D + d];
             rstd_val += buffer_ptr[g * D + d + C];
-           }
+          }
         }
         mean_val *= s;
         rstd_val = std::max(rstd_val * s - mean_val * mean_val, T_ACC(0));
@@ -336,7 +335,8 @@ void GroupNormKernelImplChannelsLastInternal(
     //
     // We could fuse step 3 and 4 into a single session but this way is better:
     //   a. D might be too small for vectorization;
-    //   b. Avoid duplicate caculation of scale/bias, each HxW plain share the same scale/bias
+    //   b. Avoid duplicate caculation of scale/bias, each HxW plain share the
+    //   same scale/bias
     //
     for (const auto n : c10::irange(N)) {
       for (const auto g : c10::irange(G)) {
@@ -347,7 +347,8 @@ void GroupNormKernelImplChannelsLastInternal(
         for (const auto d : c10::irange(D)) {
           const int64_t c = g * D + d;
           scale_ptr[c] = rstd_val * (gamma_null ? T(1) : gamma_data[c]);
-          bias_ptr[c] = -scale_ptr[c] * mean_val + (beta_null ? T(0) : beta_data[c]);
+          bias_ptr[c] =
+              -scale_ptr[c] * mean_val + (beta_null ? T(0) : beta_data[c]);
         }
       }
     }
@@ -393,22 +394,46 @@ void GroupNormKernelImpl(
     Tensor& rstd) {
   switch (X.suggest_memory_format()) {
     case at::MemoryFormat::Contiguous: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
-        GroupNormKernelImplInternal<scalar_t>(
-            X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
-      });
+      AT_DISPATCH_FLOATING_TYPES_AND(
+          ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
+            GroupNormKernelImplInternal<scalar_t>(
+                X,
+                gamma,
+                beta,
+                N,
+                C,
+                HxW,
+                group,
+                static_cast<scalar_t>(eps),
+                Y,
+                mean,
+                rstd);
+          });
       break;
     }
     case at::MemoryFormat::ChannelsLast:
     case at::MemoryFormat::ChannelsLast3d: {
-      AT_DISPATCH_FLOATING_TYPES_AND(ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
-        GroupNormKernelImplChannelsLastInternal<scalar_t>(
-            X, gamma, beta, N, C, HxW, group, static_cast<scalar_t>(eps), Y, mean, rstd);
-      });
+      AT_DISPATCH_FLOATING_TYPES_AND(
+          ScalarType::BFloat16, X.scalar_type(), "GroupNormKernelImpl", [&]() {
+            GroupNormKernelImplChannelsLastInternal<scalar_t>(
+                X,
+                gamma,
+                beta,
+                N,
+                C,
+                HxW,
+                group,
+                static_cast<scalar_t>(eps),
+                Y,
+                mean,
+                rstd);
+          });
       break;
     }
     default:
-      TORCH_CHECK(false, "Unsupported memory format. Supports only ChannelsLast, ChannelsLast3d, Contiguous");
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format. Supports only ChannelsLast, ChannelsLast3d, Contiguous");
   }
 }
 
@@ -633,7 +658,10 @@ void GroupNormBackwardKernelImpl(
     Tensor& dgamma,
     Tensor& dbeta) {
   AT_DISPATCH_FLOATING_TYPES_AND(
-      ScalarType::BFloat16, X.scalar_type(), "GroupNormBackwardKernelImpl", [&]() {
+      ScalarType::BFloat16,
+      X.scalar_type(),
+      "GroupNormBackwardKernelImpl",
+      [&]() {
         GroupNormBackwardKernelImplInternal<scalar_t>(
             dY, X, mean, rstd, gamma, N, C, HxW, group, dX, dgamma, dbeta);
       });

@@ -6,4 +6,5 @@ namespace detail {
 
 C10_REGISTER_GUARD_IMPL(Meta, c10::impl::NoOpDeviceGuardImpl<DeviceType::Meta>);
 
-}} // namespace at::detail
+}
+} // namespace at

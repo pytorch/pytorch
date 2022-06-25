@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
-#include <ATen/cuda/EmptyTensor.h>
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/EmptyTensor.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/EmptyTensor.h>
 
 namespace at {
 namespace detail {
@@ -28,15 +28,17 @@ TensorBase empty_cuda(
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt) {
-  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+  TORCH_CHECK(
+      !pin_memory_opt.has_value() || !*pin_memory_opt,
+      "Only dense CPU tensors can be pinned");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      layout_or_default(layout_opt) == Layout::Strided);
 
   const auto dtype = dtype_or_default(dtype_opt);
   return at::detail::empty_cuda(size, dtype, device_opt, memory_format_opt);
 }
 
-TensorBase empty_cuda(
-    IntArrayRef size, const TensorOptions &options) {
+TensorBase empty_cuda(IntArrayRef size, const TensorOptions& options) {
   return at::detail::empty_cuda(
       size,
       optTypeMetaToScalarType(options.dtype_opt()),
@@ -68,8 +70,11 @@ TensorBase empty_strided_cuda(
     c10::optional<Layout> layout_opt,
     c10::optional<Device> device_opt,
     c10::optional<bool> pin_memory_opt) {
-  TORCH_CHECK(!pin_memory_opt.has_value() || !*pin_memory_opt, "Only dense CPU tensors can be pinned");
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(layout_or_default(layout_opt) == Layout::Strided);
+  TORCH_CHECK(
+      !pin_memory_opt.has_value() || !*pin_memory_opt,
+      "Only dense CPU tensors can be pinned");
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      layout_or_default(layout_opt) == Layout::Strided);
 
   const auto dtype = dtype_or_default(dtype_opt);
   return at::detail::empty_strided_cuda(size, stride, dtype, device_opt);
@@ -78,7 +83,7 @@ TensorBase empty_strided_cuda(
 TensorBase empty_strided_cuda(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options) {
+    const TensorOptions& options) {
   return at::detail::empty_strided_cuda(
       size,
       stride,
@@ -88,4 +93,5 @@ TensorBase empty_strided_cuda(
       options.pinned_memory_opt());
 }
 
-}}  // namespace at::detail
+} // namespace detail
+} // namespace at

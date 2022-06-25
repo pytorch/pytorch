@@ -45,8 +45,14 @@ Tensor fake_quantize_per_tensor_affine(
     const Tensor& zero_point,
     int64_t quant_min,
     int64_t quant_max) {
-  const auto res = at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
-      self, scale, zero_point, at::ones(1, self.options().dtype(at::kLong)), quant_min, quant_max);
+  const auto res =
+      at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+          self,
+          scale,
+          zero_point,
+          at::ones(1, self.options().dtype(at::kLong)),
+          quant_min,
+          quant_max);
   return std::get<0>(res);
 }
 
@@ -83,13 +89,21 @@ std::tuple<Tensor, Tensor> fake_quantize_per_tensor_affine_cachemask(
   auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
   auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
   fake_quant_tensor_cachemask_stub(
-      self.device().type(), Y, mask, self, scale, zero_point, quant_min, quant_max);
+      self.device().type(),
+      Y,
+      mask,
+      self,
+      scale,
+      zero_point,
+      quant_min,
+      quant_max);
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
   return std::make_tuple(Y, mask);
 }
 
-std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
+std::tuple<Tensor, Tensor>
+_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(
     const Tensor& self,
     const Tensor& scale,
     const Tensor& zero_point,
@@ -103,7 +117,15 @@ std::tuple<Tensor, Tensor> _fake_quantize_per_tensor_affine_cachemask_tensor_qpa
   auto Y = at::empty_like(self, self.options(), MemoryFormat::Preserve);
   auto mask = at::empty_like(self, at::kBool, MemoryFormat::Preserve);
   fake_quant_tensor_cachemask_tensor_qparams_stub(
-      self.device().type(), Y, mask, self, scale, zero_point, fake_quant_enabled, quant_min, quant_max);
+      self.device().type(),
+      Y,
+      mask,
+      self,
+      scale,
+      zero_point,
+      fake_quant_enabled,
+      quant_min,
+      quant_max);
   // TODO(future, optional): look into packing the mask further (BoolTensor uses
   //   1 byte per element, we only need 1 bit per element).
   return std::make_tuple(Y, mask);
@@ -122,9 +144,13 @@ Tensor fake_quantize_per_tensor_affine_cachemask_backward(
     const Tensor& dY,
     const Tensor& mask) {
   TORCH_CHECK(mask.scalar_type() == ScalarType::Bool);
-  TORCH_CHECK(mask.numel() == dY.numel(),
+  TORCH_CHECK(
+      mask.numel() == dY.numel(),
       "`mask` and `dY` are not the same size: ",
-      "`mask` is size ", mask.numel(), " and `dY` is size ", dY.numel());
+      "`mask` is size ",
+      mask.numel(),
+      " and `dY` is size ",
+      dY.numel());
   if (dY.numel() <= 0) {
     return dY;
   }
@@ -139,9 +165,11 @@ int64_t _get_zero_point_from_tensor(
     int64_t quant_max,
     bool is_forward) {
   float zero_point_fp = zero_point[0].item<float>();
-  zero_point_fp = is_forward ? std::nearbyint(zero_point_fp) : zero_point_fp + 0.5f;
-  float zero_point_clamped = std::min(std::max(zero_point_fp, static_cast<float>(quant_min)),
-                                       static_cast<float>(quant_max));
+  zero_point_fp =
+      is_forward ? std::nearbyint(zero_point_fp) : zero_point_fp + 0.5f;
+  float zero_point_clamped = std::min(
+      std::max(zero_point_fp, static_cast<float>(quant_min)),
+      static_cast<float>(quant_max));
   return static_cast<int64_t>(zero_point_clamped);
 }
 
@@ -153,12 +181,14 @@ Tensor _fake_quantize_learnable_per_tensor_affine(
     int64_t quant_max,
     double grad_factor) {
   float scale_val = scale[0].item<float>();
-  int64_t zero_point_val = native::_get_zero_point_from_tensor(zero_point, quant_min, quant_max, true);
+  int64_t zero_point_val = native::_get_zero_point_from_tensor(
+      zero_point, quant_min, quant_max, true);
   return native::fake_quantize_per_tensor_affine(
-    self, scale_val, zero_point_val, quant_min, quant_max);
+      self, scale_val, zero_point_val, quant_min, quant_max);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_backward(
+std::tuple<Tensor, Tensor, Tensor>
+_fake_quantize_learnable_per_tensor_affine_backward(
     const Tensor& dY,
     const Tensor& X,
     const Tensor& scale,
@@ -186,7 +216,8 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   */
   float scale_val = scale[0].item<float>();
   float inv_scale_val = 1.0f / scale_val;
-  int64_t zero_point_val = native::_get_zero_point_from_tensor(zero_point, quant_min, quant_max, false);
+  int64_t zero_point_val = native::_get_zero_point_from_tensor(
+      zero_point, quant_min, quant_max, false);
 
   TORCH_CHECK(dY.scalar_type() == ScalarType::Float);
   TORCH_CHECK(X.scalar_type() == ScalarType::Float);
@@ -209,17 +240,25 @@ std::tuple<Tensor, Tensor, Tensor> _fake_quantize_learnable_per_tensor_affine_ba
   auto dZeroPoint_vec = at::empty_like(X, X.options(), MemoryFormat::Preserve);
 
   auto iter = TensorIteratorConfig()
-    .add_output(dX)
-    .add_output(dScale_vec)
-    .add_output(dZeroPoint_vec)
-    .add_input(X)
-    .add_input(dY)
-    .build();
+                  .add_output(dX)
+                  .add_output(dScale_vec)
+                  .add_output(dZeroPoint_vec)
+                  .add_input(X)
+                  .add_input(dY)
+                  .build();
 
   fake_quant_grad_learnable_tensor_stub(
-    X.device().type(), iter, scale_val, inv_scale_val, zero_point_val, quant_min, quant_max, grad_factor);
+      X.device().type(),
+      iter,
+      scale_val,
+      inv_scale_val,
+      zero_point_val,
+      quant_min,
+      quant_max,
+      grad_factor);
 
-  // The total sums over the scale and zero point gradient vectors are what will be returned in the end.
+  // The total sums over the scale and zero point gradient vectors are what will
+  // be returned in the end.
   auto dScale = dScale_vec.sum().unsqueeze(0).to(scale.device());
   auto dZeroPoint = dZeroPoint_vec.sum().unsqueeze(0).to(zero_point.device());
 

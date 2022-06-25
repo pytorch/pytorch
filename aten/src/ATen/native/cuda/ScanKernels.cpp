@@ -1,9 +1,9 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <ATen/core/Tensor.h>
 
-#include <ATen/native/cuda/ScanKernels.h>
 #include <ATen/native/ReduceOps.h>
+#include <ATen/native/cuda/ScanKernels.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -16,19 +16,25 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-static c10::MaybeOwned<Tensor> contiguous_out_arg(const Tensor &tensor) {
+static c10::MaybeOwned<Tensor> contiguous_out_arg(const Tensor& tensor) {
   if (tensor.is_contiguous()) {
     return c10::MaybeOwned<Tensor>::borrowed(tensor);
   }
-  return c10::MaybeOwned<Tensor>::owned(at::empty(tensor.sizes(), tensor.options()));
+  return c10::MaybeOwned<Tensor>::owned(
+      at::empty(tensor.sizes(), tensor.options()));
 }
 
-void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  TensorArg output_arg{ values, "output", 1 };
-  TensorArg indices_arg{ indices, "indices", 2 };
-  TensorArg input_arg{ self, "input", 3 };
+void cummax_helper_cuda(
+    const Tensor& self,
+    Tensor& values,
+    Tensor& indices,
+    int64_t dim) {
+  TensorArg output_arg{values, "output", 1};
+  TensorArg indices_arg{indices, "indices", 2};
+  TensorArg input_arg{self, "input", 3};
   checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
 
   auto values_ = contiguous_out_arg(values);
@@ -42,10 +48,14 @@ void cummax_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   }
 }
 
-void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int64_t dim) {
-  TensorArg output_arg{ values, "output", 1 };
-  TensorArg indices_arg{ indices, "indices", 2 };
-  TensorArg input_arg{ self, "input", 3 };
+void cummin_helper_cuda(
+    const Tensor& self,
+    Tensor& values,
+    Tensor& indices,
+    int64_t dim) {
+  TensorArg output_arg{values, "output", 1};
+  TensorArg indices_arg{indices, "indices", 2};
+  TensorArg input_arg{self, "input", 3};
   checkAllSameGPU(__func__, {output_arg, indices_arg, input_arg});
 
   auto values_ = contiguous_out_arg(values);
@@ -59,7 +69,10 @@ void cummin_helper_cuda(const Tensor& self, Tensor& values, Tensor& indices, int
   }
 }
 
-Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) {
+Tensor& _logcumsumexp_out_cuda(
+    const Tensor& self,
+    int64_t dim,
+    Tensor& result) {
   const auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   result.resize_(self.sizes());
   if (self.dim() == 0) {
@@ -71,8 +84,8 @@ Tensor& _logcumsumexp_out_cuda(const Tensor& self, int64_t dim, Tensor& result) 
     return result;
   }
 
-  TensorArg output_arg{ result, "output", 1 };
-  TensorArg input_arg{ self, "input", 2 };
+  TensorArg output_arg{result, "output", 1};
+  TensorArg input_arg{self, "input", 2};
   checkAllSameGPU(__func__, {output_arg, input_arg});
 
   auto result_ = contiguous_out_arg(result);
@@ -96,7 +109,10 @@ void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   }
 }
 
-void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void cumprod_cuda_kernel(
+    const Tensor& result,
+    const Tensor& self,
+    int64_t dim) {
   auto result_ = contiguous_out_arg(result);
   launch_cumprod_cuda_kernel(*result_, self, dim);
   if (!result.is_same(*result_)) {
@@ -107,4 +123,5 @@ void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) 
 REGISTER_CUDA_DISPATCH(cumsum_stub, &cumsum_cuda_kernel);
 REGISTER_CUDA_DISPATCH(cumprod_stub, &cumprod_cuda_kernel);
 
-}} // namespace at::native
+} // namespace native
+} // namespace at

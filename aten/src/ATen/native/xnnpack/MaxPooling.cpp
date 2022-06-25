@@ -1,8 +1,8 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/native/Pool.h>
-#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/utils/Factory.h>
+#include <ATen/native/xnnpack/Common.h>
 #include <ATen/native/xnnpack/Pooling.h>
 
 namespace at {
@@ -31,17 +31,18 @@ bool use_max_pool2d(
     return false;
   }
 
-  // Stride can be legitimately empty, in which case it is to be defaulted to kernel size.
+  // Stride can be legitimately empty, in which case it is to be defaulted to
+  // kernel size.
   if (stride_.empty()) {
     stride_ = kernel_;
   }
 
   // Normalize the parameters.
   const internal::pooling::Parameters parameters{
-    kernel_,
-    padding_,
-    stride_,
-    dilation_,
+      kernel_,
+      padding_,
+      stride_,
+      dilation_,
   };
 
   // Here are the list of conditions required for this code path to be taken:
@@ -55,7 +56,8 @@ bool use_max_pool2d(
   // * output_max must be greater than output_min.
   //   Namely, setting both output_min and output_max to 0 is not valid usage.
   // * Finally, application of this operator to the input tensor with the given
-  //   max pool 2d parameters must result in an output tensor with a valid shape.
+  //   max pool 2d parameters must result in an output tensor with a valid
+  //   shape.
   const int64_t pt_outputHeight = pooling_output_shape(
       input.size(Layout::Activation4D::height),
       parameters.kernel[Layout::Parameter::height],
@@ -86,14 +88,12 @@ bool use_max_pool2d(
       false);
 
   const bool output_size_eq = (pt_outputHeight == xnnpack_outputHeight) &&
-    (pt_outputWidth == xnnpack_outputWidth);
+      (pt_outputWidth == xnnpack_outputWidth);
 
   return xnnpack::available() &&
       // Input
-      (4 == input.dim()) &&
-      (input.device().is_cpu()) &&
-      (kFloat == input.scalar_type()) &&
-      !input.requires_grad() &&
+      (4 == input.dim()) && (input.device().is_cpu()) &&
+      (kFloat == input.scalar_type()) && !input.requires_grad() &&
       // Kernel
       (2 == parameters.kernel.size()) &&
       (parameters.kernel[Layout::Parameter::height] > 0) &&
@@ -118,19 +118,19 @@ bool use_max_pool2d(
       (output_max > output_min) &&
       // Output
       (pooling_output_shape(
-        input.size(Layout::Activation4D::height),
-        parameters.kernel[Layout::Parameter::height],
-        parameters.padding[Layout::Parameter::height],
-        parameters.stride[Layout::Parameter::height],
-        parameters.dilation[Layout::Parameter::height],
-        ceil_mode) > 0) &&
+           input.size(Layout::Activation4D::height),
+           parameters.kernel[Layout::Parameter::height],
+           parameters.padding[Layout::Parameter::height],
+           parameters.stride[Layout::Parameter::height],
+           parameters.dilation[Layout::Parameter::height],
+           ceil_mode) > 0) &&
       (pooling_output_shape(
-        input.size(Layout::Activation4D::width),
-        parameters.kernel[Layout::Parameter::width],
-        parameters.padding[Layout::Parameter::width],
-        parameters.stride[Layout::Parameter::width],
-        parameters.dilation[Layout::Parameter::width],
-        ceil_mode) > 0) &&
+           input.size(Layout::Activation4D::width),
+           parameters.kernel[Layout::Parameter::width],
+           parameters.padding[Layout::Parameter::width],
+           parameters.stride[Layout::Parameter::width],
+           parameters.dilation[Layout::Parameter::width],
+           ceil_mode) > 0) &&
       true;
 }
 
@@ -154,35 +154,34 @@ Tensor max_pool2d(
   }
 
   const internal::pooling::Parameters parameters{
-    kernel_,
-    padding_,
-    stride_,
-    dilation_,
+      kernel_,
+      padding_,
+      stride_,
+      dilation_,
   };
 
   const Tensor input_padded_contig_nhwc =
       mobile::allocate_padded_contiguous_if_needed(
-          input,
-          MemoryFormat::ChannelsLast);
+          input, MemoryFormat::ChannelsLast);
 
   Tensor output_padded_contig_nhwc = mobile::empty_with_tail_padding(
       {
-        input_padded_contig_nhwc.size(Layout::Activation4D::batch),
-        input_padded_contig_nhwc.size(Layout::Activation4D::channels),
-        pooling_output_shape(
-            input_padded_contig_nhwc.size(Layout::Activation4D::height),
-            parameters.kernel[Layout::Parameter::height],
-            parameters.padding[Layout::Parameter::height],
-            parameters.stride[Layout::Parameter::height],
-            parameters.dilation[Layout::Parameter::height],
-            ceil_mode),
-        pooling_output_shape(
-            input_padded_contig_nhwc.size(Layout::Activation4D::width),
-            parameters.kernel[Layout::Parameter::width],
-            parameters.padding[Layout::Parameter::width],
-            parameters.stride[Layout::Parameter::width],
-            parameters.dilation[Layout::Parameter::width],
-            ceil_mode),
+          input_padded_contig_nhwc.size(Layout::Activation4D::batch),
+          input_padded_contig_nhwc.size(Layout::Activation4D::channels),
+          pooling_output_shape(
+              input_padded_contig_nhwc.size(Layout::Activation4D::height),
+              parameters.kernel[Layout::Parameter::height],
+              parameters.padding[Layout::Parameter::height],
+              parameters.stride[Layout::Parameter::height],
+              parameters.dilation[Layout::Parameter::height],
+              ceil_mode),
+          pooling_output_shape(
+              input_padded_contig_nhwc.size(Layout::Activation4D::width),
+              parameters.kernel[Layout::Parameter::width],
+              parameters.padding[Layout::Parameter::width],
+              parameters.stride[Layout::Parameter::width],
+              parameters.dilation[Layout::Parameter::width],
+              ceil_mode),
       },
       input_padded_contig_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast,
@@ -191,23 +190,27 @@ Tensor max_pool2d(
   xnn_operator_t max_pool_op{};
 
   const xnn_status create_status = xnn_create_max_pooling2d_nhwc_f32(
-      parameters.padding[Layout::Parameter::height],                  // input_padding_top
-      parameters.padding[Layout::Parameter::width],                   // input_padding_right
-      parameters.padding[Layout::Parameter::height],                  // input_padding_bottom
-      parameters.padding[Layout::Parameter::width],                   // input_padding_left
-      parameters.kernel[Layout::Parameter::height],                   // kernel_height
-      parameters.kernel[Layout::Parameter::width],                    // kernel_width
-      parameters.stride[Layout::Parameter::height],                   // subsampling_height
-      parameters.stride[Layout::Parameter::width],                    // subsampling_width
-      parameters.dilation[Layout::Parameter::height],                 // dilation_height
-      parameters.dilation[Layout::Parameter::width],                  // dilation_width
-      input_padded_contig_nhwc.size(Layout::Activation4D::channels),  // channels
-      input_padded_contig_nhwc.size(Layout::Activation4D::channels),  // input_pixel_stride - NHWC Contiguous
-      output_padded_contig_nhwc.size(Layout::Activation4D::channels), // output_pixel_stride - NHWC Contiguous
-      output_min,                                                     // output_min
-      output_max,                                                     // output_max
-      0u,                                                             // flags
-      &max_pool_op);                                                  // operator
+      parameters.padding[Layout::Parameter::height], // input_padding_top
+      parameters.padding[Layout::Parameter::width], // input_padding_right
+      parameters.padding[Layout::Parameter::height], // input_padding_bottom
+      parameters.padding[Layout::Parameter::width], // input_padding_left
+      parameters.kernel[Layout::Parameter::height], // kernel_height
+      parameters.kernel[Layout::Parameter::width], // kernel_width
+      parameters.stride[Layout::Parameter::height], // subsampling_height
+      parameters.stride[Layout::Parameter::width], // subsampling_width
+      parameters.dilation[Layout::Parameter::height], // dilation_height
+      parameters.dilation[Layout::Parameter::width], // dilation_width
+      input_padded_contig_nhwc.size(Layout::Activation4D::channels), // channels
+      input_padded_contig_nhwc.size(
+          Layout::Activation4D::channels), // input_pixel_stride - NHWC
+                                           // Contiguous
+      output_padded_contig_nhwc.size(
+          Layout::Activation4D::channels), // output_pixel_stride - NHWC
+                                           // Contiguous
+      output_min, // output_min
+      output_max, // output_max
+      0u, // flags
+      &max_pool_op); // operator
 
   Operator max_pool_scoped_op(max_pool_op);
 
@@ -216,25 +219,25 @@ Tensor max_pool2d(
       "xnn_create_max_pooling2d_nhwc_f32 failed!");
 
   const xnn_status setup_status = xnn_setup_max_pooling2d_nhwc_f32(
-      max_pool_op,                                                  // operator
-      input_padded_contig_nhwc.size(Layout::Activation4D::batch),   // batch_size
-      input_padded_contig_nhwc.size(Layout::Activation4D::height),  // input_height
-      input_padded_contig_nhwc.size(Layout::Activation4D::width),   // input_width
-      input_padded_contig_nhwc.data_ptr<float>(),                   // input
-      output_padded_contig_nhwc.data_ptr<float>(),                  // output
-      caffe2::pthreadpool_());                                      // threadpool
+      max_pool_op, // operator
+      input_padded_contig_nhwc.size(Layout::Activation4D::batch), // batch_size
+      input_padded_contig_nhwc.size(
+          Layout::Activation4D::height), // input_height
+      input_padded_contig_nhwc.size(Layout::Activation4D::width), // input_width
+      input_padded_contig_nhwc.data_ptr<float>(), // input
+      output_padded_contig_nhwc.data_ptr<float>(), // output
+      caffe2::pthreadpool_()); // threadpool
 
   TORCH_CHECK(
       xnn_status_success == setup_status,
       "xnn_setup_max_pooling2d_nhwc_f32 failed!");
 
   const xnn_status run_status = xnn_run_operator(
-      max_pool_op,              // operator
-      caffe2::pthreadpool_());  // threadpool
+      max_pool_op, // operator
+      caffe2::pthreadpool_()); // threadpool
 
   TORCH_INTERNAL_ASSERT(
-      xnn_status_success == run_status,
-      "xnn_run_operator failed!");
+      xnn_status_success == run_status, "xnn_run_operator failed!");
 
   return output_padded_contig_nhwc.contiguous(input.suggest_memory_format());
 }

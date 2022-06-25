@@ -4,46 +4,52 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <ATen/native/quantized/PackedParams.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>
 
 int register_linear_params();
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
 // Check if pytorch is compiled with MIOpen.
 bool use_miopen(const at::Tensor& input, const double dropout_state) {
-    bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat)|| (input.scalar_type() == at::kHalf)) &&
-                                (detail::getCUDAHooks().compiledWithMIOpen()) &&
-                                (input.is_cuda()) &&
-                                (at::globalContext().userEnabledCuDNN());
-    return is_miopen_acceptable;
+  bool is_miopen_acceptable = ((input.scalar_type() == at::kFloat) ||
+                               (input.scalar_type() == at::kHalf)) &&
+      (detail::getCUDAHooks().compiledWithMIOpen()) && (input.is_cuda()) &&
+      (at::globalContext().userEnabledCuDNN());
+  return is_miopen_acceptable;
 }
 
-template<typename T>
+template <typename T>
 using pair_of = std::pair<T, T>;
 
-template<typename T>
+template <typename T>
 using tpair_of = std::tuple<T, T>;
 
-// Those could have been function pointers, but MSVC chokes on function pointers as template parameters
+// Those could have been function pointers, but MSVC chokes on function pointers
+// as template parameters
 struct tanh_f {
-  Tensor operator()(const Tensor& t) const { return at::tanh(t); }
+  Tensor operator()(const Tensor& t) const {
+    return at::tanh(t);
+  }
 };
 
 struct relu_f {
-  Tensor operator()(const Tensor& t) const { return at::relu(t); }
+  Tensor operator()(const Tensor& t) const {
+    return at::relu(t);
+  }
 };
 
 struct PackedSequence {
   PackedSequence() = default;
   PackedSequence(Tensor _data, Tensor _batch_sizes)
-    : data(std::move(_data)), batch_sizes(std::move(_batch_sizes)) {}
+      : data(std::move(_data)), batch_sizes(std::move(_batch_sizes)) {}
 
   Tensor data;
   Tensor batch_sizes;
@@ -71,7 +77,8 @@ struct CellParamsBase : torch::CustomClassHolder {
   // to define correct behavior for LSTMs with projections.
   // This function is not pure virtual, because it's useful to
   // provide this default implementation, so that all cell params
-  // that don't support projections work correctly (e.g. QuantizedCellParams variations)
+  // that don't support projections work correctly (e.g. QuantizedCellParams
+  // variations)
   virtual Tensor matmul_hr(const Tensor& h) const {
     return h;
   }
@@ -84,10 +91,11 @@ struct CellParamsBase : torch::CustomClassHolder {
   virtual CellParamsSerializationType __getstate__() const = 0;
 };
 
-// Pretty much all cells we support take the same set of arguments, but threading those
-// 4 arguments manually is really annoying. Their lifetime is externally managed, so we only
-// pass this struct of references around. LSTMs with projections have 5th argument w_hr, for all
-// other models it's always going to be undefined.
+// Pretty much all cells we support take the same set of arguments, but
+// threading those 4 arguments manually is really annoying. Their lifetime is
+// externally managed, so we only pass this struct of references around. LSTMs
+// with projections have 5th argument w_hr, for all other models it's always
+// going to be undefined.
 struct CellParams : public CellParamsBase {
   CellParams(
       const Tensor& _w_ih,
@@ -95,13 +103,13 @@ struct CellParams : public CellParamsBase {
       const Tensor& _b_ih,
       const Tensor& _b_hh,
       const Tensor& _w_hr)
-      : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh), w_hr(_w_hr) {};
+      : w_ih(_w_ih), w_hh(_w_hh), b_ih_(_b_ih), b_hh_(_b_hh), w_hr(_w_hr){};
 
   const Tensor& w_ih;
   const Tensor& w_hh;
   const Tensor& b_ih_; /* optional */
   const Tensor& b_hh_; /* optional */
-  const Tensor& w_hr;  /* only defined for LSTMs with projections */
+  const Tensor& w_hr; /* only defined for LSTMs with projections */
 
   Tensor matmul_ih(const Tensor& input) const override {
     return at::matmul(input, w_ih.t());
@@ -209,10 +217,10 @@ struct QuantizedCellParams : public CellParamsBase {
   CellParamsSerializationType __getstate__() const override {
     std::vector<at::Tensor> tensors_to_serialize = {
         w_ih, w_hh, b_ih_, b_hh_, col_offsets_ih, col_offsets_hh};
-    std::vector<double> doubles_to_serialize = {scale_ih.toDouble(),
-                                                scale_hh.toDouble()};
-    std::vector<int64_t> longs_to_serialize = {zero_point_ih.toLong(),
-                                               zero_point_hh.toLong()};
+    std::vector<double> doubles_to_serialize = {
+        scale_ih.toDouble(), scale_hh.toDouble()};
+    std::vector<int64_t> longs_to_serialize = {
+        zero_point_ih.toLong(), zero_point_hh.toLong()};
     return CellParamsSerializationType(
         "quantized",
         // NOLINTNEXTLINE(performance-move-const-arg)
@@ -391,7 +399,8 @@ struct QuantizedCellParamsDynamic : public CellParamsBase {
     std::vector<at::Tensor> tensors;
     std::vector<c10::intrusive_ptr<LinearPackedParamsBase>> packed_params;
     std::vector<int64_t> serialized_ints;
-    std::tie(std::ignore, tensors, std::ignore, serialized_ints, packed_params) =
+    std::tie(
+        std::ignore, tensors, std::ignore, serialized_ints, packed_params) =
         std::move(state);
     TORCH_INTERNAL_ASSERT(tensors.size() == 2);
     TORCH_INTERNAL_ASSERT(packed_params.size() == 2);
@@ -412,7 +421,6 @@ c10::intrusive_ptr<CellParamsBase> make_quantized_cell_params_dynamic(
     at::Tensor bias_ih,
     at::Tensor bias_hh,
     bool reduce_range) {
-
   return c10::make_intrusive<QuantizedCellParamsDynamic>(
       /*_packed_w_ih=*/std::move(w_ih_packed),
       /*_packed_w_hh=*/std::move(w_hh_packed),
@@ -461,7 +469,11 @@ struct QuantizedCellParamsFP16 : public CellParamsBase {
 
     return CellParamsSerializationType(
         // NOLINTNEXTLINE(performance-move-const-arg)
-        "quantized_fp16", {}, {}, {}, std::move(packed_params_to_serialize));
+        "quantized_fp16",
+        {},
+        {},
+        {},
+        std::move(packed_params_to_serialize));
   }
   static c10::intrusive_ptr<CellParamsBase> __setstate__(
       CellParamsSerializationType state) {
@@ -522,9 +534,11 @@ struct QRNNCellParamsWrapper {
 };
 
 // Gathers every two elements of a vector in a vector of pairs
-template<typename T>
+template <typename T>
 static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
-  TORCH_CHECK(vals.size() % 2 == 0, "Odd number of params or hiddens given to a bidirectional RNN");
+  TORCH_CHECK(
+      vals.size() % 2 == 0,
+      "Odd number of params or hiddens given to a bidirectional RNN");
   std::vector<pair_of<T>> result;
   result.reserve(vals.size() / 2);
   for (size_t i = 0; i < vals.size(); i += 2) {
@@ -534,7 +548,7 @@ static std::vector<pair_of<T>> pair_vec(const std::vector<T>& vals) {
 }
 
 // Flattens a vector of pairs
-template<typename T>
+template <typename T>
 static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
   std::vector<T> result;
   result.reserve(vals.size() * 2);
@@ -546,31 +560,46 @@ static std::vector<T> unpair_vec(std::vector<pair_of<T>>&& vals) {
 }
 
 // Parses a flat list of parameter tensors into a list of CellParams
-static std::vector<CellParams> gather_params(TensorList params, bool has_biases, bool has_projections = false) {
+static std::vector<CellParams> gather_params(
+    TensorList params,
+    bool has_biases,
+    bool has_projections = false) {
   static at::Tensor undefined;
   std::vector<CellParams> result;
   if (has_biases) {
     if (has_projections) {
-      TORCH_CHECK(params.size() % 5 == 0, "got an incorrect number of RNN parameters");
+      TORCH_CHECK(
+          params.size() % 5 == 0, "got an incorrect number of RNN parameters");
       for (size_t i = 0; i < params.size(); i += 5) {
-        result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], params[i + 4]);
+        result.emplace_back(
+            params[i],
+            params[i + 1],
+            params[i + 2],
+            params[i + 3],
+            params[i + 4]);
       }
     } else {
-      TORCH_CHECK(params.size() % 4 == 0, "got an incorrect number of RNN parameters");
+      TORCH_CHECK(
+          params.size() % 4 == 0, "got an incorrect number of RNN parameters");
       for (size_t i = 0; i < params.size(); i += 4) {
-        result.emplace_back(params[i], params[i + 1], params[i + 2], params[i + 3], undefined);
+        result.emplace_back(
+            params[i], params[i + 1], params[i + 2], params[i + 3], undefined);
       }
     }
   } else {
     if (has_projections) {
-      TORCH_CHECK(params.size() % 3 == 0, "got an incorrect number of RNN parameters");
+      TORCH_CHECK(
+          params.size() % 3 == 0, "got an incorrect number of RNN parameters");
       for (size_t i = 0; i < params.size(); i += 3) {
-        result.emplace_back(params[i], params[i + 1], undefined, undefined, params[i + 2]);
+        result.emplace_back(
+            params[i], params[i + 1], undefined, undefined, params[i + 2]);
       }
     } else {
-      TORCH_CHECK(params.size() % 2 == 0, "got an incorrect number of RNN parameters");
+      TORCH_CHECK(
+          params.size() % 2 == 0, "got an incorrect number of RNN parameters");
       for (size_t i = 0; i < params.size(); i += 2) {
-        result.emplace_back(params[i], params[i + 1], undefined, undefined, undefined);
+        result.emplace_back(
+            params[i], params[i + 1], undefined, undefined, undefined);
       }
     }
   }
@@ -580,36 +609,48 @@ static std::vector<CellParams> gather_params(TensorList params, bool has_biases,
 ////////////////////////////////////////////////////////////////////////////////
 // HIDDEN STATE FUNCTIONS
 //
-// Functions implemented below are implemented as templates based on hidden type,
-// because they need to work both with simple RNNs and GRU (which use a single Tensor),
-// as well as with LSTM (or possibly more complicated architectures in the future).
-// Still, there are some operations that need to be performed on the hidden states
-// alone, and for this purpose we provide an overloaded set of functions below.
+// Functions implemented below are implemented as templates based on hidden
+// type, because they need to work both with simple RNNs and GRU (which use a
+// single Tensor), as well as with LSTM (or possibly more complicated
+// architectures in the future). Still, there are some operations that need to
+// be performed on the hidden states alone, and for this purpose we provide an
+// overloaded set of functions below.
 
-Tensor hidden_as_output(const Tensor& t) { return t; }
-Tensor hidden_as_output(const tpair_of<Tensor>& t) { return std::get<0>(t); }
+Tensor hidden_as_output(const Tensor& t) {
+  return t;
+}
+Tensor hidden_as_output(const tpair_of<Tensor>& t) {
+  return std::get<0>(t);
+}
 
-template<size_t index>
+template <size_t index>
 std::vector<Tensor> project(at::ArrayRef<tpair_of<Tensor>> tuples) {
   std::vector<Tensor> result;
   result.reserve(tuples.size());
-  for (auto & t : tuples) {
+  for (auto& t : tuples) {
     result.push_back(std::get<index>(t));
   }
   return result;
 }
 
-Tensor hidden_concat(at::ArrayRef<Tensor> hiddens) { return at::cat(hiddens, 0); }
+Tensor hidden_concat(at::ArrayRef<Tensor> hiddens) {
+  return at::cat(hiddens, 0);
+}
 tpair_of<Tensor> hidden_concat(at::ArrayRef<tpair_of<Tensor>> hiddens) {
-  return std::make_tuple(hidden_concat(project<0>(hiddens)), hidden_concat(project<1>(hiddens)));
+  return std::make_tuple(
+      hidden_concat(project<0>(hiddens)), hidden_concat(project<1>(hiddens)));
 }
 
 Tensor hidden_slice(const Tensor& t, int64_t start, int64_t end) {
   return t.narrow(0, start, end - start);
 }
-tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t end) {
-  return std::make_tuple(hidden_slice(std::get<0>(t), start, end),
-                         hidden_slice(std::get<1>(t), start, end));
+tpair_of<Tensor> hidden_slice(
+    const tpair_of<Tensor>& t,
+    int64_t start,
+    int64_t end) {
+  return std::make_tuple(
+      hidden_slice(std::get<0>(t), start, end),
+      hidden_slice(std::get<1>(t), start, end));
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -620,27 +661,45 @@ tpair_of<Tensor> hidden_slice(const tpair_of<Tensor>& t, int64_t start, int64_t 
 //
 // (Tensor input, hidden_type hidden, CellParams) -> hidden_type
 //
-// which means that it consumes an input tensor, and updates the previous hidden state.
-// It's a struct only because functional programming in C++ is a pain, and it's easier
-// to pass around "vtable pointers" than actual function pointers.
+// which means that it consumes an input tensor, and updates the previous hidden
+// state. It's a struct only because functional programming in C++ is a pain,
+// and it's easier to pass around "vtable pointers" than actual function
+// pointers.
 
 void check_rnn_cell_forward_input(const Tensor& input, int64_t input_size) {
   TORCH_CHECK(
-    input.size(1) == input_size,
-    "input has inconsistent input_size: got ", input.size(1), " expected ", input_size);
+      input.size(1) == input_size,
+      "input has inconsistent input_size: got ",
+      input.size(1),
+      " expected ",
+      input_size);
 }
 
-void check_rnn_cell_forward_hidden(const Tensor& input, const Tensor& hx, int64_t hidden_size, int64_t hidden_label) {
+void check_rnn_cell_forward_hidden(
+    const Tensor& input,
+    const Tensor& hx,
+    int64_t hidden_size,
+    int64_t hidden_label) {
   TORCH_CHECK(
-    input.size(0) == hx.size(0),
-    "Input batch size ", input.size(0), " doesn't match hidden", hidden_label, " batch size ", hx.size(0));
+      input.size(0) == hx.size(0),
+      "Input batch size ",
+      input.size(0),
+      " doesn't match hidden",
+      hidden_label,
+      " batch size ",
+      hx.size(0));
 
   TORCH_CHECK(
-    hx.size(1) == hidden_size,
-    "hidden", hidden_label, " has inconsistent hidden_size: got ", hx.size(1), ", expected ", hidden_size);
+      hx.size(1) == hidden_size,
+      "hidden",
+      hidden_label,
+      " has inconsistent hidden_size: got ",
+      hx.size(1),
+      ", expected ",
+      hidden_size);
 }
 
-template<typename hidden_type_tmpl, typename cell_params_tmpl>
+template <typename hidden_type_tmpl, typename cell_params_tmpl>
 struct Cell {
   using hidden_type = hidden_type_tmpl;
   using cell_params = cell_params_tmpl;
@@ -655,7 +714,7 @@ struct Cell {
       bool pre_compute_input = false) const = 0;
 };
 
-template<typename nonlinearity, typename cell_params>
+template <typename nonlinearity, typename cell_params>
 struct SimpleCell : Cell<Tensor, cell_params> {
   using hidden_type = Tensor;
   Tensor operator()(
@@ -705,7 +764,6 @@ struct LSTMCell : Cell<std::tuple<Tensor, Tensor>, cell_params> {
     hy = params.matmul_hr(hy);
     return std::make_tuple(std::move(hy), std::move(cy));
   }
-
 };
 
 template <typename cell_params>
@@ -746,18 +804,19 @@ struct GRUCell : Cell<Tensor, cell_params> {
 // Layers are scan-like higher-order functions, which take in cells, and
 // transform them to functions of signature
 //
-// (io_type input, hidden_type hidden, param_type params) -> (io_type, hidden_type)
+// (io_type input, hidden_type hidden, param_type params) -> (io_type,
+// hidden_type)
 //
-// which can apply the cell over a sequence of inputs, and produce both a new set
-// of hidden states, as well as a concatenated output of each step.
+// which can apply the cell over a sequence of inputs, and produce both a new
+// set of hidden states, as well as a concatenated output of each step.
 
-template<typename output_type, typename hidden_type>
+template <typename output_type, typename hidden_type>
 struct LayerOutput {
   output_type outputs;
   hidden_type final_hidden;
 };
 
-template<typename io_type, typename hidden_type, typename param_type>
+template <typename io_type, typename hidden_type, typename param_type>
 struct Layer {
   using output_type = LayerOutput<io_type, hidden_type>;
 
@@ -769,14 +828,13 @@ struct Layer {
       const param_type& params) const = 0;
 };
 
-template<typename hidden_type, typename cell_params>
+template <typename hidden_type, typename cell_params>
 struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
   using output_type =
       typename Layer<Tensor, hidden_type, cell_params>::output_type;
   using unstacked_output_type = LayerOutput<std::vector<Tensor>, hidden_type>;
 
-  FullLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+  FullLayer(Cell<hidden_type, cell_params>& cell) : cell_(cell){};
 
   unstacked_output_type operator()(
       const std::vector<Tensor>& step_inputs,
@@ -800,14 +858,19 @@ struct FullLayer : Layer<Tensor, hidden_type, cell_params> {
       const auto inputs_w = params.linear_ih(inputs);
       auto unstacked_output =
           (*this)(inputs_w.unbind(0), input_hidden, params, true);
-      TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
-      return {at::stack(unstacked_output.outputs, 0),
-              unstacked_output.final_hidden};
+      TORCH_CHECK(
+          unstacked_output.outputs.size() > 0,
+          "Expected sequence length to be larger than 0 in RNN");
+      return {
+          at::stack(unstacked_output.outputs, 0),
+          unstacked_output.final_hidden};
     }
     auto unstacked_output = (*this)(inputs.unbind(0), input_hidden, params);
-    TORCH_CHECK(unstacked_output.outputs.size()>0, "Expected sequence length to be larger than 0 in RNN");
-    return {at::stack(unstacked_output.outputs, 0),
-            unstacked_output.final_hidden};
+    TORCH_CHECK(
+        unstacked_output.outputs.size() > 0,
+        "Expected sequence length to be larger than 0 in RNN");
+    return {
+        at::stack(unstacked_output.outputs, 0), unstacked_output.final_hidden};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -818,10 +881,11 @@ struct FullBidirectionalLayer
     : Layer<Tensor, pair_of<dir_hidden_type>, pair_of<cell_params>> {
   using hidden_type = pair_of<dir_hidden_type>;
   using param_type = pair_of<cell_params>;
-  using output_type = typename Layer<Tensor, hidden_type, param_type>::output_type;
+  using output_type =
+      typename Layer<Tensor, hidden_type, param_type>::output_type;
 
   FullBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
-    : layer_(cell) {};
+      : layer_(cell){};
 
   output_type operator()(
       const Tensor& input,
@@ -831,9 +895,11 @@ struct FullBidirectionalLayer
     if (input.device().is_cpu()) {
       auto input_w = params.first.linear_ih(input);
       step_inputs = input_w.unbind(0);
-      auto fw_result = layer_(
-          step_inputs, input_hidden.first, params.first, true);
-      TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
+      auto fw_result =
+          layer_(step_inputs, input_hidden.first, params.first, true);
+      TORCH_CHECK(
+          fw_result.outputs.size() > 0,
+          "Expected sequence length to be larger than 0 in RNN");
       auto fw_output = at::stack(fw_result.outputs, 0);
       input_w = params.second.linear_ih(input);
       step_inputs = input_w.unbind(0);
@@ -842,21 +908,25 @@ struct FullBidirectionalLayer
           layer_(rev_step_inputs, input_hidden.second, params.second, true);
       std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
       auto rev_output = at::stack(rev_result.outputs, 0);
-      return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
-              std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+      return {
+          at::cat({fw_output, rev_output}, fw_output.dim() - 1),
+          std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
     }
 
     step_inputs = input.unbind(0);
     auto fw_result = layer_(step_inputs, input_hidden.first, params.first);
-    TORCH_CHECK(fw_result.outputs.size() > 0, "Expected sequence length to be larger than 0 in RNN");
+    TORCH_CHECK(
+        fw_result.outputs.size() > 0,
+        "Expected sequence length to be larger than 0 in RNN");
     auto fw_output = at::stack(fw_result.outputs, 0);
     auto rev_step_inputs = reverse(std::move(step_inputs));
     auto rev_result =
         layer_(rev_step_inputs, input_hidden.second, params.second);
     std::reverse(rev_result.outputs.begin(), rev_result.outputs.end());
     auto rev_output = at::stack(rev_result.outputs, 0);
-    return {at::cat({fw_output, rev_output}, fw_output.dim() - 1),
-            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+    return {
+        at::cat({fw_output, rev_output}, fw_output.dim() - 1),
+        std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
   }
 
   std::vector<Tensor> reverse(std::vector<Tensor>&& x) const {
@@ -867,19 +937,17 @@ struct FullBidirectionalLayer
   FullLayer<dir_hidden_type, cell_params> layer_;
 };
 
-template<typename hidden_type, typename cell_params>
+template <typename hidden_type, typename cell_params>
 struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
   using output_type =
       typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
-  PackedLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+  PackedLayer(Cell<hidden_type, cell_params>& cell) : cell_(cell){};
 
   output_type operator()(
       const PackedSequence& input,
       const hidden_type& input_hidden,
       const cell_params& params) const override {
-
     std::vector<at::Tensor> step_outputs;
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
@@ -898,8 +966,8 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
 
     // Batch sizes is a sequence of decreasing lengths, which are offsets
     // into a 1D list of inputs. At every step we slice out batch_size elements,
-    // and possibly account for the decrease in the batch size since the last step,
-    // which requires us to slice the hidden state (since some sequences
+    // and possibly account for the decrease in the batch size since the last
+    // step, which requires us to slice the hidden state (since some sequences
     // are completed now). The sliced parts are also saved, because we will need
     // to return a tensor of final hidden state.
     auto hidden = input_hidden;
@@ -921,20 +989,20 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     hiddens.emplace_back(hidden);
     std::reverse(hiddens.begin(), hiddens.end());
 
-    return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
-            hidden_concat(hiddens)};
+    return {
+        PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
+        hidden_concat(hiddens)};
   }
 
   Cell<hidden_type, cell_params>& cell_;
 };
 
-template<typename hidden_type, typename cell_params>
+template <typename hidden_type, typename cell_params>
 struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
   using output_type =
       typename Layer<PackedSequence, hidden_type, cell_params>::output_type;
 
-  ReversedPackedLayer(Cell<hidden_type, cell_params>& cell)
-    : cell_(cell) {};
+  ReversedPackedLayer(Cell<hidden_type, cell_params>& cell) : cell_(cell){};
 
   output_type operator()(
       const PackedSequence& input,
@@ -956,9 +1024,9 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     }
 
     // Here the situation is similar to that above, except we start out with
-    // the smallest batch size (and a small set of hidden states we actually use),
-    // and progressively expand the hidden states, as we move backwards over the
-    // 1D list of inputs.
+    // the smallest batch size (and a small set of hidden states we actually
+    // use), and progressively expand the hidden states, as we move backwards
+    // over the 1D list of inputs.
     auto hidden = hidden_slice(input_hidden, 0, batch_sizes[num_steps - 1]);
     for (int64_t i = num_steps - 1; i >= 0; --i) {
       const int64_t batch_size = batch_sizes[i];
@@ -975,8 +1043,8 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
       step_outputs.emplace_back(hidden_as_output(hidden));
     }
     std::reverse(step_outputs.begin(), step_outputs.end());
-    return {PackedSequence{at::cat(step_outputs, 0), input.batch_sizes},
-            hidden};
+    return {
+        PackedSequence{at::cat(step_outputs, 0), input.batch_sizes}, hidden};
   }
 
   Cell<hidden_type, cell_params>& cell_;
@@ -991,7 +1059,7 @@ struct PackedBidirectionalLayer
       typename Layer<PackedSequence, hidden_type, param_type>::output_type;
 
   PackedBidirectionalLayer(Cell<dir_hidden_type, cell_params>& cell)
-    : layer_(cell), rev_layer_(cell) {};
+      : layer_(cell), rev_layer_(cell){};
 
   output_type operator()(
       const PackedSequence& input,
@@ -1002,8 +1070,9 @@ struct PackedBidirectionalLayer
     PackedSequence output{
         at::cat({fw_result.outputs.data, rev_result.outputs.data}, -1),
         input.batch_sizes};
-    return {output,
-            std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
+    return {
+        output,
+        std::make_pair(fw_result.final_hidden, rev_result.final_hidden)};
   }
 
   PackedLayer<dir_hidden_type, cell_params> layer_;
@@ -1013,10 +1082,10 @@ struct PackedBidirectionalLayer
 ////////////////////////////////////////////////////////////////////////////////
 // apply_layer_stack
 //
-// layers are convenient, but in reality we often want to stack them. this little
-// helper manages slicing of all inputs and parameters, and repeatedly feeds them
-// into the given layer. returns the last layer's outputs, and a vector of final
-// hidden states produced at each level.
+// layers are convenient, but in reality we often want to stack them. this
+// little helper manages slicing of all inputs and parameters, and repeatedly
+// feeds them into the given layer. returns the last layer's outputs, and a
+// vector of final hidden states produced at each level.
 
 Tensor dropout(const Tensor& input, double p) {
   return at::dropout(input, p, /*train=*/true);
@@ -1026,13 +1095,21 @@ PackedSequence dropout(const PackedSequence& input, double p) {
   return {at::dropout(input.data, p, /*train=*/true), input.batch_sizes};
 }
 
-template<typename io_type, typename hidden_type, typename weight_type>
-LayerOutput<io_type, std::vector<hidden_type>>
-apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const io_type& input,
-                  const std::vector<hidden_type>& hiddens, const std::vector<weight_type>& weights,
-                  int64_t num_layers, double dropout_p, bool train) {
-  TORCH_CHECK(num_layers == (int64_t)hiddens.size(), "Expected more hidden states in stacked_rnn");
-  TORCH_CHECK(num_layers == (int64_t)weights.size(), "Expected more weights in stacked_rnn");
+template <typename io_type, typename hidden_type, typename weight_type>
+LayerOutput<io_type, std::vector<hidden_type>> apply_layer_stack(
+    const Layer<io_type, hidden_type, weight_type>& layer,
+    const io_type& input,
+    const std::vector<hidden_type>& hiddens,
+    const std::vector<weight_type>& weights,
+    int64_t num_layers,
+    double dropout_p,
+    bool train) {
+  TORCH_CHECK(
+      num_layers == (int64_t)hiddens.size(),
+      "Expected more hidden states in stacked_rnn");
+  TORCH_CHECK(
+      num_layers == (int64_t)weights.size(),
+      "Expected more weights in stacked_rnn");
 
   auto layer_input = input;
   auto hidden_it = hiddens.begin();
@@ -1055,40 +1132,88 @@ apply_layer_stack(const Layer<io_type, hidden_type, weight_type>& layer, const i
 // HELPERS SIMPLIFYING DISPATCH TO FUNCTIONS ABOVE
 ////////////////////////////////////////////////////////////////////////////////
 
-template<typename CellType, template<typename,typename> class LayerT, template<typename,typename> class BidirLayerT, typename cell_params, typename io_type>
+template <
+    typename CellType,
+    template <typename, typename>
+    class LayerT,
+    template <typename, typename>
+    class BidirLayerT,
+    typename cell_params,
+    typename io_type>
 LayerOutput<io_type, std::vector<typename CellType::hidden_type>> _rnn_impl(
-      const io_type& input,
-      const std::vector<cell_params>& params,
-      const std::vector<typename CellType::hidden_type>& hiddens,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+    const io_type& input,
+    const std::vector<cell_params>& params,
+    const std::vector<typename CellType::hidden_type>& hiddens,
+    int64_t num_layers,
+    double dropout_p,
+    bool train,
+    bool bidirectional) {
   using hidden_type = typename CellType::hidden_type;
   CellType cell;
   if (bidirectional) {
     using BidirLayer = BidirLayerT<hidden_type, cell_params>;
-    auto bidir_result = apply_layer_stack(BidirLayer{cell}, input, pair_vec(hiddens), pair_vec(params), num_layers, dropout_p, train);
-    return {bidir_result.outputs, unpair_vec(std::move(bidir_result.final_hidden))};
+    auto bidir_result = apply_layer_stack(
+        BidirLayer{cell},
+        input,
+        pair_vec(hiddens),
+        pair_vec(params),
+        num_layers,
+        dropout_p,
+        train);
+    return {
+        bidir_result.outputs, unpair_vec(std::move(bidir_result.final_hidden))};
   } else {
-    return apply_layer_stack(LayerT<hidden_type,cell_params>{cell}, input, hiddens, params, num_layers, dropout_p, train);
+    return apply_layer_stack(
+        LayerT<hidden_type, cell_params>{cell},
+        input,
+        hiddens,
+        params,
+        num_layers,
+        dropout_p,
+        train);
   }
 }
 
-template<typename CellType, template<typename,typename> class LayerT, template<typename,typename> class BidirLayerT, typename cell_params, typename io_type>
+template <
+    typename CellType,
+    template <typename, typename>
+    class LayerT,
+    template <typename, typename>
+    class BidirLayerT,
+    typename cell_params,
+    typename io_type>
 std::tuple<io_type, Tensor> _rnn_impl_with_concat(
-      const io_type& input,
-      const std::vector<cell_params>& params,
-      const std::vector<typename CellType::hidden_type>& hiddens,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-  auto result = _rnn_impl<CellType, LayerT, BidirLayerT>(input, params, hiddens, num_layers, dropout_p, train, bidirectional);
-  return std::make_tuple(std::move(result.outputs), at::stack(result.final_hidden, 0));
+    const io_type& input,
+    const std::vector<cell_params>& params,
+    const std::vector<typename CellType::hidden_type>& hiddens,
+    int64_t num_layers,
+    double dropout_p,
+    bool train,
+    bool bidirectional) {
+  auto result = _rnn_impl<CellType, LayerT, BidirLayerT>(
+      input, params, hiddens, num_layers, dropout_p, train, bidirectional);
+  return std::make_tuple(
+      std::move(result.outputs), at::stack(result.final_hidden, 0));
 }
 
-template<template<typename,typename> class LayerT, template<typename,typename> class BidirLayerT, typename cell_params, typename io_type>
+template <
+    template <typename, typename>
+    class LayerT,
+    template <typename, typename>
+    class BidirLayerT,
+    typename cell_params,
+    typename io_type>
 std::tuple<io_type, Tensor, Tensor> _lstm_impl(
-      const io_type& input,
-      const std::vector<cell_params>& params, const Tensor& hx, const Tensor& cx,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-  // It's much more useful for us to work on lists of pairs of hx and cx for each layer, so we need
-  // to transpose a pair of those tensors.
+    const io_type& input,
+    const std::vector<cell_params>& params,
+    const Tensor& hx,
+    const Tensor& cx,
+    int64_t num_layers,
+    double dropout_p,
+    bool train,
+    bool bidirectional) {
+  // It's much more useful for us to work on lists of pairs of hx and cx for
+  // each layer, so we need to transpose a pair of those tensors.
   auto layer_hx = hx.unbind(0);
   auto layer_cx = cx.unbind(0);
   int64_t total_layers = layer_hx.size();
@@ -1098,17 +1223,20 @@ std::tuple<io_type, Tensor, Tensor> _lstm_impl(
     hiddens.emplace_back(std::move(layer_hx[i]), std::move(layer_cx[i]));
   }
 
-  auto result = _rnn_impl<LSTMCell<cell_params>, LayerT, BidirLayerT>(input, params, hiddens, num_layers, dropout_p, train, bidirectional);
+  auto result = _rnn_impl<LSTMCell<cell_params>, LayerT, BidirLayerT>(
+      input, params, hiddens, num_layers, dropout_p, train, bidirectional);
 
   // Now, we need to reverse the transposed we performed above.
   std::vector<Tensor> hy, cy;
-  hy.reserve(total_layers); cy.reserve(total_layers);
-  for (auto & hidden : result.final_hidden) {
+  hy.reserve(total_layers);
+  cy.reserve(total_layers);
+  for (auto& hidden : result.final_hidden) {
     hy.push_back(std::move(std::get<0>(hidden)));
     cy.push_back(std::move(std::get<1>(hidden)));
   }
 
-  return std::make_tuple(std::move(result.outputs), at::stack(hy, 0), at::stack(cy, 0));
+  return std::make_tuple(
+      std::move(result.outputs), at::stack(hy, 0), at::stack(cy, 0));
 }
 
 } // anonymous namespace
@@ -1118,16 +1246,27 @@ bool _use_cudnn_rnn_flatten_weight() {
 }
 
 // NB: This a (composite) wrapper for _thnn_fused_lstm_cell_backward_impl.
-//     It duplicates the outputs of this function so the non-composite verison doesn't have to.
-//     The point is so that we avoid triggering TensorImpl use count asserts in debug mode
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_fused_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
-      const Tensor& cx, const Tensor& cy,
-      const Tensor& workspace, bool has_bias) {
+//     It duplicates the outputs of this function so the non-composite verison
+//     doesn't have to. The point is so that we avoid triggering TensorImpl use
+//     count asserts in debug mode
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_thnn_fused_lstm_cell_backward(
+    const c10::optional<Tensor>& grad_hy_opt,
+    const c10::optional<Tensor>& grad_cy_opt,
+    const Tensor& cx,
+    const Tensor& cy,
+    const Tensor& workspace,
+    bool has_bias) {
   TORCH_INTERNAL_ASSERT(!GradMode::is_enabled());
-  auto ret = at::_thnn_fused_lstm_cell_backward_impl(grad_hy_opt, grad_cy_opt, cx, cy, workspace, has_bias);
-  return std::make_tuple(std::get<0>(ret), std::get<0>(ret), std::get<1>(ret), std::get<2>(ret), std::get<2>(ret));
+  auto ret = at::_thnn_fused_lstm_cell_backward_impl(
+      grad_hy_opt, grad_cy_opt, cx, cy, workspace, has_bias);
+  return std::make_tuple(
+      std::get<0>(ret),
+      std::get<0>(ret),
+      std::get<1>(ret),
+      std::get<2>(ret),
+      std::get<2>(ret));
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // PUBLIC FUNCTIONS
@@ -1378,21 +1517,48 @@ REGISTER_NO_CPU_DISPATCH(lstm_miopen_stub);
 REGISTER_NO_CPU_DISPATCH(lstm_packed_miopen_stub);
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
-      const Tensor& _input, TensorList hx,
-      TensorList _params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
+    const Tensor& _input,
+    TensorList hx,
+    TensorList _params,
+    bool has_biases,
+    int64_t num_layers,
+    double dropout_p,
+    bool train,
+    bool bidirectional,
+    bool batch_first) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(_input)) {
     Tensor output, hy, cy;
-    lstm_cudnn_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
+    lstm_cudnn_stub(
+        _input.device().type(),
+        output,
+        hy,
+        cy,
+        _input,
+        hx,
+        _params,
+        has_biases,
+        num_layers,
+        dropout_p,
+        train,
+        bidirectional,
+        batch_first);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
 #ifdef USE_MPS
   if (_input.is_mps() && !bidirectional) {
-    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(_input, hx, _params, has_biases,
-            num_layers, dropout_p, train, bidirectional, batch_first);
-    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(std::get<0>(output), std::get<1>(output), std::get<2>(output));
+    std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> output = at::_lstm_mps(
+        _input,
+        hx,
+        _params,
+        has_biases,
+        num_layers,
+        dropout_p,
+        train,
+        bidirectional,
+        batch_first);
+    std::tuple<Tensor, Tensor, Tensor> return_values = std::make_tuple(
+        std::get<0>(output), std::get<1>(output), std::get<2>(output));
     return return_values;
   }
 #endif
@@ -1401,8 +1567,20 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   if (use_miopen(_input, dropout_p)) {
     if (!has_projections) {
       Tensor output, hy, cy;
-      lstm_miopen_stub(_input.device().type(), output, hy, cy, _input, hx, _params, has_biases,
-                num_layers, dropout_p, train, bidirectional, batch_first);
+      lstm_miopen_stub(
+          _input.device().type(),
+          output,
+          hy,
+          cy,
+          _input,
+          hx,
+          _params,
+          has_biases,
+          num_layers,
+          dropout_p,
+          train,
+          bidirectional,
+          batch_first);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
     } else {
       TORCH_WARN_ONCE(
@@ -1422,14 +1600,32 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
 }
 
 std::tuple<Tensor, Tensor, Tensor> lstm(
-      const Tensor& data, const Tensor& batch_sizes, TensorList hx,
-      TensorList _params, bool has_biases,
-      int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
+    const Tensor& data,
+    const Tensor& batch_sizes,
+    TensorList hx,
+    TensorList _params,
+    bool has_biases,
+    int64_t num_layers,
+    double dropout_p,
+    bool train,
+    bool bidirectional) {
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
   if (at::cudnn_is_acceptable(data)) {
     Tensor output, hy, cy;
-    lstm_packed_cudnn_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-            _params, has_biases, num_layers, dropout_p, train, bidirectional);
+    lstm_packed_cudnn_stub(
+        data.device().type(),
+        output,
+        hy,
+        cy,
+        data,
+        batch_sizes,
+        hx,
+        _params,
+        has_biases,
+        num_layers,
+        dropout_p,
+        train,
+        bidirectional);
     return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
   }
   // if cells are of different size, that means projections are used
@@ -1437,8 +1633,20 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
   if (use_miopen(data, dropout_p)) {
     if (!has_projections) {
       Tensor output, hy, cy;
-      lstm_packed_miopen_stub(data.device().type(), output, hy, cy, data, batch_sizes, hx,
-              _params, has_biases, num_layers, dropout_p, train, bidirectional);
+      lstm_packed_miopen_stub(
+          data.device().type(),
+          output,
+          hy,
+          cy,
+          data,
+          batch_sizes,
+          hx,
+          _params,
+          has_biases,
+          num_layers,
+          dropout_p,
+          train,
+          bidirectional);
       return std::make_tuple(std::move(output), std::move(hy), std::move(cy));
     } else {
       TORCH_WARN_ONCE(
@@ -1446,23 +1654,29 @@ std::tuple<Tensor, Tensor, Tensor> lstm(
     }
   }
 
-  PackedSequence input { data, batch_sizes };
+  PackedSequence input{data, batch_sizes};
   auto params = gather_params(_params, has_biases, has_projections);
   auto result = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
       input, params, hx[0], hx[1], num_layers, dropout_p, train, bidirectional);
-  auto & packed_output = std::get<0>(result);
-  return std::make_tuple(std::move(packed_output.data),
-                         std::move(std::get<1>(result)),
-                         std::move(std::get<2>(result)));
+  auto& packed_output = std::get<0>(result);
+  return std::make_tuple(
+      std::move(packed_output.data),
+      std::move(std::get<1>(result)),
+      std::move(std::get<2>(result)));
 }
 
 std::tuple<Tensor, Tensor> lstm_cell(
-    const Tensor& input, TensorList hx,
-    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+    const Tensor& input,
+    TensorList hx,
+    const Tensor& w_ih,
+    const Tensor& w_hh,
+    const c10::optional<Tensor>& b_ih_opt,
+    const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned =
+      at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
-  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] { return Tensor(); });
 
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
   check_rnn_cell_forward_input(input, w_ih.size(1));
@@ -1470,21 +1684,32 @@ std::tuple<Tensor, Tensor> lstm_cell(
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
   check_rnn_cell_forward_hidden(input, hx[1], hidden_size, 0);
   static at::Tensor undefined;
-  return LSTMCell<CellParams>{}(input, std::make_tuple(hx[0], hx[1]), CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
+  return LSTMCell<CellParams>{}(
+      input,
+      std::make_tuple(hx[0], hx[1]),
+      CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
-_thnn_differentiable_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_opt, const c10::optional<Tensor>& grad_cy_opt,
+_thnn_differentiable_lstm_cell_backward(
+    const c10::optional<Tensor>& grad_hy_opt,
+    const c10::optional<Tensor>& grad_cy_opt,
     const Tensor& input_gates,
-    const Tensor& hidden_gates, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt,
+    const Tensor& hidden_gates,
+    const c10::optional<Tensor>& input_bias_opt,
+    const c10::optional<Tensor>& hidden_bias_opt,
     const Tensor& cx,
     const Tensor& cy) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> grad_hy_maybe_owned = at::borrow_from_optional_tensor(grad_hy_opt);
+  c10::MaybeOwned<Tensor> grad_hy_maybe_owned =
+      at::borrow_from_optional_tensor(grad_hy_opt);
   const Tensor& grad_hy = *grad_hy_maybe_owned;
-  const Tensor& grad_cy = c10::value_or_else(grad_cy_opt, [] {return Tensor();});
-  const Tensor& input_bias = c10::value_or_else(input_bias_opt, [] {return Tensor();});
-  const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
+  const Tensor& grad_cy =
+      c10::value_or_else(grad_cy_opt, [] { return Tensor(); });
+  const Tensor& input_bias =
+      c10::value_or_else(input_bias_opt, [] { return Tensor(); });
+  const Tensor& hidden_bias =
+      c10::value_or_else(hidden_bias_opt, [] { return Tensor(); });
 
   if (!grad_hy.defined() && !grad_cy.defined()) {
     return std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>();
@@ -1504,7 +1729,9 @@ _thnn_differentiable_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_op
 
   Tensor gcx = cy.tanh();
   Tensor gog;
-  TORCH_INTERNAL_ASSERT((grad_hy.defined() || grad_cy.defined()),"either gradient with respect to hy or cy should be defined");
+  TORCH_INTERNAL_ASSERT(
+      (grad_hy.defined() || grad_cy.defined()),
+      "either gradient with respect to hy or cy should be defined");
   if (grad_hy.defined()) {
     gog = grad_hy * gcx;
     gog = at::sigmoid_backward(gog, o);
@@ -1524,26 +1751,33 @@ _thnn_differentiable_lstm_cell_backward( const c10::optional<Tensor>& grad_hy_op
   gfg = at::sigmoid_backward(gfg, f);
   gcg = at::tanh_backward(gcg, c);
   Tensor grad_gates = at::cat({gig, gfg, gcg, gog}, 1);
-  Tensor grad_bias = input_bias.defined() ? grad_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
-  return std::make_tuple(grad_gates, grad_gates, std::move(gcx), grad_bias, grad_bias);
+  Tensor grad_bias = input_bias.defined() ? grad_gates.sum(0, /*keepdim=*/false)
+                                          : at::Tensor{};
+  return std::make_tuple(
+      grad_gates, grad_gates, std::move(gcx), grad_bias, grad_bias);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell_backward(
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_thnn_differentiable_gru_cell_backward(
     const Tensor& grad_hy,
     const Tensor& input_gates,
     const Tensor& hidden_gates,
-    const Tensor& hx, const c10::optional<Tensor>& input_bias_opt, const c10::optional<Tensor>& hidden_bias_opt){
+    const Tensor& hx,
+    const c10::optional<Tensor>& input_bias_opt,
+    const c10::optional<Tensor>& hidden_bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> input_bias_maybe_owned = at::borrow_from_optional_tensor(input_bias_opt);
+  c10::MaybeOwned<Tensor> input_bias_maybe_owned =
+      at::borrow_from_optional_tensor(input_bias_opt);
   const Tensor& input_bias = *input_bias_maybe_owned;
-  const Tensor& hidden_bias = c10::value_or_else(hidden_bias_opt, [] {return Tensor();});
+  const Tensor& hidden_bias =
+      c10::value_or_else(hidden_bias_opt, [] { return Tensor(); });
 
   Tensor in_g = input_gates;
   Tensor h_g = hidden_gates;
-  if (input_bias.defined()){
-    in_g = in_g+input_bias;
+  if (input_bias.defined()) {
+    in_g = in_g + input_bias;
   }
-  if (hidden_bias.defined()){
+  if (hidden_bias.defined()) {
     h_g = h_g + hidden_bias;
   }
   auto chunked_input_gates = in_g.unsafe_chunk(3, 1);
@@ -1557,59 +1791,85 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _thnn_differentiable_gru_cell
   Tensor rg = (ir + hr).sigmoid();
   Tensor ig = (ii + hi).sigmoid();
   Tensor grad_hx = grad_hy * ig;
-  Tensor ng = (in+rg*hn).tanh();
+  Tensor ng = (in + rg * hn).tanh();
   Tensor gig = at::sigmoid_backward(grad_hy * (hx - ng), ig);
   Tensor gin = at::tanh_backward(grad_hy * (1 - ig), ng);
   Tensor ghn = gin * rg;
   Tensor grg = at::sigmoid_backward(gin * hn, rg);
-  Tensor grad_input_gates = at::cat({grg,gig,gin}, 1);
-  Tensor grad_hidden_gates = at::cat({grg,gig,ghn}, 1);
-  Tensor grad_input_bias = input_bias.defined() ? grad_input_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
-  Tensor grad_hidden_bias = input_bias.defined() ? grad_hidden_gates.sum(0, /*keepdim=*/false) : at::Tensor{};
-  return std::make_tuple(std::move(grad_input_gates), std::move(grad_hidden_gates),
-                         std::move(grad_hx), std::move(grad_input_bias), std::move(grad_hidden_bias));
+  Tensor grad_input_gates = at::cat({grg, gig, gin}, 1);
+  Tensor grad_hidden_gates = at::cat({grg, gig, ghn}, 1);
+  Tensor grad_input_bias = input_bias.defined()
+      ? grad_input_gates.sum(0, /*keepdim=*/false)
+      : at::Tensor{};
+  Tensor grad_hidden_bias = input_bias.defined()
+      ? grad_hidden_gates.sum(0, /*keepdim=*/false)
+      : at::Tensor{};
+  return std::make_tuple(
+      std::move(grad_input_gates),
+      std::move(grad_hidden_gates),
+      std::move(grad_hx),
+      std::move(grad_input_bias),
+      std::move(grad_hidden_bias));
 }
 
 Tensor gru_cell(
-    const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+    const Tensor& input,
+    const Tensor& hx,
+    const Tensor& w_ih,
+    const Tensor& w_hh,
+    const c10::optional<Tensor>& b_ih_opt,
+    const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned =
+      at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
-  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] { return Tensor(); });
 
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
   static at::Tensor undefined;
-  return GRUCell<CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
+  return GRUCell<CellParams>{}(
+      input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
 Tensor rnn_tanh_cell(
-    const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+    const Tensor& input,
+    const Tensor& hx,
+    const Tensor& w_ih,
+    const Tensor& w_hh,
+    const c10::optional<Tensor>& b_ih_opt,
+    const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned =
+      at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
-  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] { return Tensor(); });
 
   static at::Tensor undefined;
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
-  return SimpleCell<tanh_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
+  return SimpleCell<tanh_f, CellParams>{}(
+      input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
 Tensor rnn_relu_cell(
-    const Tensor& input, const Tensor& hx,
-    const Tensor& w_ih, const Tensor& w_hh, const c10::optional<Tensor>& b_ih_opt, const c10::optional<Tensor>& b_hh_opt) {
+    const Tensor& input,
+    const Tensor& hx,
+    const Tensor& w_ih,
+    const Tensor& w_hh,
+    const c10::optional<Tensor>& b_ih_opt,
+    const c10::optional<Tensor>& b_hh_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> b_ih_maybe_owned = at::borrow_from_optional_tensor(b_ih_opt);
+  c10::MaybeOwned<Tensor> b_ih_maybe_owned =
+      at::borrow_from_optional_tensor(b_ih_opt);
   const Tensor& b_ih = *b_ih_maybe_owned;
-  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] {return Tensor();});
+  const Tensor& b_hh = c10::value_or_else(b_hh_opt, [] { return Tensor(); });
 
   static at::Tensor undefined;
   check_rnn_cell_forward_input(input, w_ih.size(1));
   check_rnn_cell_forward_hidden(input, hx, w_hh.size(1), 0);
-  return SimpleCell<relu_f, CellParams>{}(input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
+  return SimpleCell<relu_f, CellParams>{}(
+      input, hx, CellParams{w_ih, w_hh, b_ih, b_hh, undefined});
 }
 
 // Quantized implementations
@@ -1637,7 +1897,9 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     params.emplace_back(static_cast<c10::intrusive_ptr<CellParamsBase>>(param));
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
+  TORCH_CHECK(
+      hx[0].size(2) == hx[1].size(2),
+      "quantized LSTM with projections is not supported");
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
   auto input = batch_first ? _input.transpose(0, 1) : _input;
   TORCH_CHECK(has_biases, "quantized LSTM requires biases");
@@ -1651,17 +1913,35 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_input(
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (use_dynamic) {
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
+          input,
+          params,
+          hx[0],
+          hx[1],
+          num_layers,
+          dropout_p,
+          train,
+          bidirectional);
     } else {
       results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
+          input,
+          params,
+          hx[0],
+          hx[1],
+          num_layers,
+          dropout_p,
+          train,
+          bidirectional);
     }
   } else {
     results = _lstm_impl<FullLayer, FullBidirectionalLayer>(
-        input, params, hx[0], hx[1], num_layers,
-        dropout_p, train, bidirectional);
+        input,
+        params,
+        hx[0],
+        hx[1],
+        num_layers,
+        dropout_p,
+        train,
+        bidirectional);
   }
 
   if (batch_first) {
@@ -1710,32 +1990,53 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data(
     params.emplace_back(static_cast<c10::intrusive_ptr<CellParamsBase>>(param));
   }
   TORCH_CHECK(hx.size() == 2, "lstm expects two hidden states");
-  TORCH_CHECK(hx[0].size(2) == hx[1].size(2), "quantized LSTM with projections is not supported");
+  TORCH_CHECK(
+      hx[0].size(2) == hx[1].size(2),
+      "quantized LSTM with projections is not supported");
 
   auto result_dtype = dtype.has_value() ? dtype.value() : at::kChar;
 
-  PackedSequence input { data, batch_sizes };
+  PackedSequence input{data, batch_sizes};
   std::tuple<PackedSequence, Tensor, Tensor> results;
   if (result_dtype == at::kChar || result_dtype == at::kQInt8) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (use_dynamic) {
       results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
+          input,
+          params,
+          hx[0],
+          hx[1],
+          num_layers,
+          dropout_p,
+          train,
+          bidirectional);
     } else {
       results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-          input, params, hx[0], hx[1], num_layers,
-          dropout_p, train, bidirectional);
+          input,
+          params,
+          hx[0],
+          hx[1],
+          num_layers,
+          dropout_p,
+          train,
+          bidirectional);
     }
   } else {
     results = _lstm_impl<PackedLayer, PackedBidirectionalLayer>(
-        input, params, hx[0], hx[1], num_layers,
-        dropout_p, train, bidirectional);
+        input,
+        params,
+        hx[0],
+        hx[1],
+        num_layers,
+        dropout_p,
+        train,
+        bidirectional);
   }
-  auto & packed_output = std::get<0>(results);
-  return std::make_tuple(std::move(packed_output.data),
-                         std::move(std::get<1>(results)),
-                         std::move(std::get<2>(results)));
+  auto& packed_output = std::get<0>(results);
+  return std::make_tuple(
+      std::move(packed_output.data),
+      std::move(std::get<1>(results)),
+      std::move(std::get<2>(results)));
 }
 
 std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
@@ -1757,58 +2058,53 @@ std::tuple<Tensor, Tensor, Tensor> quantized_lstm_data_legacy(
       "using the newer definitions in torch.jit.quantized");
 }
 
-#define DEFINE_QUANTIZED_RNN_CELL(name, hx_type, cell_type, return_type, prepare_hx_fn) \
-return_type name( \
-    const Tensor& input, \
-    hx_type hx, \
-    const Tensor& w_ih, \
-    const Tensor& w_hh, \
-    const Tensor& b_ih, \
-    const Tensor& b_hh, \
-    const Tensor& packed_ih, \
-    const Tensor& packed_hh, \
-    const Tensor& col_offsets_ih, \
-    const Tensor& col_offsets_hh, \
-    const Scalar& scale_ih, \
-    const Scalar& scale_hh, \
-    const Scalar& zero_point_ih, \
-    const Scalar& zero_point_hh) { \
-  QuantizedCellParams params( \
-      w_ih, \
-      w_hh, \
-      b_ih, \
-      b_hh, \
-      packed_ih, \
-      packed_hh, \
-      col_offsets_ih, \
-      col_offsets_hh, \
-      scale_ih, \
-      scale_hh, \
-      zero_point_ih, \
-      zero_point_hh); \
-  return cell_type{}( \
-      input, prepare_hx_fn(hx), params); \
-}
-// Set reduced range to be True for all RNN Cells by default. This flag is used only for FBGEMM kernels
-// QNNPACK does not reduce range for activations
-#define DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(name, hx_type, cell_type, return_type, prepare_hx_fn) \
-return_type name( \
-    const Tensor& input, \
-    hx_type hx, \
-    c10::intrusive_ptr<LinearPackedParamsBase> _packed_w_ih, \
-    c10::intrusive_ptr<LinearPackedParamsBase> _packed_w_hh, \
-    const Tensor& b_ih, \
-    const Tensor& b_hh \
- ) { \
-  QuantizedCellParamsDynamic params( \
-      _packed_w_ih, \
-      _packed_w_hh, \
-      b_ih, \
-      b_hh,\
-      true); \
-  return cell_type{}( \
-      input, prepare_hx_fn(hx), params); \
-}
+#define DEFINE_QUANTIZED_RNN_CELL(                        \
+    name, hx_type, cell_type, return_type, prepare_hx_fn) \
+  return_type name(                                       \
+      const Tensor& input,                                \
+      hx_type hx,                                         \
+      const Tensor& w_ih,                                 \
+      const Tensor& w_hh,                                 \
+      const Tensor& b_ih,                                 \
+      const Tensor& b_hh,                                 \
+      const Tensor& packed_ih,                            \
+      const Tensor& packed_hh,                            \
+      const Tensor& col_offsets_ih,                       \
+      const Tensor& col_offsets_hh,                       \
+      const Scalar& scale_ih,                             \
+      const Scalar& scale_hh,                             \
+      const Scalar& zero_point_ih,                        \
+      const Scalar& zero_point_hh) {                      \
+    QuantizedCellParams params(                           \
+        w_ih,                                             \
+        w_hh,                                             \
+        b_ih,                                             \
+        b_hh,                                             \
+        packed_ih,                                        \
+        packed_hh,                                        \
+        col_offsets_ih,                                   \
+        col_offsets_hh,                                   \
+        scale_ih,                                         \
+        scale_hh,                                         \
+        zero_point_ih,                                    \
+        zero_point_hh);                                   \
+    return cell_type{}(input, prepare_hx_fn(hx), params); \
+  }
+// Set reduced range to be True for all RNN Cells by default. This flag is used
+// only for FBGEMM kernels QNNPACK does not reduce range for activations
+#define DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(                     \
+    name, hx_type, cell_type, return_type, prepare_hx_fn)      \
+  return_type name(                                            \
+      const Tensor& input,                                     \
+      hx_type hx,                                              \
+      c10::intrusive_ptr<LinearPackedParamsBase> _packed_w_ih, \
+      c10::intrusive_ptr<LinearPackedParamsBase> _packed_w_hh, \
+      const Tensor& b_ih,                                      \
+      const Tensor& b_hh) {                                    \
+    QuantizedCellParamsDynamic params(                         \
+        _packed_w_ih, _packed_w_hh, b_ih, b_hh, true);         \
+    return cell_type{}(input, prepare_hx_fn(hx), params);      \
+  }
 
 // Quantized LSTM cell
 using quantized_lstm_cell_type = LSTMCell<QuantizedCellParams>;
@@ -1820,9 +2116,19 @@ std::tuple<Tensor, Tensor> prepare_quantized_lstm_hx(TensorList hx) {
 // Quantized LSTM cell
 using quantized_lstm_cell_dynamic_type = LSTMCell<QuantizedCellParamsDynamic>;
 
-DEFINE_QUANTIZED_RNN_CELL(quantized_lstm_cell, TensorList, quantized_lstm_cell_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
+DEFINE_QUANTIZED_RNN_CELL(
+    quantized_lstm_cell,
+    TensorList,
+    quantized_lstm_cell_type,
+    quantized_lstm_return_type,
+    prepare_quantized_lstm_hx);
 
-DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_lstm_cell_dynamic, TensorList, quantized_lstm_cell_dynamic_type, quantized_lstm_return_type, prepare_quantized_lstm_hx);
+DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(
+    quantized_lstm_cell_dynamic,
+    TensorList,
+    quantized_lstm_cell_dynamic_type,
+    quantized_lstm_return_type,
+    prepare_quantized_lstm_hx);
 
 // Helpers for simpler cells
 using simple_hx_type = const Tensor&;
@@ -1834,28 +2140,63 @@ simple_hx_type prepare_quantized_hx(simple_hx_type hx) {
 using quantized_gru_cell_type = GRUCell<QuantizedCellParams>;
 using quantized_gru_cell_dynamic_type = GRUCell<QuantizedCellParamsDynamic>;
 
-DEFINE_QUANTIZED_RNN_CELL(quantized_gru_cell, simple_hx_type, quantized_gru_cell_type, Tensor, prepare_quantized_hx);
+DEFINE_QUANTIZED_RNN_CELL(
+    quantized_gru_cell,
+    simple_hx_type,
+    quantized_gru_cell_type,
+    Tensor,
+    prepare_quantized_hx);
 
-DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_gru_cell_dynamic, simple_hx_type, quantized_gru_cell_dynamic_type, Tensor, prepare_quantized_hx);
+DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(
+    quantized_gru_cell_dynamic,
+    simple_hx_type,
+    quantized_gru_cell_dynamic_type,
+    Tensor,
+    prepare_quantized_hx);
 
 // Quantized RNN w/ ReLU cell
 using quantized_rnn_relu_cell_type = SimpleCell<relu_f, QuantizedCellParams>;
-DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_relu_cell, simple_hx_type, quantized_rnn_relu_cell_type, Tensor, prepare_quantized_hx);
-using quantized_rnn_relu_cell_dynamic_type = SimpleCell<relu_f, QuantizedCellParamsDynamic>;
-DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_relu_cell_dynamic, simple_hx_type, quantized_rnn_relu_cell_dynamic_type, Tensor, prepare_quantized_hx);
+DEFINE_QUANTIZED_RNN_CELL(
+    quantized_rnn_relu_cell,
+    simple_hx_type,
+    quantized_rnn_relu_cell_type,
+    Tensor,
+    prepare_quantized_hx);
+using quantized_rnn_relu_cell_dynamic_type =
+    SimpleCell<relu_f, QuantizedCellParamsDynamic>;
+DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(
+    quantized_rnn_relu_cell_dynamic,
+    simple_hx_type,
+    quantized_rnn_relu_cell_dynamic_type,
+    Tensor,
+    prepare_quantized_hx);
 
 // Quantized RNN w/ tanh cell
 using quantized_rnn_tanh_cell_type = SimpleCell<tanh_f, QuantizedCellParams>;
-DEFINE_QUANTIZED_RNN_CELL(quantized_rnn_tanh_cell, simple_hx_type, quantized_rnn_tanh_cell_type, Tensor, prepare_quantized_hx);
-using quantized_rnn_tanh_cell_dynamic_type = SimpleCell<tanh_f, QuantizedCellParamsDynamic>;
-DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(quantized_rnn_tanh_cell_dynamic, simple_hx_type, quantized_rnn_tanh_cell_dynamic_type, Tensor, prepare_quantized_hx);
+DEFINE_QUANTIZED_RNN_CELL(
+    quantized_rnn_tanh_cell,
+    simple_hx_type,
+    quantized_rnn_tanh_cell_type,
+    Tensor,
+    prepare_quantized_hx);
+using quantized_rnn_tanh_cell_dynamic_type =
+    SimpleCell<tanh_f, QuantizedCellParamsDynamic>;
+DEFINE_QUANTIZED_RNN_CELL_DYNAMIC(
+    quantized_rnn_tanh_cell_dynamic,
+    simple_hx_type,
+    quantized_rnn_tanh_cell_dynamic_type,
+    Tensor,
+    prepare_quantized_hx);
 
 namespace {
 
-static C10_UNUSED auto ensure_linear_params_registered = register_linear_params();
+static C10_UNUSED auto ensure_linear_params_registered =
+    register_linear_params();
 
 static auto cell_params_base_registry =
-    torch::selective_class_<CellParamsBase>("rnn", TORCH_SELECTIVE_CLASS("CellParamsBase"))
+    torch::selective_class_<CellParamsBase>(
+        "rnn",
+        TORCH_SELECTIVE_CLASS("CellParamsBase"))
         .def_pickle(
             [](const c10::intrusive_ptr<CellParamsBase>& self)
                 -> CellParamsSerializationType { return self->__getstate__(); },
@@ -1867,57 +2208,95 @@ static auto cell_params_base_registry =
             });
 
 TORCH_LIBRARY_FRAGMENT(aten, m) {
-  m.def(
-      TORCH_SELECTIVE_SCHEMA("aten::quantized_lstm.input(Tensor input, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)"));
-  m.def(
-      TORCH_SELECTIVE_SCHEMA("aten::quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)"));
-  m.def(
-      TORCH_SELECTIVE_SCHEMA("aten::quantized_lstm.input_legacy(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)"));
-  m.def(
-      TORCH_SELECTIVE_SCHEMA("aten::quantized_lstm.data_legacy(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)"));
-  m.def(
-      TORCH_SELECTIVE_SCHEMA("aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)"));
-  m.def(
-      TORCH_SELECTIVE_SCHEMA("aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)"));
-  m.def(
-      TORCH_SELECTIVE_SCHEMA("aten::quantized_gru.input_legacy(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)"));
-  m.def(
-      TORCH_SELECTIVE_SCHEMA("aten::quantized_gru.data_legacy(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "aten::quantized_lstm.input(Tensor input, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "aten::quantized_lstm.data(Tensor data, Tensor batch_sizes, Tensor[] hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "aten::quantized_lstm.input_legacy(Tensor input, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "aten::quantized_lstm.data_legacy(Tensor data, Tensor batch_sizes, Tensor[] hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, *, ScalarType? dtype=None, bool use_dynamic=False) -> (Tensor, Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "aten::quantized_gru.input(Tensor input, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "aten::quantized_gru.data(Tensor data, Tensor batch_sizes, Tensor hx, __torch__.torch.classes.rnn.CellParamsBase[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "aten::quantized_gru.input_legacy(Tensor input, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional, bool batch_first) -> (Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "aten::quantized_gru.data_legacy(Tensor data, Tensor batch_sizes, Tensor hx, Tensor[] params, bool has_biases, int num_layers, float dropout, bool train, bool bidirectional) -> (Tensor, Tensor)"));
 }
 
 TORCH_LIBRARY_FRAGMENT(quantized, m) {
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh, bool reduce_range=False) -> __torch__.torch.classes.rnn.CellParamsBase"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::make_quantized_cell_params_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh) -> __torch__.torch.classes.rnn.CellParamsBase"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::make_quantized_cell_params(Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh) -> __torch__.torch.classes.rnn.CellParamsBase"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::quantized_lstm_cell_dynamic(Tensor input, Tensor[] hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh) -> (Tensor, Tensor)"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::quantized_gru_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::quantized_rnn_relu_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor"));
-  m.def(TORCH_SELECTIVE_SCHEMA("quantized::quantized_rnn_tanh_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "quantized::make_quantized_cell_params_dynamic(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh, bool reduce_range=False) -> __torch__.torch.classes.rnn.CellParamsBase"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "quantized::make_quantized_cell_params_fp16(__torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh) -> __torch__.torch.classes.rnn.CellParamsBase"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "quantized::make_quantized_cell_params(Tensor w_ih, Tensor w_hh, Tensor b_ih, Tensor b_hh) -> __torch__.torch.classes.rnn.CellParamsBase"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "quantized::quantized_lstm_cell_dynamic(Tensor input, Tensor[] hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor bias_ih, Tensor bias_hh) -> (Tensor, Tensor)"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "quantized::quantized_gru_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "quantized::quantized_rnn_relu_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor"));
+  m.def(TORCH_SELECTIVE_SCHEMA(
+      "quantized::quantized_rnn_tanh_cell_dynamic(Tensor input, Tensor hx, __torch__.torch.classes.quantized.LinearPackedParamsBase w_ih, __torch__.torch.classes.quantized.LinearPackedParamsBase w_hh, Tensor b_ih, Tensor b_hh) -> Tensor"));
 }
 
 TORCH_LIBRARY_IMPL(aten, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("aten::quantized_lstm.input"), TORCH_FN(quantized_lstm_input));
-  m.impl(TORCH_SELECTIVE_NAME("aten::quantized_lstm.data"), TORCH_FN(quantized_lstm_data));
-  m.impl(TORCH_SELECTIVE_NAME("aten::quantized_lstm.input_legacy"), TORCH_FN(quantized_lstm_input_legacy));
-  m.impl(TORCH_SELECTIVE_NAME("aten::quantized_lstm.data_legacy"), TORCH_FN(quantized_lstm_data_legacy));
-  m.impl(TORCH_SELECTIVE_NAME("aten::quantized_gru.input"), TORCH_FN(quantized_gru_input));
-  m.impl(TORCH_SELECTIVE_NAME("aten::quantized_gru.data"), TORCH_FN(quantized_gru_data));
-  m.impl(TORCH_SELECTIVE_NAME("aten::quantized_gru.input_legacy"), TORCH_FN(quantized_gru_input_legacy));
-  m.impl(TORCH_SELECTIVE_NAME("aten::quantized_gru.data_legacy"), TORCH_FN(quantized_gru_data_legacy));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantized_lstm.input"),
+      TORCH_FN(quantized_lstm_input));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantized_lstm.data"),
+      TORCH_FN(quantized_lstm_data));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantized_lstm.input_legacy"),
+      TORCH_FN(quantized_lstm_input_legacy));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantized_lstm.data_legacy"),
+      TORCH_FN(quantized_lstm_data_legacy));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantized_gru.input"),
+      TORCH_FN(quantized_gru_input));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantized_gru.data"),
+      TORCH_FN(quantized_gru_data));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantized_gru.input_legacy"),
+      TORCH_FN(quantized_gru_input_legacy));
+  m.impl(
+      TORCH_SELECTIVE_NAME("aten::quantized_gru.data_legacy"),
+      TORCH_FN(quantized_gru_data_legacy));
 }
 
 TORCH_LIBRARY_IMPL(quantized, CPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::make_quantized_cell_params_dynamic"), TORCH_FN(make_quantized_cell_params_dynamic));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::make_quantized_cell_params"), TORCH_FN(make_quantized_cell_params));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::quantized_lstm_cell_dynamic"), TORCH_FN(quantized_lstm_cell_dynamic));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::quantized_gru_cell_dynamic"), TORCH_FN(quantized_gru_cell_dynamic));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::quantized_rnn_relu_cell_dynamic"), TORCH_FN(quantized_rnn_relu_cell_dynamic));
-  m.impl(TORCH_SELECTIVE_NAME("quantized::quantized_rnn_tanh_cell_dynamic"), TORCH_FN(quantized_rnn_tanh_cell_dynamic));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::make_quantized_cell_params_dynamic"),
+      TORCH_FN(make_quantized_cell_params_dynamic));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::make_quantized_cell_params"),
+      TORCH_FN(make_quantized_cell_params));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::quantized_lstm_cell_dynamic"),
+      TORCH_FN(quantized_lstm_cell_dynamic));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::quantized_gru_cell_dynamic"),
+      TORCH_FN(quantized_gru_cell_dynamic));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::quantized_rnn_relu_cell_dynamic"),
+      TORCH_FN(quantized_rnn_relu_cell_dynamic));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::quantized_rnn_tanh_cell_dynamic"),
+      TORCH_FN(quantized_rnn_tanh_cell_dynamic));
 }
 
 TORCH_LIBRARY_IMPL(quantized, CatchAll, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::make_quantized_cell_params_fp16"), TORCH_FN(make_quantized_cell_params_fp16));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::make_quantized_cell_params_fp16"),
+      TORCH_FN(make_quantized_cell_params_fp16));
 }
 
 } // namespace
-}}  // namespace at::native
+} // namespace native
+} // namespace at

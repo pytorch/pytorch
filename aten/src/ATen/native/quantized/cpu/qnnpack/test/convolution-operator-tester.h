@@ -14,9 +14,9 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <random>
 #include <vector>
-#include <memory>
 
 #include <pytorch_qnnpack.h>
 #include <qnnpack_func.h>
@@ -471,8 +471,7 @@ class ConvolutionOperatorTester {
     auto s32rng =
         std::bind(std::uniform_int_distribution<int32_t>(-10000, 10000), rng);
     auto u8rng = std::bind(std::uniform_int_distribution<uint8_t>(), rng);
-    auto f32rng =
-        std::bind(std::uniform_real_distribution<float>(1, 5), rng);
+    auto f32rng = std::bind(std::uniform_real_distribution<float>(1, 5), rng);
 
     std::vector<uint8_t> input(
         batchSize() *
@@ -497,8 +496,7 @@ class ConvolutionOperatorTester {
     const uint8_t inputZeroPoint = 127;
     // Make num zero points multiple of 8.
     // This is the least common denominator for SSE/ARM kernels we have.
-    size_t num_zero_points_padded =
-      (groups() * groupOutputChannels() + 8);
+    size_t num_zero_points_padded = (groups() * groupOutputChannels() + 8);
     std::vector<uint8_t> kernelZeroPoints(num_zero_points_padded, 127);
 
     for (size_t iteration = 0; iteration < iterations(); iteration++) {
@@ -506,7 +504,8 @@ class ConvolutionOperatorTester {
       std::generate(kernel.begin(), kernel.end(), std::ref(u8rng));
       std::generate(bias.begin(), bias.end(), std::ref(s32rng));
       if (per_channel()) {
-        std::generate(kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
+        std::generate(
+            kernelZeroPoints.begin(), kernelZeroPoints.end(), std::ref(u8rng));
       }
       std::fill(output.begin(), output.end(), 0xA5);
       std::fill(accumulators.begin(), accumulators.end(), 0);
@@ -622,9 +621,12 @@ class ConvolutionOperatorTester {
           long(std::numeric_limits<uint8_t>::min())));
 
       ASSERT_EQ(pytorch_qnnp_status_success, pytorch_qnnp_initialize());
-      std::vector<float> requantization_scales(num_zero_points_padded, 1.0 * 1.0 / outputScale);
+      std::vector<float> requantization_scales(
+          num_zero_points_padded, 1.0 * 1.0 / outputScale);
       if (per_channel()) {
-        auto scale_generator = [&]() -> float {return (f32rng()/outputScale);};
+        auto scale_generator = [&]() -> float {
+          return (f32rng() / outputScale);
+        };
         std::generate(
             requantization_scales.begin(),
             requantization_scales.end(),
@@ -703,7 +705,8 @@ class ConvolutionOperatorTester {
 
           ASSERT_EQ(
               pytorch_qnnp_status_success,
-              pytorch_qnnp_run_operator(convolution, nullptr /* thread pool */));
+              pytorch_qnnp_run_operator(
+                  convolution, nullptr /* thread pool */));
 
           ASSERT_EQ(
               pytorch_qnnp_status_success,
@@ -711,8 +714,7 @@ class ConvolutionOperatorTester {
           convolution = nullptr;
         } break;
 
-        case Mode::Runtime:
-        {
+        case Mode::Runtime: {
           auto packW = std::unique_ptr<qnnpack::PrePackConvWeights>(
               new qnnpack::PrePackConvWeights(
                   convolution,
@@ -740,8 +742,7 @@ class ConvolutionOperatorTester {
           ASSERT_EQ(
               pytorch_qnnp_status_success,
               pytorch_qnnp_delete_operator(convolution));
-        }
-        break;
+        } break;
 
         default:
           // Undefined!

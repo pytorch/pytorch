@@ -10,12 +10,13 @@ namespace ruy_utils {
 
 ruy::Context* get_ruy_context();
 
-void quantize_multiplier(double scale,
-                         int* multiplier_fixedpoint,
-                         int* multiplier_exponent);
+void quantize_multiplier(
+    double scale,
+    int* multiplier_fixedpoint,
+    int* multiplier_exponent);
 
 } // namespace ruy_utils
 } // namespace native
-} // namesplace
+} // namespace at
 
 #endif // USE_RUY_QMATMUL

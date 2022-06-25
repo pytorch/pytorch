@@ -4,8 +4,8 @@
 #include <cuda.h>
 #include <nvrtc.h>
 
-namespace at { namespace cuda {
-
+namespace at {
+namespace cuda {
 
 // NOTE [ USE OF NVRTC AND DRIVER API ]
 //
@@ -25,9 +25,9 @@ namespace at { namespace cuda {
 // or
 //   globalContext().getNVRTC().cuLoadModule(...)
 //
-// If a function is missing add it to the list in ATen/cuda/nvrtc_stub/ATenNVRTC.h
-// and edit ATen/cuda/detail/LazyNVRTC.cpp accordingly (e.g., via one of the stub
-// macros).
+// If a function is missing add it to the list in
+// ATen/cuda/nvrtc_stub/ATenNVRTC.h and edit ATen/cuda/detail/LazyNVRTC.cpp
+// accordingly (e.g., via one of the stub macros).
 
 #if !defined(USE_ROCM)
 
@@ -65,8 +65,7 @@ namespace at { namespace cuda {
   _(nvrtcGetCUBINSize)     \
   _(nvrtcGetCUBIN)
 #else
-#define AT_FORALL_NVRTC(_) \
-  AT_FORALL_NVRTC_BASE(_)
+#define AT_FORALL_NVRTC(_) AT_FORALL_NVRTC_BASE(_)
 #endif
 
 #else
@@ -75,11 +74,11 @@ namespace at { namespace cuda {
 //
 // ATen's NVRTC stub library, caffe2_nvrtc, provides dynamic loading of both
 // NVRTC and driver APIs. While the former is not yet supported for HIP, the
-// later is supported and needed (e.g., in CUDAHooks::getDeviceWithPrimaryContext()
-// used by tensor.pin_memory()).
+// later is supported and needed (e.g., in
+// CUDAHooks::getDeviceWithPrimaryContext() used by tensor.pin_memory()).
 //
-// The macro below strips out certain unsupported operations on HIP from the full
-// list above.
+// The macro below strips out certain unsupported operations on HIP from the
+// full list above.
 //
 // HIP doesn't have
 //   cuGetErrorString  (maps to non-functional hipGetErrorString___)
@@ -87,9 +86,11 @@ namespace at { namespace cuda {
 // HIP from ROCm 3.5 on renamed hipOccupancyMaxActiveBlocksPerMultiprocessor
 // to hipModuleOccupancyMaxActiveBlocksPerMultiprocessor.
 #if TORCH_HIP_VERSION < 305
-#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR hipOccupancyMaxActiveBlocksPerMultiprocessor
+#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR \
+  hipOccupancyMaxActiveBlocksPerMultiprocessor
 #else
-#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR cuOccupancyMaxActiveBlocksPerMultiprocessor
+#define HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR \
+  cuOccupancyMaxActiveBlocksPerMultiprocessor
 #endif
 
 #define AT_FORALL_NVRTC(_)                        \
@@ -121,4 +122,5 @@ extern "C" typedef struct NVRTC {
 } NVRTC;
 
 extern "C" TORCH_CUDA_CPP_API NVRTC* load_nvrtc();
-}} // at::cuda
+} // namespace cuda
+} // namespace at

@@ -1,10 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <c10/util/irange.h>
 #include <unordered_map>
@@ -18,7 +18,8 @@
 #include <ATen/ops/empty_like_native.h>
 #endif
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 using namespace at::sparse;
 
@@ -86,7 +87,7 @@ int64_t _csr_matmult_maxnnz(
   return nnz;
 }
 
-template<class scalar_t>
+template <class scalar_t>
 void _csr_matmult(
     const int64_t n_row,
     const int64_t n_col,
@@ -111,8 +112,8 @@ void _csr_matmult(
   /*
     Compute CSR entries for matrix C = A@B.
 
-    The matrices `A` and 'B' should be in proper CSR structure, and their dimensions
-    should be compatible.
+    The matrices `A` and 'B' should be in proper CSR structure, and their
+    dimensions should be compatible.
 
     Inputs:
       `n_row`         - number of row in A
@@ -164,7 +165,7 @@ void _csr_matmult(
     }
 
     for (const auto jj : c10::irange(length)) {
-      (void)jj; //Suppress unused variable warning
+      (void)jj; // Suppress unused variable warning
       Cj[nnz] = head;
       Cx[nnz] = sums[head];
       nnz++;
@@ -180,14 +181,14 @@ void _csr_matmult(
   }
 }
 
-
 template <typename scalar_t>
 void sparse_matmul_kernel(
     Tensor& output,
     const Tensor& mat1,
     const Tensor& mat2) {
   /*
-    Computes  the sparse-sparse matrix multiplication between `mat1` and `mat2`, which are sparse tensors in COO format.
+    Computes  the sparse-sparse matrix multiplication between `mat1` and `mat2`,
+    which are sparse tensors in COO format.
   */
 
   auto M = mat1.size(0);
@@ -199,17 +200,24 @@ void sparse_matmul_kernel(
   Tensor mat1_row_indices = mat1_indices_.select(0, 0);
   Tensor mat1_col_indices = mat1_indices_.select(0, 1);
 
-  Tensor mat1_indptr = coo_to_csr(mat1_row_indices.data_ptr<int64_t>(), M, mat1._nnz());
+  Tensor mat1_indptr =
+      coo_to_csr(mat1_row_indices.data_ptr<int64_t>(), M, mat1._nnz());
 
   auto mat2_indices_ = mat2._indices().contiguous();
   auto mat2_values = mat2._values().contiguous();
   Tensor mat2_row_indices = mat2_indices_.select(0, 0);
   Tensor mat2_col_indices = mat2_indices_.select(0, 1);
 
-  Tensor mat2_indptr = coo_to_csr(mat2_row_indices.data_ptr<int64_t>(), K, mat2._nnz());
+  Tensor mat2_indptr =
+      coo_to_csr(mat2_row_indices.data_ptr<int64_t>(), K, mat2._nnz());
 
-  auto nnz = _csr_matmult_maxnnz(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(),
-      mat2_indptr.data_ptr<int64_t>(), mat2_col_indices.data_ptr<int64_t>());
+  auto nnz = _csr_matmult_maxnnz(
+      M,
+      N,
+      mat1_indptr.data_ptr<int64_t>(),
+      mat1_col_indices.data_ptr<int64_t>(),
+      mat2_indptr.data_ptr<int64_t>(),
+      mat2_col_indices.data_ptr<int64_t>());
 
   auto output_indices = output._indices();
   auto output_values = output._values();
@@ -221,11 +229,23 @@ void sparse_matmul_kernel(
   Tensor output_row_indices = output_indices.select(0, 0);
   Tensor output_col_indices = output_indices.select(0, 1);
 
-  _csr_matmult(M, N, mat1_indptr.data_ptr<int64_t>(), mat1_col_indices.data_ptr<int64_t>(), mat1_values.data_ptr<scalar_t>(),
-  mat2_indptr.data_ptr<int64_t>(), mat2_col_indices.data_ptr<int64_t>(), mat2_values.data_ptr<scalar_t>(),
-  output_indptr.data_ptr<int64_t>(), output_col_indices.data_ptr<int64_t>(), output_values.data_ptr<scalar_t>());
+  _csr_matmult(
+      M,
+      N,
+      mat1_indptr.data_ptr<int64_t>(),
+      mat1_col_indices.data_ptr<int64_t>(),
+      mat1_values.data_ptr<scalar_t>(),
+      mat2_indptr.data_ptr<int64_t>(),
+      mat2_col_indices.data_ptr<int64_t>(),
+      mat2_values.data_ptr<scalar_t>(),
+      output_indptr.data_ptr<int64_t>(),
+      output_col_indices.data_ptr<int64_t>(),
+      output_values.data_ptr<scalar_t>());
 
-  csr_to_coo(M, output_indptr.data_ptr<int64_t>(), output_row_indices.data_ptr<int64_t>());
+  csr_to_coo(
+      M,
+      output_indptr.data_ptr<int64_t>(),
+      output_row_indices.data_ptr<int64_t>());
 }
 
 } // end anonymous namespace
@@ -235,25 +255,47 @@ Tensor sparse_sparse_matmul_cpu(const Tensor& mat1_, const Tensor& mat2_) {
   TORCH_INTERNAL_ASSERT(mat2_.is_sparse());
   TORCH_CHECK(mat1_.dim() == 2);
   TORCH_CHECK(mat2_.dim() == 2);
-  TORCH_CHECK(mat1_.dense_dim() == 0, "sparse_sparse_matmul_cpu: scalar values expected, got ", mat1_.dense_dim(), "D values");
-  TORCH_CHECK(mat2_.dense_dim() == 0, "sparse_sparse_matmul_cpu: scalar values expected, got ", mat2_.dense_dim(), "D values");
+  TORCH_CHECK(
+      mat1_.dense_dim() == 0,
+      "sparse_sparse_matmul_cpu: scalar values expected, got ",
+      mat1_.dense_dim(),
+      "D values");
+  TORCH_CHECK(
+      mat2_.dense_dim() == 0,
+      "sparse_sparse_matmul_cpu: scalar values expected, got ",
+      mat2_.dense_dim(),
+      "D values");
 
   TORCH_CHECK(
-      mat1_.size(1) == mat2_.size(0), "mat1 and mat2 shapes cannot be multiplied (",
-      mat1_.size(0), "x", mat1_.size(1), " and ", mat2_.size(0), "x", mat2_.size(1), ")");
+      mat1_.size(1) == mat2_.size(0),
+      "mat1 and mat2 shapes cannot be multiplied (",
+      mat1_.size(0),
+      "x",
+      mat1_.size(1),
+      " and ",
+      mat2_.size(0),
+      "x",
+      mat2_.size(1),
+      ")");
 
-  TORCH_CHECK(mat1_.scalar_type() == mat2_.scalar_type(),
-           "mat1 dtype ", mat1_.scalar_type(), " does not match mat2 dtype ", mat2_.scalar_type());
+  TORCH_CHECK(
+      mat1_.scalar_type() == mat2_.scalar_type(),
+      "mat1 dtype ",
+      mat1_.scalar_type(),
+      " does not match mat2 dtype ",
+      mat2_.scalar_type());
 
   auto output = at::native::empty_like(mat1_);
-  output.sparse_resize_and_clear_({mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
+  output.sparse_resize_and_clear_(
+      {mat1_.size(0), mat2_.size(1)}, mat1_.sparse_dim(), 0);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(mat1_.scalar_type(), "sparse_matmul", [&] {
-    sparse_matmul_kernel<scalar_t>(output, mat1_.coalesce(), mat2_.coalesce());
-  });
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      mat1_.scalar_type(), "sparse_matmul", [&] {
+        sparse_matmul_kernel<scalar_t>(
+            output, mat1_.coalesce(), mat2_.coalesce());
+      });
   return output;
 }
-
 
 } // namespace native
 } // namespace at

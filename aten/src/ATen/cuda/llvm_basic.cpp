@@ -9,15 +9,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <string>
 #include <ATen/cuda/llvm_jit_strings.h>
+#include <string>
 
 namespace at {
 namespace cuda {
 
 // copy-pasted from some llvm files:
 // - https://github.com/llvm/llvm-project/blob/main/libcxx/include/type_traits
-// - https://github.com/llvm/llvm-project/blob/main/clang/test/Headers/Inputs/include/type_traits
+// -
+// https://github.com/llvm/llvm-project/blob/main/clang/test/Headers/Inputs/include/type_traits
 const std::string traits = R"ESCAPE(
 
 namespace std {
@@ -168,8 +169,8 @@ class __promote : public __promote_imp<_A1, _A2, _A3> {};
 
 )ESCAPE";
 
-const std::string &get_traits_string() {
-    return traits;
+const std::string& get_traits_string() {
+  return traits;
 }
 
 // This is copy-pasted from the following llvm file:
@@ -317,8 +318,9 @@ using ::truncf;
 
 )ESCAPE";
 
-const std::string &get_cmath_string() {
-    return cmath;
+const std::string& get_cmath_string() {
+  return cmath;
 }
 
-}} // namespace at::cuda
+} // namespace cuda
+} // namespace at

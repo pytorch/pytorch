@@ -1,9 +1,9 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/CPUAllocator.h>
-#include <c10/mobile/CPUProfilingAllocator.h>
 #include <ATen/ATen.h>
 #include <ATen/Context.h>
+#include <c10/core/CPUAllocator.h>
+#include <c10/mobile/CPUProfilingAllocator.h>
 
 at::Tensor run_with_control_flow(
     at::Tensor input,
@@ -46,28 +46,28 @@ TEST(CPUAllocationPlanTest, with_control_flow) {
     c10::AllocationPlan plan;
     {
       c10::WithProfileAllocationsGuard profile_guard(&plan);
-      ref_output = run_with_control_flow(
-          a, conv_weight, linear_weight, true, pointers);
+      ref_output =
+          run_with_control_flow(a, conv_weight, linear_weight, true, pointers);
     }
   };
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(valid_allocation_plan());
 
-  auto validate_allocation_plan =
-    [&](bool record_mode, bool validation_mode) -> bool {
+  auto validate_allocation_plan = [&](bool record_mode,
+                                      bool validation_mode) -> bool {
     c10::AllocationPlan plan;
     {
       c10::WithProfileAllocationsGuard profile_guard(&plan);
-      ref_output =
-        run_with_control_flow(a, conv_weight, linear_weight, record_mode, pointers);
+      ref_output = run_with_control_flow(
+          a, conv_weight, linear_weight, record_mode, pointers);
     }
     bool success{true};
     for (uint64_t i = 0; i < 10; ++i) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       bool validation_success;
       {
-        c10::WithValidateAllocationPlanGuard
-          validation_guard(&plan, &validation_success);
+        c10::WithValidateAllocationPlanGuard validation_guard(
+            &plan, &validation_success);
         output = run_with_control_flow(
             a, conv_weight, linear_weight, validation_mode, pointers);
       }
@@ -95,57 +95,50 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
     c10::AllocationPlan plan;
     {
       c10::WithProfileAllocationsGuard profile_guard(&plan);
-      ref_output = run_with_control_flow(
-          a, conv_weight, linear_weight, false, pointers);
+      ref_output =
+          run_with_control_flow(a, conv_weight, linear_weight, false, pointers);
     }
   };
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
   ASSERT_NO_THROW(valid_allocation_plan());
 
-  auto validate_allocation_plan =
-    [&](bool record_mode,
-        bool validation_mode,
-        bool validate_pointers) {
-      pointers.clear();
-      c10::AllocationPlan plan;
+  auto validate_allocation_plan = [&](bool record_mode,
+                                      bool validation_mode,
+                                      bool validate_pointers) {
+    pointers.clear();
+    c10::AllocationPlan plan;
+    {
+      c10::WithProfileAllocationsGuard profile_guard(&plan);
+      ref_output = run_with_control_flow(
+          a, conv_weight, linear_weight, record_mode, pointers, false, false);
+    }
+    c10::CPUProfilingAllocator profiling_allocator;
+    {
+      c10::WithProfilingAllocatorGuard profiling_allocator_guard(
+          &profiling_allocator, &plan);
+      output = run_with_control_flow(
+          a,
+          conv_weight,
+          linear_weight,
+          validation_mode,
+          pointers,
+          validate_pointers,
+          false);
+    }
+    for (uint64_t i = 0; i < 10; ++i) {
       {
-        c10::WithProfileAllocationsGuard profile_guard(&plan);
-        ref_output = run_with_control_flow(
-            a,
-            conv_weight,
-            linear_weight,
-            record_mode,
-            pointers,
-            false,
-            false);
-      }
-      c10::CPUProfilingAllocator profiling_allocator;
-      {
-        c10::WithProfilingAllocatorGuard
-          profiling_allocator_guard(&profiling_allocator, &plan);
+        c10::WithProfilingAllocatorGuard profiling_allocator_guard(
+            &profiling_allocator, &plan);
         output = run_with_control_flow(
             a,
             conv_weight,
             linear_weight,
             validation_mode,
             pointers,
-            validate_pointers,
-            false);
+            false,
+            validate_pointers);
       }
-      for (uint64_t i = 0; i < 10; ++i) {
-        {
-          c10::WithProfilingAllocatorGuard
-            profiling_allocator_guard(&profiling_allocator, &plan);
-          output = run_with_control_flow(
-              a,
-              conv_weight,
-              linear_weight,
-              validation_mode,
-              pointers,
-              false,
-              validate_pointers);
-        }
-      }
+    }
   };
   // When control flow conditions are same between profiling and evaluation
   // profiling allocator should not throw.
@@ -173,7 +166,8 @@ TEST(CPUAllocationPlanTest, with_profiling_alloc) {
 }
 
 int main(int argc, char* argv[]) {
-  // Setting the priority high to make sure no other allocator gets used instead of this.
+  // Setting the priority high to make sure no other allocator gets used instead
+  // of this.
   c10::SetCPUAllocator(c10::GetDefaultMobileCPUAllocator(), /*priority*/ 100);
   // Need to disable mkldnn for this test since it allocatred memory
   // via raw_allocate inteface which requires context pointer and raw

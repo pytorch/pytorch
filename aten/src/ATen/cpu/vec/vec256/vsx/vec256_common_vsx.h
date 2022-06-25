@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/cpu/vec/intrinsics.h>
-#include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/cpu/vec/vec_base.h>
 
 // Note: header order is important here
 #include <ATen/cpu/vec/vec256/vsx/vec256_double_vsx.h>
@@ -14,8 +14,8 @@
 #include <ATen/cpu/vec/vec256/vsx/vec256_qint8_vsx.h>
 #include <ATen/cpu/vec/vec256/vsx/vec256_quint8_vsx.h>
 
-#include <ATen/cpu/vec/vec256/vsx/vec256_complex_float_vsx.h>
 #include <ATen/cpu/vec/vec256/vsx/vec256_complex_double_vsx.h>
+#include <ATen/cpu/vec/vec256/vsx/vec256_complex_float_vsx.h>
 
 #include <ATen/cpu/vec/vec256/vsx/vec256_bfloat16_vsx.h>
 
@@ -82,8 +82,7 @@ convert_to_int_of_same_size<double>(const Vectorized<double>& src) {
 
 template <>
 Vectorized<int32_t> C10_ALWAYS_INLINE
-convert_to_int_of_same_size<float>(
-    const Vectorized<float>& src) {
+convert_to_int_of_same_size<float>(const Vectorized<float>& src) {
   return Vectorized<int32_t>{vec_signed(src.vec0()), vec_signed(src.vec1())};
 }
 
@@ -91,10 +90,12 @@ template <>
 inline void convert(const int32_t* src, float* dst, int64_t n) {
   // int32_t and float have same size
   int64_t i;
-  for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
+  for (i = 0; i <= (n - Vectorized<float>::size());
+       i += Vectorized<float>::size()) {
     const int32_t* src_a = src + i;
     float* dst_a = dst + i;
-    vint32 input_vec0 = vec_vsx_ld(offset0, reinterpret_cast<const vint32*>(src_a));
+    vint32 input_vec0 =
+        vec_vsx_ld(offset0, reinterpret_cast<const vint32*>(src_a));
     vint32 input_vec1 =
         vec_vsx_ld(offset16, reinterpret_cast<const vint32*>(src_a));
     vfloat32 c0 = vec_float(input_vec0);
@@ -111,7 +112,8 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
 template <>
 inline void convert(const int64_t* src, double* dst, int64_t n) {
   int64_t i;
-  for (i = 0; i <= (n - Vectorized<double>::size()); i += Vectorized<double>::size()) {
+  for (i = 0; i <= (n - Vectorized<double>::size());
+       i += Vectorized<double>::size()) {
     const int64_t* src_a = src + i;
     double* dst_a = dst + i;
     vint64 input_vec0 =
@@ -217,6 +219,6 @@ std::pair<Vectorized<float>, Vectorized<float>> inline deinterleave2<float>(
       Vectorized<float>{aa0123, aa0123_2}, Vectorized<float>{bb0123, bb0123_2});
 }
 
-} // namespace
+} // namespace CPU_CAPABILITY
 } // namespace vec
 } // namespace at

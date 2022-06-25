@@ -16,50 +16,47 @@ Tensor cumsum(
     const int64_t dim,
     const c10::optional<ScalarType> dtype) {
   TORCH_CHECK(
-    input_arg.dim() <= 4,
-    "Vulkan cumsum expects input dimension <= 4!");
+      input_arg.dim() <= 4, "Vulkan cumsum expects input dimension <= 4!");
 
   TORCH_CHECK(
-    batch_size(input_arg) == 1,
-    "Vulkan cumsum expects batch size <= 1!");
+      batch_size(input_arg) == 1, "Vulkan cumsum expects batch size <= 1!");
 
-  TORCH_CHECK(
-    dim < 4,
-    "Vulkan cumsum expects dim < 4!");
+  TORCH_CHECK(dim < 4, "Vulkan cumsum expects dim < 4!");
 
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
   vTensor v_output{
-    context,
-    input.sizes(),
-    input.options(),
+      context,
+      input.sizes(),
+      input.options(),
   };
 
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::cumsum");
+    api::OpProfiler profiler(
+        command_buffer, context->querypool(), "aten::cumsum");
 
-    if C10_LIKELY(v_input.has_image()) {
+    if C10_LIKELY (v_input.has_image()) {
       const struct Block final {
         int32_t axis;
-      } block {
-        (3-safe_downcast<int32_t>(dim)),
+      } block{
+          (3 - safe_downcast<int32_t>(dim)),
       };
 
-      if(dim<=1) {
-          // TODO: dim<0, dim=0, dim=1(z axis)
-          TORCH_CHECK(false, "Not implemented!");
+      if (dim <= 1) {
+        // TODO: dim<0, dim=0, dim=1(z axis)
+        TORCH_CHECK(false, "Not implemented!");
       }
 
       context->dispatch(
           command_buffer,
           {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
           },
           VK_KERNEL(cumsum),
           v_input.extents(),
@@ -67,14 +64,10 @@ Tensor cumsum(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer,
-              vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          v_input.image(
-              command_buffer,
-              vTensor::Stage::Compute),
+          v_input.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           context->resource().pool.uniform(block).object);

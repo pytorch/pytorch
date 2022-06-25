@@ -1,8 +1,8 @@
 #ifdef USE_XNNPACK
 
 #include <ATen/ATen.h>
-#include <ATen/quantized/Quantizer.h>
 #include <ATen/native/quantized/cpu/XnnpackUtils.h>
+#include <ATen/quantized/Quantizer.h>
 #include <c10/util/irange.h>
 
 namespace at {

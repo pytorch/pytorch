@@ -1,6 +1,6 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/NativeFunctions.h>
 
 // TODO: Remove the condition on AT_ROCM_ENABLED entirely,
 // don't build this file as part of CPU build.
@@ -8,23 +8,37 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 // See Note [ATen preprocessor philosophy]
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
-    const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
-    bool training, double exponential_average_factor, double epsilon) {
+    const Tensor& input,
+    const Tensor& weight,
+    const c10::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& running_mean_opt,
+    const c10::optional<Tensor>& running_var_opt,
+    bool training,
+    double exponential_average_factor,
+    double epsilon) {
   AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
-    const Tensor& input, const Tensor& grad_output, const Tensor& weight, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    const Tensor& input,
+    const Tensor& grad_output,
+    const Tensor& weight,
+    const c10::optional<Tensor>& running_mean_opt,
+    const c10::optional<Tensor>& running_var_opt,
+    const c10::optional<Tensor>& save_mean_opt,
+    const c10::optional<Tensor>& save_var_opt,
     double epsilon) {
   AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at
 
 #else // AT_ROCM_ENABLED
 
@@ -34,35 +48,42 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
 
 #include <ATen/TensorUtils.h>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
 namespace {
 
 Tensor expandScale(const Tensor& t, int64_t dim) {
-  std::vector<int64_t> size{ 1, t.numel() };
+  std::vector<int64_t> size{1, t.numel()};
   while (static_cast<int64_t>(size.size()) < dim) {
     size.emplace_back(1);
   }
   return t.view(size);
 }
 
-}  // namespace
+} // namespace
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
-    const Tensor& input_t, const Tensor& weight_t, const c10::optional<Tensor>& bias_t_opt, const c10::optional<Tensor>& running_mean_t_opt, const c10::optional<Tensor>& running_var_t_opt,
-    bool training, double exponential_average_factor, double epsilon)
-{
+    const Tensor& input_t,
+    const Tensor& weight_t,
+    const c10::optional<Tensor>& bias_t_opt,
+    const c10::optional<Tensor>& running_mean_t_opt,
+    const c10::optional<Tensor>& running_var_t_opt,
+    bool training,
+    double exponential_average_factor,
+    double epsilon) {
   // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> bias_t_maybe_owned = at::borrow_from_optional_tensor(bias_t_opt);
+  c10::MaybeOwned<Tensor> bias_t_maybe_owned =
+      at::borrow_from_optional_tensor(bias_t_opt);
   const Tensor& bias_t = *bias_t_maybe_owned;
-  const Tensor& running_mean_t = c10::value_or_else(running_mean_t_opt, [] {return Tensor();});
-  const Tensor& running_var_t = c10::value_or_else(running_var_t_opt, [] {return Tensor();});
+  const Tensor& running_mean_t =
+      c10::value_or_else(running_mean_t_opt, [] { return Tensor(); });
+  const Tensor& running_var_t =
+      c10::value_or_else(running_var_t_opt, [] { return Tensor(); });
 
-  TensorArg input{ input_t, "input", 1 },
-            weight{ weight_t, "weight", 2 },
-            bias{ bias_t, "bias", 3 },
-            running_mean{ running_mean_t, "running_mean", 4 },
-            running_var{ running_var_t, "running_var", 5 };
+  TensorArg input{input_t, "input", 1}, weight{weight_t, "weight", 2},
+      bias{bias_t, "bias", 3}, running_mean{running_mean_t, "running_mean", 4},
+      running_var{running_var_t, "running_var", 5};
   CheckedFrom c = "miopen_batch_norm";
 
   checkAllDefined(c, {input, weight, bias});
@@ -91,12 +112,14 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
   }
 
   auto output_t = at::empty(input->sizes(), input->options());
-  TensorArg output{ output_t, "output", 0 };
+  TensorArg output{output_t, "output", 0};
 
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*input);
-  TensorDescriptor idesc{ *input, 4 };  // input descriptor
-  TensorDescriptor wdesc{ expandScale(*weight, input->dim()), 4 };  // descriptor for weight, bias, running_mean, etc.
+  TensorDescriptor idesc{*input, 4}; // input descriptor
+  TensorDescriptor wdesc{
+      expandScale(*weight, input->dim()),
+      4}; // descriptor for weight, bias, running_mean, etc.
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
@@ -104,34 +127,44 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
 
   if (training) {
     int64_t num_features = input_t.size(1);
-    save_mean = at::empty({ num_features }, weight_t.options());
-    save_var = at::empty({ num_features }, weight_t.options());
+    save_mean = at::empty({num_features}, weight_t.options());
+    save_var = at::empty({num_features}, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardTraining(
-      handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
-      idesc.desc(), output->data_ptr(),
-      wdesc.desc(),
-      weight->data_ptr(),
-      bias->data_ptr(),
-      exponential_average_factor,
-      at::maybe_data_ptr(running_mean),
-      at::maybe_data_ptr(running_var),
-      epsilon,
-      save_mean.data_ptr(),
-      save_var.data_ptr()));
+        handle,
+        mode,
+        &one,
+        &zero,
+        idesc.desc(),
+        input->data_ptr(),
+        idesc.desc(),
+        output->data_ptr(),
+        wdesc.desc(),
+        weight->data_ptr(),
+        bias->data_ptr(),
+        exponential_average_factor,
+        at::maybe_data_ptr(running_mean),
+        at::maybe_data_ptr(running_var),
+        epsilon,
+        save_mean.data_ptr(),
+        save_var.data_ptr()));
   } else {
     save_mean = at::empty({0}, weight_t.options());
     save_var = at::empty({0}, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardInference(
-      handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
-      idesc.desc(), output->data_ptr(),
-      wdesc.desc(),
-      weight->data_ptr(),
-      bias->data_ptr(),
-      running_mean->data_ptr(),
-      running_var->data_ptr(),
-      epsilon));
+        handle,
+        mode,
+        &one,
+        &zero,
+        idesc.desc(),
+        input->data_ptr(),
+        idesc.desc(),
+        output->data_ptr(),
+        wdesc.desc(),
+        weight->data_ptr(),
+        bias->data_ptr(),
+        running_mean->data_ptr(),
+        running_var->data_ptr(),
+        epsilon));
   }
 
   // save_mean and save_var can be undefined
@@ -161,11 +194,10 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
   const Tensor& save_var_t =
       c10::value_or_else(save_var_t_opt, [] { return Tensor(); });
 
-  TensorArg input{ input_t, "input", 1 },
-            grad_output{ grad_output_t, "grad_output", 2 },
-            weight{ weight_t, "weight", 3 },
-            save_mean{ save_mean_t, "save_mean", 4 },
-            save_var{ save_var_t, "save_var", 5 };
+  TensorArg input{input_t, "input", 1},
+      grad_output{grad_output_t, "grad_output", 2},
+      weight{weight_t, "weight", 3}, save_mean{save_mean_t, "save_mean", 4},
+      save_var{save_var_t, "save_var", 5};
   CheckedFrom c = "miopen_batch_norm_backward";
 
   checkAllDefined(c, {input, grad_output, weight, save_mean, save_var});
@@ -192,34 +224,47 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     mode = miopenBNSpatial;
   }
 
-  auto grad_input_t  = at::empty(input->sizes(), input->options());
+  auto grad_input_t = at::empty(input->sizes(), input->options());
   auto grad_weight_t = at::empty(weight->sizes(), weight->options());
-  auto grad_bias_t   = at::empty(weight->sizes(), weight->options());
+  auto grad_bias_t = at::empty(weight->sizes(), weight->options());
 
   auto handle = getMiopenHandle();
   auto dataType = getMiopenDataType(*input);
 
-  TensorDescriptor idesc{ *input, 4 };  // input, output, grad_output descriptor
-  TensorDescriptor wdesc{ expandScale(*weight, input->dim()), 4 };  // descriptor for weight, bias, save_mean, etc.
+  TensorDescriptor idesc{*input, 4}; // input, output, grad_output descriptor
+  TensorDescriptor wdesc{
+      expandScale(*weight, input->dim()),
+      4}; // descriptor for weight, bias, save_mean, etc.
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
   MIOPEN_CHECK(miopenBatchNormalizationBackward(
-    handle, mode, &one, &zero, &one, &zero,
-    idesc.desc(), input->data_ptr(),
-    idesc.desc(), grad_output->data_ptr(),
-    idesc.desc(), grad_input_t.data_ptr(),
-    wdesc.desc(), weight->data_ptr(),
-    grad_weight_t.data_ptr(),
-    grad_bias_t.data_ptr(),
-    epsilon,
-    save_mean->data_ptr(),
-    save_var->data_ptr()));
+      handle,
+      mode,
+      &one,
+      &zero,
+      &one,
+      &zero,
+      idesc.desc(),
+      input->data_ptr(),
+      idesc.desc(),
+      grad_output->data_ptr(),
+      idesc.desc(),
+      grad_input_t.data_ptr(),
+      wdesc.desc(),
+      weight->data_ptr(),
+      grad_weight_t.data_ptr(),
+      grad_bias_t.data_ptr(),
+      epsilon,
+      save_mean->data_ptr(),
+      save_var->data_ptr()));
 
-  return std::tuple<Tensor,Tensor,Tensor>{grad_input_t, grad_weight_t, grad_bias_t};
+  return std::tuple<Tensor, Tensor, Tensor>{
+      grad_input_t, grad_weight_t, grad_bias_t};
 }
 
-}}  // namespace native
+} // namespace native
+} // namespace at
 
 #endif

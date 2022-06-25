@@ -9,7 +9,7 @@ class Tensor;
 
 namespace native {
 
-enum SegmentReductionType { MAX, MEAN, MIN, SUM, PROD};
+enum SegmentReductionType { MAX, MEAN, MIN, SUM, PROD };
 
 using segment_reduce_lengths_fn = Tensor (*)(
     SegmentReductionType,
@@ -35,7 +35,9 @@ using segment_reduce_lengths_backward_fn = Tensor (*)(
     const Tensor&,
     int64_t,
     const c10::optional<Scalar>&);
-DECLARE_DISPATCH(segment_reduce_lengths_backward_fn, _segment_reduce_lengths_backward_stub);
+DECLARE_DISPATCH(
+    segment_reduce_lengths_backward_fn,
+    _segment_reduce_lengths_backward_stub);
 
 using segment_reduce_offsets_backward_fn = Tensor (*)(
     const Tensor&,
@@ -45,7 +47,9 @@ using segment_reduce_offsets_backward_fn = Tensor (*)(
     const Tensor&,
     int64_t,
     const c10::optional<Scalar>&);
-DECLARE_DISPATCH(segment_reduce_offsets_backward_fn, _segment_reduce_offsets_backward_stub);
+DECLARE_DISPATCH(
+    segment_reduce_offsets_backward_fn,
+    _segment_reduce_offsets_backward_stub);
 
 } // namespace native
 } // namespace at

@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/cpu/DepthwiseConvKernel.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/native/cpu/DepthwiseConvKernel.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -39,16 +39,20 @@ inline std::vector<int64_t> calculate_conv_output_size(
     const IntArrayRef weight_size,
     const IntArrayRef stride,
     const IntArrayRef padding) {
-  const auto calc_output_dimension = [](
-    const int64_t input, const int64_t kernel, const int64_t stride, const int64_t padding) {
+  const auto calc_output_dimension = [](const int64_t input,
+                                        const int64_t kernel,
+                                        const int64_t stride,
+                                        const int64_t padding) {
     return 1 + (input - kernel + 2 * padding) / stride;
   };
 
-  return std::vector<int64_t> {
-    input_size[0],
-    weight_size[0],
-    calc_output_dimension(input_size[2], weight_size[2], stride[0], padding[0]),
-    calc_output_dimension(input_size[3], weight_size[3], stride[1], padding[1]),
+  return std::vector<int64_t>{
+      input_size[0],
+      weight_size[0],
+      calc_output_dimension(
+          input_size[2], weight_size[2], stride[0], padding[0]),
+      calc_output_dimension(
+          input_size[3], weight_size[3], stride[1], padding[1]),
   };
 }
 
@@ -78,8 +82,10 @@ inline void winograd_f2k3_output_transform_inplace__neon(
   *m1 = *m1 - *m2 - *m3;
 }
 
-inline float32x4_t
-vmuladdq_f32(const float32x4_t c, const float32x4_t a, const float32x4_t b) {
+inline float32x4_t vmuladdq_f32(
+    const float32x4_t c,
+    const float32x4_t a,
+    const float32x4_t b) {
 #if defined(__aarch64__)
   return vfmaq_f32(c, a, b);
 #else
@@ -87,8 +93,10 @@ vmuladdq_f32(const float32x4_t c, const float32x4_t a, const float32x4_t b) {
 #endif
 }
 
-inline float32x4_t
-vmulsubq_f32(const float32x4_t c, const float32x4_t a, const float32x4_t b) {
+inline float32x4_t vmulsubq_f32(
+    const float32x4_t c,
+    const float32x4_t a,
+    const float32x4_t b) {
 #if defined(__aarch64__)
   return vfmsq_f32(c, a, b);
 #else
@@ -161,7 +169,7 @@ void convolution_depthwise3x3_winograd_impl(
       &input_tile.val[2],                                     \
       &input_tile.val[3]);                                    \
                                                               \
-  for (const auto row : c10::irange(4)) {                         \
+  for (const auto row : c10::irange(4)) {                     \
     input_tile.val[row] =                                     \
         vmulq_f32(input_tile.val[row], kernel_tile.val[row]); \
   }                                                           \
@@ -191,9 +199,8 @@ void convolution_depthwise3x3_winograd_impl(
       // fast-path, all accesses in-bounds
       if (C10_LIKELY(
               ih >= 0 && iw >= 0 && ih + 3 < args.in_rows &&
-                  iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
-                  2 * otw + 1 < args.out_cols
-              )) {
+              iw + 3 < args.in_cols && 2 * oth + 1 < args.out_rows &&
+              2 * otw + 1 < args.out_cols)) {
         float32x4x4_t input_tile;
         for (const auto row : c10::irange(4)) {
           input_tile.val[row] =
@@ -252,66 +259,67 @@ void convolution_depthwise3x3_winograd_impl(
     const float* const,
     const float* const,
     const float* const,
-    float* const) {
-}
+    float* const) {}
 
 #endif /* __ARM_NEON__ */
 
 Tensor _convolution_depthwise3x3_winograd(
-    const Tensor & input,
-    const Tensor & kernel,
-    const Tensor & bias_potentially_undefined,
+    const Tensor& input,
+    const Tensor& kernel,
+    const Tensor& bias_potentially_undefined,
     const IntArrayRef stride,
     const IntArrayRef padding,
-    const int64_t groups)
-{
+    const int64_t groups) {
   const IntArrayRef input_sizes = input.sizes();
   const IntArrayRef kernel_sizes = kernel.sizes();
 
   Tensor output = at::empty(
-    calculate_conv_output_size(input_sizes, kernel_sizes, stride, padding),
-    input.options());
+      calculate_conv_output_size(input_sizes, kernel_sizes, stride, padding),
+      input.options());
 
   const IntArrayRef output_sizes = output.sizes();
 
-  const Arguments args {
-      input_sizes[0],     // Input N
-      input_sizes[2],     // Input H
-      input_sizes[3],     // Input W
-      stride[0],          // Stride
-      padding[0],         // Padding Rows
-      padding[1],         // Padding Columns
-      output_sizes[2],    // Output H
-      output_sizes[3],    // Output W
-      output_sizes[1],    // Output C
+  const Arguments args{
+      input_sizes[0], // Input N
+      input_sizes[2], // Input H
+      input_sizes[3], // Input W
+      stride[0], // Stride
+      padding[0], // Padding Rows
+      padding[1], // Padding Columns
+      output_sizes[2], // Output H
+      output_sizes[3], // Output W
+      output_sizes[1], // Output C
   };
 
   const int64_t input_hxw = args.in_rows * args.in_cols;
   const int64_t output_hxw = args.out_rows * args.out_cols;
 
-  const Tensor bias = bias_potentially_undefined.defined() ?
-                      bias_potentially_undefined :
-                      at::zeros({kernel_sizes[0]}, input.options());
+  const Tensor bias = bias_potentially_undefined.defined()
+      ? bias_potentially_undefined
+      : at::zeros({kernel_sizes[0]}, input.options());
 
-  at::parallel_for(0, args.batch * args.out_channels, 0, [&](int64_t start, int64_t end) {
-    for (const auto k : c10::irange(start, end)) {
-      const int64_t g = k % args.out_channels;
-      const int64_t i = k / (args.out_channels / groups);
-      convolution_depthwise3x3_winograd_impl(
-          args,
-          input.data_ptr<float>() + i * input_hxw,
-          kernel.data_ptr<float>() + g * 3 * 3,
-          bias.data_ptr<float>() + g,
-          output.data_ptr<float>() + k * output_hxw);
-    }
-  });
+  at::parallel_for(
+      0, args.batch * args.out_channels, 0, [&](int64_t start, int64_t end) {
+        for (const auto k : c10::irange(start, end)) {
+          const int64_t g = k % args.out_channels;
+          const int64_t i = k / (args.out_channels / groups);
+          convolution_depthwise3x3_winograd_impl(
+              args,
+              input.data_ptr<float>() + i * input_hxw,
+              kernel.data_ptr<float>() + g * 3 * 3,
+              bias.data_ptr<float>() + g,
+              output.data_ptr<float>() + k * output_hxw);
+        }
+      });
 
   return output;
 }
 
-}  // namespace
+} // namespace
 
-REGISTER_DISPATCH(convolution_depthwise3x3_winograd_stub, &_convolution_depthwise3x3_winograd);
+REGISTER_DISPATCH(
+    convolution_depthwise3x3_winograd_stub,
+    &_convolution_depthwise3x3_winograd);
 
-}  // namespace native
-}  // namespace at
+} // namespace native
+} // namespace at

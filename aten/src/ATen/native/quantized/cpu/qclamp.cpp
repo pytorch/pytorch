@@ -1,14 +1,14 @@
 #include <ATen/ATen.h>
 #include <ATen/NativeFunctions.h>
-#include <torch/library.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/cpu/Loops.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/quantized/Quantizer.h>
 #include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
+#include <torch/library.h>
 
 #include <algorithm>
 
@@ -23,8 +23,8 @@ namespace {
 
 #ifdef USE_PYTORCH_QNNPACK
 Tensor qnnpack_clamp(Tensor input, const Scalar& min, const Scalar& max) {
-
-  TORCH_CHECK(input.ndimension() > 0, "qnnpack_clamp(): Got empty input tensor");
+  TORCH_CHECK(
+      input.ndimension() > 0, "qnnpack_clamp(): Got empty input tensor");
 
   initQNNPACK();
 
@@ -36,49 +36,53 @@ Tensor qnnpack_clamp(Tensor input, const Scalar& min, const Scalar& max) {
 
   auto min_f = min.to<float>();
   auto max_f = max.to<float>();
-  uint8_t min_q =
-      at::native::quantize_val<quint8>(input.q_scale(), input.q_zero_point(), min_f).val_;
-  uint8_t max_q =
-      at::native::quantize_val<quint8>(input.q_scale(), input.q_zero_point(), max_f).val_;
+  uint8_t min_q = at::native::quantize_val<quint8>(
+                      input.q_scale(), input.q_zero_point(), min_f)
+                      .val_;
+  uint8_t max_q = at::native::quantize_val<quint8>(
+                      input.q_scale(), input.q_zero_point(), max_f)
+                      .val_;
 
   pytorch_qnnp_operator_t clamp_op{nullptr};
   const pytorch_qnnp_status createStatus = pytorch_qnnp_create_clamp_nc_u8(
-    num_elems, // channels
-    min_q,
-    max_q,
-    0, // flags
-    &clamp_op);
+      num_elems, // channels
+      min_q,
+      max_q,
+      0, // flags
+      &clamp_op);
 
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
       qnnpack_uniq_ptr(clamp_op);
 
-  TORCH_INTERNAL_ASSERT(createStatus == pytorch_qnnp_status_success,
-                        "failed to create QNNPACK Clamp operator");
+  TORCH_INTERNAL_ASSERT(
+      createStatus == pytorch_qnnp_status_success,
+      "failed to create QNNPACK Clamp operator");
 
   Tensor qy = at::_empty_affine_quantized(
-    input_contig.sizes(),
-    input_contig.options(),
-    input_contig.q_scale(),
-    input_contig.q_zero_point());
+      input_contig.sizes(),
+      input_contig.options(),
+      input_contig.q_scale(),
+      input_contig.q_zero_point());
 
   const pytorch_qnnp_status setupStatus = pytorch_qnnp_setup_clamp_nc_u8(
-    clamp_op,
-    input_contig.size(0), // batch_size
-    (uint8_t*)input_contig.data_ptr<c10::quint8>(), // input_data
-    num_elems, // input_stride
-    (uint8_t*)qy.data_ptr<c10::quint8>(), // output_data
-    num_elems); // output_stride
-  TORCH_INTERNAL_ASSERT(setupStatus == pytorch_qnnp_status_success,
-                        "failed to setup QNNPACK Clamp operator");
+      clamp_op,
+      input_contig.size(0), // batch_size
+      (uint8_t*)input_contig.data_ptr<c10::quint8>(), // input_data
+      num_elems, // input_stride
+      (uint8_t*)qy.data_ptr<c10::quint8>(), // output_data
+      num_elems); // output_stride
+  TORCH_INTERNAL_ASSERT(
+      setupStatus == pytorch_qnnp_status_success,
+      "failed to setup QNNPACK Clamp operator");
 
   pthreadpool_t threadpool = caffe2::pthreadpool_();
 
   const pytorch_qnnp_status runStatus =
-    pytorch_qnnp_run_operator(clamp_op, threadpool);
+      pytorch_qnnp_run_operator(clamp_op, threadpool);
 
   TORCH_INTERNAL_ASSERT(
-    runStatus == pytorch_qnnp_status_success,
-    "failed to run QNNPACK Clamp operator");
+      runStatus == pytorch_qnnp_status_success,
+      "failed to run QNNPACK Clamp operator");
   return qy;
 }
 
@@ -138,7 +142,8 @@ Tensor hardtanh_quantized_cpu(
   return qy;
 }
 
-Tensor& hardtanh_out_quantized_cpu(const Tensor& qx,
+Tensor& hardtanh_out_quantized_cpu(
+    const Tensor& qx,
     const Scalar& min,
     const Scalar& max,
     Tensor& result) {
@@ -158,7 +163,8 @@ Tensor& hardtanh_quantized_cpu_(
 }
 
 TORCH_LIBRARY_IMPL(quantized, QuantizedCPU, m) {
-  m.impl(TORCH_SELECTIVE_NAME("quantized::clamp"), TORCH_FN(clamp_quantized_cpu));
+  m.impl(
+      TORCH_SELECTIVE_NAME("quantized::clamp"), TORCH_FN(clamp_quantized_cpu));
 }
 
 } // namespace native

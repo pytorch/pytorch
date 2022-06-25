@@ -24,16 +24,14 @@ class TensorBase;
 struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
   // This enum is to remind people that the invariant on constructors is that
   // the list of dimnames must have at least one non-wildcard
-  enum HAS_NON_WILDCARD {
-    HasNonWildcard
-  };
+  enum HAS_NON_WILDCARD { HasNonWildcard };
 
   explicit NamedTensorMeta(HAS_NON_WILDCARD, DimnameList names)
-    : names_(names.vec()) {
+      : names_(names.vec()) {
     check_invariants();
   }
   explicit NamedTensorMeta(HAS_NON_WILDCARD, std::vector<Dimname>&& names)
-    : names_(std::move(names)) {
+      : names_(std::move(names)) {
     check_invariants();
   }
 
@@ -41,7 +39,9 @@ struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
     return std::make_unique<NamedTensorMeta>(HasNonWildcard, names_);
   }
 
-  DimnameList names() const { return names_; }
+  DimnameList names() const {
+    return names_;
+  }
 
   // Used for an assertion in TensorImpl.h
   int64_t slow_dim() const override {
@@ -50,7 +50,9 @@ struct TORCH_API NamedTensorMeta final : public c10::NamedTensorMetaInterface {
 
   void check_invariants() const {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      std::any_of(names_.begin(), names_.end(), [](const Dimname& n) { return !n.isWildcard(); }));
+        std::any_of(names_.begin(), names_.end(), [](const Dimname& n) {
+          return !n.isWildcard();
+        }));
   }
 
   void set_names(HAS_NON_WILDCARD, DimnameList new_names) {
@@ -76,7 +78,6 @@ struct TORCH_API NamesMode {
   static void set_enabled(bool enabled);
 };
 
-
 // A RAII, thread local (!) guard that enables or disables names upon
 // construction, and sets it back to the original value upon destruction.
 struct TORCH_API NoNamesGuard {
@@ -92,6 +93,7 @@ struct TORCH_API NoNamesGuard {
     TORCH_INTERNAL_ASSERT(initialized);
     NamesMode::set_enabled(prev_mode);
   }
+
  private:
   bool prev_mode;
   bool initialized;
@@ -101,8 +103,13 @@ void check_names_valid_for(const TensorBase& tensor, DimnameList names);
 void check_names_valid_for(size_t tensor_dim, DimnameList names);
 
 // Sets the names of `tensor` to be `names`.
-TORCH_API const TensorBase& internal_set_names_inplace(const TensorBase& tensor, c10::optional<DimnameList> names);
-TORCH_API const TensorBase& internal_set_names_inplace(const TensorBase& tensor, std::vector<Dimname>&& names, bool validate_names);
+TORCH_API const TensorBase& internal_set_names_inplace(
+    const TensorBase& tensor,
+    c10::optional<DimnameList> names);
+TORCH_API const TensorBase& internal_set_names_inplace(
+    const TensorBase& tensor,
+    std::vector<Dimname>&& names,
+    bool validate_names);
 
 constexpr size_t kMaxNamedTensorDim = 64;
 
@@ -112,8 +119,14 @@ namespace impl {
 
 // Some helper functions on TensorImpl. Useful for working with names in TH.
 // XXX: Ideally these would exist as methods on TensorImpl
-TORCH_API void internal_set_names_inplace(TensorImpl* impl, c10::optional<DimnameList> names, bool validate_names);
-TORCH_API void internal_set_names_inplace(TensorImpl* impl, std::vector<Dimname>&& names, bool validate_names);
+TORCH_API void internal_set_names_inplace(
+    TensorImpl* impl,
+    c10::optional<DimnameList> names,
+    bool validate_names);
+TORCH_API void internal_set_names_inplace(
+    TensorImpl* impl,
+    std::vector<Dimname>&& names,
+    bool validate_names);
 
 void check_names_valid_for(TensorImpl* impl, DimnameList names);
 

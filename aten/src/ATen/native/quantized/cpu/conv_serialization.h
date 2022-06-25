@@ -2,9 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/List.h>
-#include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <c10/util/irange.h>
 
 #include <tuple>
@@ -58,26 +58,25 @@
  */
 
 using ConvParamsSerializationTypeV2 = std::tuple<
-  // version, for versions 2 and up
-  std::string,
-  // non-optional tensors
-  std::vector<at::Tensor>,
-  // optional tensors
-  std::vector<c10::optional<at::Tensor>>>;
+    // version, for versions 2 and up
+    std::string,
+    // non-optional tensors
+    std::vector<at::Tensor>,
+    // optional tensors
+    std::vector<c10::optional<at::Tensor>>>;
 
 using ConvParamsSerializationTypeV3 = std::tuple<
-  // version, int for versions 3 and up
-  int64_t,
-  // configuration values
-  std::vector<int64_t>,
-  // optional tensors
-  std::vector<c10::optional<at::Tensor>>>;
+    // version, int for versions 3 and up
+    int64_t,
+    // configuration values
+    std::vector<int64_t>,
+    // optional tensors
+    std::vector<c10::optional<at::Tensor>>>;
 
 // Parses any historical conv packed params format into
 // the current format.
 template <uint32_t kSpatialDim>
 ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
-
   // determine the version based on IValue contents
   int version = -1;
   if (v.isTuple()) {
@@ -160,7 +159,8 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
       }
     } else {
       for (const auto& elem : elements[2].toList()) {
-        optional.emplace_back(static_cast<c10::IValue>(elem).toOptional<at::Tensor>());
+        optional.emplace_back(
+            static_cast<c10::IValue>(elem).toOptional<at::Tensor>());
       }
     }
 
@@ -184,8 +184,8 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
   } else if (version == 3) {
     return v.to<ConvParamsSerializationTypeV3>();
   } else {
-    TORCH_INTERNAL_ASSERT(false, "Unexpected serialized qconv version: ",
-        version);
+    TORCH_INTERNAL_ASSERT(
+        false, "Unexpected serialized qconv version: ", version);
   }
 }
 
@@ -197,7 +197,6 @@ using ConvParamsSerializationType = ConvParamsSerializationTypeV2;
 template <uint32_t kSpatialDim>
 ConvParamsSerializationTypeV2 serialize_conv(
     const c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>>& params) {
-
   std::string version = "2";
   std::vector<at::Tensor> non_optional;
   std::vector<c10::optional<at::Tensor>> optional;
@@ -212,16 +211,16 @@ ConvParamsSerializationTypeV2 serialize_conv(
   auto dilation = params->dilation().vec();
   params_vec.insert(params_vec.end(), dilation.begin(), dilation.end());
   auto output_padding = params->output_padding().vec();
-  params_vec.insert(params_vec.end(), output_padding.begin(),
-                    output_padding.end());
+  params_vec.insert(
+      params_vec.end(), output_padding.begin(), output_padding.end());
   params_vec.push_back(params->groups());
   params_vec.push_back(params->transpose());
   int64_t vec_size = params_vec.size();
-  at::Tensor params_tensor = at::from_blob(
-      params_vec.data(), {vec_size},
-      at::TensorOptions().dtype(at::kShort))
-    // clone to retain ownership of the data
-    .clone();
+  at::Tensor params_tensor =
+      at::from_blob(
+          params_vec.data(), {vec_size}, at::TensorOptions().dtype(at::kShort))
+          // clone to retain ownership of the data
+          .clone();
 
   at::Tensor weight;
   c10::optional<at::Tensor> bias;
@@ -249,8 +248,8 @@ ConvParamsSerializationTypeV3 serialize_conv(
   auto dilation = params->dilation().vec();
   config_vals.insert(config_vals.end(), dilation.begin(), dilation.end());
   auto output_padding = params->output_padding().vec();
-  config_vals.insert(config_vals.end(), output_padding.begin(),
-                    output_padding.end());
+  config_vals.insert(
+      config_vals.end(), output_padding.begin(), output_padding.end());
   config_vals.push_back(params->groups());
   config_vals.push_back(params->transpose());
 
@@ -274,18 +273,19 @@ ConvParamsSerializationTypeV3 serialize_conv(
 template <uint32_t kSpatialDim>
 c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
     ConvParamsSerializationTypeV3 state) {
-
   int64_t version;
   std::vector<int64_t> config_vals;
   std::vector<c10::optional<at::Tensor>> tensors;
 
   std::tie(version, config_vals, tensors) = state;
-  TORCH_INTERNAL_ASSERT(version == 3, "Unexpected serialized qconv version: ", version);
+  TORCH_INTERNAL_ASSERT(
+      version == 3, "Unexpected serialized qconv version: ", version);
 
   TORCH_CHECK(tensors.size() == 3, "Wrong number of tensors", tensors.size());
   c10::optional<at::Tensor> weight = tensors[1];
   c10::optional<at::Tensor> bias = tensors[2];
-  TORCH_INTERNAL_ASSERT(weight, "Weight should always be present in serialized qconv.");
+  TORCH_INTERNAL_ASSERT(
+      weight, "Weight should always be present in serialized qconv.");
 
   torch::List<int64_t> stride, padding, output_padding, dilation;
   // skip kSpatialDim
@@ -314,7 +314,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   idx++;
   int64_t flags = config_vals.at(idx);
   idx++;
-  TORCH_INTERNAL_ASSERT(idx == static_cast<int64_t>(config_vals.size()),
+  TORCH_INTERNAL_ASSERT(
+      idx == static_cast<int64_t>(config_vals.size()),
       "Unexpected length of config_vals, expected ",
       idx,
       " got ",
@@ -323,22 +324,22 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   bool transpose = flags & (1 << 0);
 
   int64_t other_flags = flags & ~(1 << 0);
-  TORCH_INTERNAL_ASSERT(other_flags == 0, "Unexpected flags set in ", flags, ".");
+  TORCH_INTERNAL_ASSERT(
+      other_flags == 0, "Unexpected flags set in ", flags, ".");
 
   auto& ctx = at::globalContext();
 
 #ifdef USE_FBGEMM
   if (ctx.qEngine() == at::QEngine::FBGEMM) {
     return PackedConvWeight<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      groups,
-      transpose
-    );
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose);
   }
 #endif // USE_FBGEMM
 #ifdef USE_PYTORCH_QNNPACK
@@ -348,33 +349,31 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
         "prepack/__setstate__: QNNPACK only supports Conv2d "
         "now.");
     return PackedConvWeightsQnnp<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      groups,
-      transpose
-    );
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose);
   }
 #endif // USE_PYTORCH_QNNPACK
 #if AT_MKLDNN_ENABLED()
   if (ctx.qEngine() == at::QEngine::ONEDNN) {
     return PackedConvWeightsOnednn<kSpatialDim>::prepack(
-      weight.value(),
-      bias,
-      stride,
-      padding,
-      output_padding,
-      dilation,
-      groups,
-      transpose
-    );
+        weight.value(),
+        bias,
+        stride,
+        padding,
+        output_padding,
+        dilation,
+        groups,
+        transpose);
   }
 #endif // AT_MKLDNN_ENABLED()
-TORCH_CHECK(
-  false,
-  "Didn't find engine for when deserializing ConvPackedParams: ",
-  toString(ctx.qEngine()));
+  TORCH_CHECK(
+      false,
+      "Didn't find engine for when deserializing ConvPackedParams: ",
+      toString(ctx.qEngine()));
 }

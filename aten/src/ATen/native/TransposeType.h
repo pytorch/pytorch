@@ -14,11 +14,15 @@ enum class TransposeType {
 // Transforms TransposeType into the BLAS / LAPACK format
 static char to_blas(TransposeType trans) {
   switch (trans) {
-    case TransposeType::Transpose: return 'T';
-    case TransposeType::NoTranspose: return 'N';
-    case TransposeType::ConjTranspose: return 'C';
+    case TransposeType::Transpose:
+      return 'T';
+    case TransposeType::NoTranspose:
+      return 'N';
+    case TransposeType::ConjTranspose:
+      return 'C';
   }
   TORCH_INTERNAL_ASSERT(false, "Invalid transpose type");
 }
 
-}}  // at::native
+} // namespace native
+} // namespace at

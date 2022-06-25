@@ -37,7 +37,8 @@ const CUDAHooksInterface& getCUDAHooks() {
 #if !defined C10_MOBILE
   static std::once_flag once;
   std::call_once(once, [] {
-    cuda_hooks = CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{}).release();
+    cuda_hooks =
+        CUDAHooksRegistry()->Create("CUDAHooks", CUDAHooksArgs{}).release();
     if (!cuda_hooks) {
       cuda_hooks = new CUDAHooksInterface();
     }

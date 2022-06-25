@@ -7,7 +7,7 @@ namespace at {
 // This is done to avoid modifying every use into their 'c10'
 // equivalent.
 
-using c10::kDimVectorStaticSize;
 using c10::DimVector;
+using c10::kDimVectorStaticSize;
 
 } // namespace at

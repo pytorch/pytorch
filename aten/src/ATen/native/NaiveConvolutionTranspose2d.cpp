@@ -4,8 +4,8 @@
 #include <ATen/TensorUtils.h>
 
 #include <ATen/core/Tensor.h>
-#include <ATen/native/ConvUtils.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/ConvUtils.h>
 #include <ATen/native/im2col.h>
 
 #include <c10/core/TensorOptions.h>
@@ -226,8 +226,19 @@ TORCH_META_FUNC(slow_conv_transpose2d)
 
 namespace native {
 
-template<typename scalar_t>
-void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
+template <typename scalar_t>
+void gemv(
+    char trans,
+    int64_t m,
+    int64_t n,
+    scalar_t alpha,
+    scalar_t* a,
+    int64_t lda,
+    scalar_t* x,
+    int64_t incx,
+    scalar_t beta,
+    scalar_t* y,
+    int64_t incy);
 
 namespace {
 void slow_conv_transpose2d_out_cpu_template(
@@ -280,14 +291,21 @@ void slow_conv_transpose2d_out_cpu_template(
   int64_t batch_size = input_.size(0);
 
   // Create temporary columns
-  Tensor columns = at::zeros({n_output_plane * kernel_width * kernel_height,
-      input_height * input_width}, input_.options());
+  Tensor columns = at::zeros(
+      {n_output_plane * kernel_width * kernel_height,
+       input_height * input_width},
+      input_.options());
 
   // Define a buffer of ones, for bias accumulation
-  Tensor ones = bias.defined() ? at::ones({output_height, output_width}, input_.options()) : Tensor();
+  Tensor ones = bias.defined()
+      ? at::ones({output_height, output_width}, input_.options())
+      : Tensor();
 
-  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::Long,
-      input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(
+      at::ScalarType::Long,
+      input.scalar_type(),
+      "slow_conv_transpose2d_out_cpu",
+      [&] {
         // For each elt in batch, do:
         for (const auto elt : c10::irange(batch_size)) {
           // Helpers
@@ -468,11 +486,16 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
   grad_input.zero_();
 
   // Create temporary columns
-  bool need_columns = (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
-      stride_width != 1 || pad_height != 0 || pad_width != 0 ||
-      dilation_height != 1 || dilation_width != 1);
-  Tensor grad_columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height,
-      input_height * input_width}, input.options()) : Tensor();
+  bool need_columns =
+      (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+       stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+       dilation_height != 1 || dilation_width != 1);
+  Tensor grad_columns = need_columns
+      ? at::empty(
+            {n_output_plane * kernel_width * kernel_height,
+             input_height * input_width},
+            input.options())
+      : Tensor();
 
   AT_DISPATCH_FLOATING_TYPES(
       grad_output.scalar_type(), "slow_conv_transpose2d_backward_out_cpu", [&] {
@@ -489,21 +512,21 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
           if (need_columns) {
             // Extract columns:
             im2col<scalar_t>(
-                  grad_output_n.data_ptr<scalar_t>(),
-                  n_output_plane,
-                  output_height,
-                  output_width,
-                  input_height,
-                  input_width,
-                  kernel_height,
-                  kernel_width,
-                  pad_height,
-                  pad_width,
-                  stride_height,
-                  stride_width,
-                  dilation_height,
-                  dilation_width,
-                  grad_columns.data_ptr<scalar_t>());
+                grad_output_n.data_ptr<scalar_t>(),
+                n_output_plane,
+                output_height,
+                output_width,
+                input_height,
+                input_width,
+                kernel_height,
+                kernel_width,
+                pad_height,
+                pad_width,
+                stride_height,
+                stride_width,
+                dilation_height,
+                dilation_width,
+                grad_columns.data_ptr<scalar_t>());
           }
 
           // M,N,K are dims of matrix A and B
@@ -515,7 +538,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
           auto gemm_in_ptr = need_columns ? grad_columns.data_ptr<scalar_t>()
-              : grad_output_n.data_ptr<scalar_t>();
+                                          : grad_output_n.data_ptr<scalar_t>();
           cpublas::gemm(
               TransposeType::NoTranspose,
               TransposeType::NoTranspose,
@@ -646,14 +669,21 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
   int64_t batch_size = input.size(0);
 
   // Resize temporary columns
-  bool need_columns = (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
-      stride_width != 1 || pad_height != 0 || pad_width != 0 ||
-      dilation_height != 1 || dilation_width != 1);
-  Tensor columns = need_columns ? at::empty({n_output_plane * kernel_width * kernel_height,
-      input_height * input_width}, input.options()) : Tensor();
+  bool need_columns =
+      (kernel_height != 1 || kernel_width != 1 || stride_height != 1 ||
+       stride_width != 1 || pad_height != 0 || pad_width != 0 ||
+       dilation_height != 1 || dilation_width != 1);
+  Tensor columns = need_columns
+      ? at::empty(
+            {n_output_plane * kernel_width * kernel_height,
+             input_height * input_width},
+            input.options())
+      : Tensor();
 
   AT_DISPATCH_FLOATING_TYPES(
-      input.scalar_type(), "slow_conv_transpose2d_acc_grad_parameters_cpu", [&] {
+      input.scalar_type(),
+      "slow_conv_transpose2d_acc_grad_parameters_cpu",
+      [&] {
         // Helpers
         Tensor input_n = Tensor();
         Tensor grad_output_n = Tensor();
@@ -698,7 +728,8 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = need_columns ? columns.data_ptr<scalar_t>()
+            auto gemm_in_ptr = need_columns
+                ? columns.data_ptr<scalar_t>()
                 : grad_output_n.data_ptr<scalar_t>();
             cpublas::gemm(
                 TransposeType::Transpose,
@@ -740,7 +771,7 @@ TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cpu)
  IntArrayRef padding,
  IntArrayRef output_padding,
  IntArrayRef dilation,
- const Tensor& output){
+ const Tensor& output) {
   const Tensor& bias = bias_opt.getTensorRef();
 
   slow_conv_transpose2d_out_cpu_template(
@@ -753,9 +784,10 @@ TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cpu)
       padding,
       output_padding,
       dilation);
- }
+}
 
-std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
+std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(
+    const Tensor& grad_output,
     const Tensor& input,
     const Tensor& weight,
     IntArrayRef kernel_size,
@@ -879,7 +911,9 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
   return std::tuple<Tensor, Tensor, Tensor>(grad_input, grad_weight, grad_bias);
 }
 
-REGISTER_ALL_CPU_DISPATCH(slow_conv_transpose2d_backward_stub, &slow_conv_transpose2d_backward_cpu);
+REGISTER_ALL_CPU_DISPATCH(
+    slow_conv_transpose2d_backward_stub,
+    &slow_conv_transpose2d_backward_cpu);
 
 } // namespace native
 } // namespace at

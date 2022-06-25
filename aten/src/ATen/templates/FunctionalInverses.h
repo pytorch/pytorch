@@ -8,9 +8,9 @@ namespace at {
 namespace functionalization {
 
 struct FunctionalInverses {
-
-${view_inverse_declarations}
-
+  $ {
+    view_inverse_declarations
+  }
 };
-}
-}
+} // namespace functionalization
+} // namespace at

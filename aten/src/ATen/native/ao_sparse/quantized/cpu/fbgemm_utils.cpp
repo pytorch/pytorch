@@ -65,13 +65,15 @@ int register_linear_params() {
 #endif // USE_FBGEMM
                 TORCH_CHECK(false, "Unknown qengine");
               });
-  // (1) we can't (easily) return the static initializer itself because it can have a different type because of selective build
-  // (2) we can't return void and be able to call the function in the global scope
+  // (1) we can't (easily) return the static initializer itself because it can
+  // have a different type because of selective build (2) we can't return void
+  // and be able to call the function in the global scope
   return 0;
 }
 
 namespace {
 static C10_UNUSED auto linear_params = register_linear_params();
-}  // namespace
+} // namespace
 
-}}  // namespace ao::sparse
+} // namespace sparse
+} // namespace ao

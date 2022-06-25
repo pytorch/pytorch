@@ -2,8 +2,8 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Command.h>
+#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Resource.h>
@@ -36,18 +36,21 @@ class ThreadContext final {
   GPU gpu_;
 
  private:
-  template<typename T>
+  template <typename T>
   class SingletonThreadLocalObject final {
    public:
     explicit SingletonThreadLocalObject(const GPU& gpu);
     SingletonThreadLocalObject(const SingletonThreadLocalObject&) = delete;
-    SingletonThreadLocalObject& operator=(const SingletonThreadLocalObject&) = delete;
+    SingletonThreadLocalObject& operator=(const SingletonThreadLocalObject&) =
+        delete;
     SingletonThreadLocalObject(SingletonThreadLocalObject&&) = default;
-    SingletonThreadLocalObject& operator=(SingletonThreadLocalObject&&) = default;
+    SingletonThreadLocalObject& operator=(SingletonThreadLocalObject&&) =
+        default;
     inline static T& get(const GPU& gpu) {
       static thread_local SingletonThreadLocalObject<T> object(gpu);
       return object.object_;
     }
+
    private:
     T object_;
   };

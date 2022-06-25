@@ -1,15 +1,15 @@
 #pragma once
 
-#include <string>
-#include <stdexcept>
-#include <sstream>
 #include <mkl_dfti.h>
 #include <mkl_spblas.h>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-static inline void MKL_DFTI_CHECK(MKL_INT status)
-{
+static inline void MKL_DFTI_CHECK(MKL_INT status) {
   if (status && !DftiErrorClass(status, DFTI_NO_ERROR)) {
     std::ostringstream ss;
     ss << "MKL FFT error: " << DftiErrorMessage(status);
@@ -17,7 +17,8 @@ static inline void MKL_DFTI_CHECK(MKL_INT status)
   }
 }
 
-}}  // namespace at::native
+} // namespace native
+} // namespace at
 
 namespace at {
 namespace mkl {

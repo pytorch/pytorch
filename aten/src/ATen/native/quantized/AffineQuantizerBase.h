@@ -1,6 +1,6 @@
 #pragma once
-#include <c10/macros/Export.h>
 #include <c10/core/ScalarType.h>
+#include <c10/macros/Export.h>
 
 namespace at {
 namespace native {
@@ -41,7 +41,12 @@ template <typename DST_T>
 TORCH_API DST_T
 requantize_from_int(double multiplier, int64_t zero_point, int64_t src);
 
-int quantize_val_float_qparams(float scale, float zero_point, float value, int qmin, int qmax);
+int quantize_val_float_qparams(
+    float scale,
+    float zero_point,
+    float value,
+    int qmin,
+    int qmax);
 
 } // namespace native
 } // namespace at

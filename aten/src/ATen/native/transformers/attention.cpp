@@ -233,8 +233,8 @@ Tensor qkv_projection(
       // TODO: is there a more efficient way to set this up?
       // TODO: can we stay nested insted of using cat? Probably just make a
       // NestedTensor out of the matmul results or something?
-      auto q_kv_weight_s =
-          at::native::split_with_sizes(qkv_weight, {embed_dim, embed_dim * 2}, 0);
+      auto q_kv_weight_s = at::native::split_with_sizes(
+          qkv_weight, {embed_dim, embed_dim * 2}, 0);
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           q_kv_weight_s.size() == 2,
           "expected split to produce 2 tensors but it produced ",
@@ -267,8 +267,8 @@ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cpu(
     const Tensor& qkv_bias,
     const int64_t num_head) {
   auto qkv_ = qkv.is_nested()
-    ? c10::MaybeOwned<Tensor>::owned(qkv.to_padded_tensor(0))
-    : c10::MaybeOwned<Tensor>::borrowed(qkv);
+      ? c10::MaybeOwned<Tensor>::owned(qkv.to_padded_tensor(0))
+      : c10::MaybeOwned<Tensor>::borrowed(qkv);
   auto B = qkv_->size(0);
   auto T = qkv_->size(1);
   auto _3D = qkv_->size(2);
@@ -338,10 +338,7 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
       "NestedTensor with mask is not supported yet");
   const auto D = embed_dim;
   TORCH_CHECK(
-      query.dim() == 3,
-      "expected 3-D `query`, got ",
-      query.dim(),
-      "-D tensor");
+      query.dim() == 3, "expected 3-D `query`, got ", query.dim(), "-D tensor");
   TORCH_CHECK(
       query.is_nested() || query.sizes()[2] == embed_dim,
       "passed-in embed_dim ",
@@ -349,15 +346,9 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
       " didn't match last dim of query ",
       query.sizes()[2]);
   TORCH_CHECK(
-      key.dim() == 3,
-      "expected 3-D `key`, got ",
-      key.dim(),
-      "-D tensor");
+      key.dim() == 3, "expected 3-D `key`, got ", key.dim(), "-D tensor");
   TORCH_CHECK(
-      value.dim() == 3,
-      "expected 3-D `value`, got ",
-      value.dim(),
-      "-D tensor");
+      value.dim() == 3, "expected 3-D `value`, got ", value.dim(), "-D tensor");
   TORCH_CHECK(
       query.is_nested() || key.is_nested() || value.is_nested() ||
           (query.sizes() == key.sizes() && key.sizes() == value.sizes()),
@@ -381,7 +372,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
   TORCH_CHECK(
       qkv_bias.sizes()[0] == 3 * D,
       "expected `qkv_bias` first dim and first dim of query to be equal");
-  TORCH_CHECK(D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
+  TORCH_CHECK(
+      D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
 
 #ifndef NDEBUG
   const auto B = query.is_nested()
@@ -466,8 +458,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
 
   // shape: [B, T, D]
   // Fuse transform_0213 inside
-  auto proj = transform0213_gemm_nt_bias(
-      attn_ctx, proj_weight, proj_bias, query);
+  auto proj =
+      transform0213_gemm_nt_bias(attn_ctx, proj_weight, proj_bias, query);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif
@@ -481,7 +473,8 @@ std::tuple<Tensor, Tensor> native_multi_head_attention(
   return std::make_tuple(std::move(proj), std::move(qkt));
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attention(
+std::tuple<Tensor, Tensor, Tensor, Tensor>
+native_decoder_only_multi_head_attention(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
@@ -504,10 +497,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
       "NestedTensor with mask is not supported yet");
   const auto D = embed_dim;
   TORCH_CHECK(
-      query.dim() == 3,
-      "expected 3-D `query`, got ",
-      query.dim(),
-      "-D tensor");
+      query.dim() == 3, "expected 3-D `query`, got ", query.dim(), "-D tensor");
   TORCH_CHECK(
       query.is_nested() || query.sizes()[2] == embed_dim,
       "passed-in embed_dim ",
@@ -515,15 +505,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
       " didn't match last dim of query ",
       query.sizes()[2]);
   TORCH_CHECK(
-      key.dim() == 3,
-      "expected 3-D `key`, got ",
-      key.dim(),
-      "-D tensor");
+      key.dim() == 3, "expected 3-D `key`, got ", key.dim(), "-D tensor");
   TORCH_CHECK(
-      value.dim() == 3,
-      "expected 3-D `value`, got ",
-      value.dim(),
-      "-D tensor");
+      value.dim() == 3, "expected 3-D `value`, got ", value.dim(), "-D tensor");
   TORCH_CHECK(
       query.is_nested() || key.is_nested() || value.is_nested() ||
           (query.sizes() == key.sizes() && key.sizes() == value.sizes()),
@@ -547,7 +531,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
   TORCH_CHECK(
       qkv_bias.sizes()[0] == 3 * D,
       "expected `qkv_bias` first dim and first dim of query to be equal");
-  TORCH_CHECK(D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
+  TORCH_CHECK(
+      D % num_head == 0, "`embed_dim` must divide evenly by `num_heads`");
 
 #ifndef NDEBUG
   const auto B = query.is_nested()
@@ -558,7 +543,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 #endif
 
   // shape: [B, T, 3 x D]
-  const bool is_incremental_decoding = incr_key.has_value() && incr_value.has_value() && incr_key->sizes() == incr_value->sizes();
+  const bool is_incremental_decoding = incr_key.has_value() &&
+      incr_value.has_value() && incr_key->sizes() == incr_value->sizes();
   auto qkv = qkv_projection(query, query, query, embed_dim, qkv_weight);
 
   if (!qkv.is_nested() && qkv.numel() == 0) {
@@ -643,8 +629,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
 
   // shape: [B, T, D]
   // Fuse transform_0213 inside
-  auto proj = transform0213_gemm_nt_bias(
-      attn_ctx, proj_weight, proj_bias, query);
+  auto proj =
+      transform0213_gemm_nt_bias(attn_ctx, proj_weight, proj_bias, query);
 #ifndef NDEBUG
   debug_assert_shape(__LINE__, proj, {B, T, D});
 #endif
@@ -655,7 +641,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> native_decoder_only_multi_head_attent
     qkt = qkt.sum(1);
     qkt /= num_head;
   }
-  return std::make_tuple(std::move(proj), std::move(qkt), std::move(k), std::move(v));
+  return std::make_tuple(
+      std::move(proj), std::move(qkt), std::move(k), std::move(v));
 }
 
 } // namespace native

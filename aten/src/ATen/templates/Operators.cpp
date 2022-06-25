@@ -7,13 +7,21 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Operators.h>
 #else
-${operator_headers}
+$ {
+  operator_headers
+}
 #endif
 
-${static_dispatch_extra_headers}
+$ {
+  static_dispatch_extra_headers
+}
 
-namespace at { namespace _ops {
+namespace at {
+namespace _ops {
 
-${definitions}
+$ {
+  definitions
+}
 
-}} // namespace at::_ops
+} // namespace _ops
+} // namespace at

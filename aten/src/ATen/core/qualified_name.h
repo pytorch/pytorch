@@ -109,7 +109,7 @@ struct QualifiedName {
   static constexpr char delimiter_ = '.';
 
   // Helper for cacheAccessors() below.
-  template<typename T>
+  template <typename T>
   std::string join(char delimiter, const T& v) {
     std::string out;
     size_t reserve = 0;

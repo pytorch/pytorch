@@ -30,13 +30,16 @@ void copy_texture_to_texture(
   copy_info.dstOffset.y = dst_offset.data[1u];
   copy_info.dstOffset.z = dst_offset.data[2u];
 
-  // To use vkCmdCopyImage, the stage of src & dst image must be set to vTensor::Stage::Transfer.
+  // To use vkCmdCopyImage, the stage of src & dst image must be set to
+  // vTensor::Stage::Transfer.
   vkCmdCopyImage(
-    command_buffer.handle(),
-    src_image.handle, VK_IMAGE_LAYOUT_GENERAL,
-    dst_image.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-    1,
-    &copy_info);
+      command_buffer.handle(),
+      src_image.handle,
+      VK_IMAGE_LAYOUT_GENERAL,
+      dst_image.handle,
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      1,
+      &copy_info);
 }
 
 #endif /* USE_VULKAN_API */

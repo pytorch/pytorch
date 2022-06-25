@@ -1,9 +1,9 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
-#include <ATen/Parallel.h>
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 
@@ -35,35 +35,40 @@ static void im2col(
   const int64_t channels_col = channels * kernel_h * kernel_w;
 
   if (is_channels_last) {
-    at::parallel_for(0, height_col * width_col, 0, [&](int64_t begin, int64_t end) {
-      int64_t h_col{0}, w_col{0};
-      data_index_init(begin, h_col, height_col, w_col, width_col);
+    at::parallel_for(
+        0, height_col * width_col, 0, [&](int64_t begin, int64_t end) {
+          int64_t h_col{0}, w_col{0};
+          data_index_init(begin, h_col, height_col, w_col, width_col);
 
-      for (const auto i_col : c10::irange(begin, end)) {
-        for (const auto h_offset : c10::irange(kernel_h)) {
-          int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
-          for (const auto w_offset : c10::irange(kernel_w)) {
-            int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
+          for (const auto i_col : c10::irange(begin, end)) {
+            for (const auto h_offset : c10::irange(kernel_h)) {
+              int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
+              for (const auto w_offset : c10::irange(kernel_w)) {
+                int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
 
-            const T* slice_im = data_im + (h_im * width + w_im) * channels;
-            T* slice_col = data_col + (i_col * kernel_h * kernel_w + h_offset * kernel_w + w_offset) * channels;
+                const T* slice_im = data_im + (h_im * width + w_im) * channels;
+                T* slice_col = data_col +
+                    (i_col * kernel_h * kernel_w + h_offset * kernel_w +
+                     w_offset) *
+                        channels;
 
-            if (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) {
-              std::copy_n(slice_im, channels, slice_col);
-            } else {
-              std::fill_n(slice_col, channels, T(0));
+                if (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) {
+                  std::copy_n(slice_im, channels, slice_col);
+                } else {
+                  std::fill_n(slice_col, channels, T(0));
+                }
+              }
             }
-          }
-        }
 
-        // move the the next index
-        data_index_step(h_col, height_col, w_col, width_col);
-      }
-    });
+            // move the the next index
+            data_index_step(h_col, height_col, w_col, width_col);
+          }
+        });
   } else {
     at::parallel_for(0, channels_col, 0, [&](int64_t begin, int64_t end) {
       int64_t c_im{0}, h_offset{0}, w_offset{0};
-      data_index_init(begin, c_im, channels, h_offset, kernel_h, w_offset, kernel_w);
+      data_index_init(
+          begin, c_im, channels, h_offset, kernel_h, w_offset, kernel_w);
 
       for (const auto c_col : c10::irange(begin, end)) {
         for (const auto h_col : c10::irange(height_col)) {
@@ -117,11 +122,18 @@ static void col2im(
             int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
 
             T* slice_im = data_im + (h_im * width + w_im) * channels;
-            const T* slice_col = data_col + ((h_col * width_col + w_col) * kernel_h * kernel_w
-                + h_offset * kernel_w + w_offset) * channels;
+            const T* slice_col = data_col +
+                ((h_col * width_col + w_col) * kernel_h * kernel_w +
+                 h_offset * kernel_w + w_offset) *
+                    channels;
 
             if (h_im >= 0 && h_im < height && w_im >= 0 && w_im < width) {
-              std::transform(slice_col, slice_col + channels, slice_im, slice_im, std::plus<T>());
+              std::transform(
+                  slice_col,
+                  slice_col + channels,
+                  slice_im,
+                  slice_im,
+                  std::plus<T>());
             }
           }
         }
@@ -147,5 +159,5 @@ static void col2im(
   }
 }
 
-} // native
-} // at
+} // namespace native
+} // namespace at
