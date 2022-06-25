@@ -60,7 +60,6 @@ full_codegen:
   - hardsigmoid
   - index_select
   - kl_div_backward
-  - l1_loss_backward
   - le.Scalar
   - le.Tensor
   - leaky_relu
@@ -86,6 +85,8 @@ full_codegen:
   - mm
   - mul.Tensor
   - mv
+  - native_batch_norm
+  - native_batch_norm_backward
   - native_dropout
   - native_dropout_backward
   - native_layer_norm
@@ -154,8 +155,6 @@ supported:
   - expand
   - fill_.Scalar
   - narrow
-  - native_batch_norm
-  - native_batch_norm_backward
   - normal_
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward

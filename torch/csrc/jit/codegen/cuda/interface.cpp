@@ -38,6 +38,7 @@ class NVFuserEnabler {
   c10::once_flag enabled_check_flag_;
   std::mutex mutex_;
 
+ public:
   static bool nvfuserCanBeEnabled() {
 #ifdef USE_ROCM
     return false;
@@ -47,6 +48,7 @@ class NVFuserEnabler {
 #endif
   }
 
+ private:
   static void assertFuserCanBeEnabled(bool is_enabled) {
     if (!is_enabled) {
       return;
@@ -143,6 +145,10 @@ bool isEnabled() {
 
 bool setEnabled(bool is_enabled) {
   return nvfuser_enabler.setEnabled(is_enabled);
+}
+
+bool canBeEnabled() {
+  return nvfuser_enabler.nvfuserCanBeEnabled();
 }
 
 bool getSingletonFusion() {

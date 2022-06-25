@@ -65,7 +65,6 @@ jobs:
 
       - name: Build ${{ matrix.docs_type }} docs
         env:
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           DOCS_TYPE: ${{ matrix.docs_type }}
@@ -85,7 +84,6 @@ jobs:
             -e SHA1="$GITHUB_SHA" \
             -e DOCS_VERSION="${target}" \
             -e DOCS_TYPE \
-            -e PR_LABELS \
             -e WITH_PUSH \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
