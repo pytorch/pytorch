@@ -28,7 +28,8 @@ void TORCH_API synchronize(int64_t device_index = -1);
 
 #ifdef USE_CUDA
 /// Sets memory fraction for a process.
-void TORCH_API set_per_process_memory_fraction(float fraction, int64_t device_index = -1);
+void TORCH_API
+set_per_process_memory_fraction(float fraction, int64_t device_index = -1);
 #endif
 
 } // namespace cuda

@@ -76,9 +76,9 @@ void set_per_process_memory_fraction(float fraction, int64_t device_index) {
   TORCH_CHECK(
       fraction >= 0.0 || fraction <= 1.0,
       "Memory fraction should be between 0 and 1, got: ",
-      fraction
-      );
-  c10::cuda::CUDACachingAllocator::setMemoryFraction(fraction, int(device_index));
+      fraction);
+  c10::cuda::CUDACachingAllocator::setMemoryFraction(
+      fraction, int(device_index));
 }
 #endif
 
