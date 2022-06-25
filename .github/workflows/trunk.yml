@@ -72,22 +72,21 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
         ]}
 
-  # TODO(suo): libtorch builds are not set up yet as they have a lot of custom code
   libtorch-linux-xenial-cuda10_2-py3_7-gcc7-build:
     name: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      # build-environment: libtorch-linux-xenial-cuda10.2-py3.7-gcc7
       docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
       artifact-name: ""
+      script: .jenkins/pytorch/build-libtorch.sh
 
   libtorch-linux-bionic-cuda11_6-py3_7-gcc7-build:
     name: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: libtorch-linux-bionic-cuda11.6-py3.7-gcc7
       docker-image-name: pytorch-linux-bionic-cuda11.6-cudnn8-py3-gcc7
       artifact-name: ""
+      script: .jenkins/pytorch/build-libtorch.sh
 
   linux-xenial-cuda11_3-py3_7-gcc7-no-ops:
     name: linux-xenial-cuda11.3-py3.7-gcc7-no-ops
