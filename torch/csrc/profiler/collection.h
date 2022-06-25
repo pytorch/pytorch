@@ -43,6 +43,9 @@ struct TorchOpBasicFields {
   // Set in the exit callback.
   uint64_t end_tid_{0};
 };
+//c10::TensorImpl* UNSAFE_tensor_impl_ptr_;
+//c10::StorageImpl* UNSAFE_storage_impl_ptr_;
+
 
 struct TensorMetadata {
   void* ptr_;

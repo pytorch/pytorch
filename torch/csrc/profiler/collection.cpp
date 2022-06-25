@@ -46,7 +46,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
         dim);
 
     tensor_metadata_.emplace_back(
-        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*UNSAFE_tensor_impl_ptr_*/ t.unsafeGetTensorImpl(),
+        /*UNSAFE_storage_impl_ptr_*/ t.storage().unsafeGetStorageImpl(),
         /*dtype_=*/t.scalar_type(),
         /*dim_=*/(uint32_t)dim,
         /*layout_=*/t.layout());
@@ -443,12 +444,74 @@ struct ResultGreater {
   }
 };
 
+void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
+  // Go through the result vectors
+  // For Torch Ops, check if (TensorImpl*, StorageImpl*) is already in the map
+  // For allocator events with negative allocation sizes,
+
+  // Do I need to track both TensorImpl and StorageImpl?
+
+  struct UniqueTensorInfo {
+    c10::StorageImpl* storage_impl_;
+    size_t unique_tensor_id_;
+  };
+
+  size_t cur_unique_tensor_id = 1;
+
+  std::unordered_set<void*> valid_storage_impls;
+  std::unordered_map<void*, UniqueTensorInfo> unique_tensor_map;
+
+  for (auto& res : sorted_results) {
+    if (auto torch_op =
+            c10::get_if<ExtraFields<EventType::TorchOp>>(&res->extra_fields_)) {
+      auto& metadata_vec = torch_op->inputs_.tensor_metadata_;
+      for (auto& metadata : metadata_vec) {
+        if (!metadata) {
+          continue;
+        }
+        auto tensor_impl = metadata->UNSAFE_tensor_impl_ptr_;
+        auto storage_impl = metadata->UNSAFE_storage_impl_ptr_;
+        if (!tensor_impl || !storage_impl) {
+          continue;
+        }
+        if (valid_storage_impls.find(storage_impl) ==
+            valid_storage_impls.end()) {
+          valid_storage_impls.insert(storage_impl);
+          cur_unique_tensor_id++;
+          unique_tensor_map[tensor_impl] = {storage_impl, cur_unique_tensor_id};
+          metadata->unique_tensor_id_ = cur_unique_tensor_id;
+          continue;
+        }
+        auto it = unique_tensor_map.find(tensor_impl);
+        if (it == unique_tensor_map.end()) {
+          cur_unique_tensor_id++;
+          unique_tensor_map[tensor_impl] = {storage_impl, cur_unique_tensor_id};
+          metadata->unique_tensor_id_ = cur_unique_tensor_id;
+        } else {
+          metadata->unique_tensor_id_ = it->second.unique_tensor_id_;
+        }
+      }
+    } else if (
+        auto alloc_op = c10::get_if<ExtraFields<EventType::Allocation>>(
+            &res->extra_fields_)) {
+      if (alloc_op->alloc_size_ < 0) {
+        // For deallocations, clear relevant pointers
+        valid_storage_impls.erase(alloc_op->ptr_);
+        unique_tensor_map.erase(alloc_op->ptr_);
+      }
+    }
+  }
+}
+
 void build_tree(std::vector<std::shared_ptr<Result>>& events) {
   set_autograd_evaluate(events);
   std::stable_sort(
       events.begin(), events.end(), [](const auto& a, const auto& b) {
         return a->start_time_ns_ < b->start_time_ns_;
       });
+
+  // Needs both TorchOp and Allocation events in order.
+  calculate_unique_tensor_ids(events);
 
   using op_fields = ExtraFields<EventType::TorchOp>;
   ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;
