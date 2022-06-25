@@ -4291,9 +4291,10 @@ class TestNLLLoss(TestCase):
         helper(0.0)
         helper(0.1)
         helper(0.2)
+
         # Test int32 tensor + int64 scalar add
         # see https://github.com/pytorch/pytorch/issues/79835#issuecomment-1164984534
-        x=torch.ones(4, dtype=torch.int32, device='mps')
+        x = torch.ones(4, dtype=torch.int32, device='mps')
         self.assertEqual(x + 1, torch.full((4,), 2, dtype=torch.int32, device='mps'))
         self.assertEqual(x + 1.5, torch.full((4,), 2.5, device='mps'))
 
