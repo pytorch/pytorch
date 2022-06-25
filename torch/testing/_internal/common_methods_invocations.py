@@ -17402,8 +17402,6 @@ op_db: List[OpInfo] = [
             # JIT has issue when op is passed as lambda
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-            DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_operator'),
-            DecorateInfo(unittest.skip('Allowed exemption'), 'TestCompositeCompliance', 'test_backward'),
             DecorateInfo(unittest.skip("No fill_ op"), 'TestCudaFuserOpInfo'),
             DecorateInfo(unittest.skip("No fill_ op"), 'TestNNCOpInfo'),
         )),
