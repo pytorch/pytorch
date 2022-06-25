@@ -930,7 +930,6 @@ class FullyShardedDataParallel(nn.Module):
         self._exec_order_data = _ExecOrderData()
 
     def _init_param_exec_order_wrap_policy(self, *args, **kwargs) -> None:
-        # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         auto_wrap_policy = kwargs["auto_wrap_policy"]
         module = kwargs["module"]
         if isinstance(
@@ -940,7 +939,7 @@ class FullyShardedDataParallel(nn.Module):
             tracer = auto_wrap_policy.tracing_config.tracer
             _patch_tracer(tracer, module)
             tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
-
+        # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
         self.__init__(*args, **kwargs)
         self._param_exec_order_policy: bool = True
@@ -952,31 +951,30 @@ class FullyShardedDataParallel(nn.Module):
             auto_wrap_policy.tracing_config,
             TracingConfig
         ):
-            module_fsdp_wrap: Dict[nn.Module, FullyShardedDataParallel] = dict()
+            # Initialize a dict that maps each module to its parent FSDP wrap
+            module_fsdp_wrap_map: Dict[nn.Module, FullyShardedDataParallel] = dict()
             for wrap in self.fsdp_modules(self):
-                module_fsdp_wrap[wrap.module] = wrap
+                module_fsdp_wrap_map[wrap.module] = wrap
+            # Set self._fsdp_params_exec_order based on tracer.module_forward_order.
+            # TODO (linjianma): self._fsdp_params_exec_order will be set based on
+            # the parameter execution order rather than module_forward_order,
+            # once the non-recursive wrapping policy is fully implemented.
             for m in tracer.module_forward_order:
-                if m in module_fsdp_wrap:
-                    flat_param = module_fsdp_wrap[m]._fsdp_wrapped_module.flat_param
+                if m in module_fsdp_wrap_map:
+                    flat_param = module_fsdp_wrap_map[m]._fsdp_wrapped_module.flat_param
                     if flat_param is not None:
                         self._fsdp_params_exec_order.append(flat_param)
             self._param_exec_order_prep_stage = False
-            for m in self.modules():
-                if m is not self and isinstance(m, FullyShardedDataParallel):
-                    # Assignment by reference, so each children FSDP wrap has access to
-                    # the _fsdp_params_exec_order of the root module
-                    m._fsdp_params_exec_order = self._fsdp_params_exec_order
-                    m._param_exec_order_policy = True
-                    m._param_exec_order_prep_stage = False
         else:
             assert auto_wrap_policy.tracing_config is None
-            for m in self.modules():
-                if m is not self and isinstance(m, FullyShardedDataParallel):
-                    # Assignment by reference, so each children FSDP wrap has access to
-                    # the _fsdp_params_exec_order of the root module
-                    m._fsdp_params_exec_order = self._fsdp_params_exec_order
-                    m._param_exec_order_policy = True
-                    m._param_exec_order_prep_stage = True
+
+        for m in self.modules():
+            if m is not self and isinstance(m, FullyShardedDataParallel):
+                # Assignment by reference, so each children FSDP wrap has access to
+                # the _fsdp_params_exec_order of the root module
+                m._fsdp_params_exec_order = self._fsdp_params_exec_order
+                m._param_exec_order_policy = self._param_exec_order_policy
+                m._param_exec_order_prep_stage = self._param_exec_order_prep_stage
 
     def _move_module_if_needed(self, module) -> None:
         """

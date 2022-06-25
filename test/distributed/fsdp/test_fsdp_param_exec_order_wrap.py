@@ -58,10 +58,18 @@ class TestFSDPExecOrder(FSDPTest):
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     @parametrize("iters", [1, 3])
-    def test_fsdp_flatten_params_exec_order(self, sharding_strategy: ShardingStrategy, iters: int):
+    def test_fsdp_flatten_params_exec_order(
+        self,
+        sharding_strategy: ShardingStrategy,
+        iters: int,
+    ):
         """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
-        wrap_policy = ParamExecOrderWrapPolicy(init_policy=always_wrap_policy, tracing_config=None)
-        fsdp_model = Model.wrap(sharding_strategy, self.device, wrap_policy=wrap_policy)
+        wrap_policy = ParamExecOrderWrapPolicy(init_policy=always_wrap_policy)
+        fsdp_model = Model.wrap(
+            sharding_strategy,
+            self.device,
+            wrap_policy=wrap_policy
+        )
         self.assertTrue(fsdp_model._is_param_exec_order_prep_stage())
         for _ in range(iters):
             input = fsdp_model.module.get_input(self.device)
@@ -69,8 +77,9 @@ class TestFSDPExecOrder(FSDPTest):
             loss = fsdp_model.module.get_loss(input, output).to(self.device)
             loss.backward()
         params_list = list(fsdp_model.parameters())
-        # Since the forward execution order is NOT consistent with the model definition order,
-        # the ordering in flatten_named_params_exec_order should be different from named_parameters
+        # Since the forward execution order is NOT consistent with
+        # the model definition order, the ordering in flatten_named_params_exec_order
+        # should be different from named_parameters.
         self.assertEqual(
             fsdp_model._fsdp_params_exec_order,
             [
@@ -89,10 +98,25 @@ class TestFSDPExecOrder(FSDPTest):
         [ShardingStrategy.FULL_SHARD, ShardingStrategy.SHARD_GRAD_OP],
     )
     @parametrize("iters", [0, 1])
-    def test_fsdp_flatten_params_exec_order_symbolic_trace(self, sharding_strategy: ShardingStrategy, iters: int):
-        """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
-        wrap_policy = ParamExecOrderWrapPolicy(init_policy=always_wrap_policy, tracing_config=TracingConfig())
-        fsdp_model = Model.wrap(sharding_strategy, self.device, wrap_policy=wrap_policy)
+    def test_fsdp_flatten_params_exec_order_symbolic_trace(
+        self,
+        sharding_strategy: ShardingStrategy,
+        iters: int,
+    ):
+        """
+        Tests ParamExecOrderWrapPolicy with symbolic tracing.
+        With symbolic tracing enabled, _is_param_exec_order_prep_stage
+        should always set as False.
+        """
+        wrap_policy = ParamExecOrderWrapPolicy(
+            init_policy=always_wrap_policy,
+            tracing_config=TracingConfig()
+        )
+        fsdp_model = Model.wrap(
+            sharding_strategy,
+            self.device,
+            wrap_policy=wrap_policy,
+        )
         for _ in range(iters):
             input = fsdp_model.module.get_input(self.device)
             output = fsdp_model(*input)

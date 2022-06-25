@@ -306,7 +306,7 @@ class ParamExecOrderWrapPolicy:
     Later we will wrap parameters based on bucket size.
 
     Args:
-        init_policy (nn.Module):
+        init_policy (Callable):
             The initial recursive wrapping policy used to guide the wrapping of this policy. In the first
             forward and backward iteration, init_policy is used. Parameter execution order is also recorded
             in the first iteration. Starting from second iteration, ParamExecOrderWrapPolicy will be used.
@@ -315,6 +315,11 @@ class ParamExecOrderWrapPolicy:
             transformer based models, setting transformer_auto_wrap_policy as the init_policy will guarantee
             wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
             within each transformer layer.
+
+        tracing_config (Optional[TracingConfig]):
+            The configuration used to perform symbolic tracing at FSDP constructor to get the module and
+            parameter execution order. If set as None, then symbolic tracing is not enabled, and one forward
+            as well as backward iteration are needed to get the parameter execution order.
     """
     init_policy: Callable = always_wrap_policy
     tracing_config: Optional[TracingConfig] = None
