@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from .operation import op_add, op_sub, op_mul, op_div, op_mod
+from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, op_mod
 from torch.fx.tensor_type import TensorType, Dyn
 
 
