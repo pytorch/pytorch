@@ -79,6 +79,7 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
             out.shapes_.back().push_back(*tensor_size_it++);
             out.strides_.back().push_back(*tensor_strides_it++);
           }
+          out.tensor_metadata_.emplace_back(md);
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
 
@@ -88,17 +89,20 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
           }
           out.dtypes_.emplace_back("TensorList");
           out.ivalues_.emplace_back();
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
           out.ivalues_.emplace_back(*ivals_it++);
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
           out.ivalues_.emplace_back();
           out.dtypes_.emplace_back();
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::TERMINATOR:
