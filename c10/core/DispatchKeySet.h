@@ -633,6 +633,7 @@ C10_API inline int getDispatchTableIndexForDispatchKey(DispatchKey k) {
 constexpr DispatchKeySet autograd_dispatch_keyset = DispatchKeySet({
     DispatchKey::AutogradFunctionality,
     DispatchKey::AutogradOther,
+    DispatchKey::AutogradNestedTensor,
 });
 
 constexpr DispatchKeySet autocast_dispatch_keyset = DispatchKeySet({
@@ -741,6 +742,8 @@ constexpr auto autograd_privateuse2_ks =
 constexpr auto autograd_privateuse3_ks =
     DispatchKeySet(DispatchKey::AutogradPrivateUse3);
 constexpr auto autograd_other_ks = DispatchKeySet(DispatchKey::AutogradOther);
+constexpr auto autograd_nested =
+    DispatchKeySet(DispatchKey::AutogradNestedTensor);
 
 // keyset correpsonding to functorch keys that have their own dedicated
 // TensorImpl subclass.
