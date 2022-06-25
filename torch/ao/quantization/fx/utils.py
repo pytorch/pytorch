@@ -1,3 +1,4 @@
+import copy
 import re
 import torch
 import torch.nn as nn
@@ -12,6 +13,7 @@ from torch.fx.graph import (
     Node,
 )
 from torch.fx.node import Argument
+from .custom_config import PrepareCustomConfig
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
 from collections import namedtuple
@@ -48,6 +50,7 @@ __all__ = [
     "quantize_node",
     "return_arg_list",
     "WEIGHT_INDEX_DICT",
+    "get_skipped_module_name_and_classes",
     "get_all_args_as_positional_args",
 ]
 
@@ -635,3 +638,16 @@ def get_all_args_as_positional_args(node: Node) -> List[Argument]:
     all_args = list(node.args)
     all_args.extend(list(node.kwargs.values()))
     return all_args
+
+def get_skipped_module_name_and_classes(
+        prepare_custom_config: PrepareCustomConfig,
+        is_standalone_module: bool) -> Tuple[List[str], List[Callable]]:
+    skipped_module_names = copy.copy(prepare_custom_config.non_traceable_module_names)
+    skipped_module_classes = copy.copy(prepare_custom_config.non_traceable_module_classes)
+    if not is_standalone_module:
+        # standalone module and custom module config are applied in top level module
+        skipped_module_names += list(prepare_custom_config.standalone_module_names.keys())
+        skipped_module_classes += list(prepare_custom_config.standalone_module_classes.keys())
+        skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
+
+    return skipped_module_names, skipped_module_classes
