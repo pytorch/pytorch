@@ -13438,9 +13438,6 @@ op_db: List[OpInfo] = [
                # AssertionError: False is not true : Scalars failed to compare as equal!
                DecorateInfo(unittest.skip("Errors when storage_offset is included"),
                             'TestCommon', 'test_variant_consistency_eager'),
-               # RuntimeError: This operator is not Composite Compliant
-               DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestCompositeCompliance', 'test_backward'),
-               DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestCompositeCompliance', 'test_forward_ad'),
                # Not close
                DecorateInfo(unittest.skip("Errors when storage_offset is included"),
                             'TestCommon', 'test_complex_half_reference_testing'),
