@@ -4,6 +4,7 @@ import torch
 import torch.fx
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
+from torch._decomp import decomposition_table
 
 class NvFuserOperatorSupport(OperatorSupport):
     """
@@ -17,13 +18,13 @@ class NvFuserOperatorSupport(OperatorSupport):
     alphabetical order.
     """
 
-    def __init__(self):
+    def __init__(self, use_jit_ops=False):
 
         # TODO: current list copied from torch/csrc/jit/codegen/cuda/parser.cpp is incorrect,
         # as that file is solely for TorchScript and doesn't represent the actual status
         # whether operation would be runnable by primTorch+nvFuser.
         # We will iterate on this list to reflect the the reality.
-        support_dict = {
+        jit_dict = {
             # ===============================================================
             # call_function aten
             # ===============================================================
@@ -164,7 +165,21 @@ class NvFuserOperatorSupport(OperatorSupport):
             #     "_operator.truediv": None,
         }
 
-        super().__init__(support_dict)
+        # all aten ops that have a decomposition to prims.
+        ref_dict = {
+            # ===============================================================
+            # call_function builtins
+            # ===============================================================
+            "getattr": None,
+            "_operator.getitem": None,
+        }
+
+        # take the ops from the decomposition_table that were defined in torch._refs
+        for k, v in decomposition_table.items():
+            if hasattr(v, "__module__") and "torch._refs" in v.__module__:
+                ref_dict[f"torch.ops.{str(k)}"] = None
+
+        super().__init__(jit_dict if use_jit_ops else ref_dict)
 
     def is_node_supported(
         self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
