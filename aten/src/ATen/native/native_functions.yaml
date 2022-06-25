@@ -3594,6 +3594,7 @@
   dispatch:
     CompositeExplicitAutograd: permute
     MPS: permute_mps
+    SparseCPU, SparseCUDA: permute_sparse_coo
 
 - func: movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
   variants: function, method

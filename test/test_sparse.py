@@ -787,6 +787,53 @@ class TestSparse(TestCase):
         test_shape(4, 0, [0, 0, 7, 3, 3, 3, 0])
 
     @coalescedonoff
+    @dtypes(torch.double, torch.cdouble)
+    def test_permute(self, device, dtype, coalesced):
+        # trivial checks
+        s = torch.rand(3, 3, 3, device=device, dtype=dtype).to_sparse()
+        with self.assertRaisesRegex(RuntimeError, "does not match the length"):
+            s.permute(dims=(1, 0))
+        with self.assertRaisesRegex(RuntimeError, "duplicate dims"):
+            s.permute(dims=(1, 1, 1))
+
+        def test_shape(sparse_dims, nnz, with_size):
+            ndim = len(with_size)
+            valid_sparse_dims = torch.arange(-ndim, -ndim + sparse_dims)
+            valid_dense_dims = torch.arange(-ndim + sparse_dims, 0)
+
+            for dims in itertools.permutations(range(-ndim, 0)):
+                s = self._gen_sparse(sparse_dims, nnz, with_size, dtype, device, coalesced)[0]
+                d = self.safeToDense(s)
+
+                dims_sparse, _ = torch.tensor(dims[:sparse_dims]).sort()
+                dims_dense, _ = torch.tensor(dims[sparse_dims:]).sort()
+
+                if (valid_sparse_dims == dims_sparse).all() and (valid_dense_dims == dims_dense).all():
+                    # if valid permutation, test for correctness
+                    s_permuted = s.permute(dims)
+                    self.assertEqual(s_permuted, d.permute(dims))
+
+                    # if s is coalesced, and perm does not touch 0-dim,
+                    # the result has to be coalesced as well
+                    if dims[0] == 0:
+                        self.assertEqual(s_permuted.is_coalesced(), s.is_coalesced())
+                    else:
+                        self.assertFalse(s_permuted.is_coalesced())
+
+                    gradcheck(lambda t: t.permute(dims).to_dense(), s.requires_grad_(True), check_sparse_nnz=True)
+                else:
+                    # otherwise check if exception is thrown
+                    fail_message = "transpositions between sparse and dense dimensions are not allowed"
+                    with self.assertRaisesRegex(RuntimeError, fail_message):
+                        s.permute(dims)
+
+        test_shape(2, 3, [2, 3, 4, 5])
+        test_shape(2, 3, [2, 2, 0])
+        # if nnz=0, it is not true that t == t.to_dense().to_sparse()
+        # unless t.sparse_dim == t.dim (i.e. t is not hybrid)
+        test_shape(3, 0, [0, 0, 2])
+
+    @coalescedonoff
     @onlyCPU
     @dtypes(torch.double)
     def test_coalesce_transpose_mm(self, device, dtype, coalesced):
