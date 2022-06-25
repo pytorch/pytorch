@@ -1011,19 +1011,23 @@ Arguments:
 
           .def(
               "allreduce",
-              &::c10d::ProcessGroup::allreduce,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 ::c10d::AllreduceOptions opts) {
+                return ::c10d::ops::allreduce(self, tensors, opts);
+              },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "allreduce",
-              [](::c10d::ProcessGroup& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                  std::vector<at::Tensor>& xs,
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
-                return pg.allreduce(xs, opts);
+                return ::c10d::ops::allreduce(pg, xs, opts);
               },
               py::arg("tensors"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
@@ -1031,11 +1035,13 @@ Arguments:
 
           .def(
               "allreduce",
-              [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+                 at::Tensor& x,
+                 ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
                 std::vector<at::Tensor> xs = {x};
-                return pg.allreduce(xs, opts);
+                return ::c10d::ops::allreduce(pg, xs, opts);
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
@@ -1078,7 +1084,13 @@ Arguments:
 
           .def(
               "allgather",
-              &::c10d::ProcessGroup::allgather,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<std::vector<at::Tensor>>& output_tensors,
+                 const std::vector<at::Tensor>& input_tensor,
+                 ::c10d::AllgatherOptions opts) {
+                return ::c10d::ops::allgather(
+                    self, output_tensors, input_tensor, opts);
+              },
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -1094,13 +1106,13 @@ Arguments:
 
           .def(
               "allgather",
-              [](::c10d::ProcessGroup& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                  std::vector<at::Tensor>& output,
                  at::Tensor& input) {
                 std::vector<std::vector<at::Tensor>> outputs = {output};
                 std::vector<at::Tensor> inputs = {input};
-                return pg.allgather(
-                    outputs, inputs, ::c10d::AllgatherOptions());
+                return ::c10d::ops::allgather(
+                    pg, outputs, inputs, ::c10d::AllgatherOptions());
               },
               py::arg("output_tensors"),
               py::arg("input_tensor"),

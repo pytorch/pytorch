@@ -858,15 +858,6 @@ std::vector<Shape> compute_shape_glu_jvp(
   return {Shape(glu.scalar_type(), glu.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_l1_loss_backward(
-    const at::Tensor& grad_output,
-    const at::Tensor& self,
-    const at::Tensor& target,
-    int64_t reduction) {
-  TORCH_INTERNAL_ASSERT(grad_output.scalar_type() == self.dtype());
-  return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
 std::vector<Shape> compute_shape_clamp_min(
     const at::Tensor& self,
     const at::Scalar& min) {
@@ -924,7 +915,7 @@ std::vector<Shape> compute_shape_repeat(
   return {Shape(self.scalar_type(), target_size)};
 }
 
-std::vector<Shape> compute_shape_narrow_copy(
+std::vector<Shape> compute_shape_narrow_copy_symint(
     const at::Tensor& self,
     int64_t dim,
     int64_t start,

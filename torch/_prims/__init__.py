@@ -45,7 +45,9 @@ __all__ = [
     "acos",
     "acosh",
     "asin",
+    "asinh",
     "atan",
+    "atanh",
     "cos",
     "cosh",
     "bessel_i0",
@@ -95,6 +97,7 @@ __all__ = [
     "fmax",
     "fmin",
     "fmod",
+    "gcd",
     "ge",
     "gt",
     "igamma",
@@ -107,6 +110,7 @@ __all__ = [
     "ne",
     "nextafter",
     "pow",
+    "remainder",
     "rsqrt",
     "shift_left",
     "shift_right_arithmetic",
@@ -180,6 +184,7 @@ _nvfuser_unary_ops = {
     "acos",
     "asin",
     "atan",
+    "atanh",
     "cos",
     "cosh",
     "bitwise_not",
@@ -517,10 +522,25 @@ asin = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+asinh = _make_elementwise_unary_prim(
+    "asinh",
+    impl_aten=torch.asinh,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 atan = _make_elementwise_unary_prim(
     "atan",
     impl_aten=torch.atan,
     impl_nvfuser=_atan_nvfuser,  # type: ignore[name-defined]
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+atanh = _make_elementwise_unary_prim(
+    "atanh",
+    impl_aten=torch.atanh,
+    impl_nvfuser=_atanh_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -919,6 +939,15 @@ fmod = _make_elementwise_binary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+gcd = _make_elementwise_binary_prim(
+    "gcd",
+    impl_aten=torch.gcd,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
 ge = _make_elementwise_binary_prim(
     "ge",
     impl_aten=torch.ge,
@@ -1045,6 +1074,20 @@ pow = _make_elementwise_binary_prim(
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
+
+
+def _remainder_nvfuser(fd: Any, a: TensorLikeType, b: TensorLikeType):
+    return fd.Ops.remainder(a, b)  # type: ignore[attr-defined]
+
+
+remainder = _make_elementwise_binary_prim(
+    "remainder",
+    impl_aten=torch.remainder,
+    impl_nvfuser=_remainder_nvfuser,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 
 shift_left = _make_elementwise_binary_prim(
     "shift_left",
@@ -2242,6 +2285,24 @@ def _var_nvfuser(
     return fd.Ops.var(a, dims, correction, keep_dims)
 
 
+def _amax_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.max(a, dims, keep_dims)
+
+
+def _amin_nvfuser(
+    fd: Any,
+    a: TensorLikeType,
+    dims: DimsSequenceType,
+):
+    keep_dims = False
+    return fd.Ops.min(a, dims, keep_dims)
+
+
 var = _make_var_reduction_prim(
     name="var",
     impl_aten=torch.var,
@@ -2252,12 +2313,14 @@ var = _make_var_reduction_prim(
 amax = _make_reduction_prim(
     name="amax",
     impl_aten=torch.amax,
+    impl_nvfuser=_amax_nvfuser,
     doc=_amax_doc,
 )
 
 amin = _make_reduction_prim(
     name="amin",
     impl_aten=torch.amin,
+    impl_nvfuser=_amin_nvfuser,
     doc=_amin_doc,
 )
 
