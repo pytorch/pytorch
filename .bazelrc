@@ -31,6 +31,10 @@ build --copt=-isystem --copt=bazel-out/k8-fastbuild-cpu-only/bin
 # rules_cuda configuration
 build:cpu-only --@rules_cuda//cuda:enable_cuda=False
 
+# Definition of --config=shell
+# interactive shell immediately before execution
+build:shell --run_under="//tools/bazel_tools:shellwrap"
+
 # Disable all warnings for external repositories. We don't care about
 # their warnings.
 build --per_file_copt=^external/@-w
