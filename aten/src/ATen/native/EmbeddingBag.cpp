@@ -1276,7 +1276,14 @@ Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices_,
       {indices.size(0) + 1}, offsets.options()); // offset2bag = [0 0 0 0 0]
 
     make_offset2bag(offsets, offset2bag_);
-    offset2bag_ = offset2bag_.narrow(0, 0, indices.size(0));
+    // For Composite Compliance, if `offset2bag_` is CCT
+    // then we can't call `resize_`. Instead we call `narrow`
+    // to slice the tensor.
+    if (isTensorSubclassLike(offset2bag_)) {
+      offset2bag_ = offset2bag_.narrow(0, 0, indices.size(0));
+    } else {
+      offset2bag_.resize_({indices.size(0)});
+    }
   } else {
     auto offset2bag_arg = TensorArg(offset2bag, "offset2bag", 1);
     checkScalarTypes("embedding_bag", offset2bag_arg, {kLong, kInt});
