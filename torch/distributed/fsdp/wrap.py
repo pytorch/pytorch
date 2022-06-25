@@ -5,6 +5,7 @@
 
 import contextlib
 from dataclasses import dataclass
+from enum import Enum, auto
 from typing import (
     Any,
     Callable,
@@ -20,7 +21,6 @@ from typing import (
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
 
-
 __all__ = [
     "always_wrap_policy",
     "lambda_auto_wrap_policy",
@@ -28,7 +28,7 @@ __all__ = [
     "size_based_auto_wrap_policy",
     "enable_wrap",
     "wrap",
-    "ParamExecOrderWrapPolicy",
+    "ParamExecOrderPolicy",
 ]
 
 
@@ -286,6 +286,34 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
             **wrap_overrides,
         )
     return module
+
+
+class HandleInitMode(Enum):
+    """
+    This determines how :class:`FlatParameter` s are initially constructed for
+    the parameter execution order policy. This construction is temporary, and
+    the :class:`FlatParameter` s are reconstructed later.
+    MODULE_LEVEL: For each module, its immediately owned parameters are used to
+                  construct one :class:`FlatParameter`. This construction
+                  matches that of ``always_wrap_policy``.
+    PARAM_LEVEL: Each original parameter is used to construct one
+                 :class:`FlatParameter`.
+    """
+    MODULE_LEVEL = auto()
+    PARAM_LEVEL = auto()
+
+
+class ParamExecOrderState(Enum):
+    UNINITIALIZED = auto()
+    INITIALIZED = auto()
+
+
+@dataclass
+class ParamExecOrderPolicy:
+    """
+    TODO (awgu): coalesce with below and document
+    """
+    handle_init_mode: HandleInitMode
 
 
 @dataclass
