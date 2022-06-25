@@ -1,6 +1,8 @@
 import torch
 import operator
 from typing import Callable, Dict
+
+from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
     Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD
 from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_matching, op_consistency, op_leq, op_precision
@@ -31,39 +33,82 @@ def generate_flatten_constraints(start_dim, end_dim, input, flattened, n, counte
     nat_constraints = gen_nat_constraints(d)
     return Conj([c1, c2, *nat_constraints]), counter
 
+# TODO: what constraints to generate for this?
+@register_inference_rule(getattr)
+def get_attr_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    attr_node = n.args[0]
+    attr_name = n.args[1]
+    return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule(torch.cumsum)
+def cumsum_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule(_assert_is_none)
+def assert_inference_rule(n: Node, symbols, constraints, counter):
+    return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule(operator.getitem)
+def getitem_inference_rule(n: Node, symbols, constraints, counter):
+    return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule(operator.mul)
+def mul_inference_rule(n: Node, symbols, constraints, counter):
+    return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule(operator.gt)
+def gt_inference_rule(n: Node, symbols, constraints, counter):
+    return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule(operator.lt)
+def lt_inference_rule(n: Node, symbols, constraints, counter):
+    return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule(torch.full)
+def full_inference_rule(n: Node, symbols, constraints, counter):
+    return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule(torch.arange)
+def arange_inference_rule(n: Node, symbols, constraints, counter):
+    return [], counter
 
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
 def add_inference_rule(n: Node, symbols, constraints, counter):
-    assert isinstance(n.args[0], Node)
-    assert isinstance(n.args[1], Node)
 
-    # create and store the new variable
-    my_add, counter = gen_tvar(counter)
-    symbols[n] = my_add
+    if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
+        # create and store the new variable
+        my_add, counter = gen_tvar(counter)
+        symbols[n] = my_add
 
-    # retrive arg variables
-    e1 = symbols[n.args[0]]
-    e2 = symbols[n.args[1]]
+        # retrive arg variables
+        e1 = symbols[n.args[0]]
+        e2 = symbols[n.args[1]]
 
-    # additional vars that don't correspond to expressions
-    e11, counter = gen_tvar(counter)
-    e22, counter = gen_tvar(counter)
+        # additional vars that don't correspond to expressions
+        e11, counter = gen_tvar(counter)
+        e22, counter = gen_tvar(counter)
 
-    # generate constraints
-    c1 = TGreatestUpperBound(my_add, e11, e22)
-    c2 = ApplyBroadcasting(e11, e22, e1, e2)
-    c3 = BinConstraintT(e11, e22, op_consistency)
-    # c4 = BinConstraintT(my_add, 2, op_leq)
-    # c5 = BinConstraintT(e1, 2, op_leq)
-    # c6 = BinConstraintT(e2, 2, op_leq)
-    # c7 = BinConstraintT(e11, 2, op_leq)
-    # c8 = BinConstraintT(e22, 2, op_leq)
-
-    # print([c1, c2, c3])
-
-    # store constraints
-    return [c1, c2, c3], counter
+        # generate constraints
+        c1 = TGreatestUpperBound(my_add, e11, e22)
+        c2 = ApplyBroadcasting(e11, e22, e1, e2)
+        c3 = BinConstraintT(e11, e22, op_consistency)
+        return [c1, c2, c3], counter
+    else:
+        # TODO generate add constraints
+        return [], counter
 
 
 @register_inference_rule(torch.flatten)
@@ -132,7 +177,6 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
         new_dims_rhs_1, counter = gen_tensor_dims(i, counter)
         new_dims_rhs_2, counter = gen_tensor_dims(i, counter)
 
-        # Todo: add back natural number constraints
         nat_constraints = gen_nat_constraints(new_dims_rhs_1 + new_dims_rhs_2)
 
         c_tensor_i = Conj([BinConstraintT(linear_input, TensorType(new_dims_rhs_1), op_eq),
@@ -268,17 +312,19 @@ def maxpool_inference_rule(n: Node, module_instance, symbols, constraints, count
 
 
 class ConstraintGenerator:
-    def __init__(self, traced):
+    def __init__(self, traced, graph=None):
         self.traced = traced
         self.constraints = []
         self.symbol_dict = {}
+        self.graph = graph if traced is None else traced.graph
+
 
     def generate_constraints(self, counter=0):
         """
         Iterate through every node and generate constraints
         Effect: self.constraints will be populated with the final constraints
         """
-        graph = self.traced.graph
+        graph = self.graph
 
         all_constraints = []
 
@@ -307,12 +353,19 @@ class ConstraintGenerator:
             if n.target == getattr:
                 assert getattr in _INFERENCE_RULES
                 return _INFERENCE_RULES[n.target](n, self.traced, self.symbol_dict, self.constraints)
+
             elif n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n, self.symbol_dict, self.constraints, counter)
             else:
+                print(n)
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         elif n.op == 'call_module':
+
+            # TODO: fix this
+            if self.traced is None:
+                return [], counter
+
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _INFERENCE_RULES:
                 return _INFERENCE_RULES[type(module_instance)](n,
@@ -321,6 +374,15 @@ class ConstraintGenerator:
                                                                self.constraints, counter)
             else:
                 raise RuntimeError(f'No inference rule registered for class {type(module_instance)}!')
+
+        # TODO
+        elif n.op == 'call_method':
+            return [], counter
+
+        # TODO
+        elif n.op == 'get_attr':
+            # t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
+            return [], counter
 
         elif n.op == 'output':
             return [], counter
