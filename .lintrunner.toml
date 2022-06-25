@@ -562,6 +562,7 @@ include_patterns = [
     'torch/_refs/**/*.py',
     'torch/_prims/**/*.py',
     'torch/_meta_registrations.py',
+    'torch/_decomp/**/*.py',
     'test/onnx/**/*.py',
 ]
 command = [

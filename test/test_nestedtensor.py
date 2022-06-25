@@ -146,7 +146,7 @@ class TestNestedTensor(TestCase):
             a1 = constructor([])
             self.assertRaisesRegex(
                 RuntimeError,
-                "Tensors of type NestedTensorImpl do not have sizes"
+                "Tensors of type NestedTensorImpl do not have sym sizes"
                 if IS_FBCODE
                 else "NestedTensorImpl doesn't support sizes",
                 lambda: a1.size(),
@@ -359,11 +359,7 @@ class TestNestedTensorDeviceType(TestCase):
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
         nt0 = torch.nested_tensor([])
-        self.assertRaisesRegex(
-            RuntimeError,
-            "cannot index an empty nested tensor",
-            lambda: nt0[0]
-        )
+        self.assertRaises(IndexError, lambda: nt0[0])
         # normal case
         x0 = torch.randn((2, 5), device=device, dtype=dtype)
         x1 = torch.randn((3, 4), device=device, dtype=dtype)
@@ -550,6 +546,38 @@ class TestNestedTensorDeviceType(TestCase):
                     expect_tensor[j] /= 1.0 - p
         self.nt_equal(nt, expect)
 
+    # cannot test torch.float16 because: RuntimeError: "softmax_kernel_impl" not implemented for 'Half'
+    @dtypes(torch.float, torch.double)
+    @torch.inference_mode()
+    def test_softmax(self, device, dtype):
+        # normal nested tensor
+        ntensors = 4
+        nt = self.random_nt(device, dtype, ntensors, (4, 4))
+        # error case: softmax across nested dimension
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt, 0))
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt, -3))
+        # error case: dimension out of range
+        self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt, 3))
+        self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt, -4))
+        # normal case: should equal to padding -inf
+        softmaxer = torch.nn.Softmax(1)
+        y0 = softmaxer(nt)
+        y1 = torch.nn.functional.softmax(nt, 1)
+        self.nt_equal(y0, y1)
+        pt = nt.to_padded_tensor(float("-inf"))
+        # if an entire slice is padded, then softmax will return 0.0 / 0.0 = nan
+        # however, physically speaking that should be 0.0
+        expect = torch.nn.functional.softmax(pt, 1).nan_to_num_(0.0)
+        self.assertEqual(y0.to_padded_tensor(0.0), expect)
+        # edge case: empty nested tensor
+        nt0 = torch.nested_tensor([])
+        y = torch.nn.functional.softmax(nt0, 1)
+        self.nt_equal(nt0, y)
+        # edge case: nesting scalars
+        nt1 = torch.nested_tensor([torch.tensor(0.0), torch.tensor(1.0)])
+        self.assertRaises(RuntimeError, lambda: torch.nn.functional.softmax(nt1, 0))
+        self.assertRaises(IndexError, lambda: torch.nn.functional.softmax(nt1, 1))
+
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
         self.assertEqual(nt1.dtype, nt2.dtype)
@@ -595,6 +623,77 @@ class TestNestedTensorAutograd(TestCase):
         #  Grad check doesn't work with nested yet.
         # d/dnt_1 (nt + nt_1) = 1*grad_output
         self.nt_equal(nt_1.grad, grad_output)
+
+    # Test Factory Functions
+    def test_nested_tensor_to_padded_tensor(self):
+        for padding_val in [0, 1]:
+            nt = torch.nested_tensor([torch.randn(1, 2), torch.randn(7, 8)])
+            nt.requires_grad_()
+
+            out = nt.to_padded_tensor(padding_val)
+            grad_output = torch.ones(out.shape)
+            out.backward(grad_output)
+
+            self.nt_equal(nt.grad, torch.nested_tensor([torch.ones(1, 2), torch.ones(7, 8)]))
+
+    def test_nested_tensor_from_mask_and_to_padded(self):
+        N, L, D = 2, 4, 4
+        mask = torch.ones(N, L)
+        for i in range(1, N):
+            end = torch.randint(1, L - 1, (1,))
+            mask[i, end:] = 0
+
+        mask[0, :] = 1
+        mask = mask.bool()
+
+        data = torch.randn(N, L, D, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(inpt):
+            nt = torch._nested_tensor_from_mask(inpt, mask)
+            # This implicitly tests to_padded_tensor grads
+            return nt.to_padded_tensor(0)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_from_padded(self):
+        nested_size = torch.tensor([[1, 2], [2, 2]])
+        padded_tensor = torch.randn(2, 2, 2, dtype=torch.float64)
+        padded_tensor[0, 1, :] = 0
+        padded_tensor.requires_grad_()
+
+        def grad_test_func(tensor, nested_size):
+            nt = torch._nested_from_padded(tensor, nested_size, fuse_transform_0213=False)
+            # This implicitly tests to_padded_tensor grads
+            return nt.to_padded_tensor(0)
+
+        data = (padded_tensor, nested_size)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_from_padded_fused(self):
+        nested_size = torch.tensor([[1, 8], [2, 8]])
+        padded_tensor = torch.randn(2, 2, 2, 4, dtype=torch.float64)
+        padded_tensor[0, 1, :] = 0
+        padded_tensor.requires_grad_()
+
+        def grad_test_func(tensor, nested_size):
+            nt = torch._nested_from_padded(tensor, nested_size, fuse_transform_0213=True)
+            # This implicitly tests to_padded_tensor grads
+            return nt.to_padded_tensor(0)
+        data = (padded_tensor, nested_size)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_from_list(self):
+
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(10, 2, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c):
+            c = torch.nested_tensor([a, b, c])
+            # This implictily tests to_padded_tensor grads
+            return c.to_padded_tensor(0)
+        data = (a, b, c)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 

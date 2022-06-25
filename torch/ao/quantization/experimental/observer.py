@@ -5,9 +5,9 @@ the values observed during calibration (PTQ) or training (QAT).
 
 import torch
 import itertools
-import math
 import matplotlib.pyplot as plt
 from torch.ao.quantization.observer import ObserverBase
+from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
 
 # TODO: Consider adding NonUniformQuantizationObserverBase class
 # when more than one non-uniform method is implemented
@@ -128,28 +128,3 @@ class APoTObserver(ObserverBase):
         plt.xlabel("Full Precision")
         plt.ylabel("Quantized")
         plt.show()
-
-r"""Converts floating point input into int4 APoT2 number
-    based on quantization levels
-"""
-def float_to_apot(x, levels, indices):
-    levels_lst = list(levels)
-    indices_lst = list(indices)
-
-    min_delta = math.inf
-    best_idx = 0
-
-    for level, idx in zip(levels_lst, indices_lst):
-        cur_delta = abs(level - x)
-        if cur_delta < min_delta:
-            min_delta = cur_delta
-            best_idx = idx
-
-    return best_idx
-
-r"""Converts int4 APoT2 input into floating point number
-based on quantization levels
-"""
-def apot_to_float(x_apot, levels, indices):
-    idx = list(indices).index(x_apot)
-    return levels[idx]
