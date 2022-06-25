@@ -1325,17 +1325,17 @@ TEST_F(NVFuserTest, FusionParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Tensor<float, 1> T3) {
-  int64_t i52;
-  i52 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
-  if ((i52 < T0.size[0])) {
+  int64_t i51;
+  i51 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  if ((i51 < T0.size[0])) {
     float T5[1];
     T5[0] = 0;
     T5[0]
-       = T1[i52];
+       = T1[i51];
     float T4[1];
     T4[0] = 0;
     T4[0]
-       = T0[i52];
+       = T0[i51];
     float T6[1];
     float T2[1];
     T2[0]
@@ -1344,7 +1344,7 @@ __global__ void CUDAGeneratedKernel(Tensor<float, 1> T0, Tensor<float, 1> T1, Te
     T6[0]
       = T2[0]
       * T4[0];
-    T3[i52]
+    T3[i51]
        = T6[0];
   }
 }
@@ -19016,9 +19016,9 @@ TEST_F(NVFuserTest, FusionChannelsLastParser_CUDA) {
   // 2. use a fuzzy compare (ignore non-significant whitespaces for example)
   const std::string expected_kernel = R"(
 __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, Tensor<__half, 4> T7) {
-  int64_t i173;
-  i173 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
-  if ((i173 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
+  int64_t i172;
+  i172 = (((nvfuser_index_t)blockIdx.x) * 128) + ((nvfuser_index_t)threadIdx.x);
+  if ((i172 < (T0.size[0] * (T0.size[1] * (T0.size[2] * T0.size[3]))))) {
     __half T9[1];
     T9[0] = 0;
     T9[0]
@@ -19026,7 +19026,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
     __half T8[1];
     T8[0] = 0;
     T8[0]
-       = T0[i173];
+       = T0[i172];
     __half T10[1];
     float T3[1];
     T3[0]
@@ -19046,7 +19046,7 @@ __global__ void CUDAGeneratedKernel(Tensor<__half, 4> T0, Tensor<__half, 4> T2, 
        = relu(T5[0]);
     T10[0]
        = __float2half(T6[0]);
-    T7[i173]
+    T7[i172]
        = T10[0];
   }
 }
