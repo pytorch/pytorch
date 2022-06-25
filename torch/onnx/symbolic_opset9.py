@@ -158,7 +158,6 @@ __all__ = [
     "upsample_trilinear3d",
     "bitwise_not",
     "wrap_logical_op_with_cast_to",
-    "wrap_logical_op_with_cast_to_and_from",
     "wrap_logical_op_with_negation",
     "eq",
     "ne",
