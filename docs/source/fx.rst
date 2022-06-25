@@ -1121,3 +1121,4 @@ API Reference
 .. py:module:: torch.fx.experimental
 .. py:module:: torch.fx.experimental.unification
 .. py:module:: torch.fx.experimental.unification.multipledispatch
+.. py:module:: torch.fx.experimental.migrate_gradual_types
