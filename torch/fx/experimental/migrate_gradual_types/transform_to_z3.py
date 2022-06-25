@@ -1,11 +1,11 @@
-from torch.fx.experimental.migrate_gradual_types.constraint import Conj, Disj, T, F, BinConstraintT  # type: ignore[import]
+from torch.fx.experimental.migrate_gradual_types.constraint import Conj, Disj, T, F, BinConstraintT
 from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintD, TVar, DVar
 from torch.fx.experimental.migrate_gradual_types.constraint import Prod, is_algebraic_expression, is_dim
-from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_eq, op_neq  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.operation import op_leq, op_sub, op_div, op_mul, op_mod  # type: ignore[import]
-from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, z3_dyn, D  # type: ignore[import]
+from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
+from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint
+from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_eq, op_neq
+from torch.fx.experimental.migrate_gradual_types.operation import op_leq, op_sub, op_div, op_mul, op_mod
+from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, z3_dyn, D
 from torch.fx.tensor_type import TensorType, Dyn
 
 try:
