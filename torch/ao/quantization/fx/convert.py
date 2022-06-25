@@ -36,7 +36,6 @@ from torch.ao.quantization.backend_config.utils import (
     get_pattern_to_dtype_configs,
     get_fused_module_classes,
     get_qat_module_classes,
-    get_module_to_qat_module,
 )
 from torch.ao.quantization.backend_config import get_native_backend_config_dict
 from .graph_module import (
@@ -159,12 +158,7 @@ def duplicate_dequantize_node(quantized: QuantizedGraphModule) -> QuantizedGraph
             if len(users) > 1:
                 for user in users:
                     with quantized.graph.inserting_before(node):
-                        new_node = quantized.graph.create_node(
-                            "call_method",
-                            "dequantize",
-                            node.args,
-                            node.kwargs
-                        )
+                        new_node = quantized.graph.create_node("call_method", "dequantize", node.args, {})
                     user.replace_input_with(node, new_node)
                 quantized.graph.erase_node(node)
 
@@ -184,12 +178,7 @@ def remove_extra_dequantize(quantized: QuantizedGraphModule) -> QuantizedGraphMo
 
         if len(dequant_users) > 1:
             with quantized.graph.inserting_after(node):
-                unique_dq = quantized.graph.create_node(
-                    "call_method",
-                    "dequantize",
-                    users[0].args,
-                    users[0].kwargs,
-                )
+                unique_dq = quantized.graph.create_node("call_method", "dequantize", users[0].args, {})
             for dequant in dequant_users:
                 dequant.replace_all_uses_with(unique_dq)
                 quantized.graph.erase_node(dequant)
@@ -578,9 +567,6 @@ def convert(
             "in a future version. Please pass in a ConvertCustomConfig instead.")
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
-    if backend_config_dict is None:
-        backend_config_dict = get_native_backend_config_dict()
-
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to convert is deprecated and will not be supported "
@@ -618,8 +604,7 @@ def convert(
         modules_copy = copy.deepcopy(modules)
 
         if model._is_qat:
-            module_to_qat_module = get_module_to_qat_module(backend_config_dict)
-            update_qconfig_for_qat(qconfig_mapping, module_to_qat_module)
+            update_qconfig_for_qat(qconfig_mapping, {})
         update_qconfig_for_fusion(model, qconfig_mapping)
 
         compare_prepare_convert_qconfig_mappings(prepare_qconfig_mapping, qconfig_mapping)  # type: ignore[arg-type]
@@ -725,6 +710,8 @@ def convert(
     input_quantized_idxs: List[int] = prepare_custom_config.input_quantized_indexes
     output_quantized_idxs: List[int] = prepare_custom_config.output_quantized_indexes
 
+    if backend_config_dict is None:
+        backend_config_dict = get_native_backend_config_dict()
     root_module_to_quantized_reference_module = get_root_module_to_quantized_reference_module(backend_config_dict)
     # convert tuples so that it can work with isinstance(module, tuple_of_classes)
     root_module_classes = tuple(root_module_to_quantized_reference_module.keys())
