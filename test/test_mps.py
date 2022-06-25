@@ -1676,6 +1676,35 @@ class TestNLLLoss(TestCase):
             self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
             self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
 
+    # L1 loss
+    def test_l1_loss(self):
+        def helper(shape, reduction):
+            # create the criterion
+            loss = torch.nn.L1Loss(reduction=reduction)
+
+            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            targetCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
+            targetMPS = targetCPU.detach().clone().to('mps')
+
+            # forward pass
+            outputCPU = loss(inputCPU, targetCPU)
+            outputMPS = loss(inputMPS, targetMPS)
+            self.assertEqual(outputCPU, outputMPS)
+
+            # backward pass
+            if reduction != 'none':
+                # chose 2 just to make the grad_output > 1 in backward pass
+                outputCPU.backward(gradient=torch.full_like(outputCPU, 2))
+                outputMPS.backward(gradient=torch.full_like(outputMPS, 2))
+                self.assertEqual(inputCPU.grad, inputMPS.grad)
+
+        helper([8, 5, 4], 'none')
+        helper([7, 5, 2, 4], 'sum')
+        # verify if changes in shape would cause cached graph lookup problems
+        helper([7, 5, 2, 4, 6], 'sum')
+        helper([8, 4, 5, 7, 6], 'mean')
+
     # Mean Squared Error
     def test_mse_loss(self):
         def helper(shape, reduction):
@@ -4262,6 +4291,12 @@ class TestNLLLoss(TestCase):
         helper(0.0)
         helper(0.1)
         helper(0.2)
+
+        # Test int32 tensor + int64 scalar add
+        # see https://github.com/pytorch/pytorch/issues/79835#issuecomment-1164984534
+        x = torch.ones(4, dtype=torch.int32, device='mps')
+        self.assertEqual(x + 1, torch.full((4,), 2, dtype=torch.int32, device='mps'))
+        self.assertEqual(x + 1.5, torch.full((4,), 2.5, device='mps'))
 
     def test_types_binary_op(self):
         # Float * Bool
