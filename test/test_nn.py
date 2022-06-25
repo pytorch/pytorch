@@ -17889,17 +17889,24 @@ torch.cuda.synchronize()
             self.assertEqual(out_y, out_x.to(device), msg=test)
 
     @onlyCUDA
-    @largeTensorTest('6GB')
+    @largeTensorTest('40GB')
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
-        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device)
+        x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device, requires_grad=True)
         y = torch.nn.functional.max_pool3d(x, 5)
+        g = torch.randn_like(y, dtype=torch.half)
+        torch.cuda.synchronize()
+        y.backward(g)
         torch.cuda.synchronize()
 
-        ref_x = x.cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_x = x.detach().cpu().float()  # max_pool3d_cpu is not implemented for half
+        ref_x.requires_grad = True
+        ref_g = g.cpu().float()
         ref_y = torch.nn.functional.max_pool3d(ref_x, 5)
+        ref_y.backward(ref_g)
 
         self.assertEqual(y, ref_y, exact_dtype=False)
+        self.assertEqual(x.grad, ref_x.grad, exact_dtype=False)
 
     @onlyCUDA
     def test_AvgPool3d_backward_after_cat_dim1_device(self, device):
