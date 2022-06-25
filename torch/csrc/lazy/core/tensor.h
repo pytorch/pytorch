@@ -14,6 +14,10 @@ namespace lazy {
 class TORCH_API SymbolicIntNode : public c10::SymbolicIntNode {
  public:
   SymbolicIntNode(NodePtr ptr) : node_(std::move(ptr)){};
+  std::shared_ptr<c10::SymbolicIntNode> add(
+      const std::shared_ptr<c10::SymbolicIntNode>& other) override {
+    TORCH_CHECK(false, "NYI");
+  }
   NodePtr node_;
 };
 

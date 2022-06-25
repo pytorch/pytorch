@@ -470,6 +470,77 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   return {Shape(tensors[0].scalar_type(), out_shape)};
 }
 
+std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& bias,
+    const c10::optional<at::Tensor>& running_mean,
+    const c10::optional<at::Tensor>& running_var,
+    bool training,
+    double momentum,
+    double eps) {
+  std::vector<torch::lazy::Shape> shapes;
+  shapes.reserve(3);
+  shapes.emplace_back(input.scalar_type(), input.sizes().vec());
+
+  // A separate mean and var needs to be kept for each channel.
+  TORCH_CHECK(
+      input.sizes().size() >= 2,
+      "Input tensor must have at least batch and channel dimensions!");
+  int64_t num_features = input.size(1);
+
+  if (running_mean.has_value()) {
+    shapes.emplace_back(
+        running_mean.value().scalar_type(), running_mean.value().sizes().vec());
+  } else {
+    shapes.emplace_back(
+        at::get_default_dtype_as_scalartype(),
+        std::vector<int64_t>{num_features});
+  }
+
+  if (running_var.has_value()) {
+    shapes.emplace_back(
+        running_var.value().scalar_type(), running_var.value().sizes().vec());
+  } else {
+    shapes.emplace_back(
+        at::get_default_dtype_as_scalartype(),
+        std::vector<int64_t>{num_features});
+  }
+  return shapes;
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& running_mean,
+    const c10::optional<at::Tensor>& running_var,
+    const c10::optional<at::Tensor>& save_mean,
+    const c10::optional<at::Tensor>& save_invstd,
+    bool train,
+    double eps,
+    ::std::array<bool, 3> output_mask) {
+  std::vector<torch::lazy::Shape> shapes;
+  shapes.reserve(3);
+  shapes.emplace_back(input.scalar_type(), input.sizes().vec());
+
+  // A separate mean and var needs to be kept for each channel.
+  TORCH_CHECK(
+      input.sizes().size() >= 2,
+      "Input tensor must have at least batch and channel dimensions!");
+  int64_t num_features = input.size(1);
+
+  // `weight` and `bias` are vectors of length C (number of channels)`
+  shapes.emplace_back(
+      at::get_default_dtype_as_scalartype(),
+      std::vector<int64_t>{num_features});
+  shapes.emplace_back(
+      at::get_default_dtype_as_scalartype(),
+      std::vector<int64_t>{num_features});
+
+  return shapes;
+}
+
 std::vector<Shape> compute_shape_native_layer_norm(
     const at::Tensor& input,
     at::IntArrayRef normalized_shape,
@@ -858,15 +929,6 @@ std::vector<Shape> compute_shape_glu_jvp(
   return {Shape(glu.scalar_type(), glu.sizes().vec())};
 }
 
-std::vector<Shape> compute_shape_l1_loss_backward(
-    const at::Tensor& grad_output,
-    const at::Tensor& self,
-    const at::Tensor& target,
-    int64_t reduction) {
-  TORCH_INTERNAL_ASSERT(grad_output.scalar_type() == self.dtype());
-  return {Shape(self.scalar_type(), self.sizes().vec())};
-}
-
 std::vector<Shape> compute_shape_clamp_min(
     const at::Tensor& self,
     const at::Scalar& min) {
@@ -924,7 +986,7 @@ std::vector<Shape> compute_shape_repeat(
   return {Shape(self.scalar_type(), target_size)};
 }
 
-std::vector<Shape> compute_shape_narrow_copy(
+std::vector<Shape> compute_shape_narrow_copy_symint(
     const at::Tensor& self,
     int64_t dim,
     int64_t start,
