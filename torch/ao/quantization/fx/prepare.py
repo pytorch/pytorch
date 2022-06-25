@@ -5,7 +5,6 @@ import warnings
 from torch.fx import (
     GraphModule,
 )
-from torch.fx.experimental.normalize import NormalizeArgs
 from torch.fx.graph import (
     Graph,
     Node,
@@ -57,13 +56,13 @@ from .match_utils import (
     find_matches,
 )
 
+from ..utils import _parent_name
 from .utils import (
     get_custom_module_class_keys,
     all_node_args_have_no_tensors,
     assert_and_get_unique_device,
     get_non_observable_arg_indexes_and_types,
     get_new_attr_name_with_prefix,
-    get_all_args_as_positional_args,
     NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
     BIAS_INDEX_DICT,
@@ -75,7 +74,6 @@ from torch.ao.quantization.quantize import (
 )
 
 from ..utils import (
-    _parent_name,
     get_qconfig_dtypes,
     get_swapped_custom_module_class,
     activation_is_statically_quantized,
@@ -141,27 +139,6 @@ __all__ = [
 
 # list of dtypes to not add observers to
 DO_NOT_OBS_DTYPE_LIST = [int, float, torch.bool, None]
-
-def _move_all_kwargs_to_args(model: GraphModule) -> GraphModule:
-    for n in model.graph.nodes:
-        n.args = tuple(get_all_args_as_positional_args(n))
-        n.kwargs = {}
-    return model
-
-def _cleanup_args(model: GraphModule) -> GraphModule:
-    """ This pass removes some unused arguments
-    * inplace argument for F.relu and torch.relu since we use them
-    in pattern matching which assumes that relu only has one argument
-    """
-    for n in model.graph.nodes:
-        # remove inplace arg from relu
-        if n.op == "call_function" and n.target in (torch.nn.functional.relu, torch.relu):
-            # ignore the inplace op since that will interfere with node
-            # matching
-            n.args = (n.args[0],)
-            n.kwargs = {}
-    return model
-
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
@@ -586,11 +563,7 @@ def maybe_insert_input_observer_for_arg_or_kwarg(
             # qconfig_dict and backend_config_dict to support more general configurations
             # of dynamic quantization, e.g. dynamically quantizing second input, third
             # input etc.
-            (arg_as_input_target_compute_dtype in [
-                torch.quint8,
-                torch.int8,
-                torch.float16]
-             ) and arg is node.args[0]
+            (arg_as_input_target_compute_dtype in [torch.quint8, torch.int8, torch.float16]) and arg is node.args[0]
         )
 
     else:
@@ -753,7 +726,6 @@ def maybe_insert_input_equalization_observers_for_node(
 
     # assign the new args and kwargs to the node, inplace
     node.args = tuple(new_args)
-    node.kwargs = {}
 
 def maybe_insert_output_observer_for_node(
     node: Node,
@@ -1504,13 +1476,6 @@ def prepare(
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
-    # normalize the arguments of module/functions to be kwargs in positional order
-    # this depends on operator_schema from torchscript, we may want to replace
-    # this with something more robust by using real example_inputs in the future
-    model = NormalizeArgs(model).transform()
-    model = _move_all_kwargs_to_args(model)
-    model = _cleanup_args(model)
-
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, equalization_config)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
@@ -1520,7 +1485,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config_dict)
         qat_swap_modules(model, module_to_qat_module)
-        update_qconfig_for_qat(qconfig_mapping, module_to_qat_module)
+        update_qconfig_for_qat(qconfig_mapping, {})
 
     # mapping from fully qualified module name to module instance
     # for example,
