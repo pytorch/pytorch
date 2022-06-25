@@ -55,30 +55,6 @@ else
   export CMAKE_PREFIX_PATH=/opt/conda
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
-  POSSIBLE_JAVA_HOMES=()
-  POSSIBLE_JAVA_HOMES+=(/usr/local)
-  POSSIBLE_JAVA_HOMES+=(/usr/lib/jvm/java-8-openjdk-amd64)
-  POSSIBLE_JAVA_HOMES+=(/Library/Java/JavaVirtualMachines/*.jdk/Contents/Home)
-  # Add the Windows-specific JNI
-  POSSIBLE_JAVA_HOMES+=("$PWD/.circleci/windows-jni/")
-  for JH in "${POSSIBLE_JAVA_HOMES[@]}" ; do
-    if [[ -e "$JH/include/jni.h" ]] ; then
-      # Skip if we're not on Windows but haven't found a JAVA_HOME
-      if [[ "$JH" == "$PWD/.circleci/windows-jni/" && "$OSTYPE" != "msys" ]] ; then
-        break
-      fi
-      echo "Found jni.h under $JH"
-      export JAVA_HOME="$JH"
-      export BUILD_JNI=ON
-      break
-    fi
-  done
-  if [ -z "$JAVA_HOME" ]; then
-    echo "Did not find jni.h"
-  fi
-fi
-
 # Use special scripts for Android builds
 if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   export ANDROID_NDK=/opt/ndk
@@ -92,17 +68,8 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
     build_args+=("-DANDROID_ABI=x86_64")
   fi
-  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-    build_args+=("-DUSE_VULKAN=ON")
-  fi
   build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
   exec ./scripts/build_android.sh "${build_args[@]}" "$@"
-fi
-
-if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
-  export USE_VULKAN=1
-  # shellcheck disable=SC1091
-  source /var/lib/jenkins/vulkansdk/setup-env.sh
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
@@ -134,11 +101,6 @@ fi
 
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST="5.2"
-
-# Add sm_75 support for the Linux CUDA 11.1 cuDNN 8 CircleCI build
-if [[ "$BUILD_ENVIRONMENT" == *xenial-cuda11.1*build ]]; then
-  export TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST";7.5"
-fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
   export CC=clang
@@ -180,99 +142,85 @@ else
   ( ! get_exit_code python setup.py clean] )
   ( ! get_exit_code python setup.py clean bad_argument )
 
-  if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
-
-    # rocm builds fail when WERROR=1
-    if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
-      WERROR=1 python setup.py bdist_wheel
-    else
-      python setup.py bdist_wheel
-    fi
-    python -mpip install dist/*.whl
-
-    # TODO: I'm not sure why, but somehow we lose verbose commands
-    set -x
-
-    assert_git_not_dirty
-    # Copy ninja build logs to dist folder
-    mkdir -p dist
-    if [ -f build/.ninja_log ]; then
-      cp build/.ninja_log dist
-    fi
-
-    if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-      # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
-      sudo rm -f /opt/cache/bin/cc
-      sudo rm -f /opt/cache/bin/c++
-      sudo rm -f /opt/cache/bin/gcc
-      sudo rm -f /opt/cache/bin/g++
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
-      fi
-      sudo rm -rf original
-      popd
-    fi
-
-    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
-    CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
-    CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
-    mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
-
-    # Build custom operator tests.
-    CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
-    CUSTOM_OP_TEST="$PWD/test/custom_operator"
-    python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir -p "$CUSTOM_OP_BUILD"
-    pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
-    # Build jit hook tests
-    JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
-    JIT_HOOK_TEST="$PWD/test/jit_hooks"
-    python --version
-    SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-    mkdir -p "$JIT_HOOK_BUILD"
-    pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
-
-    # Build custom backend tests.
-    CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
-    CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
-    python --version
-    mkdir -p "$CUSTOM_BACKEND_BUILD"
-    pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
-          -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
-    make VERBOSE=1
-    popd
-    assert_git_not_dirty
+  # rocm builds fail when WERROR=1
+  if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
+    WERROR=1 python setup.py bdist_wheel
   else
-    # Test no-Python build
-    echo "Building libtorch"
-    # NB: Install outside of source directory (at the same level as the root
-    # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-    BUILD_LIBTORCH_PY=$PWD/tools/build_libtorch.py
-    mkdir -p ../cpp-build/caffe2
-    pushd ../cpp-build/caffe2
-    WERROR=1 VERBOSE=1 DEBUG=1 python "$BUILD_LIBTORCH_PY"
+    python setup.py bdist_wheel
+  fi
+  python -mpip install dist/*.whl
+
+  # TODO: I'm not sure why, but somehow we lose verbose commands
+  set -x
+
+  assert_git_not_dirty
+  # Copy ninja build logs to dist folder
+  mkdir -p dist
+  if [ -f build/.ninja_log ]; then
+    cp build/.ninja_log dist
+  fi
+
+  if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+    # remove sccache wrappers post-build; runtime compilation of MIOpen kernels does not yet fully support them
+    sudo rm -f /opt/cache/bin/cc
+    sudo rm -f /opt/cache/bin/c++
+    sudo rm -f /opt/cache/bin/gcc
+    sudo rm -f /opt/cache/bin/g++
+    pushd /opt/rocm/llvm/bin
+    if [[ -d original ]]; then
+      sudo mv original/clang .
+      sudo mv original/clang++ .
+    fi
+    sudo rm -rf original
     popd
   fi
+
+  CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
+  CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
+  CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
+  mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
+
+  # Build custom operator tests.
+  CUSTOM_OP_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-op-build"
+  CUSTOM_OP_TEST="$PWD/test/custom_operator"
+  python --version
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir -p "$CUSTOM_OP_BUILD"
+  pushd "$CUSTOM_OP_BUILD"
+  cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+        -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
+
+  # Build jit hook tests
+  JIT_HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
+  JIT_HOOK_TEST="$PWD/test/jit_hooks"
+  python --version
+  SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+  mkdir -p "$JIT_HOOK_BUILD"
+  pushd "$JIT_HOOK_BUILD"
+  cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+        -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
+
+  # Build custom backend tests.
+  CUSTOM_BACKEND_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/custom-backend-build"
+  CUSTOM_BACKEND_TEST="$PWD/test/custom_backend"
+  python --version
+  mkdir -p "$CUSTOM_BACKEND_BUILD"
+  pushd "$CUSTOM_BACKEND_BUILD"
+  cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPYTHON_EXECUTABLE="$(which python)" \
+        -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
+  make VERBOSE=1
+  popd
+  assert_git_not_dirty
 fi
 
-if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   # export test times so that potential sharded tests that'll branch off this build will use consistent data
-  # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python test/run_test.py --export-past-test-times
 fi
 

@@ -148,13 +148,15 @@ jobs:
       docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
       artifact-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
 
-  # TODO this does not yet properly use `script`
   linux-vulkan-bionic-py3_7-clang9-build:
     name: linux-vulkan-bionic-py3.7-clang9
     uses: ./.github/workflows/_linux-build.yml
     with:
       docker-image-name: pytorch-linux-bionic-py3.7-clang9
       artifact-name: pytorch-linux-bionic-py3.7-clang9-vulkan
+      env-variables: |
+        USE_VULKAN=1
+      script: .github/jenkins/pytorch/build-vulkan.sh
 
   linux-vulkan-bionic-py3_7-clang9-test:
     name: linux-vulkan-bionic-py3.7-clang9
@@ -165,7 +167,7 @@ jobs:
       artifact-name: pytorch-linux-bionic-py3.7-clang9-vulkan
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "vulkan", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
         ]}
 
   linux-bionic-cuda11_6-py3_7-gcc7-build:
