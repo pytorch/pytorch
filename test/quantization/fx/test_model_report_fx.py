@@ -1086,3 +1086,8 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             # make sure we don't run into error for single report
             model_single_report = model_report_single.generate_model_report(prepared_for_callibrate_model_single, False)
+
+class TestFxDetectInputWeightEqualization(QuantizationTestCase):
+
+    def test_simple_pass(self):
+        pass

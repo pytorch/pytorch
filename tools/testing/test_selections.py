@@ -107,7 +107,7 @@ def _pull_job_times_from_S3() -> Dict[str, float]:
         s3_reports = []
 
     if len(s3_reports) == 0:
-        print("Gathered no reports from S3. Please proceed without them.")
+        print("::warning:: Gathered no reports from S3. Please proceed without them.")
         return dict()
 
     return _calculate_job_times(s3_reports)
@@ -173,7 +173,9 @@ def get_shard_based_on_S3(
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
-        print("Gathered no stats from S3. Proceeding with default sharding plan.")
+        print(
+            "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
+        )
         return tests[which_shard - 1 :: num_shards]
 
     shards = calculate_shards(num_shards, tests, jobs_to_times)
@@ -189,7 +191,7 @@ def get_slow_tests_based_on_S3(
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
-        print("Gathered no stats from S3. No new slow tests calculated.")
+        print("::warning:: Gathered no stats from S3. No new slow tests calculated.")
         return []
 
     slow_tests: List[str] = []

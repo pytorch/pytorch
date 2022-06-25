@@ -4348,6 +4348,9 @@
 # softmax allows positional dtype, unlike most operators, because kwonly is BC-breaking when loading jit models.
 - func: softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
   variants: function, method
+  dispatch:
+    CompositeImplicitAutograd: softmax
+    NestedTensorCPU, NestedTensorCUDA: softmax
 
 - func: softmax.int_out(Tensor self, int dim, ScalarType? dtype=None, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
@@ -4361,6 +4364,7 @@
   structured_delegate: _softmax.out
   dispatch:
     MkldnnCPU: mkldnn_softmax
+    NestedTensorCPU, NestedTensorCUDA: softmax_nested
 
 - func: _softmax.out(Tensor self, int dim, bool half_to_float, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -11413,23 +11417,19 @@
 # "_ex" stands for experimental
 - func: linalg_cholesky_ex(Tensor self, *, bool upper=False, bool check_errors=False) -> (Tensor L, Tensor info)
   python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_cholesky_ex
+  structured_delegate: linalg_cholesky_ex.L
 
 - func: linalg_cholesky_ex.L(Tensor self, *, bool upper=False, bool check_errors=False, Tensor(a!) L, Tensor(b!) info) -> (Tensor(a!) L, Tensor(b!) info)
   python_module: linalg
-  variants: function
+  structured: True
   dispatch:
     CPU, CUDA: linalg_cholesky_ex_out
 
 - func: linalg_cholesky(Tensor self, *, bool upper=False) -> Tensor
   python_module: linalg
-  variants: function
 
 - func: linalg_cholesky.out(Tensor self, *, bool upper=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
-  variants: function
 
 - func: linalg_cross(Tensor self, Tensor other, *, int dim=-1) -> Tensor
   python_module: linalg
@@ -11494,26 +11494,24 @@
     CPU, CUDA: linalg_lu_solve_out
 
 # linalg.det
-- func: linalg_det(Tensor self) -> Tensor
+- func: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
+  structured_delegate: _linalg_det.result
+
+- func: _linalg_det.result(Tensor A, *, Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots) -> (Tensor(a!) result, Tensor(b!) LU, Tensor(c!) pivots)
+  structured: True
+  dispatch:
+    CPU, CUDA: _linalg_det_out
+
+- func: linalg_det(Tensor A) -> Tensor
   python_module: linalg
   variants: function
 
-- func: linalg_det.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_det.out(Tensor A, *, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
 
 # torch.det, alias for torch.linalg.det
 - func: det(Tensor self) -> Tensor
   variants: function, method
-
-- func: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor lu, Tensor pivs)
-  variants: function
-  dispatch:
-    CPU, CUDA: _det_lu_based_helper
-
-- func: _det_lu_based_helper_backward_helper(Tensor det_grad, Tensor det, Tensor self, Tensor lu, Tensor pivs) -> Tensor
-  variants: function
-  dispatch:
-    CPU, CUDA: _det_lu_based_helper_backward_helper
 
 - func: linalg_ldl_factor_ex(Tensor self, *, bool hermitian=False, bool check_errors=False) -> (Tensor LD, Tensor pivots, Tensor info)
   structured_delegate: linalg_ldl_factor_ex.out
@@ -12813,6 +12811,19 @@
 - func: special_modified_bessel_k1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: special_modified_bessel_k1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_scaled_modified_bessel_k1(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_scaled_modified_bessel_k1.out
+  variants: function
+
+- func: special_scaled_modified_bessel_k1.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_scaled_modified_bessel_k1_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
