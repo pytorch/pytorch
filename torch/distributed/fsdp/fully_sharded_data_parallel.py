@@ -937,7 +937,7 @@ class FullyShardedDataParallel(nn.Module):
             TracingConfig
         ):
             tracer = auto_wrap_policy.tracing_config.tracer
-            _patch_tracer(tracer, module)
+            execution_info = _patch_tracer(tracer, module)
             tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
@@ -955,11 +955,11 @@ class FullyShardedDataParallel(nn.Module):
             module_fsdp_wrap_map: Dict[nn.Module, FullyShardedDataParallel] = dict()
             for wrap in self.fsdp_modules(self):
                 module_fsdp_wrap_map[wrap.module] = wrap
-            # Set self._fsdp_params_exec_order based on tracer.module_forward_order.
+            # Set self._fsdp_params_exec_order based on execution_info.module_forward_order.
             # TODO (linjianma): self._fsdp_params_exec_order will be set based on
             # the parameter execution order rather than module_forward_order,
             # once the non-recursive wrapping policy is fully implemented.
-            for m in tracer.module_forward_order:
+            for m in execution_info.module_forward_order:
                 if m in module_fsdp_wrap_map:
                     flat_param = module_fsdp_wrap_map[m]._fsdp_wrapped_module.flat_param
                     if flat_param is not None:

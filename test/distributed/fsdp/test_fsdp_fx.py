@@ -2,7 +2,7 @@
 
 import torch
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.distributed.fsdp.symbolic_trace import _patch_tracer, _ExecutionUnitInfo
+from torch.distributed.fsdp.symbolic_trace import _patch_tracer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -35,19 +35,10 @@ class Model(torch.nn.Module):
 
 
 class TestSymbolicTracing(FSDPTest):
-    def execution_unit_info(self, model: torch.nn.Module) -> None:
-        """
-        Return a model and all of its named parameters, wrapped by _ExecutionUnitInfo
-        """
-        return _ExecutionUnitInfo(
-            module=model,
-            named_params=list(model.named_parameters())
-        )
-
     def test_symbolic_tracing_outputs(self):
         model = Model()
         tracer = torch.fx.Tracer()
-        _patch_tracer(tracer, model)
+        execution_info = _patch_tracer(tracer, model)
         tracer.trace(model)
         # test tracer.module_forward_order
         correct_module_forward_order = [
@@ -64,33 +55,38 @@ class TestSymbolicTracing(FSDPTest):
             model.layer0,
             model.relu
         ]
-        self.assertEqual(tracer.module_forward_order, correct_module_forward_order)
-        # test tracer.module_execution_info_dict
         self.assertEqual(
-            tracer.module_execution_info_dict[model],
+            execution_info.module_forward_order,
+            correct_module_forward_order
+        )
+        # test execution_info.module_execution_info_dict
+        self.assertEqual(
+            execution_info.module_execution_info_dict[model],
             [
-                self.execution_unit_info(model.layer0),
-                self.execution_unit_info(model.layer2),
-                _ExecutionUnitInfo(module=model, named_params=[("weight1", model.weight1)]),
-                self.execution_unit_info(model.layer1),
-                _ExecutionUnitInfo(module=model, named_params=[("weight2", model.weight2)]),
-                self.execution_unit_info(model.layer0),
+                (model.layer0, list(model.layer0.named_parameters())),
+                (model.layer2, list(model.layer2.named_parameters())),
+                (model, [("weight1", model.weight1)]),
+                (model.layer1, list(model.layer1.named_parameters())),
+                (model, [("weight2", model.weight2)]),
+                (model.layer0, list(model.layer0.named_parameters())),
             ]
         )
         self.assertEqual(
-            tracer.module_execution_info_dict[model.layer0], [self.execution_unit_info(model.layer0)],
+            execution_info.module_execution_info_dict[model.layer0],
+            [(model.layer0, list(model.layer0.named_parameters()))],
         )
         self.assertEqual(
-            tracer.module_execution_info_dict[model.layer1], [self.execution_unit_info(model.layer1)],
+            execution_info.module_execution_info_dict[model.layer1],
+            [(model.layer1, list(model.layer1.named_parameters()))],
         )
         self.assertEqual(
-            tracer.module_execution_info_dict[model.layer2],
+            execution_info.module_execution_info_dict[model.layer2],
             [
-                self.execution_unit_info(model.layer2[0]),
-                self.execution_unit_info(model.layer2[2]),
+                (model.layer2[0], list(model.layer2[0].named_parameters())),
+                (model.layer2[2], list(model.layer2[2].named_parameters())),
             ]
         )
-        self.assertEqual(tracer.module_execution_info_dict[model.relu], [])
+        self.assertEqual(execution_info.module_execution_info_dict[model.relu], [])
         # test tracer.param_exec_order
         correct_param_order = [
             model.layer0.weight,
@@ -101,7 +97,7 @@ class TestSymbolicTracing(FSDPTest):
             model.layer1.weight,
             model.weight2,
         ]
-        self.assertEqual(tracer.param_exec_order, correct_param_order)
+        self.assertEqual(execution_info.param_exec_order, correct_param_order)
 
 
 instantiate_parametrized_tests(TestSymbolicTracing)

@@ -36,18 +36,46 @@ class TracingConfig:
     concrete_args: Optional[Dict[str, Any]] = None
 
 
-@dataclass
-class _ExecutionUnitInfo:
+class _ExecutionInfo:
     """
-    Contains named_params in a module that will be executed together.
+    Contains the execution order information in the model forward pass.
+
+    Attributes:
+        current_module: record the module that is currently being traced.
+
+        module_forward_order: a list of modules, where the ordering is based on
+            when their forward function is called.
+
+        param_exec_order: a list of parameters ordered based on their execution order.
+
+        _traced_param_set: a set containing all parameters that have been traced.
+
+        module_execution_info_dict: a dict that maps each module to a list of
+            tuple containing a module and a list of named parameters.
+            For a given module, each tuple:
+            1. either contains this module and part of its named_parameters that will be executed together,
+            2. or contains one of its child modules and all of the child module's named_parameters.
+            The list of tuple is ordered based on the parameter execution order.
     """
-    module: torch.nn.Module
-    named_params: List[Tuple[str, torch.nn.Parameter]]
+    def __init__(self, root_module: torch.nn.Module) -> None:
+        self.current_module = root_module
+        self.module_forward_order: List[torch.nn.Module] = [root_module]
+
+        named_params_type = List[Tuple[str, torch.nn.Parameter]]
+        self.module_execution_info_dict: Dict[
+            torch.nn.Module,
+            List[Tuple[torch.nn.Module, named_params_type]]
+        ] = dict()
+        self.module_execution_info_dict[root_module] = []
+
+        self.param_exec_order: List[torch.nn.Parameter] = []
+        self._traced_param_set: Set[torch.nn.Parameter] = set()
 
 
-def patched_create_proxy(
+def _patched_create_proxy(
     tracer: torch.fx.Tracer,
     create_proxy: Callable,
+    execution_info: _ExecutionInfo,
     kind: str,
     target: torch.fx.node.Target,
     args: Tuple[Any, ...],
@@ -60,14 +88,9 @@ def patched_create_proxy(
     https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.create_proxy).
     Tracer.create_proxy is called in symbolic tracing for each leaf function/method/module.
     This override intercepts the recording of each of these operations and
-    update tracer.module_execution_info_dict.
+    update execution_info.module_execution_info_dict.
     """
     proxy = create_proxy(kind, target, args, kwargs, name, type_expr)
-
-    assert hasattr(tracer, "current_module")
-    assert hasattr(tracer, "module_execution_info_dict")
-    assert hasattr(tracer, "param_exec_order")
-    assert hasattr(tracer, "_traced_param_set")
 
     params_dict = dict(tracer.root.named_parameters())
     if kind in ["call_function", "call_method"]:
@@ -77,30 +100,31 @@ def patched_create_proxy(
                 if isinstance(arg, torch.fx.Proxy) and arg.node.target in params_dict:
                     param = params_dict[arg.node.target]
                     named_params.append((arg.node.target, param))
-                    if param not in tracer._traced_param_set:
-                        tracer.param_exec_order.append(param)
-                        tracer._traced_param_set.add(param)
+                    if param not in execution_info._traced_param_set:
+                        execution_info.param_exec_order.append(param)
+                        execution_info._traced_param_set.add(param)
             if named_params != []:
-                tracer.module_execution_info_dict[tracer.current_module].append(
-                    _ExecutionUnitInfo(module=tracer.current_module, named_params=named_params)
+                execution_info.module_execution_info_dict[execution_info.current_module].append(
+                    (execution_info.current_module, named_params)
                 )
     elif kind == "call_module":
         module = tracer.root.get_submodule(target)
         named_params_list = list(module.named_parameters())
         if named_params_list != []:
-            tracer.module_execution_info_dict[module].append(
-                _ExecutionUnitInfo(module=module, named_params=named_params_list)
+            execution_info.module_execution_info_dict[module].append(
+                (module, named_params_list)
             )
         for (_, p) in named_params_list:
-            if p not in tracer._traced_param_set:
-                tracer.param_exec_order.append(p)
-                tracer._traced_param_set.add(p)
+            if p not in execution_info._traced_param_set:
+                execution_info.param_exec_order.append(p)
+                execution_info._traced_param_set.add(p)
     return proxy
 
 
-def patched_call_module(
+def _patched_call_module(
     tracer: torch.fx.Tracer,
     call_module: Callable,
+    execution_info: _ExecutionInfo,
     module: torch.nn.Module,
     forward: Callable[..., Any],
     args: Tuple[Any, ...],
@@ -111,73 +135,47 @@ def patched_call_module(
     https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.call_module).
     Tracer.call_module is called in symbolic tracing for each non-root module.
     This override intercepts the recording of each operation and
-    update tracer.module_forward_order and tracer.module_execution_info_dict.
+    update execution_info.module_forward_order and execution_info.module_execution_info_dict.
     """
-    assert hasattr(tracer, "module_forward_order")
-    assert hasattr(tracer, "current_module")
-    assert hasattr(tracer, "module_execution_info_dict")
-
-    # Update tracer.module_forward_order
-    tracer.module_forward_order.append(module)
-    # Update tracer.module_execution_info_dict[tracer.current_module]
+    # Update execution_info.module_forward_order
+    execution_info.module_forward_order.append(module)
+    # Update execution_info.module_execution_info_dict[current_module]
     named_params_list = list(module.named_parameters())
     if named_params_list != []:
-        tracer.module_execution_info_dict[tracer.current_module].append(
-            _ExecutionUnitInfo(
-                module=module, named_params=list(module.named_parameters())
-            )
+        execution_info.module_execution_info_dict[execution_info.current_module].append(
+            (module, list(module.named_parameters()))
         )
-    # Stores away tracer.current_module for restoration later
-    old_current_module = tracer.current_module
-    tracer.current_module = module
-    # Initialize tracer.module_execution_info_dict[module]. Note that if
+    # Stores away current_module for restoration later
+    old_current_module = execution_info.current_module
+    execution_info.current_module = module
+    # Initialize execution_info.module_execution_info_dict[module]. Note that if
     # the forward of module is called multiple times, this will record
     # the execution info of the last forward pass.
-    tracer.module_execution_info_dict[module] = []
+    execution_info.module_execution_info_dict[module] = []
     # Delegates into the normal Tracer.call_module method
     output = call_module(module, forward, args, kwargs)
-    # Restores tracer.current_module
-    tracer.current_module = old_current_module
+    # Restores current_module
+    execution_info.current_module = old_current_module
     return output
 
 
-def _patch_tracer(tracer: Callable, root_module: torch.nn.Module) -> None:
+def _patch_tracer(tracer: torch.fx.Tracer, root_module: torch.nn.Module) -> None:
     """
     Patches the input tracer so that during tracer.trace(), the forward order
     of all modules and the parameter execution information are recorded.
     root_module is the top-level module to be traced.
-
-    The following attributes are added to tracer:
-    tracer.current_module: record the module that is currently being traced.
-
-    tracer.module_forward_order: a list of modules, where the ordering is based on
-    when their forward function is called.
-
-    tracer.param_exec_order: a list of parameters ordered based on their execution order.
-
-    tracer._traced_param_set: a set containing all parameters that have been traced.
-
-    tracer.module_execution_info_dict: a dict that maps each module to a list of
-    _ExecutionUnitInfo.
-    For a given module, each _ExecutionUnitInfo:
-        1. either contains this module and part of its named_parameters that will be executed together,
-        2. or contains one of its child modules and all of the child module's named_parameters.
-    The list of _ExecutionUnitInfo is ordered based on the parameter execution order.
     """
-    assert not hasattr(tracer, "current_module")
-    assert not hasattr(tracer, "module_forward_order")
-    assert not hasattr(tracer, "module_execution_info_dict")
-    assert not hasattr(tracer, "param_exec_order")
-    assert not hasattr(tracer, "_traced_param_set")
-
-    tracer.current_module: torch.nn.Module = root_module
-    tracer.module_forward_order: List[torch.nn.Module] = [root_module]
-
-    tracer.module_execution_info_dict: Dict[torch.nn.Module, List[_ExecutionUnitInfo]] = dict()
-    tracer.module_execution_info_dict[root_module] = []
-
-    tracer.param_exec_order: List[torch.nn.Parameter] = []
-    tracer._traced_param_set: Set[torch.nn.Parameter] = set()
-
-    tracer.call_module = functools.partial(patched_call_module, tracer, tracer.call_module)
-    tracer.create_proxy = functools.partial(patched_create_proxy, tracer, tracer.create_proxy)
+    execution_info = _ExecutionInfo(root_module)
+    tracer.call_module = functools.partial(
+        _patched_call_module,
+        tracer,
+        tracer.call_module,
+        execution_info
+    )
+    tracer.create_proxy = functools.partial(
+        _patched_create_proxy,
+        tracer,
+        tracer.create_proxy,
+        execution_info
+    )
+    return execution_info
