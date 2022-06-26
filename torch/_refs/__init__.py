@@ -48,6 +48,7 @@ __all__ = [
     "abs",
     "acos",
     "acosh",
+    "angle",
     "asin",
     "atan",
     "bitwise_not",
@@ -93,6 +94,7 @@ __all__ = [
     # Elementwise Binary References
     #
     "add",
+    "arctan2",
     "atan2",
     "bitwise_and",
     "bitwise_left_shift",
@@ -365,6 +367,14 @@ def acos(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def acosh(a):
     return prims.acosh(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def angle(a):
+    if utils.is_complex_dtype(a.dtype):
+        return prims.arctan2(a.imag, a.real)
+
+    return prims.angle(a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -771,6 +781,12 @@ def add(
 
     return prims.add(a, b)
 
+arctan2 = _make_elementwise_binary_reference(
+    prims.arctan2,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    supports_lhs_python_scalar=False,
+    supports_rhs_python_scalar=False,
+)
 
 # TODO: add docstring
 atan2 = _make_elementwise_binary_reference(

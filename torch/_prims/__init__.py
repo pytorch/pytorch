@@ -44,6 +44,7 @@ __all__ = [
     "abs",
     "acos",
     "acosh",
+    "angle",
     "asin",
     "atan",
     "cos",
@@ -85,6 +86,7 @@ __all__ = [
     # Elementwise binary prims
     #
     "add",
+    "arctan2",
     "atan2",
     "bitwise_and",
     "bitwise_or",
@@ -511,6 +513,13 @@ acosh = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+angle = _make_elementwise_unary_prim(
+    "angle",
+    impl_aten=torch.angle,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
 asin = _make_elementwise_unary_prim(
     "asin",
     impl_aten=torch.asin,
@@ -833,6 +842,13 @@ add = _make_elementwise_binary_prim(
     name="add",
     impl_aten=torch.add,
     impl_nvfuser=_add_nvfuser,  # type: ignore[name-defined]
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+arctan2 = _make_elementwise_binary_prim(
+    name="arctan2",
+    impl_aten=torch.arctan2,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )

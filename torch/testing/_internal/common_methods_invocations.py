@@ -20048,6 +20048,11 @@ python_ref_db = [
         supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.angle",
+        torch_opinfo_name="angle",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.asin",
         torch_opinfo_name="asin",
     ),
@@ -20385,6 +20390,11 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.arctan2",
+        torch_opinfo_name="arctan2",
+        supports_nvfuser=False,
     ),
     ElementwiseBinaryPythonRefInfo(
         "_refs.atan2",
