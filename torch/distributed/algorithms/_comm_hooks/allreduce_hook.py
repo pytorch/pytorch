@@ -46,14 +46,14 @@ class AllReduceState(object):
 def allreduce_hook(state: AllReduceState, grad: torch.Tensor):
     r"""
     This FSDP communication hook implements ``all_reduce`` algorithm
-    and a neccessary pre- and post-division of gradients.
+    and a necessary pre- and post-division of gradients.
 
     Args:
         state (AllReduceState): State information, configures pre- and post-division factors
         grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks.
     """
-    grad.div_(state.gradient_predivide_factor)
+    if state.gradient_predivide_factor > 1:
+        grad.div_(state.gradient_predivide_factor)
     dist.all_reduce(grad, group=state.process_group)
     if state.gradient_postdivide_factor > 1:
-        # Average grad by world_size for consistency with PyTorch DDP.
         grad.div_(state.gradient_postdivide_factor)

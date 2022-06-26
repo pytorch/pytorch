@@ -4070,7 +4070,7 @@ class FullyShardedDataParallel(nn.Module):
                             the full, flattened, unsharded gradient with respect to all variables
                             corresponding to the model this FSDP unit is wrapping
                             (that are not wrapped by other FSDP sub-units).
-                            It then performs all neccessary processing and returns ``None``.
+                            It then performs all necessary processing and returns ``None``.
 
         """
         assert self.check_is_root(), "register_comm_hook can only be called on a root instance."
