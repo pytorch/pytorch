@@ -99,7 +99,7 @@ class APoTObserver(ObserverBase):
 
         # calculate sum of each row
         for row in cartesian_product:
-            sum = 0
+            sum = 0.0
             for ele in row:
                 sum += ele
             quantization_levels_list.append(sum)
