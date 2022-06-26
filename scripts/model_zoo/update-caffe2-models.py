@@ -17,7 +17,8 @@ class SomeClass:
         model_dir = self._caffe2_model_dir(model)
         assert not os.path.exists(model_dir)
         os.makedirs(model_dir)
-        for f in ['predict_net.pb', 'init_net.pb', 'value_info.json']:
+        i = ['predict_net.pb', 'init_net.pb', 'value_info.json']
+        for f in i:
             url = getURLFromName(model, f)
             dest = os.path.join(model_dir, f)
             try:
@@ -30,7 +31,7 @@ class SomeClass:
                     # (Sep 17, 2017)
                     downloadFromURLToFile(url, dest)
             except Exception as e:
-                print("Abort: {reason}".format(reason=e))
+                print(f"Abort: {e}")
                 print("Cleaning up...")
                 deleteDirectory(model_dir)
                 exit(1)
@@ -53,20 +54,20 @@ class SomeClass:
         if os.path.exists(model_dir):
             return
         os.makedirs(model_dir)
-        url = 'https://s3.amazonaws.com/download.onnx/models/{}.tar.gz'.format(model)
+        url = f'https://s3.amazonaws.com/download.onnx/models/{model}.tar.gz'
 
         # On Windows, NamedTemporaryFile cannot be opened for a
         # second time
         download_file = tempfile.NamedTemporaryFile(delete=False)
         try:
             download_file.close()
-            print('Start downloading model {} from {}'.format(model, url))
+            print(f'Start downloading model {model} from {url}')
             urlretrieve(url, download_file.name)
             print('Done')
             with tarfile.open(download_file.name) as t:
                 t.extractall(models_dir)
         except Exception as e:
-            print('Failed to prepare data for model {}: {}'.format(model, e))
+            print(f'Failed to prepare data for model {model}: {e}')
             raise
         finally:
             os.remove(download_file.name)
@@ -91,7 +92,7 @@ models = [
 def download_models():
     sc = SomeClass()
     for model in models:
-        print('update-caffe2-models.py:  downloading', model)
+        print(f'update-caffe2-models.py:  downloading {model}')
         caffe2_model_dir = sc._caffe2_model_dir(model)
         onnx_model_dir, onnx_models_dir = sc._onnx_model_dir(model)
         if not os.path.exists(caffe2_model_dir):
@@ -102,7 +103,7 @@ def download_models():
 def generate_models():
     sc = SomeClass()
     for model in models:
-        print('update-caffe2-models.py:  generating', model)
+        print(f'update-caffe2-models.py:  generating {model})
         caffe2_model_dir = sc._caffe2_model_dir(model)
         onnx_model_dir, onnx_models_dir = sc._onnx_model_dir(model)
         subprocess.check_call(['echo', model])
@@ -126,14 +127,14 @@ def generate_models():
 def upload_models():
     sc = SomeClass()
     for model in models:
-        print('update-caffe2-models.py:  uploading', model)
+        print(f'update-caffe2-models.py:  uploading {model}')
         onnx_model_dir, onnx_models_dir = sc._onnx_model_dir(model)
         subprocess.check_call([
             'aws',
             's3',
             'cp',
             model + '.tar.gz',
-            "s3://download.onnx/models/{}.tar.gz".format(model),
+            f"s3://download.onnx/models/{model}.tar.gz",
             '--acl', 'public-read'
         ], cwd=onnx_models_dir)
 
