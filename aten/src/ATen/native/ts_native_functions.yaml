@@ -85,6 +85,8 @@ full_codegen:
   - mm
   - mul.Tensor
   - mv
+  - native_batch_norm
+  - native_batch_norm_backward
   - native_dropout
   - native_dropout_backward
   - native_layer_norm
@@ -174,8 +176,6 @@ supported:
   - empty.memory_format
   - empty_strided
   - fill_.Scalar
-  - native_batch_norm
-  - native_batch_norm_backward
   - normal_
   - max_pool3d_with_indices
   - max_pool3d_with_indices_backward
