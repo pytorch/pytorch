@@ -2,11 +2,10 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
 import torch.fx
-import torch.nn as nn
 from torch.fx.graph import map_arg
 from .tools_common import NodeList, NodeSet
 from torch.fx._compatibility import compatibility
-
+from torch.fx.passes.utils import lift_subgraph_as_module, HolderModule
 
 @compatibility(is_backward_compatible=False)
 def getattr_recursive(obj, name):
@@ -51,19 +50,6 @@ class Component:
     getattr_maps: Dict[torch.fx.Node, torch.fx.Node] = field(default_factory=dict)
     constructor_args: List[str] = field(default_factory=list)
     gm: Optional[torch.fx.GraphModule] = None
-
-
-@compatibility(is_backward_compatible=False)
-class HolderModule(nn.Module):
-    """
-    HolderModule is used to copy all the attributes from original module to submodules
-    that uses the attributes
-    """
-
-    def __init__(self, d):
-        super().__init__()
-        for k, v in d.items():
-            self.add_module(k, v)
 
 
 @compatibility(is_backward_compatible=False)
@@ -261,37 +247,7 @@ def split_by_tags(gm: torch.fx.GraphModule, tags: List[str]) -> torch.fx.GraphMo
         # ((output_0, output_1, ...)).
         comp.graph.output(outs[0] if len(outs) == 1 else outs)
 
-        # Loop through all module calls (call_module) and param fetches (get_attr)
-        # in this component, creating HolderModules as necessary to match the path.
-        # e.g. if in the original module there's a get_attr node fetches "conv.weight".
-        # We create a HolderModule as root -> add a HolderModule named "conv" ->
-        # make "weight" a attribute of "conv" HolderModule and point to conv.weight in
-        # the original module.
-        root = HolderModule({})
-        for n in comp.graph.nodes:
-            if n.op not in ("call_module", "get_attr"):
-                continue
-
-            target = n.target
-            assert isinstance(target, str)
-            target_name_parts = target.split(".")
-            curr = root
-            orig_gm = gm
-
-            for name in target_name_parts[:-1]:
-                if not hasattr(curr, name):
-                    curr.add_module(name, HolderModule({}))
-
-                curr = getattr(curr, name)
-                orig_gm = getattr(orig_gm, name)
-
-            leaf_node_name = target_name_parts[-1]
-            leaf_node = getattr(orig_gm, leaf_node_name)
-
-            # Relies on custom __setattr__ magic.
-            setattr(curr, leaf_node_name, leaf_node)
-
-        comp.gm = torch.fx.GraphModule(root, comp.graph)
+        comp.gm = lift_subgraph_as_module(gm, comp.graph)
 
         # Create a call_module node in main graph.
         main_node = main_g.call_module(
