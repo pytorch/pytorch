@@ -70,7 +70,7 @@ class APoTObserver(ObserverBase):
         for i in range(0, self.n):
             p_curr = torch.tensor([0])
 
-            for j in range(0, 2 ** (self.k - 1) + 1):
+            for j in range(0, (2 ** self.k - 2) + 1):
                 curr_ele = 2 ** (- (i + j * self.n))
                 p_append = torch.tensor([curr_ele])
                 p_curr = torch.cat((p_curr, p_append))
