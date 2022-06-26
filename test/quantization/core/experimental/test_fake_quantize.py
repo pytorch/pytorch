@@ -19,7 +19,9 @@ class TestFakeQuantize(unittest.TestCase):
         min_val = torch.tensor([0.0])
         max_val = torch.tensor([1.0])
 
-        qparams = apot_fake.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
+        alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(signed=False,
+                                                                                       min_val=min_val,
+                                                                                       max_val=max_val)
 
         qparams_expected = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
 
@@ -38,11 +40,12 @@ class TestFakeQuantize(unittest.TestCase):
         # between 0 -> 1000 to quantize -> dequantize
         X = 1000 * torch.rand(20)
 
-        min_val = torch.min(X)
-        max_val = torch.max(X)
+        min_val, max_val = torch.aminmax(X)
 
         observer = APoTObserver(b=4, k=2)
-        qparams = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False,
+                                                                                      min_val=min_val,
+                                                                                      max_val=max_val)
         quantization_levels = qparams[1]
         level_indices = qparams[2]
 

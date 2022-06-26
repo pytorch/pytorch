@@ -17,8 +17,7 @@ class APoTFakeQuantize(FakeQuantizeBase):
 
     def forward(self, X: torch.Tensor, signed: bool):
         if self.observer_enabled[0] == 1:
-            min_val = torch.min(X)
-            max_val = torch.max(X)
+            min_val, max_val = torch.aminmax(X)
             qparams = self.calculate_qparams(signed, min_val, max_val)
         if self.fake_quant_enabled[0] == 1:
             quantizer = APoTQuantizer(self.observer.b, self.observer.k, self.observer.min_val, self.observer.max_val, signed)
