@@ -1059,10 +1059,8 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_hardshrink_dtype(self):
-        model = torch.nn.Hardshrink()
-
         x = torch.rand(3, 3).to(dtype=torch.float64)
-        self.run_test(model, x)
+        self.run_test(torch.nn.Hardshrink(), x)
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_softshrink(self):
@@ -1079,10 +1077,8 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_softshrink_dtype(self):
-        model = torch.nn.Softshrink()
-
         x = torch.rand(3, 3).to(dtype=torch.float64)
-        self.run_test(model, x)
+        self.run_test(torch.nn.Softshrink(), x)
 
     def test_clamp(self):
         class ClampModel(torch.nn.Module):
