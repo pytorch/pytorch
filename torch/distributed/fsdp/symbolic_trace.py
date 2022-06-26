@@ -73,9 +73,9 @@ class _ExecutionInfo:
 
 
 def _patched_create_proxy(
-    tracer: torch.fx.Tracer,
     create_proxy: Callable,
     execution_info: _ExecutionInfo,
+    params_dict: Dict[str, torch.nn.Parameter],
     kind: str,
     target: torch.fx.node.Target,
     args: Tuple[Any, ...],
@@ -89,10 +89,18 @@ def _patched_create_proxy(
     Tracer.create_proxy is called in symbolic tracing for each leaf function/method/module.
     This override intercepts the recording of each of these operations and
     update execution_info.module_execution_info_dict.
+
+    Args:
+        create_proxy (Callable):
+            The create_proxy function to be patched.
+        execution_info (_ExecutionInfo):
+            Used to repord the execution information.
+        params_dict (Dict[str, torch.nn.Parameter]):
+            A dict that maps each parameter name to the parameter
+        kind, target, args, kwargs, name, type_expr: inputs to the create_proxy function.
     """
     proxy = create_proxy(kind, target, args, kwargs, name, type_expr)
 
-    params_dict = dict(tracer.root.named_parameters())
     if kind in ["call_function", "call_method"]:
         if args is not None:
             named_params: List[Tuple[str, torch.nn.Parameter]] = []
@@ -108,7 +116,7 @@ def _patched_create_proxy(
                     (execution_info.current_module, named_params)
                 )
     elif kind == "call_module":
-        module = tracer.root.get_submodule(target)
+        module = execution_info.current_module
         named_params_list = list(module.named_parameters())
         if named_params_list != []:
             execution_info.module_execution_info_dict[module].append(
@@ -122,7 +130,6 @@ def _patched_create_proxy(
 
 
 def _patched_call_module(
-    tracer: torch.fx.Tracer,
     call_module: Callable,
     execution_info: _ExecutionInfo,
     module: torch.nn.Module,
@@ -136,6 +143,13 @@ def _patched_call_module(
     Tracer.call_module is called in symbolic tracing for each non-root module.
     This override intercepts the recording of each operation and
     update execution_info.module_forward_order and execution_info.module_execution_info_dict.
+
+    Args:
+        call_module (Callable):
+            The call_module function to be patched.
+        execution_info (_ExecutionInfo):
+            Used to repord the execution information.
+        module, forward, args, kwargs: inputs to the call_module function.
     """
     # Update execution_info.module_forward_order
     execution_info.module_forward_order.append(module)
@@ -159,7 +173,10 @@ def _patched_call_module(
     return output
 
 
-def _patch_tracer(tracer: torch.fx.Tracer, root_module: torch.nn.Module) -> None:
+def _patch_tracer(
+    tracer: torch.fx.Tracer,
+    root_module: torch.nn.Module
+) -> _ExecutionInfo:
     """
     Patches the input tracer so that during tracer.trace(), the forward order
     of all modules and the parameter execution information are recorded.
@@ -168,14 +185,14 @@ def _patch_tracer(tracer: torch.fx.Tracer, root_module: torch.nn.Module) -> None
     execution_info = _ExecutionInfo(root_module)
     tracer.call_module = functools.partial(
         _patched_call_module,
-        tracer,
         tracer.call_module,
         execution_info
     )
+    params_dict = dict(root_module.named_parameters())
     tracer.create_proxy = functools.partial(
         _patched_create_proxy,
-        tracer,
         tracer.create_proxy,
-        execution_info
+        execution_info,
+        params_dict
     )
     return execution_info
