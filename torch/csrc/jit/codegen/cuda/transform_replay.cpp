@@ -646,35 +646,28 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   return replayCasP(consumer, producer, compute_at_axis, root_map);
 }
 
-std::shared_ptr<TransformPropagator::RootDomainInfo> TransformPropagator::
-    getStartingRootIDInfo(TensorView* tv) {
-  RootDomainInfo result;
-  const auto& root_domain = tv->getRootDomain();
-  result.info.reserve(root_domain.size());
-  for (auto id : root_domain) {
-    result.info.emplace_back(RootIDInfo{{id}, true, false});
-  }
-  return std::make_shared<TransformPropagator::RootDomainInfo>(
-      std::move(result));
-}
-
 void TransformPropagator::propagateTvPasC(TensorView* from, TensorView* to) {
-  int pos = replayed_pos.at(from);
+  int pos = replayed_pos_.at(from);
   auto replay = TransformReplay::replayPasC(to, from, pos);
   to->setDomain(replay.first);
-  replayed_pos[to] = replay.second;
+  replayed_pos_[to] = replay.second;
 }
 
 void TransformPropagator::propagateTvCasP(TensorView* from, TensorView* to) {
-  int pos = replayed_pos.at(from);
+  int pos = replayed_pos_.at(from);
   auto replay = TransformReplay::replayCasP(to, from, pos);
   to->setDomain(replay.first);
-  replayed_pos[to] = replay.second;
+  replayed_pos_[to] = replay.second;
 }
 
-TransformPropagator::TransformPropagator(TensorView* from)
-    : MaxRootDomainInfoPropagator(from, getStartingRootIDInfo(from)) {
-  replayed_pos[from] = from->nDims();
+TransformPropagator::TransformPropagator(TensorView* from, int64_t pos) {
+  if (pos < 0) {
+    pos += int64_t(from->nDims()) + 1;
+  }
+  TORCH_CHECK(
+      pos >= 0 && pos <= from->nDims(),
+      "TransformPropagator called on an pos outside valid range.");
+  replayed_pos_[from] = pos;
 }
 
 } // namespace cuda

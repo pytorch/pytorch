@@ -157,17 +157,13 @@ class TORCH_CUDA_CU_API TransformReplay {
 };
 
 class TORCH_CUDA_CU_API TransformPropagator
-    : public MaxRootDomainInfoPropagator {
-  std::unordered_map<TensorView*, size_t> replayed_pos;
-  static std::shared_ptr<TransformPropagator::RootDomainInfo>
-  getStartingRootIDInfo(TensorView* tv);
-
- protected:
-  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
-  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
+    : public MaxRootDomainInfoSpanningTree::Propagator {
+  std::unordered_map<TensorView*, size_t> replayed_pos_;
 
  public:
-  TransformPropagator(TensorView* from);
+  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
+  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
+  TransformPropagator(TensorView* from, int64_t pos = -1);
 };
 
 } // namespace cuda

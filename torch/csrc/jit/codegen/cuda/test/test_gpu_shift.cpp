@@ -1264,7 +1264,8 @@ TEST_F(NVFuserTest, FusionShiftDoubleSplitMerge2_CUDA) {
   out->merge(2, 3);
   out->merge(0, 1);
 
-  TransformPropagator(out).run();
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 1);
 
@@ -2324,7 +2325,8 @@ TEST_F(NVFuserTest, FusionHdiffPartialSplitUnswitch_CUDA) {
   out->reorder({{1, 3}, {2, 1}, {3, 4}, {4, 2}});
   // out: [NZ/tz, NY/by, NX/bx, tz, by, bx]
 
-  TransformPropagator(out).run();
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   inp->computeAt(out, 4);
 
@@ -2720,7 +2722,8 @@ TEST_F(NVFuserTest, FusionGather6_CUDA) {
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator(out).run();
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 2);
 
@@ -2779,7 +2782,8 @@ TEST_F(NVFuserTest, FusionGather7_CUDA) {
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator(out).run();
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 2);
 
@@ -2879,7 +2883,8 @@ TEST_F(NVFuserTest, FusionGather9_CUDA) {
   out->split(0, block_y);
   out->reorder({{1, 2}, {2, 1}});
 
-  TransformPropagator(out).run();
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 2);
 
@@ -3804,7 +3809,8 @@ TEST_F(NVFuserTest, FusionShiftNoPadding1_CUDA) {
   tv5->split(-1, 8);
   tv5->reorder({{1, 2}});
 
-  TransformPropagator(tv5).run();
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
@@ -3860,7 +3866,8 @@ TEST_F(NVFuserTest, FusionShiftNoPadding2_CUDA) {
   tv5->reorder({{1, 2}});
   tv5->merge(-2, -1);
 
-  TransformPropagator(tv5).run();
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
@@ -3920,7 +3927,8 @@ TEST_F(NVFuserTest, FusionShiftNoPadding3_CUDA) {
   tv_avg->reorder({{1, 2}});
   tv_avg->merge(-2, -1);
 
-  TransformPropagator(tv_avg).run();
+  TransformPropagator propagator(tv_avg);
+  MaxRootDomainInfoSpanningTree(tv_avg).traverse(&propagator);
 
   tv2->computeAt(tv_avg, -1);
   tv3->computeAt(tv_avg, -1);
@@ -4106,7 +4114,8 @@ TEST_F(NVFuserTest, FusionShiftPadding1_CUDA) {
   tv5->split(-1, 8);
   tv5->reorder({{1, 2}});
 
-  TransformPropagator(tv5).run();
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv2->computeAt(tv5, -1);
   tv3->computeAt(tv5, -1);
@@ -5314,7 +5323,8 @@ TEST_F(NVFuserTest, FusionGather9ptStencilDoubleBuffering_CUDA) {
   out->split(-2, 4);
   out->split(-1, 32);
   out->reorder({{1, 2}, {2, 1}});
-  TransformPropagator(out).run();
+  TransformPropagator propagator(out);
+  MaxRootDomainInfoSpanningTree(out).traverse(&propagator);
 
   tv0->computeAt(out, 2);
 
@@ -5363,7 +5373,8 @@ TEST_F(NVFuserTest, FusionValidateParallelizeShift_CUDA) {
 
   tv5->split(-1, 1024);
   tv5->split(-1, 2);
-  TransformPropagator(tv5).run();
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv0->computeAt(tv5, 1);
 

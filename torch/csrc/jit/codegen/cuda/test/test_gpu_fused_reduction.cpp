@@ -135,7 +135,8 @@ TEST_F(NVFuserTest, FusionGridAllreduce1_CUDA) {
   fusion.addOutput(tv3);
 
   tv3->split(0, tidx);
-  TransformPropagator(tv3).run();
+  TransformPropagator propagator(tv3);
+  MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv3->axis(0)->parallelize(ParallelType::BIDx);
   tv3->axis(1)->parallelize(ParallelType::TIDx);
@@ -178,7 +179,8 @@ TEST_F(NVFuserTest, FusionGridAllreduce2_CUDA) {
   fusion.addOutput(tv3);
 
   tv3->split(0, tidx);
-  TransformPropagator(tv3).run();
+  TransformPropagator propagator(tv3);
+  MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv3->axis(0)->parallelize(ParallelType::BIDx);
   tv3->axis(1)->parallelize(ParallelType::TIDx);
@@ -230,7 +232,8 @@ TEST_F(NVFuserTest, FusionGridAllreduce3_CUDA) {
   fusion.addOutput(tv3);
 
   tv3->split(1, tidx);
-  TransformPropagator(tv3).run();
+  TransformPropagator propagator(tv3);
+  MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv0->computeAt(tv3, 1);
 
@@ -277,7 +280,8 @@ TEST_F(NVFuserTest, FusionGridAllreduce4_CUDA) {
   fusion.addOutput(tv4);
 
   tv4->split(0, tidx);
-  TransformPropagator(tv4).run();
+  TransformPropagator propagator(tv4);
+  MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
 
   tv4->axis(0)->parallelize(ParallelType::BIDx);
   tv4->axis(1)->parallelize(ParallelType::TIDx);
@@ -335,7 +339,8 @@ TEST_F(NVFuserTest, FusionGridAllreduce5_CUDA) {
 
   // Setup the reduction
   tv4->split(1, tidx);
-  TransformPropagator(tv4).run();
+  TransformPropagator propagator(tv4);
+  MaxRootDomainInfoSpanningTree(tv4).traverse(&propagator);
 
   tv4->axis(1)->parallelize(ParallelType::BIDx);
   tv4->axis(2)->parallelize(ParallelType::TIDx);
@@ -389,7 +394,8 @@ TEST_F(NVFuserTest, FusionGridAllreduce6_CUDA) {
   tv1->split(1, vec);
   tv1->split(1, tidx);
   tv1->split(0, tidy);
-  TransformPropagator(tv1).run();
+  TransformPropagator propagator(tv1);
+  MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
 
   tv1->axis(0)->parallelize(ParallelType::BIDy);
   tv1->axis(1)->parallelize(ParallelType::TIDy);
@@ -437,7 +443,8 @@ TEST_F(NVFuserTest, FusionGridAllreduceWelford1_CUDA) {
   fusion.addOutput(tv5);
 
   tv5->split(0, tidx);
-  TransformPropagator(tv5).run();
+  TransformPropagator propagator(tv5);
+  MaxRootDomainInfoSpanningTree(tv5).traverse(&propagator);
 
   tv5->axis(0)->parallelize(ParallelType::BIDx);
   tv5->axis(1)->parallelize(ParallelType::TIDx);
@@ -484,7 +491,8 @@ TEST_F(NVFuserTest, FusionGridAllreduceWelford2_CUDA) {
   fusion.addOutput(tv3);
 
   tv3->split(1, tidx);
-  TransformPropagator(tv3).run();
+  TransformPropagator propagator(tv3);
+  MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
 
   tv0->computeAt(tv3, 1);
 
@@ -591,7 +599,8 @@ TEST_F(NVFuserTest, FusionFusedReductionBatchnorm_CUDA) {
        {9, 8},
        {6, 9}});
 
-  TransformPropagator(tv0).run();
+  TransformPropagator propagator(tv0);
+  MaxRootDomainInfoSpanningTree(tv0).traverse(&propagator);
 
   auto tvs_rf = tvs.rFactor({-5, -4, -3, -2, -1});
 
@@ -716,7 +725,8 @@ TEST_F(NVFuserTest, FusionGroupedReduction2_CUDA) {
   groupReductions({tv2, tv4});
 
   tv2->split(1, 128);
-  TransformPropagator(tv2).run();
+  TransformPropagator propagator(tv2);
+  MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   tv0->computeAt(tv4, -1, ComputeAtMode::MostInlined);
 
@@ -759,7 +769,8 @@ TEST_F(NVFuserTest, FusionGroupedReduction3_CUDA) {
 
   groupReductions({tv1, tv3});
   tv1->split(1, 128);
-  TransformPropagator(tv1).run();
+  TransformPropagator propagator(tv1);
+  MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
 
   tv0->computeAt(tv5, -1, ComputeAtMode::MostInlined);
 
@@ -1044,7 +1055,8 @@ TEST_F(NVFuserTest, FusionGroupAllreduce1_CUDA) {
   groupReductions({tv1, tv3});
 
   tv2->split(0, 128);
-  TransformPropagator(tv2).run();
+  TransformPropagator propagator(tv2);
+  MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   tv2->axis(0)->parallelize(ParallelType::BIDx);
   tv2->axis(1)->parallelize(ParallelType::TIDx);
@@ -1089,7 +1101,8 @@ TEST_F(NVFuserTest, FusionGroupAllreduce2_CUDA) {
   const int tidx = 512;
   groupReductions({tv1, tv4});
   tv1->split(1, tidx);
-  TransformPropagator(tv1).run();
+  TransformPropagator propagator(tv1);
+  MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
 
   tv0->computeAt(tv8, -1, ComputeAtMode::MostInlined);
 
@@ -1143,7 +1156,8 @@ TEST_F(NVFuserTest, FusionGroupAllreduce3_CUDA) {
   groupReductions({tv1, tv4, tv7});
 
   tv1->split(0, 128);
-  TransformPropagator(tv1).run();
+  TransformPropagator propagator(tv1);
+  MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
 
   tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
@@ -1194,7 +1208,8 @@ TEST_F(NVFuserTest, FusionGroupAllreduce4_CUDA) {
   auto reduction_tv = reduction_tvs.at(0);
 
   reduction_tv->split(0, 128);
-  TransformPropagator(reduction_tv).run();
+  TransformPropagator propagator(reduction_tv);
+  MaxRootDomainInfoSpanningTree(reduction_tv).traverse(&propagator);
 
   reduction_tv->axis(0)->parallelize(ParallelType::BIDx);
   reduction_tv->axis(1)->parallelize(ParallelType::TIDx);
@@ -1253,7 +1268,8 @@ TEST_F(NVFuserTest, FusionGroupAllreduce5_CUDA) {
   groupReductions({tv1, tv5, tv9});
 
   tv1->split(0, 128);
-  TransformPropagator(tv1).run();
+  TransformPropagator propagator(tv1);
+  MaxRootDomainInfoSpanningTree(tv1).traverse(&propagator);
 
   tv1->axis(0)->parallelize(ParallelType::BIDx);
   tv1->axis(1)->parallelize(ParallelType::TIDx);
@@ -1409,7 +1425,8 @@ TEST_F(NVFuserTest, FusionPersistentBNBackwardAllreduce_CUDA) {
   grad_input->axis(3)->parallelize(ParallelType::BIDy);
   grad_input->axis(4)->parallelize(ParallelType::TIDx);
 
-  TransformPropagator(grad_input).run();
+  TransformPropagator propagator(grad_input);
+  MaxRootDomainInfoSpanningTree(grad_input).traverse(&propagator);
 
   auto rf_tensors = grad_output_sum->rFactor(
       {-1}, std::vector<TensorView*>({grad_output_sum, dot_p}));
@@ -1522,7 +1539,8 @@ TEST_F(NVFuserTest, FusionGroupedReductionReEntrant1_CUDA) {
   tv2->split(1, tidx);
 
   tv2->split(0, tidy);
-  TransformPropagator(tv2).run();
+  TransformPropagator propagator(tv2);
+  MaxRootDomainInfoSpanningTree(tv2).traverse(&propagator);
 
   tv0_cache->axis(-1)->parallelize(ParallelType::Vectorize);
 
@@ -1623,7 +1641,8 @@ TEST_F(NVFuserTest, FusionGroupedReductionChannelsLastBatchNormLike_CUDA) {
   // Move the serial reduction to the right of the vector axis
   ref->reorder({{3, 4}, {4, 3}});
 
-  TransformPropagator(ref).run();
+  TransformPropagator propagator(ref);
+  MaxRootDomainInfoSpanningTree(ref).traverse(&propagator);
 
   auto rf_tvs = tv5->rFactor({-2}, {tv5, tv9});
   auto tv5_rf = rf_tvs.at(0);
@@ -1751,7 +1770,8 @@ TEST_F(
   // Move the serial reduction to the right of the vector axis
   ref->reorder({{3, 4}, {4, 3}});
 
-  TransformPropagator(ref).run();
+  TransformPropagator propagator(ref);
+  MaxRootDomainInfoSpanningTree(ref).traverse(&propagator);
 
   auto rf_tvs = tv5->rFactor({-2}, {tv5, tv9});
   auto tv5_rf = rf_tvs.at(0);
