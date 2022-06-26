@@ -27,7 +27,7 @@ class APoTQuantizer():
     Args:
         tensor2quantize: fp Tensor
     Returns:
-        result: integer APoT representation of tensor2quantize
+        result: APoT Tensor representation of tensor2quantize
     """
     def quantize(self, tensor2quantize: Tensor):
         result = torch.tensor([])
@@ -64,6 +64,14 @@ class APoTQuantizer():
         raise NotImplementedError
 
 r""" Global method to create quantizer and call quantizer quantize_APoT
+    Args:
+        tensor2quantize: fp Tensor to quantize
+        alpha: Tensor qparam alpha (clipping level)
+        gamma: Tensor qparam gamma (scale factor for quantization levels)
+        quantization levels: Tensor with fp quantization levels
+        level indices: Tensor with integer quantization level indices
+    Returns:
+        result: ApoT Tensor representation of tensor2quantize
 """
 def quantize_APoT(tensor2quantize: Tensor, alpha: Tensor, gamma: Tensor, quantization_levels: Tensor, level_indices: Tensor):
     quantizer = APoTQuantizer(alpha=alpha, gamma=gamma, quantization_levels=quantization_levels, level_indices=level_indices)
@@ -71,6 +79,14 @@ def quantize_APoT(tensor2quantize: Tensor, alpha: Tensor, gamma: Tensor, quantiz
     return result
 
 r""" Global method to create quantizer and call quantizer dequantize_APoT
+    Args:
+        apot_tensor: APoT Tensor to dequantize
+        alpha: Tensor qparam alpha (clipping level)
+        gamma: Tensor qparam gamma (scale factor for quantization levels)
+        quantization levels: Tensor with fp quantization levels
+        level indices: Tensor with integer quantization level indices
+    Returns:
+        result: fp Tensor dequantized from apot_tensor
 """
 def dequantize_APoT(apot_tensor, alpha: Tensor, gamma: Tensor, quantization_levels: Tensor, level_indices: Tensor) -> Tensor:
     quantizer = APoTQuantizer(alpha=alpha, gamma=gamma, quantization_levels=quantization_levels, level_indices=level_indices)
