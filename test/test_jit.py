@@ -3026,6 +3026,23 @@ class TestFrontend(JitTestCase):
         checker.check("def forward")
         checker.run(str(cm.exception))
 
+    def test_dictionary_as_example_inputs_for_jit_trace(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super(TestModule, self).__init__()
+
+            def forward(self, key2=None, key3=None, key4=None, key5=None, key1=None, key6=None):
+                return key1 + key2 + key3
+        
+        model = TestModule()
+        value1 = torch.ones(1)
+        value2 = torch.ones(1)
+        value3 = torch.ones(1)
+        example_input_dict = {'key1':value1, 'key2':value2, 'key3':value3}
+        traced_model = torch.jit.trace(model, example_input_dict, strict=False)
+        res = traced_model(**example_input_dict)
+        self.assertEqual(res, 3 * torch.ones(1))
+
 
 class TestScript(JitTestCase):
 
