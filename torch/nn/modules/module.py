@@ -249,7 +249,17 @@ class Module:
     the change."""
 
     training: bool
+    _parameters: Dict[str, Optional[Parameter]]
+    _buffers: Dict[str, Optional[Tensor]]
+    _non_persistent_buffers_set: Set[str]
+    _backward_hooks: Dict[int, Callable]
     _is_full_backward_hook: Optional[bool]
+    _forward_hooks: Dict[int, Callable]
+    _forward_pre_hooks: Dict[int, Callable]
+    _state_dict_hooks: Dict[int, Callable]
+    _load_state_dict_pre_hooks: Dict[int, Callable]
+    _load_state_dict_post_hooks: Dict[int, Callable]
+    _modules: Dict[str, Optional['Module']]
 
     def __init__(self) -> None:
         """
@@ -257,18 +267,24 @@ class Module:
         """
         torch._C._log_api_usage_once("python.nn_module")
 
-        self.training = True
-        self._parameters: Dict[str, Optional[Parameter]] = OrderedDict()
-        self._buffers: Dict[str, Optional[Tensor]] = OrderedDict()
-        self._non_persistent_buffers_set: Set[str] = set()
-        self._backward_hooks: Dict[int, Callable] = OrderedDict()
-        self._is_full_backward_hook = None
-        self._forward_hooks: Dict[int, Callable] = OrderedDict()
-        self._forward_pre_hooks: Dict[int, Callable] = OrderedDict()
-        self._state_dict_hooks: Dict[int, Callable] = OrderedDict()
-        self._load_state_dict_pre_hooks: Dict[int, Callable] = OrderedDict()
-        self._load_state_dict_post_hooks: Dict[int, Callable] = OrderedDict()
-        self._modules: Dict[str, Optional['Module']] = OrderedDict()
+        """
+        Calls super().__setattr__('a', a) instead of the typical self.a = a
+        to avoid Module.__setattr__ overhead. Module's __setattr__ has special
+        handling for parameters, submodules, and buffers but simply calls into
+        super().__setattr__ for all other attributes.
+        """
+        super().__setattr__('training', True)
+        super().__setattr__('_parameters', OrderedDict())
+        super().__setattr__('_buffers', OrderedDict())
+        super().__setattr__('_non_persistent_buffers_set', set())
+        super().__setattr__('_backward_hooks', OrderedDict())
+        super().__setattr__('_is_full_backward_hook', None)
+        super().__setattr__('_forward_hooks', OrderedDict())
+        super().__setattr__('_forward_pre_hooks', OrderedDict())
+        super().__setattr__('_state_dict_hooks', OrderedDict())
+        super().__setattr__('_load_state_dict_pre_hooks', OrderedDict())
+        super().__setattr__('_load_state_dict_post_hooks', OrderedDict())
+        super().__setattr__('_modules', OrderedDict())
 
     forward: Callable[..., Any] = _forward_unimplemented
 
@@ -615,6 +631,7 @@ class Module:
                     grad_applied = fn(param.grad)
                 should_use_set_data = compute_should_use_set_data(param.grad, grad_applied)
                 if should_use_set_data:
+                    assert out_param.grad is not None
                     out_param.grad.data = grad_applied
                 else:
                     assert param.grad.is_leaf
@@ -1252,7 +1269,7 @@ class Module:
                                         .format(torch.typename(value), name))
                     buffers[name] = value
                 else:
-                    object.__setattr__(self, name, value)
+                    super().__setattr__(name, value)
 
     def __delattr__(self, name):
         if name in self._parameters:
@@ -1263,7 +1280,7 @@ class Module:
         elif name in self._modules:
             del self._modules[name]
         else:
-            object.__delattr__(self, name)
+            super().__delattr__(name)
 
     def _register_state_dict_hook(self, hook):
         r"""These hooks will be called with arguments: `self`, `state_dict`,

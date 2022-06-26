@@ -413,7 +413,6 @@ def run_gen_lazy_tensor(
             fm,
             output_dir,
             class_name,
-            cpp_namespace,
             backend_indices,
             grouped_native_functions,
             backend_key,

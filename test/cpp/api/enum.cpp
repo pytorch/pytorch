@@ -4,51 +4,51 @@
 
 #include <test/cpp/api/support.h>
 
-#define TORCH_ENUM_PRETTY_PRINT_TEST(name) \
-{ \
-  v = torch::k##name; \
-  std::string pretty_print_name("k"); \
-  pretty_print_name.append(#name); \
-  ASSERT_EQ(torch::enumtype::get_enum_name(v), pretty_print_name); \
-}
+#define TORCH_ENUM_PRETTY_PRINT_TEST(name)                           \
+  {                                                                  \
+    v = torch::k##name;                                              \
+    std::string pretty_print_name("k");                              \
+    pretty_print_name.append(#name);                                 \
+    ASSERT_EQ(torch::enumtype::get_enum_name(v), pretty_print_name); \
+  }
 
 TEST(EnumTest, AllEnums) {
   c10::variant<
-    torch::enumtype::kLinear,
-    torch::enumtype::kConv1D,
-    torch::enumtype::kConv2D,
-    torch::enumtype::kConv3D,
-    torch::enumtype::kConvTranspose1D,
-    torch::enumtype::kConvTranspose2D,
-    torch::enumtype::kConvTranspose3D,
-    torch::enumtype::kSigmoid,
-    torch::enumtype::kTanh,
-    torch::enumtype::kReLU,
-    torch::enumtype::kLeakyReLU,
-    torch::enumtype::kFanIn,
-    torch::enumtype::kFanOut,
-    torch::enumtype::kConstant,
-    torch::enumtype::kReflect,
-    torch::enumtype::kReplicate,
-    torch::enumtype::kCircular,
-    torch::enumtype::kNearest,
-    torch::enumtype::kBilinear,
-    torch::enumtype::kBicubic,
-    torch::enumtype::kTrilinear,
-    torch::enumtype::kArea,
-    torch::enumtype::kSum,
-    torch::enumtype::kMean,
-    torch::enumtype::kMax,
-    torch::enumtype::kNone,
-    torch::enumtype::kBatchMean,
-    torch::enumtype::kZeros,
-    torch::enumtype::kBorder,
-    torch::enumtype::kReflection,
-    torch::enumtype::kRNN_TANH,
-    torch::enumtype::kRNN_RELU,
-    torch::enumtype::kLSTM,
-    torch::enumtype::kGRU
-  > v;
+      torch::enumtype::kLinear,
+      torch::enumtype::kConv1D,
+      torch::enumtype::kConv2D,
+      torch::enumtype::kConv3D,
+      torch::enumtype::kConvTranspose1D,
+      torch::enumtype::kConvTranspose2D,
+      torch::enumtype::kConvTranspose3D,
+      torch::enumtype::kSigmoid,
+      torch::enumtype::kTanh,
+      torch::enumtype::kReLU,
+      torch::enumtype::kLeakyReLU,
+      torch::enumtype::kFanIn,
+      torch::enumtype::kFanOut,
+      torch::enumtype::kConstant,
+      torch::enumtype::kReflect,
+      torch::enumtype::kReplicate,
+      torch::enumtype::kCircular,
+      torch::enumtype::kNearest,
+      torch::enumtype::kBilinear,
+      torch::enumtype::kBicubic,
+      torch::enumtype::kTrilinear,
+      torch::enumtype::kArea,
+      torch::enumtype::kSum,
+      torch::enumtype::kMean,
+      torch::enumtype::kMax,
+      torch::enumtype::kNone,
+      torch::enumtype::kBatchMean,
+      torch::enumtype::kZeros,
+      torch::enumtype::kBorder,
+      torch::enumtype::kReflection,
+      torch::enumtype::kRNN_TANH,
+      torch::enumtype::kRNN_RELU,
+      torch::enumtype::kLSTM,
+      torch::enumtype::kGRU>
+      v;
 
   TORCH_ENUM_PRETTY_PRINT_TEST(Linear)
   TORCH_ENUM_PRETTY_PRINT_TEST(Conv1D)

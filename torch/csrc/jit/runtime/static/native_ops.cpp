@@ -1,3 +1,5 @@
+#include <torch/csrc/jit/passes/inliner.h>
+#include <torch/csrc/jit/runtime/static/impl.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 
 #include <ATen/CPUFunctions.h>
@@ -7,6 +9,7 @@
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
+#include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
@@ -194,6 +197,87 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return [](ProcessedNode* p_node) {
         auto list = p_node->Input(0).toList();
         list.push_back(p_node->Input(1));
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::list,
+    aten_list,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto str = p_node->Input(0).toStringRef();
+        c10::List<std::string> chars;
+        chars.reserve(str.size());
+        for (auto c : str) {
+          chars.emplace_back(1, c);
+        }
+        p_node->Output(0) = std::move(chars);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::numel,
+    aten_numel,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& arg = p_node->Input(0).toTensor();
+        p_node->Output(0) = arg.numel();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::cpu,
+    aten_cpu,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& arg = p_node->Input(0).toTensor();
+        p_node->Output(0) = arg.cpu();
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::__range_length,
+    aten_range_length,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        auto lo = p_node->Input(0).toInt();
+        auto hi = p_node->Input(1).toInt();
+        auto step = p_node->Input(2).toInt();
+        // error handling when step_val == 0 during runtime
+        if (step == 0) {
+          throw std::runtime_error("range() arg 3 must not be zero");
+        }
+        if (step > 0 && lo < hi) {
+          p_node->Output(0) = 1 + (hi - 1 - lo) / step;
+        } else if (step < 0 && lo > hi) {
+          p_node->Output(0) = 1 + (lo - 1 - hi) / (0 - step);
+        } else {
+          p_node->Output(0) = 0;
+        }
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::index_put,
+    aten_index_put,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        const auto& indices = p_node->Input(1).toOptionalTensorList();
+        const auto& values = p_node->Input(2).toTensor();
+        const auto accumulate = p_node->Input(3).toBool();
+        p_node->Output(0) =
+            at::native::index_put(self, indices, values, accumulate);
+      };
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::item,
+    aten_item,
+    [](Node* n) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        const auto& self = p_node->Input(0).toTensor();
+        p_node->Output(0) = at::native::item(self);
       };
     });
 
@@ -691,6 +775,40 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
+REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::tensor_split, aten_tensor_split, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "tensor_split.indices(Tensor(a -> *) self, int[] indices, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto& b = pnode->Input(1).toIntVector();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "tensor_split.sections(Tensor(a -> *) self, int sections, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto b = pnode->Input(1).toInt();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "tensor_split.tensor_indices_or_sections(Tensor(a -> *) self, Tensor tensor_indices_or_sections, int dim=0) -> Tensor(a)[]"))) {
+    return [](ProcessedNode* pnode) {
+      const auto& a = pnode->Input(0).toTensor();
+      const auto& b = pnode->Input(1).toTensor();
+      const auto c = pnode->Input(2).toInt();
+      pnode->Output(0) = at::native::tensor_split(a, b, c);
+    };
+  }
+  LogAndDumpSchema(n);
+  return nullptr;
+});
+
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::Int,
     aten_Int,
@@ -765,10 +883,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         case BlockRunPlan::kRunBothBlocks:
           return [](ProcessedNode* p_node) {
             auto condition = p_node->Input(0).toBool();
-            auto* block_runners = p_node->block_runners();
-            DCHECK(block_runners);
-            DCHECK_EQ(block_runners->size(), 2);
-            auto& runner = (*block_runners)[!condition];
+            auto* meta_data = p_node->meta_data();
+            DCHECK(meta_data);
+            auto& block_runners = meta_data->block_runners();
+            DCHECK_EQ(block_runners.size(), 2);
+            auto& runner = block_runners[!condition];
 
             auto output = runner({});
             if (!output.isTuple()) {
@@ -784,22 +903,24 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         case BlockRunPlan::kRunOnlyTrueBlock:
           return [](ProcessedNode* p_node) {
             auto condition = p_node->Input(0).toBool();
-            auto* block_runners = p_node->block_runners();
-            DCHECK(block_runners);
-            DCHECK_EQ(block_runners->size(), 2);
+            auto* meta_data = p_node->meta_data();
+            DCHECK(meta_data);
+            auto& block_runners = meta_data->block_runners();
+            DCHECK_EQ(block_runners.size(), 2);
             if (condition) {
-              auto output = block_runners->front()({});
+              auto output = block_runners.front()({});
               DCHECK(output.isNone());
             }
           };
         case BlockRunPlan::kRunOnlyFalseBlock:
           return [](ProcessedNode* p_node) {
             auto condition = p_node->Input(0).toBool();
-            auto* block_runners = p_node->block_runners();
-            DCHECK(block_runners);
-            DCHECK_EQ(block_runners->size(), 2);
+            auto* meta_data = p_node->meta_data();
+            DCHECK(meta_data);
+            auto& block_runners = meta_data->block_runners();
+            DCHECK_EQ(block_runners.size(), 2);
             if (!condition) {
-              auto output = block_runners->back()({});
+              auto output = block_runners.back()({});
               DCHECK(output.isNone());
             }
           };
@@ -834,6 +955,129 @@ std::vector<IValue> collectLoopSubBlockInputs(const ProcessedNode& p_node) {
 
 } // namespace
 
+namespace {
+/*
+  ForkedSubgraphSRLauncher is responsible for the execution of
+  forked subgraph on new instance of static runtime. Once the
+  execution is completed, future is marked as complete to
+  indicate aten::wait() to proceed
+*/
+class TORCH_API ForkedSubgraphSRLauncher {
+ public:
+  ForkedSubgraphSRLauncher(
+      std::shared_ptr<StaticModule> smodule,
+      std::vector<IValue> args,
+      c10::intrusive_ptr<Future> future)
+      : smodule_(std::move(smodule)),
+        args_(std::move(args)),
+        future_(std::move(future)) {}
+
+  void operator()() {
+    try {
+      StaticRuntime runtime(*smodule_);
+      auto output = runtime(args_, {});
+      future_->markCompleted(output);
+    } catch (const std::exception& e) {
+      future_->setErrorIfNeeded(
+          std::make_exception_ptr(c10::ivalue::Future::FutureError(e.what())));
+    }
+  }
+
+ private:
+  std::shared_ptr<StaticModule> smodule_;
+  std::vector<IValue> args_;
+  c10::intrusive_ptr<Future> future_;
+};
+
+/*
+  helper function to create a future on return type
+  of the graph outputs. This function is utilized by
+  prim::fork and aten::wait oprations for async
+  execution of subgraphs
+*/
+c10::intrusive_ptr<Future> createFutureTypeFromGraphOutput(
+    std::shared_ptr<torch::jit::Graph> graph) {
+  TypePtr return_type_;
+  if (graph->outputs().size() == 1) {
+    return_type_ = graph->outputs().at(0)->type();
+  } else {
+    return_type_ = TupleType::create(
+        fmap(graph->outputs(), [](const Value* v) { return v->type(); }));
+  }
+  c10::intrusive_ptr<Future> future = c10::make_intrusive<Future>(return_type_);
+  return future;
+}
+} // namespace
+
+/*
+  prim::fork forks the execution of a subgraph. It returns a future on which
+  the corresponding aten::wait op waits until future is marked complete
+  Current implementation creates a instance of StaticModule uses it to
+  create StaticRuntime instances on the fly during runtime to handle the
+  execution of forked subgraph. Async execution is handled by
+  aten::ParallelThreadPoolNative threadpool.
+*/
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    prim::fork,
+    prim_Fork,
+    [](Node* node) -> SROperator {
+      auto forkedGraph = node->g(attr::Subgraph);
+      Inline(*forkedGraph);
+      auto sr_metadata = node->ival(getStaticRuntimeMetadataSymbol())
+                             .toCustomClass<StaticRuntimeMetadata>();
+      auto smodule =
+          std::make_shared<StaticModule>(forkedGraph, sr_metadata->get_opts());
+
+      return [forkedGraph = std::move(forkedGraph),
+              smodule = std::move(smodule)](ProcessedNode* p_node) {
+        std::vector<IValue> args;
+        args.reserve(p_node->num_inputs());
+        for (const auto i : c10::irange(p_node->num_inputs())) {
+          args.push_back(p_node->Input(i));
+        }
+
+        c10::intrusive_ptr<Future> future =
+            createFutureTypeFromGraphOutput(forkedGraph);
+        p_node->Output(0) = future;
+
+        ForkedSubgraphSRLauncher runtime_launcher(smodule, args, future);
+        auto* meta_data = p_node->meta_data();
+        DCHECK(meta_data);
+        (meta_data->launcher())(std::move(runtime_launcher));
+      };
+    });
+/*
+  aten::wait waits on the future (present in corresponding fork)
+  to be executed. Once the execution is complete, the future is marked
+  completed and wait execution continues.
+*/
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::wait,
+    aten_Wait,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* p_node) {
+        TORCH_INTERNAL_ASSERT(p_node->Input(0).isFuture());
+        auto future = p_node->Input(0).toFuture();
+
+        // blocking call: waiting for the future to be completed
+        future->waitAndThrow();
+
+        TORCH_INTERNAL_ASSERT(future->completed());
+        TORCH_INTERNAL_ASSERT(!future->hasError());
+        TORCH_INTERNAL_ASSERT(future->hasValue());
+
+        if (!future->value().isTuple()) {
+          p_node->Output(0) = future->value();
+          return;
+        }
+        auto& elems = future->value().toTupleRef().elements();
+        DCHECK_EQ(elems.size(), p_node->num_outputs());
+        for (const auto i : c10::irange(elems.size())) {
+          p_node->Output(i) = elems[i];
+        }
+      };
+    });
+
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
     prim::Loop,
     prim_Loop,
@@ -842,10 +1086,11 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
         const auto max_trip_count = p_node->Input(0).toInt();
         auto condition = p_node->Input(1).toBool();
 
-        auto* block_runners = p_node->block_runners();
-        DCHECK(block_runners);
-        DCHECK_EQ(block_runners->size(), 1);
-        auto& runner = (*block_runners)[0];
+        auto* meta_data = p_node->meta_data();
+        DCHECK(meta_data);
+        auto& block_runners = meta_data->block_runners();
+        DCHECK_EQ(block_runners.size(), 1);
+        auto& runner = block_runners[0];
 
         auto args = collectLoopSubBlockInputs(*p_node);
         int64_t loop_count = 0;

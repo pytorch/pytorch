@@ -107,6 +107,20 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   return can_support;
 }
 
+namespace {
+
+// CustomClass extending torch::CustomClassHolder can be typecasted
+// to IValue StaticRuntimeMetadata is created so that we can attach
+// SR metadata to IR's prim::fork nodes. These CustomClass needs to be
+// registered first in order to be used as IValue.below is an
+// UNUSED VARIABLE but NEEDED to invoke the class_ constructor necessary
+// for class registration.
+auto sr_metadata_registerer = torch::class_<StaticRuntimeMetadata>(
+    "StaticRuntime",
+    "StaticRuntimeMetadata");
+
+} // namespace
+
 std::string dumpValueSet(
     const FastSet<const Value*>& value_set,
     const char* set_name) {
@@ -513,6 +527,10 @@ StaticModule::StaticModule(
       graph_(std::move(graph_and_module.first)),
       module_(std::move(graph_and_module.second)),
       num_inputs_(graph_->inputs().size()) {
+  sr_metadata_ = c10::make_intrusive<jit::StaticRuntimeMetadata>(opts_);
+  // recursively attach metadata to prim::fork nodes
+  attachNodeMetadata(graph_->block());
+
   // check opt flags
   if (opts.manage_output_tensors) {
     TORCH_CHECK(
@@ -620,6 +638,17 @@ size_t StaticModule::prepareBlockInfo(
 
   block_infos_.at(block).set_output_indices(std::move(output_indices));
   return cur_idx - start_idx;
+}
+
+void StaticModule::attachNodeMetadata(Block* block) {
+  for (auto* node : block->nodes()) {
+    if (node->kind() == prim::fork) {
+      node->ival_(getStaticRuntimeMetadataSymbol(), IValue(sr_metadata_));
+    }
+    for (auto* sub_block : node->blocks()) {
+      attachNodeMetadata(sub_block);
+    }
+  }
 }
 
 void StaticModule::prepareFunctionsAndConstants(
@@ -835,19 +864,24 @@ BlockRunner::BlockRunner(
 
   for (auto& pnode : nodes_) {
     auto* node = pnode.node();
+    // attaching default interop threadpool executor to fork nodes
+    if (node->kind() == prim::fork) {
+      TaskLauncher launcher_ = at::launch;
+      pnode.set_meta_data(std::move(launcher_));
+    }
     auto blocks = node->blocks();
     const auto num_blocks = blocks.size();
     if (num_blocks == 0) {
       continue;
     }
     DCHECK(node->kind() == prim::If || node->kind() == prim::Loop);
-    auto block_runners = std::make_unique<std::vector<BlockRunner>>();
-    block_runners->reserve(num_blocks);
+    std::vector<BlockRunner> block_runners;
+    block_runners.reserve(num_blocks);
 
     for (auto* b : blocks) {
-      block_runners->emplace_back(sm, values_, b);
+      block_runners.emplace_back(sm, values_, b);
     }
-    pnode.set_block_runners(std::move(block_runners));
+    pnode.set_meta_data(std::move(block_runners));
   }
 }
 
@@ -1350,10 +1384,19 @@ void BlockRunner::benchmark(
                 << planner_->total_reused_tensors() << std::endl;
     }
   }
+
+  auto unsupported_nodes_count = results.total_nodes_count -
+      results.out_nodes_count - results.native_nodes.size();
   std::cout << "Total number of 'out' variant nodes/total number of nodes: "
             << results.out_nodes_count << "/" << results.total_nodes_count
             << " ("
             << 100.0 * (results.out_nodes_count) /
+          static_cast<float>(results.total_nodes_count)
+            << "%)" << std::endl;
+  std::cout << "Total number of nodes not covered by SR/total number of nodes: "
+            << unsupported_nodes_count << "/" << results.total_nodes_count
+            << " ("
+            << 100.0 * (unsupported_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << std::endl;
 
@@ -1682,10 +1725,10 @@ bool BlockRunner::check_for_memory_leak(
         }
       }
     }
-
-    auto* block_runners = pnode.block_runners();
-    if (recurse_on_sub_blocks && block_runners) {
-      for (auto& block_runner : *block_runners) {
+    auto* meta_data = pnode.meta_data();
+    if (recurse_on_sub_blocks && meta_data) {
+      auto& block_runners = meta_data->block_runners();
+      for (auto& block_runner : block_runners) {
         block_runner.check_for_memory_leak(
             output_returned, recurse_on_sub_blocks);
       }
@@ -1880,11 +1923,11 @@ void ProcessedNode::run() {
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
   at::MemOverlapStatus status = at::get_overlap_status(a, b);
-  if (status == at::MemOverlapStatus::FULL ||
-      status == at::MemOverlapStatus::PARTIAL) {
+  if (status == at::MemOverlapStatus::Full ||
+      status == at::MemOverlapStatus::Partial) {
     return false;
   }
-  if (status == at::MemOverlapStatus::TOO_HARD) {
+  if (status == at::MemOverlapStatus::TooHard) {
     VLOG(1) << "Detected TOO_HARD memory overlap status";
   }
   return true;

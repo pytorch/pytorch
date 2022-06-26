@@ -5,7 +5,7 @@ import linecache
 import pickletools
 import platform
 import types
-from collections import OrderedDict, defaultdict
+from collections import defaultdict, OrderedDict
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -13,14 +13,14 @@ from typing import (
     Any,
     BinaryIO,
     Callable,
+    cast,
+    DefaultDict,
     Dict,
     List,
     Optional,
     Sequence,
     Set,
     Union,
-    cast,
-    DefaultDict,
 )
 
 import torch

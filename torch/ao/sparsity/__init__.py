@@ -5,6 +5,7 @@ from ._mappings import get_static_sparse_quantized_mapping
 # Sparsifier
 from .sparsifier.base_sparsifier import BaseSparsifier
 from .sparsifier.weight_norm_sparsifier import WeightNormSparsifier
+from .sparsifier.nearly_diagonal_sparsifier import NearlyDiagonalSparsifier
 
 # Scheduler
 from .scheduler.base_scheduler import BaseScheduler
@@ -25,3 +26,10 @@ from .experimental.pruner.parametrization import BiasHook
 
 # Pruner
 from .experimental.pruner.base_pruner import BasePruner
+
+# Data Sparsifier
+from .experimental.data_sparsifier.base_data_sparsifier import BaseDataSparsifier
+from .experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
+
+# Data Scheduler
+from .experimental.data_scheduler.base_data_scheduler import BaseDataScheduler

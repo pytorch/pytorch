@@ -20,8 +20,8 @@ enum class ReduceOp : std::uint8_t {
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
 struct BroadcastOptions {
-  int rootRank = 0;
-  int rootTensor = 0;
+  int64_t rootRank = 0;
+  int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
@@ -34,8 +34,8 @@ struct AllreduceCoalescedOptions : AllreduceOptions {};
 
 struct ReduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
-  int rootRank = 0;
-  int rootTensor = 0;
+  int64_t rootRank = 0;
+  int64_t rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
@@ -44,12 +44,12 @@ struct AllgatherOptions {
 };
 
 struct GatherOptions {
-  int rootRank = 0;
+  int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
 struct ScatterOptions {
-  int rootRank = 0;
+  int64_t rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 

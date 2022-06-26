@@ -119,51 +119,6 @@
       "Tuple",
       "Union"
   ],
-  "torch.ao.quantization.fx.fuse": [
-    "ABC",
-    "Any",
-    "Callable",
-    "DefaultFuseHandler",
-    "Dict",
-    "FuseHandler",
-    "FusedGraphModule",
-    "Graph",
-    "GraphModule",
-    "List",
-    "MatchAllNode",
-    "Node",
-    "NodePattern",
-    "Optional",
-    "Pattern",
-    "Tuple",
-    "Union",
-    "abstractmethod",
-    "get_fuser_method_mapping",
-    "get_fuser_method_new",
-    "get_fusion_pattern_to_extra_inputs_getter",
-    "get_fusion_pattern_to_fuse_handler_cls",
-    "get_fusion_pattern_to_root_node_getter",
-    "get_native_backend_config_dict",
-    "is_match",
-    "map_arg",
-    "sorted_patterns_dict"
-  ],
-  "torch.ao.quantization.fx.fusion_patterns": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "Graph",
-    "List",
-    "MatchAllNode",
-    "Node",
-    "NodePattern",
-    "Optional",
-    "Pattern",
-    "Union",
-    "abstractmethod",
-    "get_fuser_method_new"
-  ],
   "torch.ao.quantization.fx.graph_module": [
     "Any",
     "Dict",
@@ -177,23 +132,6 @@
     "QConfigAny",
     "QuantizedGraphModule",
     "Tuple"
-  ],
-  "torch.ao.quantization.fx.match_utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Graph",
-    "List",
-    "MatchAllNode",
-    "MatchResult",
-    "Node",
-    "Optional",
-    "Pattern",
-    "QConfigAny",
-    "QuantizeHandler",
-    "Set",
-    "Tuple",
-    "is_observed_standalone_module"
   ],
   "torch.ao.quantization.fx.pattern_utils": [
     "Any",
@@ -229,25 +167,6 @@
     "QuantizerCls",
     "Tuple",
     "Union"
-  ],
-  "torch.ao.quantization.fx.utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "List",
-    "Node",
-    "Optional",
-    "Set",
-    "Tuple",
-    "Type",
-    "Union",
-    "is_activation_post_process",
-    "is_per_channel",
-    "is_per_tensor",
-    "map_arg",
-    "namedtuple"
   ],
   "torch.ao.quantization.fx.backend_config_utils": [
     "Any",
@@ -1944,6 +1863,7 @@
     "lu",
     "lu_factor",
     "lu_factor_ex",
+    "lu_solve",
     "matmul",
     "matrix_exp",
     "matrix_norm",
@@ -2101,60 +2021,6 @@
   ],
   "torch.nn.intrinsic.quantized.modules.conv_relu": [
     "fuse_conv_bn_weights"
-  ],
-  "torch.nn.modules.activation": [
-    "Module",
-    "NonDynamicallyQuantizableLinear",
-    "Optional",
-    "Parameter",
-    "Tensor",
-    "Tuple",
-    "constant_",
-    "xavier_normal_",
-    "xavier_uniform_"
-  ],
-  "torch.nn.modules.adaptive": [
-    "Linear",
-    "List",
-    "Module",
-    "ModuleList",
-    "Sequence",
-    "Sequential",
-    "Tensor",
-    "log_softmax",
-    "namedtuple"
-  ],
-  "torch.nn.modules.batchnorm": [
-    "Any",
-    "LazyModuleMixin",
-    "Module",
-    "Optional",
-    "Parameter",
-    "Tensor",
-    "UninitializedBuffer",
-    "UninitializedParameter",
-    "sync_batch_norm"
-  ],
-  "torch.nn.modules.channelshuffle": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.container": [
-    "Any",
-    "Dict",
-    "Iterable",
-    "Iterator",
-    "Mapping",
-    "Module",
-    "Optional",
-    "OrderedDict",
-    "Parameter",
-    "Tuple",
-    "TypeVar",
-    "Union",
-    "chain",
-    "islice",
-    "overload"
   ],
   "torch.nn.modules.conv": [
     "LazyModuleMixin",
@@ -2484,94 +2350,6 @@
     "Optional",
     "TensorProtoDataType",
     "TrainingMode"
-  ],
-  "torch.optim.adadelta": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adagrad": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adamax": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adamw": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.asgd": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.lbfgs": [
-    "Optimizer",
-    "reduce"
-  ],
-  "torch.optim.lr_scheduler": [
-    "Counter",
-    "Optimizer",
-    "bisect_right",
-    "wraps"
-  ],
-  "torch.optim.nadam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.optimizer": [
-    "chain",
-    "deepcopy",
-    "defaultdict"
-  ],
-  "torch.optim.radam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.rmsprop": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.rprop": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.sgd": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.sparse_adam": [
-    "Optimizer"
-  ],
-  "torch.optim.swa_utils": [
-    "Module",
-    "deepcopy"
   ],
   "torch.overrides": [
     "BaseTorchFunctionMode",
@@ -2914,13 +2692,6 @@
     "Generator"
   ],
   "torch.return_types": [
-    "_det_lu_based_helper",
-    "_fake_quantize_per_tensor_affine_cachemask_tensor_qparams",
-    "_fused_moving_avg_obs_fq_helper",
-    "_linalg_svd",
-    "_linalg_svd_out",
-    "_lu_with_info",
-    "_unpack_dual",
     "attr",
     "pytree_register_structseq"
   ],
@@ -2955,8 +2726,15 @@
     "softmax"
   ],
   "torch.special": [
+    "airy_ai",
+    "bessel_j0",
+    "bessel_j1",
+    "bessel_y0",
+    "bessel_y1",
     "chebyshev_polynomial_t",
     "chebyshev_polynomial_u",
+    "chebyshev_polynomial_v",
+    "chebyshev_polynomial_w",
     "digamma",
     "entr",
     "erf",
@@ -2976,17 +2754,27 @@
     "i1",
     "i1e",
     "laguerre_polynomial_l",
+    "legendre_polynomial_p",
     "log1p",
     "log_ndtr",
     "log_softmax",
     "logit",
     "logsumexp",
+    "modified_bessel_i0",
+    "modified_bessel_i1",
+    "modified_bessel_k0",
+    "modified_bessel_k1",
     "multigammaln",
     "ndtr",
     "ndtri",
     "polygamma",
     "psi",
     "round",
+    "scaled_modified_bessel_k1",
+    "shifted_chebyshev_polynomial_t",
+    "shifted_chebyshev_polynomial_u",
+    "shifted_chebyshev_polynomial_v",
+    "shifted_chebyshev_polynomial_w",
     "sinc",
     "softmax",
     "xlog1py",
@@ -3246,7 +3034,6 @@
     "_cummax_helper",
     "_cummin_helper",
     "_debug_has_internal_overlap",
-    "_det_lu_based_helper",
     "_det_lu_based_helper_backward_helper",
     "_dim_arange",
     "_dirichlet_grad",

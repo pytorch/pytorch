@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Callable, Dict, Tuple, List
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
+import weakref
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch
 
@@ -55,117 +57,97 @@ torch_function_passthrough = {
 }
 
 
-class TensorMeta(torch.Tensor):
-    """
-    Model tensor metadata.  Not a stock meta tensor because device is modeled
-    as the original device (not meta device), also we have different behavior
-    for some high level Python bindings
-    """
-
-    # Note: this will be an fx Node if it's ever
-    # populated, but some Meta-internal jobs don't include fx
-    node: Optional[Any]
-    tname: str
-
-    @staticmethod
-    def __new__(
-        cls,
-        tensorlike: Optional[Union[TensorMeta, NumberType, torch.Tensor]] = None,
-        *,
-        shape: Optional[ShapeType] = None,
-        strides: Optional[StrideType] = None,
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[Union[torch.device, str]] = None,
-    ):
-
-        if isinstance(tensorlike, Number):
-            assert not shape and (shape is None or isinstance(shape, Sequence))
-            assert not strides and (strides is None or isinstance(strides, Sequence))
-            inferred_shape: Tuple[int, ...] = ()
-            inferred_strides: Tuple[int, ...] = ()
-            inferred_dtype = type_to_dtype(type(tensorlike))
-            inferred_device = torch.device("cpu")
-            # TODO: This looks wrong, a number that is wrapped into a tensor
-            # needs to behave differently than a scalar tensor for type
-            # promotion purposes
-        elif tensorlike is not None:
-            assert isinstance(tensorlike, (TensorMeta, torch.Tensor))
-            inferred_shape = tuple(tensorlike.shape)
-            inferred_strides = tuple(tensorlike.stride())
-            inferred_dtype = tensorlike.dtype
-            inferred_device = tensorlike.device
-        else:
-            # If no tensorlike "example" is given then all metadata
-            # must be provided explicitly
-            assert shape is not None
-            assert strides is not None
-            assert dtype is not None
-            assert device is not None
-
-        shape = inferred_shape if shape is None else tuple(shape)
-        strides = inferred_strides if strides is None else tuple(strides)
-        dtype = inferred_dtype if dtype is None else dtype
-        device = inferred_device if device is None else device
-
-        if isinstance(device, str):
-            device = torch.device(device)
-
-        r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
-            cls,
-            shape,
-            strides=strides,
-            storage_offset=0,  # TODO: this is inaccurate
-            dtype=dtype,
-            device=device,
-            requires_grad=False,
-        )
-
-        r.tname = ""
-        r.node = None
-        return r
-
-    @classmethod
-    def __torch_function__(
-        cls,
-        func: Callable,
-        types: Sequence,
-        args: Sequence[Any] = (),
-        kwargs: Optional[Dict] = None,
-    ):
-        if kwargs is None:
-            kwargs = {}
-
-        if func in torch_function_passthrough:
-            return super().__torch_function__(func, types, args, kwargs)
-
-        if not hasattr(func, "meta"):
-            raise ValueError(f"Callable {func} has no meta function!")
-
-        return func.meta(*args, **kwargs)  # type: ignore[attr-defined]
-
-    @classmethod
-    def __torch_dispatch__(
-        cls,
-        func,
-        types,
-        args=(),
-        kwargs=None,
-    ):
-        raise RuntimeError("this should be unreachable")
-
-    # TODO: fx uses dunder repr to print objects in code
-    def __repr__(self):
-        return self.tname
-        # return f"TensorMeta(dtype={self.dtype}, device={self.device}, shape={self.shape}, strides={self.stride()})"
-
-    def __format__(self, format_spec):
-        return self.tname
-
-
-TensorLikeType = Union[torch.Tensor, TensorMeta]
-TensorLike = (torch.Tensor, TensorMeta)
+TensorLikeType = torch.Tensor
+TensorLike = torch.Tensor
 TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
+
+
+# In order to keep things like aliasing relationships and storage
+# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
+# which caches conversions to Meta Tensors. We would like to use
+# one consistent mode among along FakeTensors, which we store here.
+# We store a weakref, so that when all previous FakeTensors are
+# the present mode will also deallocate. FakeTensorMode holds onto
+# tensors that are converted to Meta so we don't want to persist it
+# longer than necessary.x
+prim_fake_mode_ref = None
+
+
+def get_prim_fake_mode():
+    global prim_fake_mode_ref
+    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
+        mode = FakeTensorMode()
+        prim_fake_mode_ref = weakref.ref(mode)
+        return mode
+    else:
+        return prim_fake_mode_ref()
+
+
+def TensorMeta(
+    tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
+    *,
+    shape: Optional[ShapeType] = None,
+    strides: Optional[StrideType] = None,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[Union[torch.device, str]] = None,
+):
+    if isinstance(tensorlike, Number):
+        assert not shape and (shape is None or isinstance(shape, Sequence))
+        assert not strides and (strides is None or isinstance(strides, Sequence))
+        inferred_shape: Tuple[int, ...] = ()
+        inferred_strides: Tuple[int, ...] = ()
+        inferred_dtype = type_to_dtype(type(tensorlike))
+        inferred_device = torch.device("cpu")
+        # TODO: This looks wrong, a number that is wrapped into a tensor
+        # needs to behave differently than a scalar tensor for type
+        # promotion purposes
+    elif tensorlike is not None:
+        assert isinstance(tensorlike, torch.Tensor)
+        inferred_shape = tuple(tensorlike.shape)
+        inferred_strides = tuple(tensorlike.stride())
+        inferred_dtype = tensorlike.dtype
+        inferred_device = tensorlike.device
+    else:
+        # If no tensorlike "example" is given then all metadata
+        # must be provided explicitly
+        assert shape is not None
+        assert strides is not None
+        assert dtype is not None
+        assert device is not None
+
+    shape = inferred_shape if shape is None else tuple(shape)
+    strides = inferred_strides if strides is None else tuple(strides)
+    dtype = inferred_dtype if dtype is None else dtype
+    device = inferred_device if device is None else device
+
+    if isinstance(device, str):
+        device = torch.device(device)
+
+    if isinstance(tensorlike, FakeTensor):
+        mode = tensorlike.fake_mode
+    else:
+        mode = get_prim_fake_mode()
+
+    if device.type == "meta":
+        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
+    else:
+        return FakeTensor(
+            mode,
+            torch.empty_strided(shape, strides, dtype=dtype, device="meta"),
+            device,
+        )
+
+
+def same_shape(a: ShapeType, b: ShapeType) -> bool:
+    if len(a) != len(b):
+        return False
+
+    for x, y in zip(a, b):
+        if x != y:
+            return False
+
+    return True
 
 
 # TODO: look at using torch.testing.assert_close instead with an option
@@ -181,10 +163,9 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    for x, y in zip(a.shape, b.shape):
-        if x != y:
-            msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
-            raise AssertionError(msg)
+    if not same_shape(a.shape, b.shape):
+        msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+        raise AssertionError(msg)
 
     if a.dtype != b.dtype:
         msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
@@ -405,10 +386,11 @@ def canonicalize_dim(rank: int, idx: int) -> int:
         _idx = idx
 
     if _idx < 0 or _idx > _rank:
-        msg = "Received out of bounds index {0} for tensor of rank {1}!".format(
-            idx, rank
+        # Same error message as in aten/src/ATen/WrapDimUtils.h:49
+        msg = "Dimension out of range (expected to be in range of [{0}, {1}], but got {2})".format(
+            -rank, rank - 1, idx
         )
-        raise ValueError(msg)
+        raise IndexError(msg)
 
     return _idx
 
@@ -1189,12 +1171,14 @@ def check_in_bounds_for_storage(
         raise ValueError(msg)
 
 
-def check(b, s):
+def check(
+    b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
+) -> None:
     """
-    Helper function for raising a RuntimeError if a boolean condition fails.
+    Helper function for raising an error_type (default: RuntimeError) if a boolean condition fails.
     Error message is a callable producing a string (to avoid wasting time
     string formatting in non-error case, and also to make it easier for torchdynamo
     to trace.)
     """
     if not b:
-        raise RuntimeError(s())
+        raise exc_type(s())

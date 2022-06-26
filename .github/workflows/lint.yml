@@ -42,7 +42,7 @@ jobs:
       - name: Run lintrunner on all files
         run: |
           set +e
-          if ! lintrunner --verbose --force-color --all-files --tee-json=lint.json; then
+          if ! lintrunner --force-color --all-files --tee-json=lint.json; then
               echo ""
               echo -e "\e[1m\e[36mYou can reproduce these results locally by using \`lintrunner\`.\e[0m"
               echo -e "\e[1m\e[36mSee https://github.com/pytorch/pytorch/wiki/lintrunner for setup instructions.\e[0m"
@@ -87,6 +87,10 @@ jobs:
           # NB: We use 'printf' below rather than '\u000a' since bash pre-4.2
           # does not support the '\u000a' syntax (which is relevant for local linters)
           (! git --no-pager grep -In "$(printf '\xC2\xA0')" -- . || (echo "The above lines have non-breaking spaces (U+00A0); please convert them to spaces (U+0020)"; false))
+      - name: Ensure cross-OS compatible file names
+        if: always()
+        run: |
+          (! git ls-files | grep -E '([<>:"|?*]|[ .]$)' || (echo "The above file names are not valid across all operating systems. Please ensure they don't contain the characters '<>:""|?*' and don't end with a white space or a '.' "; false))
       - name: Ensure no versionless Python shebangs
         if: always()
         run: |
@@ -212,8 +216,9 @@ jobs:
           python3 -mpip install boto3==1.16.34
           pip3 install typing-extensions==3.10 --user
           pip3 install -r requirements-flake8.txt --user
+          python3 -mpip install rockset==0.8.10 --user
           python3 -mpip install -r requirements.txt --user
-          python3 -mpip install mypy==0.812 --user
+          python3 -mpip install mypy==0.960 --user
           make setup_lint
       - name: Test tools
         run: |
@@ -226,9 +231,16 @@ jobs:
     runs-on: linux.20_04.4x
     strategy:
       matrix:
-        with_torch: [with_torch, without_torch]
+        test_type: [with_torch, without_torch, older_python_version]
     steps:
-      - name: Setup Python
+      - name: Setup Python 3.5
+        if: matrix.test_type == 'older_python_version'
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.5
+          architecture: x64
+      - name: Setup Python 3.8
+        if: matrix.test_type != 'older_python_version'
         uses: actions/setup-python@v2
         with:
           python-version: 3.8
@@ -241,7 +253,7 @@ jobs:
           submodules: false
           fetch-depth: 1
       - name: Install torch
-        if: matrix.with_torch == 'with_torch'
+        if: matrix.test_type == 'with_torch'
         run: |
           # Doesn't really matter what torch version, we just need ANY torch installed
           pip install 'torch==1.*'
