@@ -2061,7 +2061,8 @@ void verify_params_across_processes(
   }
 
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
-  process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
+  ops::allgather(process_group, param_size_output_tensors, param_size_vec)
+      ->wait();
   auto result_size_tensors = param_size_output_tensors.front();
   for (size_t i = 0; i < world_size; ++i) {
     auto param_size_for_rank = result_size_tensors[i][0].item<int>();

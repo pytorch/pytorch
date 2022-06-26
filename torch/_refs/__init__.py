@@ -49,8 +49,10 @@ __all__ = [
     "acos",
     "acosh",
     "angle",
+    "asinh",
     "asin",
     "atan",
+    "atanh",
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
@@ -383,8 +385,18 @@ def asin(a):
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def asinh(a):
+    return prims.asinh(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def atan(a):
     return prims.atan(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def atanh(a):
+    return prims.atanh(a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
