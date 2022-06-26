@@ -323,6 +323,7 @@ def meta_index_Tensor(self, indices):
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
+@torch.library.impl(meta_lib, "addbmm")
 @torch.library.impl(meta_lib, "addbmm.out")
 @out_wrapper()
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
