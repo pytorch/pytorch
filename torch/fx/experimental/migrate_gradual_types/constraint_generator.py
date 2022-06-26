@@ -33,14 +33,82 @@ def generate_flatten_constraints(start_dim, end_dim, input, flattened, n, counte
     nat_constraints = gen_nat_constraints(d)
     return Conj([c1, c2, *nat_constraints]), counter
 
-# TODO: what constraints to generate for this?
+
+# TODO where are the docs for this??
+@register_inference_rule("long")
+def long_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+# TODO
+@register_inference_rule("type_as")
+def type_as_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+# TODO
+@register_inference_rule("int")
+def int_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+# TODO
+@register_inference_rule("ne")
+def ne_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+# TODO
 @register_inference_rule(getattr)
 def get_attr_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    attr_node = n.args[0]
-    attr_name = n.args[1]
+
     return [], counter
+
+# TODO: what constraints to generate for this?
+@register_inference_rule("expand")
+def expand_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+
+# TODO: what constraints to generate for this?
+@register_inference_rule("to")
+def to_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+
+# TODO: what constraints to generate for this?
+@register_inference_rule("masked_fill_")
+def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+
+# TODO: what constraints to generate for this?
+@register_inference_rule("view")
+def view_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
+
+# # TODO: what constraints to generate for this? and this is a string?????
+@register_inference_rule("size")
+def size_inference_rule(n: Node, symbols, constraints, counter):
+    """
+    """
+    return [], counter
+
 
 # TODO: what constraints to generate for this?
 @register_inference_rule(torch.cumsum)
@@ -57,6 +125,7 @@ def assert_inference_rule(n: Node, symbols, constraints, counter):
 # TODO: what constraints to generate for this?
 @register_inference_rule(operator.getitem)
 def getitem_inference_rule(n: Node, symbols, constraints, counter):
+    # print(n.args)
     return [], counter
 
 # TODO: what constraints to generate for this?
@@ -77,11 +146,13 @@ def lt_inference_rule(n: Node, symbols, constraints, counter):
 # TODO: what constraints to generate for this?
 @register_inference_rule(torch.full)
 def full_inference_rule(n: Node, symbols, constraints, counter):
+    # print(n.args)
     return [], counter
 
 # TODO: what constraints to generate for this?
 @register_inference_rule(torch.arange)
 def arange_inference_rule(n: Node, symbols, constraints, counter):
+    # print(n.args)
     return [], counter
 
 @register_inference_rule(torch.add)
@@ -328,6 +399,11 @@ class ConstraintGenerator:
 
         all_constraints = []
 
+        # Annotate with Dyn if no type exists
+        for n in graph.nodes:
+            if n.type is None:
+                n.type = Dyn
+
         for n in graph.nodes:
             (constraints, counter) = self.generate_constraints_node(n, counter)
             all_constraints += constraints
@@ -357,7 +433,7 @@ class ConstraintGenerator:
             elif n.target in _INFERENCE_RULES:
                 return _INFERENCE_RULES[n.target](n, self.symbol_dict, self.constraints, counter)
             else:
-                print(n)
+                # print(n)
                 raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         elif n.op == 'call_module':
@@ -377,7 +453,11 @@ class ConstraintGenerator:
 
         # TODO
         elif n.op == 'call_method':
-            return [], counter
+            if n.target in _INFERENCE_RULES:
+                return _INFERENCE_RULES[n.target](n, self.symbol_dict, self.constraints, counter)
+            else:
+                print(type(n.target))
+                raise RuntimeError(f'No inference rule registered for target {n.target}!')
 
         # TODO
         elif n.op == 'get_attr':
