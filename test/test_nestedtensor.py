@@ -443,20 +443,27 @@ class TestNestedTensorDeviceType(TestCase):
         # nested tensor * scalar
         number = 10.0
         scalar = torch.tensor(number).to(dtype).to(device)
-        vector = torch.tensor([number]).to(dtype).to(device)
         ref = torch.nested_tensor([t * number for t in nt1.unbind()])
         out_number0 = nt1 * number
         out_number1 = number * nt1
         out_scalar0 = nt1 * scalar
         out_scalar1 = scalar * nt1
-        out_vector0 = nt1 * vector
-        out_vector1 = vector * nt1
         self.nt_equal(out_number0, ref)
         self.nt_equal(out_number1, ref)
         self.nt_equal(out_scalar0, ref)
         self.nt_equal(out_scalar1, ref)
-        self.nt_equal(out_vector0, ref)
-        self.nt_equal(out_vector1, ref)
+        # error case: numel == 1 but dim > 0
+        vector = torch.tensor([number]).to(dtype).to(device)
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both self and other to be nested, but got a nested self and non-nested other",
+            lambda: nt1.mul(vector)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both self and other to be nested, but got a non-nested self and nested other",
+            lambda: vector.mul(nt1)
+        )
 
     @dtypes(torch.float, torch.float16)
     @skipMeta
@@ -479,25 +486,28 @@ class TestNestedTensorDeviceType(TestCase):
         # nested tensor * scalar
         number = 10.0
         scalar = torch.tensor(number).to(dtype).to(device)
-        vector = torch.tensor([number]).to(dtype).to(device)
         ref = torch.nested_tensor([t * number for t in nt1.unbind()])
         out_number = nt1.clone()
         out_number *= number
         out_scalar = nt1.clone()
         out_scalar *= scalar
-        out_vector = nt1.clone()
-        out_vector *= vector
         self.nt_equal(out_number, ref)
         self.nt_equal(out_scalar, ref)
-        self.nt_equal(out_vector, ref)
         self.assertRaisesRegex(
             RuntimeError,
             r"output with shape \[.*\] doesn't match the broadcast shape \[.*\]",
             lambda: scalar.mul_(nt1)
         )
+        # error case: numel == 1 but dim > 0
+        vector = torch.tensor([number]).to(dtype).to(device)
         self.assertRaisesRegex(
             RuntimeError,
-            r"output with shape \[.*\] doesn't match the broadcast shape \[.*\]",
+            "Expected both self and other to be nested, but got a nested self and non-nested other",
+            lambda: nt1.mul_(vector)
+        )
+        self.assertRaisesRegex(
+            RuntimeError,
+            "Expected both self and other to be nested, but got a non-nested self and nested other",
             lambda: vector.mul_(nt1)
         )
 
