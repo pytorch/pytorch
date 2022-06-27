@@ -115,7 +115,9 @@ jobs:
           # detached container should get cleaned up by teardown_ec2_linux
           export SHARD_NUMBER=0
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
-          export COMMIT_MESSAGES
+          # trim all new lines from commit messages so we don't run into issues with batch environment
+          # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
+          export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
           # TODO: Stop building test binaries as part of the build phase
           # Make sure we copy test results from bazel-testlogs symlink to
           # a regular directory ./test/test-reports
@@ -127,6 +129,8 @@ jobs:
             -e NUM_TEST_SHARDS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
+            -e PR_BODY \
+            -e COMMIT_MESSAGES \
             -e PYTORCH_RETRY_TEST_CASES \
             -e PYTORCH_OVERRIDE_FLAKY_SIGNAL \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
