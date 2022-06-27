@@ -2725,9 +2725,18 @@
 
 - func: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
   python_module: nn
+  dispatch:
+    CompositeImplicitAutograd: linear
+    NestedTensorCPU, NestedTensorCUDA: nested_linear
+
+- func: linear_backward(Tensor self, Tensor grad_output, Tensor weight, bool[3] output_mask) -> (Tensor, Tensor, Tensor)
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: nested_linear_backward
 
 - func: linear.out(Tensor input, Tensor weight, Tensor? bias=None, *, Tensor(a!) out) -> Tensor(a!)
   python_module: nn
+  dispatch:
+    CompositeExplicitAutograd: linear_out
 
 # TODO: Add this function to MPS dispatch key so that we avoid declaring it in
 # native_functions.yaml
