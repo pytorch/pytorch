@@ -1028,6 +1028,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.modified_bessel_i1: lambda input: -1,
         torch.special.modified_bessel_k0: lambda input: -1,
         torch.special.modified_bessel_k1: lambda input: -1,
+        torch.special.scaled_modified_bessel_k1: lambda input: -1,
         torch.special.multigammaln: lambda input, p: -1,
         torch.special.ndtr: lambda input: -1,
         torch.special.ndtri: lambda input: -1,

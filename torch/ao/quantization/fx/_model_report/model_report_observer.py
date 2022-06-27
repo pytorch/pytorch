@@ -41,10 +41,7 @@ class ModelReportObserver(ObserverBase):
         x_copy = x.detach()  # avoid keeping autograd tape
         x_copy = x_copy.to(self.epoch_activation_min.dtype)
 
-        # calculate the range stats
         x_copy = self._calculate_range_stats(x_copy)
-
-        # calculate the min, max stats
         x_copy = self._calculate_min_max_stats(x_copy)
 
         # return the passed in the value
@@ -81,7 +78,9 @@ class ModelReportObserver(ObserverBase):
         return x_copy
 
     def _calculate_min_max_stats(self, x_copy):
-        r"""
+        r"""Calculates and stores the per_channel min, max stats with forward values.
+        Does calculation based on channel axis: self.ch_axis
+
         Args
             x_copy: A copy of the forward data
 

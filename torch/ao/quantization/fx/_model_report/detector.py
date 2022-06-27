@@ -43,11 +43,18 @@ class DetectorBase(ABC):
 
     def _get_targeting_node(self, prepared_fx_model: GraphModule, target_fqn: str) -> torch.fx.node.Node:
         r"""
-        Takes in a GraphModule and the target_fqn and finds the node object that targets this fqn
+        Takes in a GraphModule and the target_fqn and finds the node whose target is this fqn.
 
         If it's not found, it means it is most likely inside a fused layer
             We just go one layer up in terms of the fqn we are searching for until we find parent node
             If we get to empty string, then we know that it doesn't exist
+
+        The reason for the recursion is that if the model that we are looking for got fused,
+        we will have module fqn as e.g. x.linear.0 but the graph will only have a node for the fused module,
+        which would have fqn as x.linear so they will not match.
+        To handle this, if we don't match, we then take off the last bit of the fqn e.g. x.linear.0 -> x.linear,
+        or more generally foo.bar.baz -> foo.bar and search again, this will allow us to locate the correct module
+        even in cases with fusion
 
         Args:
             prepared_fx_model (GraphModule):  The prepared Fx GraphModule
@@ -299,12 +306,8 @@ class DynamicStaticDetector(DetectorBase):
         obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
 
         for fqn, module in prepared_fx_model.named_modules():
-            # check to see if module is of a supported type
-            is_supported_type: bool = (
-                sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
-            )
-
-            if is_supported_type:
+            # make sure module is supported
+            if self._get_is_supported(module, insert=True):
                 # if it's a supported type, we want to get node and add observer insert locations
                 targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
 
@@ -334,6 +337,26 @@ class DynamicStaticDetector(DetectorBase):
         r""" returns the string name of this detector"""
         return "dynamic_vs_static_detector"
 
+    def _get_is_supported(self, module: nn.Module, insert: bool = False) -> bool:
+        r"""Returns whether the given module is supported for observers
+
+        Args
+            module: The module to check and ensure is supported
+            insert: True if this is check for observer insertion, false if for report gen
+
+        Returns True if the module is supported by observer, False otherwise
+        """
+        # check to see if module is of a supported type
+        is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+
+        # this is check for observer insertion
+        if insert:
+            return is_supported_type
+        else:
+            # this is for report gen and we also need to check if it contains observers
+            has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME) and hasattr(module, self.DEFAULT_POST_OBSERVER_NAME)
+            return is_supported_type and has_obs
+
     def _generate_dict_info(self, model: GraphModule) -> Dict[str, Any]:
         r"""
         Helper function for generate_detector_report that does the generation of the dictionary.
@@ -359,16 +382,8 @@ class DynamicStaticDetector(DetectorBase):
 
         # loop through all submodules included nested ones
         for fqn, module in model.named_modules():
-
-            # check to see if module is of a supported type
-            is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
-
             # if module is Linear has the ModelReportObserver attached to it
-            if (
-                is_supported_type
-                and hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
-                and hasattr(module, self.DEFAULT_POST_OBSERVER_NAME)
-            ):
+            if self._get_is_supported(module):
                 # get pre and post observers for the module
                 pre_obs = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
                 post_obs = getattr(module, self.DEFAULT_POST_OBSERVER_NAME)
@@ -434,12 +449,16 @@ class DynamicStaticDetector(DetectorBase):
 
         dynamic_vs_static_string = "Dynamic vs. Static Quantization suggestions: \n"
 
+        modules_added: bool = False  # check to make sure at least 1 module added.
+
         # This for loop goes through the information collected in module_dynamic_static_info and:
         #   Populates the string based report with the information from module_dynamic_static_info
         #   Compiles the complete report by appending relavent formatted strings
 
         for module_fqn in module_dynamic_static_info.keys():
 
+            # there is at least 1 module for suggestion
+            modules_added = True
             module_info = module_dynamic_static_info[module_fqn]
             suggestion_string_template = "For module {} it is suggested to use {} quantization because {}.\n"
 
@@ -492,6 +511,9 @@ class DynamicStaticDetector(DetectorBase):
 
             # append to overall suggestion
             dynamic_vs_static_string += module_suggestion_string
+
+        if not modules_added:
+            dynamic_vs_static_string += "No applicable layers for suggestions. Only linear valid.\n"
 
         # return the string as well as the dictionary of information
         return (dynamic_vs_static_string, module_dynamic_static_info)
@@ -564,6 +586,26 @@ class InputWeightEqualizationDetector(DetectorBase):
         self.ratio_threshold: float = ratio_threshold
         self.ch_axis: int = ch_axis
 
+    def _get_is_supported(self, module: nn.Module, insert: bool = False) -> bool:
+        r"""Returns whether the given module is supported for observers
+
+        Args
+            module: The module to check and ensure is supported
+            insert: True if this is check for observer insertion, false if for report gen
+
+        Returns True if the module is supported by observer, False otherwise
+        """
+        # check to see if module is of a supported type
+        is_supported_type = sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
+
+        # this is check for observer insertion
+        if insert:
+            return is_supported_type
+        else:
+            # this is for report gen and we also need to check if it contains observers
+            has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
+            return is_supported_type and has_obs
+
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
         For this detector, we want to place observers in front of supported layers.
@@ -590,13 +632,8 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         for fqn, module in prepared_fx_model.named_modules():
             # check to see if module is of a supported type
-            is_supported_type: bool = (
-                sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
-            )
-
-            if is_supported_type:
+            if self._get_is_supported(module, insert=True):
                 # if it's a supported type, we want to get node and add observer insert locations
-
                 targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
 
                 # add entry for pre-observer
@@ -617,7 +654,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     def _extract_input_info(self, model: GraphModule) -> Dict[str, Dict]:
         r"""
-        Takes in a callibrated GraphModule and then finds the relavent observers.
+        Takes in a callibrated GraphModule and then finds the relevant observers.
         It then extracts the input information for each observer returns it
 
         Args
@@ -634,13 +671,8 @@ class InputWeightEqualizationDetector(DetectorBase):
         input_info: Dict[str, Dict] = {}
 
         for fqn, module in model.named_modules():
-            # check to see if module is of a supported type
-            is_supported_type: bool = (
-                sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
-            )
-
             # if module is supported and it has a pre-observer
-            if is_supported_type and hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME):
+            if self._get_is_supported(module):
                 # get pre observer for the module
                 pre_obs = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
 
@@ -671,13 +703,8 @@ class InputWeightEqualizationDetector(DetectorBase):
         weight_info: Dict[str, Dict] = {}
 
         for fqn, module in model.named_modules():
-            # check to see if module is of a supported type
-            is_supported_type: bool = (
-                sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
-            )
-
             # if module is supported and it has a pre-observer
-            if is_supported_type and hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME):
+            if self._get_is_supported(module):
                 # we don't need actual observer, just the module weights
                 # calculate min and max vals
                 min_val, max_val = torch.aminmax(module.weight, dim=self.ch_axis)
@@ -824,7 +851,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         Returns a tuple with two elements:
             String report of of whether input weight equalization is recommended for certain modules
-            Dictionary mapping modules of interst to:
+            Dictionary mapping modules of interest to:
                 whether input weight equalization is recommended
                 their s_c metric compared to the threshold
                 the threshold used to make the recommendation
@@ -857,8 +884,13 @@ class InputWeightEqualizationDetector(DetectorBase):
         input_weight_non_benefit_reasoning = "the scales of the input vs. weight with regards to their ranges."
         input_weight_non_benefit_str = "we don't expect much improvement from input-weight equalization based on {}"
 
+        # added module check
+        added_module: bool = False
+
         # compile the suggestion string
         for module_fqn in input_weight_equalization_info:
+            # we added at least 1 module
+            added_module = True
             # add the module level description
             input_weight_string += module_suggestion_str.format(module_fqn, self.ch_axis)
 
@@ -873,6 +905,10 @@ class InputWeightEqualizationDetector(DetectorBase):
                     non_benefit_str = input_weight_non_benefit_str.format(input_weight_non_benefit_reasoning)
                     channel_str = channel_suggestion_str.format(index, no_use_str, non_benefit_str)
                     input_weight_string += channel_str
+
+        # if no modules looked at, amend return string
+        if not added_module:
+            input_weight_string += "No applicable layers for suggestions. Only linear and conv valid.\n"
 
         # return a tuple with the string explanation and the compiled dict info
         return (input_weight_string, input_weight_equalization_info)
