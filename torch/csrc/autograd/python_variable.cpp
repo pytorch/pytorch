@@ -4,6 +4,7 @@
 #include <c10/core/SafePyObject.h>
 #include <c10/util/DeadlockDetection.h>
 #include <c10/util/irange.h>
+#include <pybind11/pytypes.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
@@ -2338,6 +2339,7 @@ c10::IntArrayRef concrete_strides_fn(
   return c10::IntArrayRef(start, len);
 }
 
+
 c10::IntArrayRef concrete_sizes_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self) {
@@ -2405,9 +2407,6 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  PyObject* subclass = *mb_obj;
-  Py_INCREF(subclass);
-  py::object sub = py::reinterpret_steal<py::object>(subclass);
 
   // We need to squeeze SymIntNodes and ints into `SymInts`
   // since it's a format `sym_sizes()` are stored in
@@ -2423,7 +2422,7 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   py::object os = py::module_::import("torch").attr("overrides");
   py::function get_buffer =
       py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(sub, symints, "sym_size");
+  auto buffer = get_buffer(py::handle(*mb_obj), symints, "sym_size");
   auto result = THPUtils_unpackLongs(buffer.ptr());
   c10::SymInt* start = (c10::SymInt*)result[0];  
   int64_t len = result[1];
