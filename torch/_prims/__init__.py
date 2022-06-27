@@ -611,6 +611,7 @@ ceil = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _conj_physical_meta(input: TensorLikeType):
     if not input.dtype.is_complex:
         raise RuntimeError("prims.conj_physical is only defined for complex dtypes")
@@ -1378,6 +1379,7 @@ def _conj_meta(a: TensorLikeType) -> TensorLikeType:
         raise RuntimeError("Expected complex dtype in prims.conj")
     return TensorMeta(a)
 
+
 _conj_doc = """
 Returns a conjugated view of the original tensor
 """
@@ -1389,6 +1391,7 @@ conj = _make_prim(
     return_type=RETURN_TYPE.VIEW,
     doc=_conj_doc,
 )
+
 
 def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
     """
