@@ -219,13 +219,13 @@ static inline  __device__ at::Half gpuAtomicAdd(at::Half *address, at::Half val)
 }
 
 static inline __device__ at::BFloat16 gpuAtomicAdd(at::BFloat16 *address, at::BFloat16 val) {
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && (CUDA_VERSION >= 11000) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 800)
-  return atomicAdd(reinterpret_cast<__nv_bfloat16*>(address), val);
-#else
+#if defined(USE_ROCM) || ((defined(CUDA_VERSION) && CUDA_VERSION < 11000) || (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)))
   return AtomicFPOp<at::BFloat16>()(address, val,
                                     [](at::BFloat16 bsum, at::BFloat16 val) {
                                       return bsum + val;
                                     });
+#else
+  return atomicAdd(reinterpret_cast<__nv_bfloat16*>(address), val);
 #endif
 }
 
