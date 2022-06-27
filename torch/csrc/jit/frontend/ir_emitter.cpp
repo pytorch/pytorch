@@ -3639,7 +3639,10 @@ struct to_ir {
         }
         auto input =
             emitSugaredExpr(apply.inputs()[0], 1)->asValue(loc, method);
-
+        if (input->type()->kind() == TypeKind::TupleType) {
+          return std::make_shared<SimpleValue>(
+              emitIndex(loc, self, createTupleUnpack(input)));
+        }
         return std::make_shared<SimpleValue>(emitIndex(loc, self, {input}));
       }
       default:

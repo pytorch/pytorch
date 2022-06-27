@@ -15,13 +15,13 @@ aten_native_yaml = os.path.join(path, '../aten/src/ATen/native/native_functions.
 all_operators_with_namedtuple_return = {
     'max', 'min', 'aminmax', 'median', 'nanmedian', 'mode', 'kthvalue', 'svd', 'symeig', 'eig',
     'qr', 'geqrf', 'slogdet', 'sort', 'topk', 'lstsq', 'linalg_inv_ex',
-    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_unpack_dual", 'linalg_qr',
+    'triangular_solve', 'cummax', 'cummin', 'linalg_eigh', "_linalg_eigh", "_unpack_dual", 'linalg_qr',
     'linalg_svd', '_linalg_svd', 'linalg_slogdet', 'fake_quantize_per_tensor_affine_cachemask',
     'fake_quantize_per_channel_affine_cachemask', 'linalg_lstsq', 'linalg_eig', 'linalg_cholesky_ex',
     'frexp', 'lu_unpack', 'histogram', 'histogramdd',
     '_fake_quantize_per_tensor_affine_cachemask_tensor_qparams',
     '_fused_moving_avg_obs_fq_helper', 'linalg_lu_factor', 'linalg_lu_factor_ex', 'linalg_lu',
-    '_det_lu_based_helper', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', '_linalg_solve'
+    '_linalg_det', '_lu_with_info', 'linalg_ldl_factor_ex', 'linalg_ldl_factor', '_linalg_solve'
 }
 
 
@@ -82,6 +82,7 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['lstsq'], input=(a,), names=('solution', 'QR'), hasout=True),
             op(operators=['linalg_eig'], input=(), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
+            op(operators=['_linalg_eigh'], input=("L",), names=('eigenvalues', 'eigenvectors'), hasout=True),
             op(operators=['linalg_slogdet'], input=(), names=('sign', 'logabsdet'), hasout=True),
             op(operators=['linalg_cholesky_ex'], input=(), names=('L', 'info'), hasout=True),
             op(operators=['linalg_inv_ex'], input=(), names=('inverse', 'info'), hasout=True),
@@ -110,8 +111,8 @@ class TestNamedTupleAPI(TestCase):
             op(operators=['_fused_moving_avg_obs_fq_helper'],
                input=(torch.tensor([1]), torch.tensor([1]), torch.tensor([0.1]), torch.tensor([0.1]),
                torch.tensor([0.1]), torch.tensor([1]), 0.01, 0, 255, 0), names=('output', 'mask',), hasout=False),
-            op(operators=['_det_lu_based_helper'],
-               input=(), names=('det', 'lu', 'pivs'), hasout=False),
+            op(operators=['_linalg_det'],
+               input=(), names=('result', 'LU', 'pivots'), hasout=True),
             op(operators=['aminmax'], input=(), names=('min', 'max'), hasout=True),
             op(operators=['_lu_with_info'],
                input=(), names=('LU', 'pivots', 'info'), hasout=False),

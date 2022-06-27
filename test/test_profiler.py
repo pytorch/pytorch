@@ -1,12 +1,13 @@
 # Owner(s): ["oncall: profiler"]
-
 import collections
 import gc
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
+import time
 
 import torch
 import torch.nn as nn
@@ -22,7 +23,8 @@ from torch.autograd.profiler import profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver
+    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
+    _utils
 )
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
@@ -209,13 +211,14 @@ class TestExecutionGraph(TestCase):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
             rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
-            x = torch.randn(10, 10)
+            x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
-            y = torch.randn(10, 10)
+            y = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 y = y.cuda()
             z = x + y + x * y + x * y
+            z.backward(z)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
@@ -385,6 +388,9 @@ class TestProfiler(TestCase):
 
         mod = DummyModule()
 
+        def call_module(x):
+            return mod(x)
+
         with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
@@ -393,7 +399,7 @@ class TestProfiler(TestCase):
             v = 2 * w
             v.backward()
             a = torch.randn(2, 3, 2, 2, requires_grad=True)
-            b = mod(a)
+            b = call_module(a)
             c = b.sum()
             c.backward()
 
@@ -404,6 +410,22 @@ class TestProfiler(TestCase):
                     "test_source" in entry or
                     "ts_method_1" in entry or
                     "ts_method_2" in entry) for entry in e.stack]))
+
+        # TODO: https://github.com/pytorch/kineto/issues/617
+        if kineto_available() and not IS_WINDOWS:
+            with TemporaryFileName(mode="w+") as fname:
+                p.export_chrome_trace(fname)
+                with io.open(fname, 'r') as f:
+                    events = json.load(f)["traceEvents"]
+
+                def extract(pattern: str):
+                    matches = [e for e in events if re.search(pattern, e["name"])]
+                    self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
+                    return matches[0]
+
+                module_event = extract(r"DummyModule_0")
+                wrapper_event = extract(r"call_module")
+                self.assertEqual(module_event["args"]["Python parent id"], wrapper_event["args"]["Python id"])
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
@@ -1063,6 +1085,111 @@ class TestProfiler(TestCase):
         # Kineto profiler
         with profile():
             self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
+
+    def test_profiler_correlation_id(self):
+        '''
+        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        So we will reuse id_uniqueness_set.
+        '''
+        id_uniqueness_set = set()
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        uint32_max = 2**32 - 1
+        for i in range(5):
+            with profile() as prof:
+                model(inputs)
+            for event in prof.profiler.kineto_results.events():
+                corr_id = event.correlation_id()
+                if (corr_id):
+                    self.assertTrue(corr_id not in id_uniqueness_set)
+                    id_uniqueness_set.add(corr_id)
+                    self.assertTrue(corr_id < uint32_max)
+
+    def test_utils_compute_self_time(self):
+        with profile() as prof:
+            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
+                1, requires_grad=True)
+            z = torch.add(t1, t2)
+            y = torch.ones(1)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
+            loss.backward()
+        basic_eval = _utils.BasicEvaluation(prof.profiler)
+        metrics = basic_eval.metrics
+        self.assertTrue(len(metrics) > 0)
+        for event_key, event_metrics in metrics.items():
+            self.assertEqual(
+                event_metrics.self_time_ns,
+                event_key.event.duration_time_ns - sum([
+                    child.duration_time_ns
+                    for child in event_key.event.children
+                ]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_utils_compute_queue_depth(self):
+        x = torch.ones((8096, 8096), device="cuda")
+        with profile() as prof:
+            # First half we want it to be compute bound
+            for _ in range(5):
+                y = torch.mm(x, x)
+            # Second half we want it to be overhead bound
+            # So we are synchronize and sleeping
+            torch.cuda.synchronize()
+            for _ in range(3):
+                y[0] += 1
+                time.sleep(0.1)
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        # We can assume golden because mm is compute intensive,
+        # so kernel will queued up.
+        # But later tensor indexing is overhead bound, and there
+        # is sleep to make sure kernel finished before next dispatch.
+        golden_queue_depth_list = [1, 2, 3, 4, 5, 1, 1, 1]
+        for entry, golden in zip(basic_evaluation.compute_queue_depth(),
+                                 golden_queue_depth_list):
+            self.assertTrue(entry.queue_depth == golden)
+
+    def test_utils_compute_queue_depth_when_no_cuda_events(self):
+        # For traces with only cpu events, we expect empty queue depth list
+        x = torch.ones((1024, 1024))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        self.assertFalse(basic_evaluation.compute_queue_depth())
+
+
+    def test_extra_fields(self):
+        with profile(with_stack=True, profile_memory=True) as p:
+            _ = torch.ones((1,))
+
+        def find_ones(nodes):
+            for n in nodes:
+                if n.name() == "aten::ones":
+                    return n
+                result = find_ones(n.children)
+                if result:
+                    return result
+
+        node = find_ones(p.profiler.kineto_results.experimental_event_tree())
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._autograd._ExtraFields_TorchOp)
+
+        self.assertIsInstance(
+            node.parent.extra_fields,
+            torch._C._autograd._ExtraFields_PyCCall)
+
+        self.assertEqual(node.children[0].name(), "aten::empty")
+        self.assertEqual(node.children[0].children[0].name(), "[memory]")
+        self.assertIsInstance(
+            node.children[0].children[0].extra_fields,
+            torch._C._autograd._ExtraFields_Allocation)
 
 
 if __name__ == '__main__':

@@ -34,6 +34,7 @@
 #include <c10d/reducer.hpp>
 
 #include <torch/csrc/Exceptions.h>
+#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/distributed/c10d/python_comm_hook.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/object_ptr.h>
@@ -986,18 +987,23 @@ Arguments:
 
           .def(
               "broadcast",
-              &::c10d::ProcessGroup::broadcast,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 ::c10d::BroadcastOptions opts) {
+                return ::c10d::ops::broadcast(self, tensors, opts);
+              },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::BroadcastOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "broadcast",
-              [](::c10d::ProcessGroup& pg, at::Tensor& x, int rootRank) {
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 at::Tensor& x,
+                 int rootRank) {
                 ::c10d::BroadcastOptions opts;
                 opts.rootRank = rootRank;
-                std::vector<at::Tensor> xs = {x};
-                return pg.broadcast(xs, opts);
+                return ::c10d::ops::broadcast(self, {x}, opts);
               },
               py::arg("tensor"),
               py::arg("root"),
@@ -1005,19 +1011,23 @@ Arguments:
 
           .def(
               "allreduce",
-              &::c10d::ProcessGroup::allreduce,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& tensors,
+                 ::c10d::AllreduceOptions opts) {
+                return ::c10d::ops::allreduce(self, tensors, opts);
+              },
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceOptions(),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "allreduce",
-              [](::c10d::ProcessGroup& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                  std::vector<at::Tensor>& xs,
                  ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
-                return pg.allreduce(xs, opts);
+                return ::c10d::ops::allreduce(pg, xs, opts);
               },
               py::arg("tensors"),
               py::arg("op") = ::c10d::ReduceOp::SUM,
@@ -1025,11 +1035,13 @@ Arguments:
 
           .def(
               "allreduce",
-              [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
+                 at::Tensor& x,
+                 ::c10d::ReduceOp op) {
                 ::c10d::AllreduceOptions opts;
                 opts.reduceOp = op;
                 std::vector<at::Tensor> xs = {x};
-                return pg.allreduce(xs, opts);
+                return ::c10d::ops::allreduce(pg, xs, opts);
               },
               py::arg("tensor"),
               py::arg("op") = ::c10d::ReduceOp::SUM,

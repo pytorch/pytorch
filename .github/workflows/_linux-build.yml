@@ -74,28 +74,33 @@ jobs:
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build
           # TODO duplicated
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: 5.2
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           DEBUG: ${{ inputs.build-with-debug && '1' || '0' }}
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
           container_name=$(docker run \
             -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             -e PR_NUMBER \
@@ -104,10 +109,10 @@ jobs:
             -e SCCACHE_BUCKET \
             -e XLA_CUDA \
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e PR_LABELS \
+            -e OUR_GITHUB_JOB_ID \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --security-opt seccomp=unconfined \
             --cap-add=SYS_PTRACE \
@@ -133,6 +138,15 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
+
+      - name: Upload sccache stats
+        uses: seemethere/upload-artifact-s3@v5
+        with:
+          s3-prefix: |
+            ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+          retention-days: 365
+          if-no-files-found: warn
+          path: sccache-stats-*.json
 
       - name: Teardown Linux
         uses: ./.github/actions/teardown-linux

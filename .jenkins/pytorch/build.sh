@@ -8,6 +8,8 @@ set -ex
 
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+# shellcheck source=./common-build.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
 if [[ "$BUILD_ENVIRONMENT" == *-clang7-asan* ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" "$@"
@@ -21,11 +23,6 @@ if [[ "$BUILD_ENVIRONMENT" == *deploy* ]]; then
   # Enabling DEPLOY build (embedded torch python interpreter, experimental)
   # only on one config for now, can expand later
   export USE_DEPLOY=ON
-
-  # Deploy feature builds cpython. It requires these packages.
-  # TODO move this to dockerfile?
-  sudo apt-get -qq update
-  sudo apt-get -qq install libffi-dev libbz2-dev libreadline-dev libncurses5-dev libncursesw5-dev libgdbm-dev libsqlite3-dev uuid-dev tk-dev
 fi
 
 echo "Python version:"
@@ -227,13 +224,6 @@ else
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
 
-    if which sccache > /dev/null; then
-      echo 'PyTorch Build Statistics'
-      sccache --show-stats
-
-      sccache --show-stats | python -m tools.stats.upload_sccache_stats
-    fi
-
     assert_git_not_dirty
     # Copy ninja build logs to dist folder
     mkdir -p dist
@@ -256,7 +246,7 @@ else
       popd
     fi
 
-    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+    CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
     CUSTOM_TEST_USE_ROCM=$([[ "$BUILD_ENVIRONMENT" == *rocm* ]] && echo "ON" || echo "OFF")
     CUSTOM_TEST_MODULE_PATH="${PWD}/cmake/public"
     mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
@@ -316,3 +306,5 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
   python test/run_test.py --export-past-test-times
 fi
+
+print_sccache_stats

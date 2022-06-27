@@ -57,11 +57,8 @@ jobs:
       - name: Build
         env:
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-build-and-test
-          CUSTOM_TEST_ARTIFACT_BUILD_DIR: build/custom_test_artifacts
           TORCH_CUDA_ARCH_LIST: 5.2
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
-          PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         run: |
           set -e
@@ -81,11 +78,8 @@ jobs:
           git submodule sync && git submodule update -q --init --recursive --depth 1 --jobs 0
           export id
           id=$(docker run -e BUILD_ENVIRONMENT \
-            -e JOB_BASE_NAME \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \
-            -e CUSTOM_TEST_ARTIFACT_BUILD_DIR \
-            -e PR_LABELS \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e TORCH_CUDA_ARCH_LIST \
             -e BUILD_LITE_INTERPRETER \

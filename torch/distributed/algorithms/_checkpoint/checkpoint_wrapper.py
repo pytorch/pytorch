@@ -10,8 +10,7 @@ import torch.nn as nn
 from typing import Dict, Any
 from functools import partial
 
-_CHECKPOINT_PREFIX = "mod"
-
+_CHECKPOINT_PREFIX = "_checkpoint_wrapped_module"
 
 class CheckpointImpl(Enum):
     REENTRANT = auto()
@@ -29,7 +28,7 @@ class CheckpointWrapper(torch.nn.Module):
         offload_to_cpu: bool = False,
     ):
         super().__init__()
-        self.mod = mod
+        self._checkpoint_wrapped_module = mod
         self.checkpoint_impl = checkpoint_impl
         self.offload_to_cpu = offload_to_cpu
         # state_dict post hook to remove prefix to allow loading into a
@@ -41,11 +40,22 @@ class CheckpointWrapper(torch.nn.Module):
             self._pre_load_state_dict_hook, with_module=True
         )
 
+    def __getattr__(self, name: str) -> Any:
+        """Forward missing attributes to wrapped module."""
+        try:
+            return super().__getattr__(name)  # defer to nn.Module's logic
+        except AttributeError:
+            return getattr(self._checkpoint_wrapped_module, name)
+
+    def __getitem__(self, key: int) -> Any:
+        """Forward indexing calls in case the module is a nn.Sequential."""
+        return self._checkpoint_wrapped_module.__getitem__(key)  # type: ignore[operator]
+
     def forward(self, *args, **kwargs):
         offload_mgr = save_on_cpu(pin_memory=True) if self.offload_to_cpu else suppress()
         with offload_mgr:  # type: ignore[attr-defined]
             return checkpoint(
-                self.mod,
+                self._checkpoint_wrapped_module,
                 use_reentrant=(self.checkpoint_impl == CheckpointImpl.REENTRANT),
                 *args,
                 **kwargs,
@@ -112,17 +122,6 @@ def checkpoint_wrapper(
         (nn.Module):
             Wrapped module
     """
-    # saved tensor hooks based-checkpoint wrapper is not yet supported.
-    if checkpoint_impl == CheckpointImpl.NO_REENTRANT:
-        raise ValueError(
-            "No support for non-reentrant based checkpoint implementation."
-        )
-
-    if offload_to_cpu and checkpoint_impl != CheckpointImpl.REENTRANT:
-        raise ValueError(
-            "No support for CPU offload activations and non-reentrant based "
-            "checkpoint implementation."
-        )
 
     return CheckpointWrapper(module, checkpoint_impl, offload_to_cpu)
 

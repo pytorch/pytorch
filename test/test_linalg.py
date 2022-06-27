@@ -533,14 +533,14 @@ class TestLinalg(TestCase):
 
         # dtypes should be safely castable
         out = torch.empty(*A.shape, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.cholesky(A, out=out)
 
         # device should match
         if torch.cuda.is_available():
             wrong_device = 'cpu' if self.device_type != 'cpu' else 'cuda'
             out = torch.empty(0, device=wrong_device, dtype=dtype)
-            with self.assertRaisesRegex(RuntimeError, "Expected result and input tensors to be on the same device"):
+            with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.cholesky(A, out=out)
 
     # NOTE: old_cholesky* tests were moved here from test_torch.py and test_autograd.py
@@ -696,19 +696,6 @@ class TestLinalg(TestCase):
         self.assertEqual(info, expected_info)
         with self.assertRaisesRegex(torch.linalg.LinAlgError, r'\(Batch element 3\): The factorization could not be completed'):
             torch.linalg.cholesky_ex(A, check_errors=True)
-
-    @skipCUDAIfNoMagmaAndNoCusolver
-    @skipCPUIfNoLapack
-    @dtypes(*floating_and_complex_types())
-    def test_cholesky_ex_out_info_error(self, device, dtype):
-        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
-
-        # dtype for info must be torch.int32
-        A = random_hermitian_pd_matrix(3, dtype=dtype, device=device)
-        L = torch.empty(A.shape, dtype=dtype, device=device)
-        info = torch.empty(A.shape[:-2], dtype=torch.int64, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got info with dtype Long"):
-            torch.linalg.cholesky_ex(A, out=(L, info))
 
     def _test_addr_vs_numpy(self, device, dtype, beta=1, alpha=1):
         def check(m, a, b, beta, alpha):
@@ -966,12 +953,12 @@ class TestLinalg(TestCase):
         # dtypes should be safely castable
         out_w = torch.empty(0, dtype=real_dtype, device=device)
         out_v = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got eigenvectors with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.eigh(a, out=(out_w, out_v))
 
         out_w = torch.empty(0, dtype=torch.int, device=device)
         out_v = torch.empty(0, dtype=dtype, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got eigenvalues with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.eigh(a, out=(out_w, out_v))
 
         # device should match
@@ -1041,7 +1028,7 @@ class TestLinalg(TestCase):
 
         # dtypes should be safely castable
         out = torch.empty(0, dtype=torch.int, device=device)
-        with self.assertRaisesRegex(RuntimeError, "but got result with dtype Int"):
+        with self.assertRaisesRegex(RuntimeError, "but got int instead"):
             torch.linalg.eigvalsh(t, out=out)
 
         # device should match

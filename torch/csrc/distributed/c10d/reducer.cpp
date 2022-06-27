@@ -19,6 +19,7 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
+#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
@@ -677,7 +678,8 @@ void Reducer::all_reduce_local_used_map() {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
   std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
-  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
+  local_used_work_ =
+      ops::allreduce(process_group_, temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
@@ -1568,7 +1570,7 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor_device = at::empty({total_size + 1}, options);
   indices_tensor_device.copy_(indices_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
-  process_group_->broadcast(indices_tensor_list)->wait();
+  ops::broadcast(process_group_, indices_tensor_list)->wait();
   indices_tensor.copy_(indices_tensor_list.front(), /*non_blocking=*/false);
 
   // Update num_buckets after receiving it from rank 0
@@ -1587,7 +1589,7 @@ void Reducer::sync_bucket_indices(
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
-  process_group_->broadcast(bucket_sizes_tensor_list)->wait();
+  ops::broadcast(process_group_, bucket_sizes_tensor_list)->wait();
   bucket_sizes_tensor.copy_(
       bucket_sizes_tensor_list.front(), /*non_blocking=*/false);
 
@@ -2101,7 +2103,7 @@ void verify_params_across_processes(
 
   auto metadata_dev = metadata.clone().to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
-  process_group->broadcast(vec)->wait();
+  ops::broadcast(process_group, vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.

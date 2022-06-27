@@ -452,6 +452,7 @@ libtorch_core_sources = sorted(
 libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/FileStore.cpp",
     "torch/csrc/distributed/c10d/GlooDeviceFactory.cpp",
+    "torch/csrc/distributed/c10d/Ops.cpp",
     "torch/csrc/distributed/c10d/ParamCommsUtils.cpp",
     "torch/csrc/distributed/c10d/PrefixStore.cpp",
     "torch/csrc/distributed/c10d/ProcessGroup.cpp",
@@ -1147,6 +1148,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/UnfoldBackwardKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleMoreKernel.cpp",
+    "aten/src/ATen/native/cpu/airy_ai.cpp",
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",

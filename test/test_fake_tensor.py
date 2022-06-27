@@ -1,6 +1,6 @@
 # Owner(s): ["module: meta tensors"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfCrossRef
 import torch
 import itertools
 from torch.testing._internal.jit_utils import RUN_CUDA
@@ -12,9 +12,15 @@ from torch._subclasses.fake_tensor import (
 )
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import unittest
-
+import torch._prims as prims
+import copy
 
 class FakeTensorTest(TestCase):
+    def checkType(self, t, device_str, size):
+        self.assertTrue(isinstance(t, FakeTensor))
+        self.assertEqual(t.device.type, device_str)
+        self.assertEqual(list(t.size()), size)
+
     def test_basic(self):
         mode = FakeTensorMode(inner=None)
         x = torch.empty(2, 2, device="cpu")
@@ -26,6 +32,19 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.shape, (4, 2, 2))
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(isinstance(z, FakeTensor))
+
+    def test_parameter_instantiation(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x = torch.rand([4])
+            y = torch.nn.parameter.Parameter(x)
+            self.assertTrue(isinstance(y, torch.nn.Parameter))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_index_cuda_with_cpu(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            x = torch.rand([2048], device='cuda')
+            out = x[torch.zeros([36], dtype=torch.int64)]
+            self.checkType(out, "cuda", [36])
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_shape_take_not_device(self):
@@ -144,8 +163,50 @@ class FakeTensorTest(TestCase):
             FakeTensorMode(inner=None, allow_cpu_fallback=False)
         ):
             x = torch.rand([10, 10])
+
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
 
+    def checkMetaProps(self, t1, t2):
+        prims.utils.compare_tensor_meta(t1, t2)
+
+    @skipIfCrossRef
+    def test_deepcopy(self):
+        mode = FakeTensorMode(inner=None)
+        mod = torch.nn.BatchNorm2d(10)
+        with torch._subclasses.fake_tensor.FakeCopyMode(mode):
+            mod_copied = copy.deepcopy(mod)
+
+        def check_copy(mod, mod_copied):
+            for name, param in itertools.chain(mod.named_parameters(), mod.named_buffers()):
+                param_copied = getattr(mod_copied, name)
+                self.checkMetaProps(param, param_copied)
+                self.assertTrue(isinstance(param_copied, FakeTensor))
+                self.assertEqual(isinstance(param, torch.nn.Parameter), isinstance(param_copied, torch.nn.Parameter))
+                self.assertEqual(param.requires_grad, param_copied.requires_grad)
+
+        check_copy(mod, mod_copied)
+
+        class ModuleNew(torch.nn.Module):
+            def __init__(self):
+                super(ModuleNew, self).__init__()
+                self.a = torch.rand([10, 2])
+                self.b = self.a
+                self.c = self.a[0]
+
+        mod = ModuleNew()
+        with torch._subclasses.fake_tensor.FakeCopyMode(mode):
+            mod_copied = copy.deepcopy(mod)
+
+        self.assertIs(mod_copied.a, mod_copied.b)
+        self.assertEqual(mod_copied.b.storage()._cdata, mod_copied.a.storage()._cdata)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_new(self):
+        with enable_torch_dispatch_mode(FakeTensorMode(inner=None)):
+            a = torch.rand([16, 1])
+            self.checkType(a.new(10, 10), "cpu", [10, 10])
+            self.checkType(a.new([1, 2, 3, 4]), "cpu", [4])
+            self.checkType(a.new(device='cuda'), "cuda", [0])
 
 def contains_type(type: torch._C.Type, maybe_contained_type: torch._C.Type):
     return maybe_contained_type.isSubtypeOf(type) or any(
