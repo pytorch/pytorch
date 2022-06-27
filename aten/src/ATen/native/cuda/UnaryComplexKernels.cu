@@ -62,6 +62,23 @@ void angle_kernel_cuda(TensorIteratorBase& iter) {
 // NB: Ignores the negative bit on tensors
 const char conj_name[] = "conj_kernel";
 void conj_kernel_cuda(TensorIteratorBase& iter) {
+  auto conj_chalf = [&] {
+    using scalar_t = c10::complex<at::Half>;
+    #if AT_USE_JITERATOR()
+      static const auto conj_string = jiterator_stringify(
+        template <typename T>
+        T conj_kernel(T z) {
+          return std::conj(z);
+        }
+      );
+      jitted_gpu_kernel<conj_name, scalar_t, scalar_t, 1>(iter, conj_string);
+    #else
+      gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return std::conj(a);
+      });
+    #endif
+  };
+
   AT_DISPATCH_SWITCH(iter.common_dtype(), "conj_cuda",
     AT_DISPATCH_CASE_ALL_TYPES_AND3(kBool, kBFloat16, kHalf, [&] {
       // Conj is a no-op for non-complex types
@@ -72,21 +89,7 @@ void conj_kernel_cuda(TensorIteratorBase& iter) {
         return std::conj(a);
       });
     })
-    AT_DISPATCH_CASE(kComplexHalf, [&] {
-      #if AT_USE_JITERATOR()
-        static const auto conj_string = jiterator_stringify(
-            template <typename T>
-            T conj_kernel(T z) {
-              return std::conj(z);
-            }
-          );
-        jitted_gpu_kernel<conj_name, scalar_t, scalar_t, 1>(iter, conj_string);
-      #else
-        gpu_kernel(iter, [] GPU_LAMBDA(scalar_t a) -> scalar_t {
-          return std::conj(a);
-        });
-      #endif
-    })
+    AT_DISPATCH_CASE(kComplexHalf, conj_chalf)
   );
 }
 
