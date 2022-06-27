@@ -371,6 +371,7 @@ def generate_tests(test_cls, constructor_arg_db):
         torch.nn.quantized.Embedding,
         torch.nn.quantized.EmbeddingBag,
         torch.nn.quantized.modules.rnn.LSTM,
+        torch.nn.quantized.MultiheadAttention,
     }
     # no need to support kwargs for these modules even though
     # they have parameters / buffers because they are passed in
