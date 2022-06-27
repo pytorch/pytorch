@@ -3,7 +3,7 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from typing import  Any, Dict, Iterable, List, Set, Tuple, Union, Optional
+from typing import Any, Dict, Iterable, List, Set, Tuple, Union, Optional
 
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
@@ -180,7 +180,7 @@ class StreamWrapper:
     DataPipe operation like `FileOpener`. StreamWrapper would guarantee
     the wrapped file handler is closed when it's out of scope.
     '''
-    session_streams: Set[Any] = {}
+    session_streams: Set[Any] = set()
 
     def __init__(self, file_obj, parent_stream=None, name=None):
         self.file_obj = file_obj
