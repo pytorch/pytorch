@@ -89,23 +89,23 @@ struct ExtraFileBuilder;
 struct Module;
 struct ModuleBuilder;
 
-enum class TypeType : uint8_t {
-  UNSET = 0,
-  CLASS_WITH_FIELD = 1,
-  CUSTOM_CLASS = 2,
-  CLASS_WITH_SETSTATE = 3,
-  NON_OBJ = 4,
-  MIN = UNSET,
-  MAX = NON_OBJ
+enum TypeType : uint8_t {
+  TypeType_UNSET = 0,
+  TypeType_CLASS_WITH_FIELD = 1,
+  TypeType_CUSTOM_CLASS = 2,
+  TypeType_CLASS_WITH_SETSTATE = 3,
+  TypeType_NON_OBJ = 4,
+  TypeType_MIN = TypeType_UNSET,
+  TypeType_MAX = TypeType_NON_OBJ
 };
 
 inline const TypeType (&EnumValuesTypeType())[5] {
   static const TypeType values[] = {
-    TypeType::UNSET,
-    TypeType::CLASS_WITH_FIELD,
-    TypeType::CUSTOM_CLASS,
-    TypeType::CLASS_WITH_SETSTATE,
-    TypeType::NON_OBJ
+    TypeType_UNSET,
+    TypeType_CLASS_WITH_FIELD,
+    TypeType_CUSTOM_CLASS,
+    TypeType_CLASS_WITH_SETSTATE,
+    TypeType_NON_OBJ
   };
   return values;
 }
@@ -123,52 +123,52 @@ inline const char * const *EnumNamesTypeType() {
 }
 
 inline const char *EnumNameTypeType(TypeType e) {
-  if (flatbuffers::IsOutRange(e, TypeType::UNSET, TypeType::NON_OBJ)) return "";
+  if (flatbuffers::IsOutRange(e, TypeType_UNSET, TypeType_NON_OBJ)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesTypeType()[index];
 }
 
-enum class IValueUnion : uint8_t {
-  NONE = 0,
-  Int = 1,
-  Bool = 2,
-  Double = 3,
-  ComplexDouble = 4,
-  TensorMetadata = 5,
-  String = 6,
-  List = 7,
-  Tuple = 8,
-  Dict = 9,
-  Object = 10,
-  IntList = 11,
-  DoubleList = 12,
-  BoolList = 13,
-  Device = 14,
-  EnumValue = 15,
-  Function = 16,
-  MIN = NONE,
-  MAX = Function
+enum IValueUnion : uint8_t {
+  IValueUnion_NONE = 0,
+  IValueUnion_Int = 1,
+  IValueUnion_Bool = 2,
+  IValueUnion_Double = 3,
+  IValueUnion_ComplexDouble = 4,
+  IValueUnion_TensorMetadata = 5,
+  IValueUnion_String = 6,
+  IValueUnion_List = 7,
+  IValueUnion_Tuple = 8,
+  IValueUnion_Dict = 9,
+  IValueUnion_Object = 10,
+  IValueUnion_IntList = 11,
+  IValueUnion_DoubleList = 12,
+  IValueUnion_BoolList = 13,
+  IValueUnion_Device = 14,
+  IValueUnion_EnumValue = 15,
+  IValueUnion_Function = 16,
+  IValueUnion_MIN = IValueUnion_NONE,
+  IValueUnion_MAX = IValueUnion_Function
 };
 
 inline const IValueUnion (&EnumValuesIValueUnion())[17] {
   static const IValueUnion values[] = {
-    IValueUnion::NONE,
-    IValueUnion::Int,
-    IValueUnion::Bool,
-    IValueUnion::Double,
-    IValueUnion::ComplexDouble,
-    IValueUnion::TensorMetadata,
-    IValueUnion::String,
-    IValueUnion::List,
-    IValueUnion::Tuple,
-    IValueUnion::Dict,
-    IValueUnion::Object,
-    IValueUnion::IntList,
-    IValueUnion::DoubleList,
-    IValueUnion::BoolList,
-    IValueUnion::Device,
-    IValueUnion::EnumValue,
-    IValueUnion::Function
+    IValueUnion_NONE,
+    IValueUnion_Int,
+    IValueUnion_Bool,
+    IValueUnion_Double,
+    IValueUnion_ComplexDouble,
+    IValueUnion_TensorMetadata,
+    IValueUnion_String,
+    IValueUnion_List,
+    IValueUnion_Tuple,
+    IValueUnion_Dict,
+    IValueUnion_Object,
+    IValueUnion_IntList,
+    IValueUnion_DoubleList,
+    IValueUnion_BoolList,
+    IValueUnion_Device,
+    IValueUnion_EnumValue,
+    IValueUnion_Function
   };
   return values;
 }
@@ -198,81 +198,81 @@ inline const char * const *EnumNamesIValueUnion() {
 }
 
 inline const char *EnumNameIValueUnion(IValueUnion e) {
-  if (flatbuffers::IsOutRange(e, IValueUnion::NONE, IValueUnion::Function)) return "";
+  if (flatbuffers::IsOutRange(e, IValueUnion_NONE, IValueUnion_Function)) return "";
   const size_t index = static_cast<size_t>(e);
   return EnumNamesIValueUnion()[index];
 }
 
 template<typename T> struct IValueUnionTraits {
-  static const IValueUnion enum_value = IValueUnion::NONE;
+  static const IValueUnion enum_value = IValueUnion_NONE;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Int> {
-  static const IValueUnion enum_value = IValueUnion::Int;
+  static const IValueUnion enum_value = IValueUnion_Int;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Bool> {
-  static const IValueUnion enum_value = IValueUnion::Bool;
+  static const IValueUnion enum_value = IValueUnion_Bool;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Double> {
-  static const IValueUnion enum_value = IValueUnion::Double;
+  static const IValueUnion enum_value = IValueUnion_Double;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::ComplexDouble> {
-  static const IValueUnion enum_value = IValueUnion::ComplexDouble;
+  static const IValueUnion enum_value = IValueUnion_ComplexDouble;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::TensorMetadata> {
-  static const IValueUnion enum_value = IValueUnion::TensorMetadata;
+  static const IValueUnion enum_value = IValueUnion_TensorMetadata;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::String> {
-  static const IValueUnion enum_value = IValueUnion::String;
+  static const IValueUnion enum_value = IValueUnion_String;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::List> {
-  static const IValueUnion enum_value = IValueUnion::List;
+  static const IValueUnion enum_value = IValueUnion_List;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Tuple> {
-  static const IValueUnion enum_value = IValueUnion::Tuple;
+  static const IValueUnion enum_value = IValueUnion_Tuple;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Dict> {
-  static const IValueUnion enum_value = IValueUnion::Dict;
+  static const IValueUnion enum_value = IValueUnion_Dict;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Object> {
-  static const IValueUnion enum_value = IValueUnion::Object;
+  static const IValueUnion enum_value = IValueUnion_Object;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::IntList> {
-  static const IValueUnion enum_value = IValueUnion::IntList;
+  static const IValueUnion enum_value = IValueUnion_IntList;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::DoubleList> {
-  static const IValueUnion enum_value = IValueUnion::DoubleList;
+  static const IValueUnion enum_value = IValueUnion_DoubleList;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::BoolList> {
-  static const IValueUnion enum_value = IValueUnion::BoolList;
+  static const IValueUnion enum_value = IValueUnion_BoolList;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Device> {
-  static const IValueUnion enum_value = IValueUnion::Device;
+  static const IValueUnion enum_value = IValueUnion_Device;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::EnumValue> {
-  static const IValueUnion enum_value = IValueUnion::EnumValue;
+  static const IValueUnion enum_value = IValueUnion_EnumValue;
 };
 
 template<> struct IValueUnionTraits<torch::jit::mobile::serialization::Function> {
-  static const IValueUnion enum_value = IValueUnion::Function;
+  static const IValueUnion enum_value = IValueUnion_Function;
 };
 
 bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type);
-bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<IValueUnion> *types);
+bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<uint8_t> *types);
 
 FLATBUFFERS_MANUALLY_ALIGNED_STRUCT(8) Int FLATBUFFERS_FINAL_CLASS {
  private:
@@ -488,14 +488,14 @@ struct QuantizedSchema FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<int8_t>(verifier, VT_QSCHEME) &&
-           VerifyField<double>(verifier, VT_SCALE) &&
-           VerifyField<int32_t>(verifier, VT_ZERO_POINT) &&
+           VerifyField<int8_t>(verifier, VT_QSCHEME, 1) &&
+           VerifyField<double>(verifier, VT_SCALE, 8) &&
+           VerifyField<int32_t>(verifier, VT_ZERO_POINT, 4) &&
            VerifyOffset(verifier, VT_SCALES) &&
            verifier.VerifyTable(scales()) &&
            VerifyOffset(verifier, VT_ZERO_POINTS) &&
            verifier.VerifyTable(zero_points()) &&
-           VerifyField<int32_t>(verifier, VT_AXIS) &&
+           VerifyField<int32_t>(verifier, VT_AXIS, 4) &&
            verifier.EndTable();
   }
 };
@@ -606,14 +606,14 @@ struct TensorMetadata FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint32_t>(verifier, VT_STORAGE_LOCATION_INDEX) &&
-           VerifyField<int8_t>(verifier, VT_SCALAR_TYPE) &&
-           VerifyField<int32_t>(verifier, VT_STORAGE_OFFSET) &&
+           VerifyField<uint32_t>(verifier, VT_STORAGE_LOCATION_INDEX, 4) &&
+           VerifyField<int8_t>(verifier, VT_SCALAR_TYPE, 1) &&
+           VerifyField<int32_t>(verifier, VT_STORAGE_OFFSET, 4) &&
            VerifyOffset(verifier, VT_SIZES) &&
            verifier.VerifyVector(sizes()) &&
            VerifyOffset(verifier, VT_STRIDES) &&
            verifier.VerifyVector(strides()) &&
-           VerifyField<uint8_t>(verifier, VT_REQUIRES_GRAD) &&
+           VerifyField<uint8_t>(verifier, VT_REQUIRES_GRAD, 1) &&
            VerifyOffset(verifier, VT_QUANTIZED_SCHEMA) &&
            verifier.VerifyTable(quantized_schema()) &&
            verifier.EndTable();
@@ -1210,7 +1210,7 @@ struct ObjectType FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TYPE_NAME) &&
            verifier.VerifyString(type_name()) &&
-           VerifyField<uint8_t>(verifier, VT_TYPE) &&
+           VerifyField<uint8_t>(verifier, VT_TYPE, 1) &&
            VerifyOffset(verifier, VT_ATTR_NAMES) &&
            verifier.VerifyVector(attr_names()) &&
            verifier.VerifyVectorOfStrings(attr_names()) &&
@@ -1245,7 +1245,7 @@ struct ObjectTypeBuilder {
 inline flatbuffers::Offset<ObjectType> CreateObjectType(
     flatbuffers::FlatBufferBuilder &_fbb,
     flatbuffers::Offset<flatbuffers::String> type_name = 0,
-    torch::jit::mobile::serialization::TypeType type = torch::jit::mobile::serialization::TypeType::UNSET,
+    torch::jit::mobile::serialization::TypeType type = torch::jit::mobile::serialization::TypeType_UNSET,
     flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>> attr_names = 0) {
   ObjectTypeBuilder builder_(_fbb);
   builder_.add_attr_names(attr_names);
@@ -1257,7 +1257,7 @@ inline flatbuffers::Offset<ObjectType> CreateObjectType(
 inline flatbuffers::Offset<ObjectType> CreateObjectTypeDirect(
     flatbuffers::FlatBufferBuilder &_fbb,
     const char *type_name = nullptr,
-    torch::jit::mobile::serialization::TypeType type = torch::jit::mobile::serialization::TypeType::UNSET,
+    torch::jit::mobile::serialization::TypeType type = torch::jit::mobile::serialization::TypeType_UNSET,
     const std::vector<flatbuffers::Offset<flatbuffers::String>> *attr_names = nullptr) {
   auto type_name__ = type_name ? _fbb.CreateString(type_name) : 0;
   auto attr_names__ = attr_names ? _fbb.CreateVector<flatbuffers::Offset<flatbuffers::String>>(*attr_names) : 0;
@@ -1302,11 +1302,11 @@ struct Object FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint32_t>(verifier, VT_TYPE_INDEX) &&
-           VerifyField<uint32_t>(verifier, VT_STATE) &&
+           VerifyField<uint32_t>(verifier, VT_TYPE_INDEX, 4) &&
+           VerifyField<uint32_t>(verifier, VT_STATE, 4) &&
            VerifyOffset(verifier, VT_ATTRS) &&
            verifier.VerifyVector(attrs()) &&
-           VerifyField<uint32_t>(verifier, VT_SETSTATE_FUNC) &&
+           VerifyField<uint32_t>(verifier, VT_SETSTATE_FUNC, 4) &&
            verifier.EndTable();
   }
 };
@@ -1389,7 +1389,7 @@ struct EnumValue FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_TYPE_NAME) &&
            verifier.VerifyString(type_name()) &&
-           VerifyField<uint32_t>(verifier, VT_VALUE) &&
+           VerifyField<uint32_t>(verifier, VT_VALUE, 4) &&
            verifier.EndTable();
   }
 };
@@ -1467,7 +1467,7 @@ struct Operator FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyString(name()) &&
            VerifyOffset(verifier, VT_OVERLOAD_NAME) &&
            verifier.VerifyString(overload_name()) &&
-           VerifyField<int32_t>(verifier, VT_NUM_ARGS_SERIALIZED) &&
+           VerifyField<int32_t>(verifier, VT_NUM_ARGS_SERIALIZED, 4) &&
            verifier.EndTable();
   }
 };
@@ -1553,7 +1553,7 @@ struct Arg FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyString(name()) &&
            VerifyOffset(verifier, VT_TYPE) &&
            verifier.VerifyString(type()) &&
-           VerifyField<uint32_t>(verifier, VT_DEFAULT_VALUE) &&
+           VerifyField<uint32_t>(verifier, VT_DEFAULT_VALUE, 4) &&
            verifier.EndTable();
   }
 };
@@ -1816,12 +1816,12 @@ struct Function FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            VerifyOffset(verifier, VT_TYPE_ANNOTATIONS) &&
            verifier.VerifyVector(type_annotations()) &&
            verifier.VerifyVectorOfStrings(type_annotations()) &&
-           VerifyField<int32_t>(verifier, VT_REGISTER_SIZE) &&
+           VerifyField<int32_t>(verifier, VT_REGISTER_SIZE, 4) &&
            VerifyOffset(verifier, VT_SCHEMA) &&
            verifier.VerifyTable(schema()) &&
            VerifyOffset(verifier, VT_DEBUG_INFO) &&
            verifier.VerifyTable(debug_info()) &&
-           VerifyField<uint32_t>(verifier, VT_CLASS_TYPE) &&
+           VerifyField<uint32_t>(verifier, VT_CLASS_TYPE, 4) &&
            verifier.EndTable();
   }
 };
@@ -1990,59 +1990,59 @@ struct IValue FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   template<typename T> const T *val_as() const;
   const torch::jit::mobile::serialization::Int *val_as_Int() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::Int ? static_cast<const torch::jit::mobile::serialization::Int *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_Int ? static_cast<const torch::jit::mobile::serialization::Int *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::Bool *val_as_Bool() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::Bool ? static_cast<const torch::jit::mobile::serialization::Bool *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_Bool ? static_cast<const torch::jit::mobile::serialization::Bool *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::Double *val_as_Double() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::Double ? static_cast<const torch::jit::mobile::serialization::Double *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_Double ? static_cast<const torch::jit::mobile::serialization::Double *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::ComplexDouble *val_as_ComplexDouble() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::ComplexDouble ? static_cast<const torch::jit::mobile::serialization::ComplexDouble *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_ComplexDouble ? static_cast<const torch::jit::mobile::serialization::ComplexDouble *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::TensorMetadata *val_as_TensorMetadata() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::TensorMetadata ? static_cast<const torch::jit::mobile::serialization::TensorMetadata *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_TensorMetadata ? static_cast<const torch::jit::mobile::serialization::TensorMetadata *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::String *val_as_String() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::String ? static_cast<const torch::jit::mobile::serialization::String *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_String ? static_cast<const torch::jit::mobile::serialization::String *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::List *val_as_List() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::List ? static_cast<const torch::jit::mobile::serialization::List *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_List ? static_cast<const torch::jit::mobile::serialization::List *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::Tuple *val_as_Tuple() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::Tuple ? static_cast<const torch::jit::mobile::serialization::Tuple *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_Tuple ? static_cast<const torch::jit::mobile::serialization::Tuple *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::Dict *val_as_Dict() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::Dict ? static_cast<const torch::jit::mobile::serialization::Dict *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_Dict ? static_cast<const torch::jit::mobile::serialization::Dict *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::Object *val_as_Object() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::Object ? static_cast<const torch::jit::mobile::serialization::Object *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_Object ? static_cast<const torch::jit::mobile::serialization::Object *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::IntList *val_as_IntList() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::IntList ? static_cast<const torch::jit::mobile::serialization::IntList *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_IntList ? static_cast<const torch::jit::mobile::serialization::IntList *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::DoubleList *val_as_DoubleList() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::DoubleList ? static_cast<const torch::jit::mobile::serialization::DoubleList *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_DoubleList ? static_cast<const torch::jit::mobile::serialization::DoubleList *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::BoolList *val_as_BoolList() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::BoolList ? static_cast<const torch::jit::mobile::serialization::BoolList *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_BoolList ? static_cast<const torch::jit::mobile::serialization::BoolList *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::Device *val_as_Device() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::Device ? static_cast<const torch::jit::mobile::serialization::Device *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_Device ? static_cast<const torch::jit::mobile::serialization::Device *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::EnumValue *val_as_EnumValue() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::EnumValue ? static_cast<const torch::jit::mobile::serialization::EnumValue *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_EnumValue ? static_cast<const torch::jit::mobile::serialization::EnumValue *>(val()) : nullptr;
   }
   const torch::jit::mobile::serialization::Function *val_as_Function() const {
-    return val_type() == torch::jit::mobile::serialization::IValueUnion::Function ? static_cast<const torch::jit::mobile::serialization::Function *>(val()) : nullptr;
+    return val_type() == torch::jit::mobile::serialization::IValueUnion_Function ? static_cast<const torch::jit::mobile::serialization::Function *>(val()) : nullptr;
   }
   void *mutable_val() {
     return GetPointer<void *>(VT_VAL);
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint8_t>(verifier, VT_VAL_TYPE) &&
+           VerifyField<uint8_t>(verifier, VT_VAL_TYPE, 1) &&
            VerifyOffset(verifier, VT_VAL) &&
            VerifyIValueUnion(verifier, val(), val_type()) &&
            verifier.EndTable();
@@ -2136,7 +2136,7 @@ struct IValueBuilder {
 
 inline flatbuffers::Offset<IValue> CreateIValue(
     flatbuffers::FlatBufferBuilder &_fbb,
-    torch::jit::mobile::serialization::IValueUnion val_type = torch::jit::mobile::serialization::IValueUnion::NONE,
+    torch::jit::mobile::serialization::IValueUnion val_type = torch::jit::mobile::serialization::IValueUnion_NONE,
     flatbuffers::Offset<void> val = 0) {
   IValueBuilder builder_(_fbb);
   builder_.add_val(val);
@@ -2305,17 +2305,17 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
   }
   bool Verify(flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
-           VerifyField<uint32_t>(verifier, VT_BYTECODE_VERSION) &&
+           VerifyField<uint32_t>(verifier, VT_BYTECODE_VERSION, 4) &&
            VerifyOffset(verifier, VT_EXTRA_FILES) &&
            verifier.VerifyVector(extra_files()) &&
            verifier.VerifyVectorOfTables(extra_files()) &&
            VerifyOffset(verifier, VT_METHODS) &&
            verifier.VerifyVector(methods()) &&
-           VerifyField<uint32_t>(verifier, VT_STATE_OBJ) &&
+           VerifyField<uint32_t>(verifier, VT_STATE_OBJ, 4) &&
            VerifyOffset(verifier, VT_IVALUES) &&
            verifier.VerifyVector(ivalues()) &&
            verifier.VerifyVectorOfTables(ivalues()) &&
-           VerifyField<int32_t>(verifier, VT_STORAGE_DATA_SIZE) &&
+           VerifyField<int32_t>(verifier, VT_STORAGE_DATA_SIZE, 4) &&
            VerifyOffset(verifier, VT_STORAGE_DATA) &&
            verifier.VerifyVector(storage_data()) &&
            verifier.VerifyVectorOfTables(storage_data()) &&
@@ -2327,8 +2327,8 @@ struct Module FLATBUFFERS_FINAL_CLASS : private flatbuffers::Table {
            verifier.VerifyVectorOfTables(jit_sources()) &&
            VerifyOffset(verifier, VT_JIT_CONSTANTS) &&
            verifier.VerifyVector(jit_constants()) &&
-           VerifyField<uint32_t>(verifier, VT_OPERATOR_VERSION) &&
-           VerifyField<uint32_t>(verifier, VT_MOBILE_IVALUE_SIZE) &&
+           VerifyField<uint32_t>(verifier, VT_OPERATOR_VERSION, 4) &&
+           VerifyField<uint32_t>(verifier, VT_MOBILE_IVALUE_SIZE, 4) &&
            verifier.EndTable();
   }
 };
@@ -2453,66 +2453,66 @@ inline flatbuffers::Offset<Module> CreateModuleDirect(
 
 inline bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, IValueUnion type) {
   switch (type) {
-    case IValueUnion::NONE: {
+    case IValueUnion_NONE: {
       return true;
     }
-    case IValueUnion::Int: {
-      return verifier.Verify<torch::jit::mobile::serialization::Int>(static_cast<const uint8_t *>(obj), 0);
+    case IValueUnion_Int: {
+      return verifier.VerifyField<torch::jit::mobile::serialization::Int>(static_cast<const uint8_t *>(obj), 0, 8);
     }
-    case IValueUnion::Bool: {
-      return verifier.Verify<torch::jit::mobile::serialization::Bool>(static_cast<const uint8_t *>(obj), 0);
+    case IValueUnion_Bool: {
+      return verifier.VerifyField<torch::jit::mobile::serialization::Bool>(static_cast<const uint8_t *>(obj), 0, 1);
     }
-    case IValueUnion::Double: {
-      return verifier.Verify<torch::jit::mobile::serialization::Double>(static_cast<const uint8_t *>(obj), 0);
+    case IValueUnion_Double: {
+      return verifier.VerifyField<torch::jit::mobile::serialization::Double>(static_cast<const uint8_t *>(obj), 0, 8);
     }
-    case IValueUnion::ComplexDouble: {
-      return verifier.Verify<torch::jit::mobile::serialization::ComplexDouble>(static_cast<const uint8_t *>(obj), 0);
+    case IValueUnion_ComplexDouble: {
+      return verifier.VerifyField<torch::jit::mobile::serialization::ComplexDouble>(static_cast<const uint8_t *>(obj), 0, 8);
     }
-    case IValueUnion::TensorMetadata: {
+    case IValueUnion_TensorMetadata: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::TensorMetadata *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::String: {
+    case IValueUnion_String: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::String *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::List: {
+    case IValueUnion_List: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::List *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::Tuple: {
+    case IValueUnion_Tuple: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::Tuple *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::Dict: {
+    case IValueUnion_Dict: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::Dict *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::Object: {
+    case IValueUnion_Object: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::Object *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::IntList: {
+    case IValueUnion_IntList: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::IntList *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::DoubleList: {
+    case IValueUnion_DoubleList: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::DoubleList *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::BoolList: {
+    case IValueUnion_BoolList: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::BoolList *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::Device: {
+    case IValueUnion_Device: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::Device *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::EnumValue: {
+    case IValueUnion_EnumValue: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::EnumValue *>(obj);
       return verifier.VerifyTable(ptr);
     }
-    case IValueUnion::Function: {
+    case IValueUnion_Function: {
       auto ptr = reinterpret_cast<const torch::jit::mobile::serialization::Function *>(obj);
       return verifier.VerifyTable(ptr);
     }
@@ -2520,7 +2520,7 @@ inline bool VerifyIValueUnion(flatbuffers::Verifier &verifier, const void *obj, 
   }
 }
 
-inline bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<IValueUnion> *types) {
+inline bool VerifyIValueUnionVector(flatbuffers::Verifier &verifier, const flatbuffers::Vector<flatbuffers::Offset<void>> *values, const flatbuffers::Vector<uint8_t> *types) {
   if (!values || !types) return !values && !types;
   if (values->size() != types->size()) return false;
   for (flatbuffers::uoffset_t i = 0; i < values->size(); ++i) {
@@ -2557,6 +2557,11 @@ inline bool ModuleBufferHasIdentifier(const void *buf) {
       buf, ModuleIdentifier());
 }
 
+inline bool SizePrefixedModuleBufferHasIdentifier(const void *buf) {
+  return flatbuffers::BufferHasIdentifier(
+      buf, ModuleIdentifier(), true);
+}
+
 inline bool VerifyModuleBuffer(
     flatbuffers::Verifier &verifier) {
   return verifier.VerifyBuffer<torch::jit::mobile::serialization::Module>(ModuleIdentifier());
@@ -2585,4 +2590,3 @@ inline void FinishSizePrefixedModuleBuffer(
 }  // namespace torch
 
 #endif  // FLATBUFFERS_GENERATED_MOBILEBYTECODE_TORCH_JIT_MOBILE_SERIALIZATION_H_
-// @generated
