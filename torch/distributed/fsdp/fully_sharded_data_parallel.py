@@ -4024,7 +4024,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _get_default_comm_hook(self) -> Any:
         r"""
-        Sets a default communication hook based on a sharding strategy.
+        Returns a default communication hook based on a sharding strategy.
         """
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             return None
@@ -4033,7 +4033,7 @@ class FullyShardedDataParallel(nn.Module):
 
     def _get_default_comm_hook_state(self) -> Any:
         r"""
-        Sets a default communication hook state based on a sharding strategy.
+        Returns a default communication hook state based on a sharding strategy.
         """
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             return None
@@ -4066,14 +4066,15 @@ class FullyShardedDataParallel(nn.Module):
                             and shared by all the gradient tensors on the worker.
             hook (callable): Callable with the following signature:
                             ``hook: Callable[torch.Tensor] -> None``:
-                            This function takes in a python tensor, which represents
+                            This function takes in a Python tensor, which represents
                             the full, flattened, unsharded gradient with respect to all variables
                             corresponding to the model this FSDP unit is wrapping
                             (that are not wrapped by other FSDP sub-units).
                             It then performs all necessary processing and returns ``None``.
 
         """
-        assert self.check_is_root(), "register_comm_hook can only be called on a root instance."
+        if not self.check_is_root():
+            raise AssertionError("register_comm_hook can only be called on a root instance.")
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             raise NotImplementedError(
                 "Communication hooks are currently only available for a NO_SHARD strategy."
