@@ -12299,6 +12299,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_det_singular,
            decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
            skips=(
+               DecorateInfo(unittest.skip("The backward may give different results"), 'TestCommon', 'test_noncontiguous_samples'),
                # Both Hessians are incorrect on complex inputs??
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad', dtypes=(torch.complex128,)),
                DecorateInfo(unittest.expectedFailure, "TestGradients", 'test_fn_fwgrad_bwgrad', dtypes=(torch.complex128,)),
@@ -13402,8 +13403,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestGradients', 'test_fn_gradgrad'),
                # JIT test also tries to compute double backward, which fails
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
-               # RuntimeError: vector::_M_range_check: __n (which is 2) >= this->size() (which is 2)
-               DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_correctness_with_reusing_ir'),
            )),
     OpInfo('nn.functional.cosine_similarity',
            aten_name="cosine_similarity",
@@ -19716,6 +19715,20 @@ op_db: List[OpInfo] = [
         ref=scipy.special.k1 if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
+    UnaryUfuncInfo(
+        'special.scaled_modified_bessel_k1',
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=1e-03),
+                    torch.float64: tol(atol=1e-05, rtol=1e-03),
+                }
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k1e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
     BinaryUfuncInfo(
         'special.shifted_chebyshev_polynomial_t',
         dtypes=all_types_and(torch.bool),
@@ -19968,8 +19981,18 @@ python_ref_db = [
         torch_opinfo_name="asin",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.asinh",
+        torch_opinfo_name="asinh",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.atanh",
+        torch_opinfo_name="atanh",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",

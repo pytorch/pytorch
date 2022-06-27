@@ -4064,17 +4064,25 @@ Tensor masked_fmap(
   // function is used when we have a formula that works for, say, all
   // non-singular inputs and another one for when the inputs are singular. See
   // for example det_backward
-  auto n_true = mask.count_nonzero().item<int64_t>();
-  if (n_true == mask.numel()) {
+
+  // Precondition for the n == 0 case to make sense
+  TORCH_INTERNAL_ASSERT(t.numel() != 0);
+  auto t_masked = t.index({mask});
+  auto n = t_masked.numel();
+  if (n == t.numel()) {
     return f1(t, ts...);
-  } else if (n_true == 0) {
+  } else if (n == 0) {
     return f2(t, ts...);
   } else {
-    auto idx_true = at::native::toListOfOptionalTensors(mask);
-    auto idx_false = at::native::toListOfOptionalTensors(mask.logical_not());
+    // Do
+    // ret = t.new_empty(t.shape)
+    // ret[mask] = f1(t1[mask], ..., tn[mask])
+    // ret[~mask] = f2(t1[~mask], ..., tn[~mask])
+    auto not_mask = mask.logical_not();
     return t.new_empty(t.sizes())
-        .index_put_(idx_true, f1(t.index(idx_true), ts.index(idx_true)...))
-        .index_put_(idx_false, f2(t.index(idx_false), ts.index(idx_false)...));
+        .index_put_({mask}, f1(t_masked, ts.index({mask})...))
+        .index_put_(
+            {not_mask}, f2(t.index({not_mask}), ts.index({not_mask})...));
   }
 }
 
@@ -4153,7 +4161,7 @@ Tensor linalg_det_backward(
     // some inputs via the masking, as computing an SVD is about 100 times
     // slower than computing an lu_solve on GPU
     return masked_fmap(
-        det.abs() < 10. * eps, singular, non_singular, A, d, grad);
+        det.abs() < 100. * eps, singular, non_singular, A, d, grad);
   }
 }
 
