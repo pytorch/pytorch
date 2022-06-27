@@ -1,9 +1,9 @@
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import warnings
 
 import torch
 from torch.fx import GraphModule
-from .fx.tracer import  QuantizationTracer
+from .fx.tracer import QuantizationTracer
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
 from .fx.convert import convert
