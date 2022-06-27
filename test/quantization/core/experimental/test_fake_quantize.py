@@ -13,17 +13,14 @@ class TestFakeQuantize(unittest.TestCase):
     """
     def test_fake_calc_qparams(self):
         observer = APoTObserver(b=4, k=2)
+        observer.min_val = torch.tensor([0.0])
+        observer.max_val = torch.tensor([1.0])
 
         apot_fake = APoTFakeQuantize(observer)
 
-        min_val = torch.tensor([0.0])
-        max_val = torch.tensor([1.0])
+        alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(signed=False)
 
-        alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(signed=False,
-                                                                                       min_val=min_val,
-                                                                                       max_val=max_val)
-
-        qparams_expected = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
+        qparams_expected = observer.calculate_qparams(signed=False)
 
         self.assertEqual(alpha, qparams_expected[0])
         self.assertTrue(torch.equal(gamma, qparams_expected[1]))
@@ -41,12 +38,9 @@ class TestFakeQuantize(unittest.TestCase):
         # between 0 -> 1000 to quantize -> dequantize
         X = 1000 * torch.rand(20)
 
-        min_val, max_val = torch.aminmax(X)
-
         observer = APoTObserver(b=4, k=2)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False,
-                                                                                      min_val=min_val,
-                                                                                      max_val=max_val)
+        observer.forward(X)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
         apot_fake = APoTFakeQuantize(observer)
         apot_fake.enable_observer()
@@ -66,12 +60,9 @@ class TestFakeQuantize(unittest.TestCase):
         # between 0 -> 1000 to quantize -> dequantize
         X = 1000 * torch.rand(20)
 
-        min_val, max_val = torch.aminmax(X)
-
         observer = APoTObserver(b=4, k=2)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False,
-                                                                                      min_val=min_val,
-                                                                                      max_val=max_val)
+        observer.forward(X)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
         apot_fake = APoTFakeQuantize(observer)
         # disable observer so qparams not set, qparams are all None

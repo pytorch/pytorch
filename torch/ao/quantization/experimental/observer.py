@@ -98,7 +98,7 @@ class APoTObserver(ObserverBase):
                 p_sum += float(tens[1])
 
         # assign gamma
-        gamma = float(alpha) / float(p_sum)
+        gamma = alpha / p_sum
 
         # calculate cartesian product
         cartesian_product = list(itertools.product(*p_all))
