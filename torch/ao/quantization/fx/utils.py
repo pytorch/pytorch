@@ -630,7 +630,7 @@ def create_node_from_old_node_preserve_meta(
 
 def get_skipped_module_name_and_classes(
         prepare_custom_config: PrepareCustomConfig,
-        is_standalone_module: bool) -> Tuple[List[str], List[Callable]]:
+        is_standalone_module: bool) -> Tuple[List[str], List[Type[Any]]]:
     skipped_module_names = copy.copy(prepare_custom_config.non_traceable_module_names)
     skipped_module_classes = copy.copy(prepare_custom_config.non_traceable_module_classes)
     if not is_standalone_module:
