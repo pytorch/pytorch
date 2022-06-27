@@ -1,6 +1,7 @@
 # Owner(s): ["module: primTorch"]
 
 from functools import partial
+from itertools import product
 
 import torch
 from torch.testing import make_tensor
@@ -14,6 +15,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.logging_tensor import LoggingTensor, capture_logs, log_input
 import torch._prims as prims
 from torch._prims.executor import make_traced
+import torch._refs as refs
+
 
 
 class TestPrims(TestCase):
@@ -163,6 +166,69 @@ class TestPrims(TestCase):
         result_aten = fn(a, b, executor="aten")
         result_nvfuser = fn(a, b, executor="nvfuser")
         self.assertEqual(result_aten, result_nvfuser)
+
+    @dtypes(torch.float32)
+    def test_memory_format_strides(self, device, dtype):
+        shapes = (
+            (),
+            (0,),
+            (1,),
+            (5),
+            (1, 0),
+            (1, 1),
+            (3, 7),
+            (3, 0, 2),
+            (1, 1, 2),
+            (4, 1, 1),
+            (7, 8, 9),
+        )
+
+        channels_last_shapes = (
+            (0, 0, 0, 0),
+            (1, 0, 3, 0),
+            (0, 2, 3, 5),
+            (2, 2, 2, 0),
+            (5, 4, 3, 2),
+            (8, 8, 7, 2),
+            (9, 1, 3, 1),
+            (4, 5, 8, 7)
+        )
+
+        channels_last_3d_shapes = (
+            (0, 8, 7, 9, 2),
+            (5, 0, 7, 9, 2),
+            (5, 0, 7, 9, 0),
+            (5, 8, 7, 9, 2),
+            (5, 1, 7, 9, 2),
+            (5, 1, 7, 9, 1),
+        )
+
+        pairs = (
+            (shapes, torch.contiguous_format),
+            (channels_last_shapes, torch.contiguous_format),
+            (channels_last_3d_shapes, torch.contiguous_format),
+            (channels_last_shapes, torch.channels_last),
+            (channels_last_3d_shapes, torch.channels_last_3d),
+        )
+
+        for shapes, memory_format in pairs:
+            for shape in shapes:
+                # tests empty
+                expected = torch.empty(shape, device=device, dtype=dtype, memory_format=memory_format)
+                actual = refs.empty(shape, device=device, dtype=dtype, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
+
+                # tests clone
+                a = torch.testing.make_tensor(shape, device=device, dtype=dtype)
+                expected = torch.clone(a, memory_format=memory_format)
+                actual = torch.clone(a, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
+
+                # tests contiguous
+                a = torch.testing.make_tensor(shape, device=device, dtype=dtype, noncontiguous=True)
+                expected = a.contiguous(memory_format=memory_format)
+                actual = refs.contiguous(a, memory_format=memory_format)
+                self.assertEqual(expected.stride(), actual.stride())
 
 
 class TestPrimsBasic(TestCase):

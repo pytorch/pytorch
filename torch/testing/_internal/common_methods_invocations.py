@@ -20764,11 +20764,6 @@ python_ref_db = [
         "_refs.clone",
         torch_opinfo_name="clone",
         supports_nvfuser=False,
-        skips=(
-            # RuntimeError: no _refs support for torch.Tensor.requires_grad.__get__
-            # https://github.com/pytorch/pytorch/issues/80154
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
     ),
     #
     # View & Shape OpInfos
@@ -20927,22 +20922,12 @@ python_ref_db = [
         torch_opinfo_name="roll",
         validate_view_consistency=False,
         supports_nvfuser=False,
-        skips=(
-            # RuntimeError: no _refs support for torch.Tensor.requires_grad.__get__
-            # https://github.com/pytorch/pytorch/issues/80154
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
     ),
     PythonRefInfo(
         "_refs.rot90",
         torch_opinfo_name="rot90",
         validate_view_consistency=False,
         supports_nvfuser=False,
-        skips=(
-            # RuntimeError: no _refs support for torch.Tensor.requires_grad.__get__
-            # https://github.com/pytorch/pytorch/issues/80154
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
-        ),
     ),
     PythonRefInfo(
         "_refs.stack",

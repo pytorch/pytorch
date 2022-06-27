@@ -55,6 +55,7 @@ torch_function_passthrough = {
     # For TorchRefsMode only
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
+    torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
 }
 
 
@@ -213,9 +214,9 @@ def is_contiguous(a: TensorLikeType) -> bool:
     Tests whether a tensor is contiguous or not.
 
     Tensors are contiguous when they have no elements,
-    or when they have "nested" strides.
+    one element, or when they have "nested" strides.
     """
-    if a.numel() == 0:
+    if a.numel() < 2:
         return True
 
     expected_stride = 1
@@ -339,11 +340,6 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
         return True
 
     # The following is equivalent to compute_non_overlapping_and_dense in TensorImpl.cpp
-
-    # Short-circuits for tensors with zero or one elements, which
-    # are trivially non-overlapping and "dense"
-    if a.numel() < 2:
-        return True
 
     # Short-circuits for tensors of rank one, which are
     # non-overlapping and "dense" if their stride is one
@@ -1265,12 +1261,21 @@ def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
         lambda: "Only tensors of rank 4 can use the channels_last memory format",
     )
 
-    shape = list(shape)
-    shape[1], shape[-1] = shape[-1], shape[1]
-    strides = list(make_contiguous_strides_for(shape))
-    strides[-1], strides[1] = strides[1], strides[-1]
+    multiplier = shape[1]
+    strides = []
+    for idx in (-1, -2, 0):
+        l = shape[idx]
+        if l != 0:
+            strides.append(multiplier)
+        else:
+            strides.append(multiplier)
+        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # This is consistent with eager
+        multiplier = l * multiplier
 
-    return tuple(strides)
+    strides.insert(2, 1)
+    result = tuple(reversed(strides))
+    return result
 
 
 def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
@@ -1279,12 +1284,21 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
         lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
     )
 
-    shape = list(shape)
-    shape[1], shape[-1] = shape[-1], shape[1]
-    strides = list(make_contiguous_strides_for(shape))
-    strides[-1], strides[1] = strides[1], strides[-1]
+    multiplier = shape[1]
+    strides = []
+    for idx in (-1, -2, -3, 0):
+        l = shape[idx]
+        if l != 0:
+            strides.append(multiplier)
+        else:
+            strides.append(multiplier)
+        # NOTE: intentionally divergence from make_contiguous_strides_for
+        # This is consistent with eager
+        multiplier = l * multiplier
 
-    return tuple(strides)
+    strides.insert(3, 1)
+    result = tuple(reversed(strides))
+    return result
 
 
 def compute_reduction_output_shape(
