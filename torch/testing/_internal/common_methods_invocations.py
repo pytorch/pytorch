@@ -11167,7 +11167,12 @@ op_db: List[OpInfo] = [
            reference_inputs_func=reference_inputs_clone,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_out=False),
+           supports_out=False,
+           skips=(
+               # TypeError: _copy_dispatcher() got an unexpected keyword argument 'memory_format'
+               # (NumPy reference needs to be extended with memory_format)
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref'),
+           ),),
     OpInfo('contiguous',
            op=lambda x, *args, **kwargs: x.contiguous(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
