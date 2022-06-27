@@ -589,7 +589,6 @@ class TestOperators(TestCase):
         xfail('__getitem__', ''),  # dynamic error
         xfail('_masked.prod'),  # calls aten::item
         xfail('eig'),  # calls aten::item
-        xfail('linalg.det', ''),  # calls .item()
         xfail('linalg.eig'),  # Uses aten::allclose
         xfail('linalg.householder_product'),  # needs select_scatter
         xfail('linalg.slogdet'),  # calls .item()
@@ -733,6 +732,7 @@ class TestOperators(TestCase):
         xfail('lu'),
         xfail('cumprod'),
         xfail('lu_solve'),
+        xfail('linalg.det'),
         xfail('linalg.lstsq', 'grad_oriented'),
         xfail('linalg.cholesky'),
         xfail('linalg.qr'),
@@ -1043,7 +1043,6 @@ class TestOperators(TestCase):
         xfail('cdist', ''),
         xfail('cholesky', ''),
         xfail('eig', ''),
-        xfail('linalg.det', ''),
         xfail('linalg.slogdet', ''),
         xfail('logcumsumexp', ''),
         xfail('logdet', ''),
