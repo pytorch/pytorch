@@ -22,6 +22,7 @@ Functions
 .. autofunction:: exp2
 .. autofunction:: expit
 .. autofunction:: expm1
+.. autofunction:: gamma
 .. autofunction:: gammainc
 .. autofunction:: gammaincc
 .. autofunction:: gammaln
