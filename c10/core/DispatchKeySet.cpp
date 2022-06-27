@@ -117,8 +117,8 @@ DispatchKeySet getBackendKeySetFromAutograd(DispatchKey t) {
     case DispatchKey::AutogradPrivateUse3:
       return DispatchKeySet(DispatchKey::PrivateUse3);
     case DispatchKey::AutogradNestedTensor:
-      return DispatchKeySet(
-          {DispatchKey::NestedTensorCPU, DispatchKey::NestedTensorCUDA});
+      return DispatchKeySet(DispatchKey::NestedTensor) |
+          DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
     case DispatchKey::AutogradOther:
       return autogradother_backends;
     default:
