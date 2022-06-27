@@ -9,6 +9,10 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .. import functional as F
 
+__all__ = ['Threshold', 'ReLU', 'RReLU', 'Hardtanh', 'ReLU6', 'Sigmoid', 'Hardsigmoid', 'Tanh',
+           'SiLU', 'Mish', 'Hardswish', 'ELU', 'CELU', 'SELU', 'GLU', 'GELU', 'Hardshrink', 'LeakyReLU',
+           'LogSigmoid', 'Softplus', 'Softshrink', 'MultiheadAttention', 'PReLU', 'Softsign', 'Tanhshrink',
+           'Softmin', 'Softmax', 'Softmax2d', 'LogSoftmax']
 
 class Threshold(Module):
     r"""Thresholds each element of the input Tensor.
@@ -734,7 +738,7 @@ class LeakyReLU(Module):
     or
 
     .. math::
-        \text{LeakyRELU}(x) =
+        \text{LeakyReLU}(x) =
         \begin{cases}
         x, & \text{ if } x \geq 0 \\
         \text{negative\_slope} \times x, & \text{ otherwise }

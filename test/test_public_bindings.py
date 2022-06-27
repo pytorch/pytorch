@@ -188,6 +188,7 @@ class TestPublicBindings(TestCase):
             "StreamObjType",
             "StringType",
             "SUM",
+            "SymbolicIntNode",
             "TensorType",
             "ThroughputBenchmark",
             "TracingState",
@@ -241,6 +242,11 @@ class TestPublicBindings(TestCase):
             "vitals_enabled",
 
             "wait",
+            "Tag",
+            "inplace_view",
+            "view_copy",
+            "generated",
+            "dynamic_output_shape",
         }
         torch_C_bindings = {elem for elem in dir(torch._C) if not elem.startswith("_")}
 

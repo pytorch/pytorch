@@ -48,6 +48,20 @@ static int64_t noop_dim_fn(const PyInterpreter*, const TensorImpl*) {
       "attempted to call `dim` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static c10::IntArrayRef noop_strides_fn(
+    const PyInterpreter*,
+    const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `strides` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
+static c10::IntArrayRef noop_sizes_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `sizes` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
@@ -56,6 +70,8 @@ void PyInterpreter::disarm() noexcept {
   is_contiguous_fn_ = &noop_is_contiguous_fn;
   device_fn_ = &noop_device_fn;
   dim_fn_ = &noop_dim_fn;
+  strides_fn_ = &noop_strides_fn;
+  sizes_fn_ = &noop_sizes_fn;
 }
 
 } // namespace impl

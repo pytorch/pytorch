@@ -36,6 +36,8 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
     is_non_overlapping_and_dense_ = is_non_overlapping_and_dense;
   }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     TensorImpl::release_resources();
     opaque_handle_ = {};
@@ -55,7 +57,8 @@ struct TORCH_API OpaqueTensorImpl : public TensorImpl {
 
 #ifdef DEBUG
   bool has_storage() const override {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!storage_, "OpaqueTensorImpl assumes that storage_ is never set");
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        !storage_, "OpaqueTensorImpl assumes that storage_ is never set");
     return false;
   }
 #endif
