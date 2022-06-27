@@ -1,5 +1,7 @@
 from enum import Enum
 
+__all__ = ['ObservationType']
+
 class ObservationType(Enum):
     # this means input and output are observed with different observers, based
     # on qconfig.activation
