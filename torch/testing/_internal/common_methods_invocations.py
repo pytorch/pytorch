@@ -20214,7 +20214,6 @@ python_ref_db = [
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
@@ -20705,7 +20704,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        supports_nvfuser=False,
         skips=(
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
