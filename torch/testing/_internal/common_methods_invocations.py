@@ -20172,7 +20172,8 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        # No support for squeeze when keepdim=False.
+        # When keepdim=False logsumexp function uses squeeze operation
+        # that is not yet exposed in nvFuser's Python API.
         supports_nvfuser=False,
     ),
     PythonRefInfo(
