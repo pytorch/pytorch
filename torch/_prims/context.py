@@ -83,9 +83,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
         if func is not None:
-            # torch calls inside func should be interpreted as refs calls
-            with torch.overrides.enable_torch_function_mode(self, replace=self.inner):
-                return func(*args, **kwargs)
+            return func(*args, **kwargs)
         if self.strict:
             raise RuntimeError(
                 f"no _refs support for {torch.overrides.resolve_name(orig_func)}"

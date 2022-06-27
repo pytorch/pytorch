@@ -34,8 +34,8 @@ struct AllreduceCoalescedOptions : AllreduceOptions {};
 
 struct ReduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
-  int64_t rootRank = 0;
-  int64_t rootTensor = 0;
+  int rootRank = 0;
+  int rootTensor = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
@@ -44,12 +44,12 @@ struct AllgatherOptions {
 };
 
 struct GatherOptions {
-  int64_t rootRank = 0;
+  int rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
 struct ScatterOptions {
-  int64_t rootRank = 0;
+  int rootRank = 0;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 
@@ -63,7 +63,7 @@ struct AllToAllOptions {
 };
 
 struct BarrierOptions {
-  std::vector<int64_t> device_ids;
+  std::vector<int> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
 };
 

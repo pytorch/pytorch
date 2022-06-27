@@ -4,7 +4,6 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
-__all__ = ['Adagrad', 'adagrad']
 
 class Adagrad(Optimizer):
     r"""Implements Adagrad algorithm.

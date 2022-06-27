@@ -3,7 +3,6 @@ from .. import functional as F
 
 from torch import Tensor
 
-__all__ = ['PixelShuffle', 'PixelUnshuffle']
 
 class PixelShuffle(Module):
     r"""Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)`

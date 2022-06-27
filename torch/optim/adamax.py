@@ -4,7 +4,6 @@ from torch import Tensor
 from .optimizer import Optimizer
 from typing import List, Optional
 
-__all__ = ['Adamax', 'adamax']
 
 class Adamax(Optimizer):
     r"""Implements Adamax algorithm (a variant of Adam based on infinity norm).

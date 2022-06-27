@@ -12,7 +12,6 @@ from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
 
-__all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'TransformerEncoderLayer', 'TransformerDecoderLayer']
 
 class Transformer(Module):
     r"""A transformer model. User is able to modify the attributes as needed. The architecture
