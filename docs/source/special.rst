@@ -29,9 +29,9 @@ Functions
 .. autofunction:: i0e
 .. autofunction:: i1
 .. autofunction:: i1e
+.. autofunction:: log1p
 .. autofunction:: log_ndtr
 .. autofunction:: log_softmax
-.. autofunction:: log1p
 .. autofunction:: logit
 .. autofunction:: logsumexp
 .. autofunction:: multigammaln
@@ -41,6 +41,7 @@ Functions
 .. autofunction:: psi
 .. autofunction:: round
 .. autofunction:: scaled_modified_bessel_k0
+.. autofunction:: scaled_modified_bessel_k1
 .. autofunction:: sinc
 .. autofunction:: softmax
 .. autofunction:: xlog1py

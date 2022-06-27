@@ -1178,6 +1178,26 @@ inline Tensor& scaled_modified_bessel_k0_out(Tensor& y, const Tensor& x) {
   return torch::special_scaled_modified_bessel_k0_out(y, x);
 }
 
+/// Scaled modified Bessel function of the second kind of order 1.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_k1(x);
+/// ```
+inline Tensor scaled_modified_bessel_k1(const Tensor& x) {
+  return torch::special_scaled_modified_bessel_k1(x);
+}
+
+inline Tensor& scaled_modified_bessel_k1_out(Tensor& y, const Tensor& x) {
+  return torch::special_scaled_modified_bessel_k1_out(y, x);
+}
+
 /// Shifted Chebyshev polynomial of the first kind.
 ///
 /// See
