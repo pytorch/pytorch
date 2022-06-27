@@ -139,13 +139,22 @@ class TestProxyTensor(TestCase):
         def f(x):
             return x + torch.randn(x.shape)
 
-        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))  # default behavior should not trace factory functions
+        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))  # setting the flag to false should not trace factory functions
         self.assertFalse(
             any(
-                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
+                node.target == torch.ops.aten.randn.default
                 for node in traced.graph.nodes
             )
         )
+
+    def test_make_fx_overloads(self):
+        def f(x):
+            return x.cos() + torch.randn(x.shape)
+
+        traced = make_fx(f)(torch.randn(3))
+
+        self.assertTrue(all([isinstance(node.target, torch._ops.OpOverload) for node in traced.graph.nodes if node.op == 'call_function']))
+
 
 make_fx_failures = {
     # unknown
