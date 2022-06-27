@@ -129,5 +129,41 @@ class TestNonUniformObserver(unittest.TestCase):
         level_indices_test_list = obs_result[2].tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
+    """
+        Test case 5
+        Assume hardcoded parameters:
+        * b = 6 (total number of bits across all terms)
+        * k = 1 (base bitwidth, i.e. bitwidth of every term)
+        * n = 6 (number of additive terms)
+    """
+    def test_calculate_qparams_k1(self):
+        obs = APoTObserver(max_val=1.0, b=6, k=1)
+
+        obs_result = obs.calculate_qparams(signed=False)
+
+        # calculate expected gamma value
+        gamma_test = 0
+        for i in range(6):
+            gamma_test += 2**(-i)
+
+        gamma_test = 1 / gamma_test
+
+        # check gamma value
+        self.assertEqual(obs_result[0], gamma_test)
+
+        # check quantization levels size
+        quantlevels_size_test = int(len(obs_result[1]))
+        quantlevels_size = 2**6
+        self.assertEqual(quantlevels_size_test, quantlevels_size)
+
+        # check level indices size
+        levelindices_size_test = int(len(obs_result[2]))
+        level_indices_size = 2**6
+        self.assertEqual(levelindices_size_test, level_indices_size)
+
+        # check level indices unique values
+        level_indices_test_list = obs_result[2].tolist()
+        self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
+
 if __name__ == '__main__':
     unittest.main()
