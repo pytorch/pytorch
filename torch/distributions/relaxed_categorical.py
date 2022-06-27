@@ -6,6 +6,7 @@ from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
 
+__all__ = ['ExpRelaxedCategorical', 'RelaxedOneHotCategorical']
 
 class ExpRelaxedCategorical(Distribution):
     r"""

@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, lazy_property
 
+__all__ = ['MultivariateNormal']
 
 def _batch_mv(bmat, bvec):
     r"""

@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from typing import Any, List
 
+__all__ = ['PruningParametrization', 'ZeroesParametrization', 'ActivationReconstruction', 'BiasHook']
 
 class PruningParametrization(nn.Module):
     def __init__(self, original_outputs):

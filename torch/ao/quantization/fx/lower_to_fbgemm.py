@@ -3,6 +3,8 @@ from .graph_module import QuantizedGraphModule
 from ..qconfig import QConfigAny
 from typing import Dict, Tuple
 
+__all__ = ['lower_to_fbgemm']
+
 def lower_to_fbgemm(
     model: QuantizedGraphModule,
     qconfig_map: Dict[str, QConfigAny],
