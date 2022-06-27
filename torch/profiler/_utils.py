@@ -1,7 +1,9 @@
 from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List
+import re
 
+import torch
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 from torch.autograd import _KinetoEvent
@@ -46,9 +48,9 @@ class EventKey:
         overlap_time = 0
         intervals = sorted(intervals, key=lambda x: x.start)
         for i, interval in enumerate(intervals):
-            if i + 1 < len(intervals):
-                assert interval.end <= intervals[
-                    i + 1].start, "Intervals must be disjoint"
+            if i + 1 < len(intervals) and interval.end > intervals[i +
+                                                                   1].start:
+                interval.end = intervals[i + 1].start
             overlap_start = max(self.event.start_time_ns, interval.start)
             overlap_end = min(self.event.end_time_ns, interval.end)
 
@@ -84,7 +86,6 @@ class BasicEvaluation:
             for child_event in curr_event.children:
                 self_time -= child_event.duration_time_ns
                 stack.append(child_event)
-
             assert EventKey(
                 curr_event
             ) not in self.metrics, f"Duplicate id: {curr_event.id}, {curr_event.name()}"
@@ -181,6 +182,14 @@ class BasicEvaluation:
         idle = False
         idle_start = 0
         idle_intervals: List[Interval] = []
+        if self.queue_depth_list and self.events:
+            idle_intervals += [
+                Interval(self.events[0].start_time_ns,
+                         self.queue_depth_list[0].start),
+                Interval(self.queue_depth_list[-1].end,
+                         self.events[-1].end_time_ns)
+            ]
+
         for data_point in self.queue_depth_list:
             if data_point.queue_depth == 0 and not idle:
                 idle_start = data_point.end
@@ -194,6 +203,86 @@ class BasicEvaluation:
             self.metrics[EventKey(event)].idle_time_ns = EventKey(
                 event).intervals_overlap(idle_intervals)
 
+    def rank_events(self, length):
+        '''
+        Filter and Rank the events based on some heuristics:
+        1) Events that are in the falling phase of the queue depth.
+        2) Events that have a high idle_time, self_time difference.
+
+        Parameters:
+            length: The number of events to return.
+        '''
+
+        # Find the interval when qd is falling to 0
+        queue_depth_list = list(reversed(self.queue_depth_list))
+        qd_values = [e.queue_depth for e in queue_depth_list]
+
+        decrease_interval = []
+        for i in range(len(qd_values) - 1):
+            if qd_values[i] <= 1:
+                # Find next zero and if the max value between them exceeds
+                # the threshold, then we have a falling interval
+                for j in range(i + 1, len(qd_values)):
+                    if qd_values[j] <= 1:
+                        peak_idx = argmax(qd_values, start=i + 1, end=j)
+                        if peak_idx is None:
+                            continue
+                        # check for threshold
+                        if qd_values[peak_idx] - qd_values[i] > 3:
+                            decrease_interval.append(
+                                Interval(queue_depth_list[peak_idx].start,
+                                         queue_depth_list[i].start))
+                            i = j
+                            break
+
+        # Filter out events that are not in the decrease interval
+        event_list = [
+            event for event in self.metrics.keys()
+            if event.intervals_overlap(decrease_interval)
+        ]
+        if event_list:
+            self_time = torch.tensor(
+                [self.metrics[event].self_time_ns for event in event_list],
+                dtype=torch.float32)
+            idle_time = torch.tensor(
+                [self.metrics[event].idle_time_ns for event in event_list],
+                dtype=torch.float32)
+
+            normalized_gain = (idle_time -
+                               torch.mean(idle_time)) / torch.std(idle_time)
+            normalized_self = (self_time -
+                               torch.mean(self_time)) / torch.std(self_time)
+            heuristic_score_list = normalized_gain + normalized_self
+
+            # Sort events by heuristic
+            event_list = [
+                event
+                for _, event in sorted(zip(heuristic_score_list, event_list),
+                                       key=lambda x: x[0],
+                                       reverse=True)
+            ]
+            event_list = event_list[:length]
+        return event_list
+
+    def get_optimizable_events(self,
+                               length: int = 1,
+                               print_enable: bool = True):
+        event_list = self.rank_events(length)
+        output = ""
+        if len(event_list) == 0:
+            output += "No events to optimize\n"
+            return []
+        output += "Optimizable events:\n"
+        for event in event_list:
+            output += f"""{'-'*80}
+Event:                {event}
+Source code location: {source_code_location(event.event)}
+Percentage idle time: {self.metrics[event].fraction_idle_time * 100:.2f}%
+{'-'*80}\n"""
+        if print_enable:
+            print(output)
+        return event_list
+
 
 def index_of_first_match(seq, predicate, start=0, end=None):
     if end is None or end >= len(seq):
@@ -202,3 +291,20 @@ def index_of_first_match(seq, predicate, start=0, end=None):
         if predicate(seq[i]):
             return i
     return None
+
+
+def argmax(seq, key=lambda x: x, start=0, end=None):
+    seq = seq[start:end]
+    if len(seq) == 0:
+        return None
+    return seq.index(max(seq, key=key)) + start
+
+
+def source_code_location(event):
+    while (event is not None):
+        match = re.search(r"\.py\(.*\)", event.name())
+        if (match is None):
+            event = event.parent
+            continue
+        return event.name()
+    return "No source code location found"
