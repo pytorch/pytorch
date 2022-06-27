@@ -92,21 +92,20 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "linux.2xlarge" },
         ]}
 
-
-  linux-xenial-py3_7-clang7-onnx-build:
-    name: linux-xenial-py3.7-clang7-onnx
+  linux-focal-py3_7-clang10-onnx-build:
+    name: linux-focal-py3.7-clang10-onnx
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-xenial-py3.7-clang7-onnx
-      docker-image-name: pytorch-linux-xenial-py3-clang7-onnx
+      build-environment: linux-focal-py3.7-clang10-onnx
+      docker-image-name: pytorch-linux-focal-py3-clang10-onnx
 
-  linux-xenial-py3_7-clang7-onnx-test:
-    name: linux-xenial-py3.7-clang7-onnx
+  linux-focal-py3_7-clang10-onnx-test:
+    name: linux-focal-py3.7-clang10-onnx
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-xenial-py3_7-clang7-onnx-build
+    needs: linux-focal-py3_7-clang10-onnx-build
     with:
-      build-environment: linux-xenial-py3.7-clang7-onnx
-      docker-image: ${{ needs.linux-xenial-py3_7-clang7-onnx-build.outputs.docker-image }}
+      build-environment: linux-focal-py3.7-clang10-onnx
+      docker-image: ${{ needs.linux-focal-py3_7-clang10-onnx-build.outputs.docker-image }}
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -133,6 +132,8 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
   linux-bionic-cuda11_3-py3_7-clang9-build:
@@ -209,6 +210,7 @@ jobs:
       build-generates-artifacts: false
 
   linux-bionic-py3_7-clang8-xla-build:
+    if: false
     name: linux-bionic-py3_7-clang8-xla
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -306,3 +308,13 @@ jobs:
         { include: [
           { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
+
+  # please ensure that this and its corresponding job in trunk.yml are in sync
+  linux-bionic-rocm5_1-py3_7-build:
+    # don't run build twice on master
+    if: github.event_name == 'pull_request'
+    name: linux-bionic-rocm5.1-py3.7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-rocm5.1-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7

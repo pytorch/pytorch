@@ -12,6 +12,7 @@ The torch.special module, modeled after SciPy's `special <https://docs.scipy.org
 Functions
 -----------------------
 
+.. autofunction:: airy_ai
 .. autofunction:: bessel_j0
 .. autofunction:: bessel_j1
 .. autofunction:: bessel_y0
@@ -29,6 +30,7 @@ Functions
 .. autofunction:: exp2
 .. autofunction:: expit
 .. autofunction:: expm1
+.. autofunction:: gamma
 .. autofunction:: gammainc
 .. autofunction:: gammaincc
 .. autofunction:: gammaln
@@ -38,9 +40,9 @@ Functions
 .. autofunction:: i1e
 .. autofunction:: laguerre_polynomial_l
 .. autofunction:: legendre_polynomial_p
-.. autofunction:: log1p
 .. autofunction:: log_ndtr
 .. autofunction:: log_softmax
+.. autofunction:: log1p
 .. autofunction:: logit
 .. autofunction:: logsumexp
 .. autofunction:: modified_bessel_i0
@@ -53,12 +55,14 @@ Functions
 .. autofunction:: polygamma
 .. autofunction:: psi
 .. autofunction:: round
+.. autofunction:: scaled_modified_bessel_k1
 .. autofunction:: shifted_chebyshev_polynomial_t
 .. autofunction:: shifted_chebyshev_polynomial_u
 .. autofunction:: shifted_chebyshev_polynomial_v
 .. autofunction:: shifted_chebyshev_polynomial_w
 .. autofunction:: sinc
 .. autofunction:: softmax
+.. autofunction:: spherical_bessel_j0
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta

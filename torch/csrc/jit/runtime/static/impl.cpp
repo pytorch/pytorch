@@ -864,19 +864,24 @@ BlockRunner::BlockRunner(
 
   for (auto& pnode : nodes_) {
     auto* node = pnode.node();
+    // attaching default interop threadpool executor to fork nodes
+    if (node->kind() == prim::fork) {
+      TaskLauncher launcher_ = at::launch;
+      pnode.set_meta_data(std::move(launcher_));
+    }
     auto blocks = node->blocks();
     const auto num_blocks = blocks.size();
     if (num_blocks == 0) {
       continue;
     }
     DCHECK(node->kind() == prim::If || node->kind() == prim::Loop);
-    auto block_runners = std::make_unique<std::vector<BlockRunner>>();
-    block_runners->reserve(num_blocks);
+    std::vector<BlockRunner> block_runners;
+    block_runners.reserve(num_blocks);
 
     for (auto* b : blocks) {
-      block_runners->emplace_back(sm, values_, b);
+      block_runners.emplace_back(sm, values_, b);
     }
-    pnode.set_block_runners(std::move(block_runners));
+    pnode.set_meta_data(std::move(block_runners));
   }
 }
 
@@ -1720,10 +1725,10 @@ bool BlockRunner::check_for_memory_leak(
         }
       }
     }
-
-    auto* block_runners = pnode.block_runners();
-    if (recurse_on_sub_blocks && block_runners) {
-      for (auto& block_runner : *block_runners) {
+    auto* meta_data = pnode.meta_data();
+    if (recurse_on_sub_blocks && meta_data) {
+      auto& block_runners = meta_data->block_runners();
+      for (auto& block_runner : block_runners) {
         block_runner.check_for_memory_leak(
             output_returned, recurse_on_sub_blocks);
       }
