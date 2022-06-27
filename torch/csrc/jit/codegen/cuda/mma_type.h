@@ -94,6 +94,9 @@ struct MmaOptions {
         operand == other.operand &&
         accumulator_stride == other.accumulator_stride;
   }
+
+  // To be inferred by mma builder interface.
+  MmaOp* mma_op = nullptr;
 };
 
 //! User interface for configuring the mma and mma related
@@ -126,6 +129,10 @@ class TORCH_CUDA_CU_API MmaBuilder {
   //! Generates the matching ldmatrix instruction type for the
   //!  specified mma option.
   LoadStoreOpType ldMatrix() const;
+
+  //! Store the accumulator tv register reference in mma builder
+  //!  to avoid automatic matching of which mma ops.
+  void accumulatorTv(TensorView* tv);
 
   //! Fill in mma options in scheduling time.
   //!  Each mma op in Fusion IR must be configured once before lowering.
