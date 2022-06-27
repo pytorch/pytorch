@@ -2390,7 +2390,7 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
 
   auto out = torchDispatchFromTensorImpl(
       self,
-      "size",
+      "sym_size",
       py::module::import("torch")
           .attr("ops")
           .attr("aten")
