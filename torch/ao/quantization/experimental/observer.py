@@ -33,8 +33,8 @@ class APoTObserver(ObserverBase):
 
     # min_val and max_val are optional args to override
     # the min_val and max_val observed by forward
-    def calculate_qparams(self, signed, min_val=None, max_val=None):
-        return self._calculate_qparams(signed, min_val, max_val)
+    def calculate_qparams(self, signed):
+        return self._calculate_qparams(signed, self.min_val, self.max_val)
 
     r""" Calculates nonuniform quantization parameters according to APoT paper:
     https://arxiv.org/pdf/1909.13144.pdf.

@@ -11,11 +11,11 @@ class TestNonUniformObserver(unittest.TestCase):
     """
     def test_calculate_qparams_invalid(self):
         obs = APoTObserver(b=0, k=0)
+        obs.min_val = torch.tensor([0.0])
+        obs.max_val = torch.tensor([0.0])
 
         with self.assertRaises(AssertionError):
-            alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False,
-                                                                                     min_val=torch.tensor([0]),
-                                                                                     max_val=torch.tensor([0]))
+            alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False)
 
     """
         Test case 2: calculate_qparams
@@ -29,13 +29,11 @@ class TestNonUniformObserver(unittest.TestCase):
     def test_calculate_qparams_2terms(self):
         obs = APoTObserver(b=4, k=2)
 
-        min_val = torch.tensor([0])
-        max_val = torch.tensor([1])
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False,
-                                                                                 min_val=min_val,
-                                                                                 max_val=max_val)
+        obs.min_val = torch.tensor([0.0])
+        obs.max_val = torch.tensor([1.0])
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False)
 
-        alpha_test = torch.max(-min_val, max_val)
+        alpha_test = torch.max(-obs.min_val, obs.max_val)
 
         # check alpha value
         self.assertEqual(alpha, alpha_test)
@@ -73,13 +71,11 @@ class TestNonUniformObserver(unittest.TestCase):
     def test_calculate_qparams_3terms(self):
         obs = APoTObserver(b=6, k=2)
 
-        min_val = torch.tensor([0])
-        max_val = torch.tensor([1])
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False,
-                                                                                 min_val=min_val,
-                                                                                 max_val=max_val)
+        obs.min_val = torch.tensor([0.0])
+        obs.max_val = torch.tensor([1.0])
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False)
 
-        alpha_test = torch.max(-min_val, max_val)
+        alpha_test = torch.max(-obs.min_val, obs.max_val)
 
         # check alpha value
         self.assertEqual(alpha, alpha_test)
@@ -119,12 +115,10 @@ class TestNonUniformObserver(unittest.TestCase):
     def test_calculate_qparams_signed(self):
         obs = APoTObserver(b=4, k=2)
 
-        min_val = torch.tensor([0])
-        max_val = torch.tensor([1])
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=True,
-                                                                                 min_val=min_val,
-                                                                                 max_val=max_val)
-        alpha_test = torch.max(-min_val, max_val)
+        obs.min_val = torch.tensor([0.0])
+        obs.max_val = torch.tensor([1.0])
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=True)
+        alpha_test = torch.max(-obs.min_val, obs.max_val)
 
         # check alpha value
         self.assertEqual(alpha, alpha_test)
@@ -168,9 +162,12 @@ class TestNonUniformObserver(unittest.TestCase):
         * n = 6 (number of additive terms)
     """
     def test_calculate_qparams_k1(self):
-        obs = APoTObserver(max_val=1.0, b=6, k=1)
+        obs = APoTObserver(b=6, k=1)
 
-        obs_result = obs.calculate_qparams(signed=False)
+        obs.min_val = torch.tensor([0.0])
+        obs.max_val = torch.tensor([1.0])
+
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=False)
 
         # calculate expected gamma value
         gamma_test = 0
@@ -180,20 +177,20 @@ class TestNonUniformObserver(unittest.TestCase):
         gamma_test = 1 / gamma_test
 
         # check gamma value
-        self.assertEqual(obs_result[0], gamma_test)
+        self.assertEqual(gamma, gamma_test)
 
         # check quantization levels size
-        quantlevels_size_test = int(len(obs_result[1]))
+        quantlevels_size_test = int(len(quantization_levels))
         quantlevels_size = 2**6
         self.assertEqual(quantlevels_size_test, quantlevels_size)
 
         # check level indices size
-        levelindices_size_test = int(len(obs_result[2]))
+        levelindices_size_test = int(len(level_indices))
         level_indices_size = 2**6
         self.assertEqual(levelindices_size_test, level_indices_size)
 
         # check level indices unique values
-        level_indices_test_list = obs_result[2].tolist()
+        level_indices_test_list = level_indices.tolist()
         self.assertEqual(len(level_indices_test_list), len(set(level_indices_test_list)))
 
     """
@@ -207,7 +204,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         X = obs.forward(X)
 
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(True)
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=True)
 
         min_val = torch.min(X)
         max_val = torch.max(X)
