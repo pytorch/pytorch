@@ -54,6 +54,7 @@ __all__ = [
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
+    "conj_physical",
     "cos",
     "cosh",
     "digamma",
@@ -184,6 +185,7 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "conj",
     "constant_pad_nd",
     "dsplit",
     "dstack",
@@ -383,6 +385,13 @@ def bitwise_not(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
+
+
+@out_wrapper
+def conj_physical(input: TensorLikeType):
+    if not input.dtype.is_complex:
+        return input
+    return prims.conj_physical(input)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -1760,6 +1769,14 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
+def conj(input: TensorLikeType) -> TensorLikeType:
+    if not input.dtype.is_complex:
+        return input
+    if input.is_sparse:
+        return prims.conj_physical(input)
+    return prims.conj(input)
+
+
 # @register_decomposition(torch.ops.aten.constant_pad_nd)
 def constant_pad_nd(
     input: TensorLikeType, pad: List[int], value: NumberType = 0
@@ -1807,8 +1824,6 @@ def constant_pad_nd(
                 f"which is invalid. Check dimension {l_diff + i} of your input.",
             )
         new_shape.append(new_dim)
-
-    print(new_shape, [type(i) for i in new_shape])
 
     output = full(
         new_shape,
