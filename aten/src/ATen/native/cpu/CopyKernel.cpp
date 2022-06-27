@@ -11,9 +11,6 @@ namespace native {
 inline namespace CPU_CAPABILITY {
 void neg_kernel(TensorIteratorBase &iter);
 void conj_kernel(TensorIteratorBase &iter);
-} // namespace CPU_CAPABILITY
-
-namespace {
 
 void direct_copy_kernel(TensorIteratorBase &iter) {
   // TODO: we don't actually need separate instantiations per dtype;
@@ -112,7 +109,7 @@ void copy_kernel(TensorIterator& iter, bool /*non_blocking*/) {
   }
 }
 
-} // anonymous namespace
+} // namespace CPU_CAPABILITY
 
 REGISTER_DISPATCH(copy_stub, &copy_kernel);
 
