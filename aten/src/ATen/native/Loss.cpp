@@ -191,7 +191,7 @@ Tensor kl_div(const Tensor& input, const Tensor& target, int64_t reduction, bool
   TORCH_CHECK(!input.is_complex() && !target.is_complex(),
               "kl_div: Complex inputs not supported.")
   auto output = log_target ? at::exp(target) * (target - input)
-                           : at::xlogy(target, target) - target * input;
+                           : target * (at::log(target) - input);
   return apply_loss_reduction(output, reduction);
 }
 
