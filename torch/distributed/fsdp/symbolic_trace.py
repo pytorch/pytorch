@@ -23,7 +23,7 @@ class TracingConfig:
         tracing. tracer is default to be torch.fx.Tracer(), but can also be instance
         of some child class of torch.fx.Tracer. For example, for hugginface transformer
         based models, one may want to use HFTracer:
-        https://github.com/huggingface/transformers/blob/main/src/transformers/utils/fx.py#L636
+        https://github.com/huggingface/transformers/blob/6dd00f6bd49141ef4f26ed1d1c555bc0fe109ea8/src/transformers/utils/fx.py#L636
 
     concrete_args: Concrete arguments that should not be treated as torch.fx.Proxy
         when tracing the forward function.
@@ -111,7 +111,7 @@ def _patched_create_proxy(
                     if param not in execution_info._traced_param_set:
                         execution_info.param_exec_order.append(param)
                         execution_info._traced_param_set.add(param)
-            if named_params != []:
+            if named_params:
                 execution_info.module_execution_info_dict[execution_info.current_module].append(
                     (execution_info.current_module, named_params)
                 )
@@ -151,9 +151,7 @@ def _patched_call_module(
             Used to repord the execution information.
         module, forward, args, kwargs: inputs to the call_module function.
     """
-    # Update execution_info.module_forward_order
     execution_info.module_forward_order.append(module)
-    # Update execution_info.module_execution_info_dict[current_module]
     named_params_list = list(module.named_parameters())
     if named_params_list != []:
         execution_info.module_execution_info_dict[execution_info.current_module].append(
@@ -180,8 +178,14 @@ def _patch_tracer(
     """
     Patches the input tracer so that during tracer.trace(), the forward order
     of all modules and the parameter execution information are recorded.
-    root_module is the top-level module to be traced.
+    root_module is the top-level module to be traced and should not contain
+    any FSDP modules.
     """
+    from .fully_sharded_data_parallel import FullyShardedDataParallel
+    for module in root_module.modules():
+        assert (
+            not isinstance(module, FullyShardedDataParallel)
+        ), "The input root_module of _patch_tracer should not contain FSDP modules"
     execution_info = _ExecutionInfo(root_module)
     tracer.call_module = functools.partial(
         _patched_call_module,
