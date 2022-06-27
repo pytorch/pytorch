@@ -10,6 +10,7 @@ from . import (
     _enable_server_process_global_profiler,
 )
 
+__all__ = []
 
 class _server_process_global_profile(profile):
     """
