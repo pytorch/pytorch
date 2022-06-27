@@ -8908,6 +8908,11 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(a, args=(c, b))
 
+    # Python scalars type promotion
+    for scalar in (0, 0.0, 0j, False):
+        yield SampleInput(scalar, args=(c, b))
+        yield SampleInput(a, args=(c, scalar))
+
 
 def error_inputs_where(op_info, device, **kwargs):
     shape = (S,)
