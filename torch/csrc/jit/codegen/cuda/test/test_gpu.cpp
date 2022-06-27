@@ -23866,13 +23866,13 @@ TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
     std::stringstream ss;
     virtual void propagateTvPasC(TensorView* from, TensorView* to) override {
       ss << "propagateTvPasC" << std::endl;
-      ss << "from: " << from << std::endl;
-      ss << "to: " << to << std::endl;
+      ss << "from: " << from->name() << std::endl;
+      ss << "to: " << to->name() << std::endl;
     }
     virtual void propagateTvCasP(TensorView* from, TensorView* to) override {
       ss << "propagateTvCasP" << std::endl;
-      ss << "from: " << from << std::endl;
-      ss << "to: " << to << std::endl;
+      ss << "from: " << from->name() << std::endl;
+      ss << "to: " << to->name() << std::endl;
     }
   } printer1, printer2;
   printer1.ss << std::endl;
@@ -23884,11 +23884,11 @@ TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
 
   auto expect = R"ESCAPE(
 propagateTvPasC
-from: T1_l[ rS8{( ceilDiv(i1, 10) )}, rS9{10}, iS4{i2}, iS5{i3} ]
-to: T0_g[ iS0{i1}, iS1{i2}, iS2{i3} ]
+from: 1
+to: 0
 propagateTvCasP
-from: T1_l[ rS8{( ceilDiv(i1, 10) )}, rS9{10}, iS4{i2}, iS5{i3} ]
-to: T2_g[ iS6{i2}, iS7{i3} ]
+from: 1
+to: 2
 )ESCAPE";
   TORCH_CHECK(printer1.ss.str() == expect);
   TORCH_CHECK(printer2.ss.str() == expect);
