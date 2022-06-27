@@ -2596,11 +2596,6 @@ class TestIterDataPipeCountSampleYielded(TestCase):
         res = list(datapipe)
         self.assertEqual(len(res), datapipe._number_of_samples_yielded)
 
-        # Functional Test: Check for reset behavior and if iterator also works
-        it = iter(datapipe)  # reset the DataPipe
-        res = list(it)
-        self.assertEqual(len(res), datapipe._number_of_samples_yielded)
-
         # Functional Test: Check if the count is correct when DataPipe is partially read
         it = iter(datapipe)
         res = []
@@ -2609,6 +2604,11 @@ class TestIterDataPipeCountSampleYielded(TestCase):
             if i == n_expected_samples - 1:
                 break
         self.assertEqual(n_expected_samples, datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check for reset behavior and if iterator also works
+        it = iter(datapipe)  # reset the DataPipe
+        res = list(it)
+        self.assertEqual(len(res), datapipe._number_of_samples_yielded)
 
     def test_iterdatapipe_sample_yielded_generator_function(self):
         # Functional Test: `__iter__` is a generator function
