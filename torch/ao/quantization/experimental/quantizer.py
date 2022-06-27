@@ -86,5 +86,5 @@ r""" Global method to create quantizer and call quantizer dequantize_APoT
 """
 def dequantize_APoT(apot_tensor) -> Tensor:
     quantizer = apot_tensor.quantizer
-    result = apot_tensor.quantizer.dequantize(apot_tensor)
+    result = quantizer.dequantize(apot_tensor)
     return result
