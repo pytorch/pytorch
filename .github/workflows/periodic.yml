@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build:
-    if: false
+    if: false # https://github.com/pytorch/pytorch/issues/80314
     name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -22,7 +22,7 @@ jobs:
       docker-image-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
 
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-test:
-    if: false
+    if: false # https://github.com/pytorch/pytorch/issues/80314
     name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build
