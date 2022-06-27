@@ -48,8 +48,10 @@ __all__ = [
     "abs",
     "acos",
     "acosh",
+    "asinh",
     "asin",
     "atan",
+    "atanh",
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
@@ -373,8 +375,18 @@ def asin(a):
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def asinh(a):
+    return prims.asinh(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def atan(a):
     return prims.atan(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def atanh(a):
+    return prims.atanh(a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -829,8 +841,7 @@ def _pow(
 ) -> TensorLikeType:
     assert isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)
 
-    # If b is a number. mypy doesn't like isinstance(b, NumberType)
-    if not isinstance(b, TensorLikeType):
+    if isinstance(a, Number):
         if b == 1.0:
             return a  # type: ignore[return-value]
         elif b == 2.0:
@@ -839,7 +850,7 @@ def _pow(
             return torch.sqrt(a)  # type: ignore[arg-type]
         elif b == 1.0 / 3.0:
             return prims.cbrt(a)
-    return prims.pow(a, b)
+    return a ** b
 
 
 # TODO: add docstring
