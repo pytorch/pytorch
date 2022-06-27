@@ -149,13 +149,9 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
+if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
-  export ATEN_CPU_CAPABILITY=default
-
-# TODO: this condition is never (we have no NO_AVX512 config), need to fix this.
-elif [[ $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
