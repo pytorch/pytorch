@@ -209,6 +209,6 @@ if __name__ == "__main__":
     # volume of writes we do to Rockset.
     upload_to_rockset("test_run_summary", summarize_test_cases(test_cases))
 
-    if args.head_branch != "master":
+    if args.head_branch == "master":
         # For master jobs, upload everytihng.
         upload_to_rockset("test_run", test_cases)
