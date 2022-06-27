@@ -158,8 +158,6 @@ class FakeSymbolicTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
-
-        print(func_overload)
         if func_overload in meta_funcs:
             return meta_funcs[func_overload](*args, **kwargs)
 

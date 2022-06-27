@@ -2386,7 +2386,6 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
-  std::cerr << "Running concrete_sym_sizes_fn\n";
   auto out = torchDispatchFromTensorImpl(
       self,
       "size",
@@ -2398,15 +2397,9 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
           .ptr(),
       "torch.ops.aten");
 
-  std::cerr << "After torchDispatchFromTensorImpl\n";
   if (out == Py_None) {
-    std::cerr << "Calling default sym_sizes_default\n";
     return self->sym_sizes_default();
   }
-
-  std::cerr << "Writing to buffer\n";
-
-  py::object values = py::reinterpret_steal<py::object>(out.ptr());
 
   c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
   c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
@@ -2419,7 +2412,7 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   // We need to squeeze SymIntNodes and ints into `SymInts`
   // since it's a format `sym_sizes()` are stored in
   py::list symints;
-  for (auto it = values.begin(); it != values.end(); it++) {
+  for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
     auto si = torch::is_symint_node(elm)
         ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
@@ -2432,10 +2425,11 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
       py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
   auto buffer = get_buffer(sub, symints, "sym_size");
   auto result = THPUtils_unpackLongs(buffer.ptr());
-  c10::SymInt* start = (c10::SymInt*)result[0];
+  c10::SymInt* start = (c10::SymInt*)result[0];  
   int64_t len = result[1];
 
   return c10::SymIntArrayRef(start, len);
-}
+  }
+
 
 } // anonymous namespace
