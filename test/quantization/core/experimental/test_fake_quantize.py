@@ -25,9 +25,10 @@ class TestFakeQuantize(unittest.TestCase):
 
         qparams_expected = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
 
-        self.assertEqual(qparams[0], qparams_expected[0])
-        self.assertTrue(torch.equal(qparams[1], qparams_expected[1]))
-        self.assertTrue(torch.equal(qparams[2], qparams_expected[2]))
+        self.assertEqual(alpha, qparams_expected[0])
+        self.assertTrue(torch.equal(gamma, qparams_expected[1]))
+        self.assertTrue(torch.equal(quantization_levels, qparams_expected[2]))
+        self.assertTrue(torch.equal(level_indices, qparams_expected[3]))
 
     r""" Tests fake quantize forward() method
          by comparing result with expected
@@ -46,10 +47,10 @@ class TestFakeQuantize(unittest.TestCase):
         alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False,
                                                                                       min_val=min_val,
                                                                                       max_val=max_val)
-        quantization_levels = qparams[1]
-        level_indices = qparams[2]
 
         apot_fake = APoTFakeQuantize(observer)
+        apot_fake.observer_enabled[0] = 1
+        apot_fake.fake_quant_enabled[0] = 1
 
         X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
 
