@@ -66,6 +66,20 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
   tls_edge_profiler = this;
 }
 
+void KinetoEdgeCPUProfiler::recordBackendMemoryEvent(
+    void *ptr,
+    int64_t alloc_size,
+    int64_t total_allocated,
+    int64_t total_reserved,
+    c10::Device device) {
+  torch::autograd::profiler::reportBackendMemoryEventToActiveKinetoProfiler(
+    ptr,
+    alloc_size,
+    total_allocated,
+    total_reserved,
+    device);
+}
+
 void KinetoEdgeCPUProfiler::recordBackendEvent(
     const int64_t start_time_us,
     const int64_t end_time_us,

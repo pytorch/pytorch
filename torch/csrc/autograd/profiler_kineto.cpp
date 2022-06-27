@@ -620,6 +620,28 @@ void reportBackendEventToActiveKinetoProfiler(
   */
 }
 
+void reportBackendMemoryEventToActiveKinetoProfiler(
+    void *ptr,
+    int64_t alloc_size,
+    int64_t total_allocated,
+    int64_t total_reserved,
+    c10::Device device) {
+  TORCH_INTERNAL_ASSERT(
+      GlobalStateManager::get() == nullptr,
+      "On-demand profiling does not support post processing callback");
+
+  auto state_ptr = KinetoThreadLocalState::getTLS();
+  if (!state_ptr) {
+    return;
+  }
+  state_ptr->reportMemoryUsage(ptr,
+                              alloc_size,
+                              total_allocated,
+                              total_reserved,
+                              device);
+
+}
+
 void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
