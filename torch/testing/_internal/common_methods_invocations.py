@@ -20081,6 +20081,11 @@ python_ref_db = [
         torch_opinfo_name="ceil",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.conj_physical",
+        torch_opinfo_name="conj_physical",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.cos",
         torch_opinfo_name="cos",
     ),
@@ -20914,6 +20919,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.column_stack",
         torch_opinfo_name="column_stack",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.conj",
+        torch_opinfo_name="conj",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
