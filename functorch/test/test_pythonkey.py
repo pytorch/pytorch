@@ -113,6 +113,7 @@ class TestPythonKey(TestCase):
     def test_make_fx_no_decompose(self, device):
         # FIXME
         return self.skipTest("error: maximum recursion reached")
+
         def f(x):
             return torch.tanh(x).sum()
 
