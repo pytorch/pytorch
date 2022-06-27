@@ -2,11 +2,14 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List
 import re
+import os
 
 import torch
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 from torch.autograd import _KinetoEvent
+
+GENERATE_PLOT = bool(os.environ.get("PROFILER_GENERATE_PLOT", False))
 
 
 @dataclass
@@ -262,6 +265,30 @@ class BasicEvaluation:
                                        reverse=True)
             ]
             event_list = event_list[:length]
+
+        def plot_analysis_graph(filepath):
+            import matplotlib.pyplot as plt
+            plt.plot([x.start for x in self.queue_depth_list],
+                        qd_values[::-1])
+            for interval in decrease_interval:
+                plt.axvspan(interval.start,
+                            interval.end,
+                            color='orange',
+                            alpha=0.5)
+            for i, event in enumerate(event_list):
+                y_loc = max(qd_values) - i * 20
+                plt.plot(
+                    [event.event.start_time_ns, event.event.end_time_ns],
+                    [y_loc, y_loc],
+                    label=event.event.name())
+            plt.legend(bbox_to_anchor=(1, 0.5), loc='center left')
+            plt.xlabel("Time (ns)")
+            plt.ylabel("Queue Depth")
+            plt.savefig(filepath, bbox_inches='tight')
+
+        if GENERATE_PLOT:
+            plot_analysis_graph("qd.png")
+
         return event_list
 
     def get_optimizable_events(self,
