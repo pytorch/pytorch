@@ -25,7 +25,9 @@ class TestQuantizer(unittest.TestCase):
 
         observer = APoTObserver(b=8, k=1)
         observer.forward(tensor2quantize)
-        qparams = observer.calculate_qparams(signed=False, min_val=torch.tensor(0), max_val=torch.tensor(255))
+        observer.min_val = torch.tensor([0])
+        observer.max_val=torch.tensor([255])
+        qparams = observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
         qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
@@ -118,11 +120,7 @@ class TestQuantizer(unittest.TestCase):
         original_input = torch.clone(original_apot.data).int()
 
         # dequantize apot_tensor
-        dequantize_result = dequantize_APoT(apot_tensor=original_apot,
-                                            alpha=qparams[0],
-                                            gamma=qparams[1],
-                                            quantization_levels=qparams[2],
-                                            level_indices=qparams[3])
+        dequantize_result = dequantize_APoT(apot_tensor=original_apot)
 
         # quantize apot_tensor
         final_apot = quantize_APoT(tensor2quantize=dequantize_result,
@@ -167,11 +165,7 @@ class TestQuantizer(unittest.TestCase):
         original_input = torch.clone(original_apot.data).int()
 
         # dequantize apot_tensor
-        dequantize_result = dequantize_APoT(apot_tensor=original_apot,
-                                            alpha=qparams[0],
-                                            gamma=qparams[1],
-                                            quantization_levels=qparams[2],
-                                            level_indices=qparams[3])
+        dequantize_result = dequantize_APoT(apot_tensor=original_apot)
 
         # quantize apot_tensor
         final_apot = quantize_APoT(tensor2quantize=dequantize_result,
