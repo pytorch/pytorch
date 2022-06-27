@@ -42,12 +42,16 @@ class TestFakeQuantize(unittest.TestCase):
         observer.forward(X)
         alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
-        apot_fake = APoTFakeQuantize(observer)
+        fake_observer = APoTObserver(b=4, k=2)
+        apot_fake = APoTFakeQuantize(fake_observer)
         apot_fake.enable_observer()
         apot_fake.enable_fake_quant()
 
         X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
 
+        # float_to_reduced_precision method converts fp values to reduced precision
+        # by mapping fp values to quantization levels.
+        # accomplishes same task as quantize -> dequantize
         X_expected = X.apply_(lambda x: float_to_reduced_precision(x, quantization_levels, level_indices))
 
         self.assertTrue(torch.equal(X_reduced_precision_fp, X_expected))
