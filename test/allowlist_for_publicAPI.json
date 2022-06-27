@@ -1,17 +1,4 @@
 {
-  "torch.amp.autocast_mode": [
-    "Any",
-    "Optional"
-  ],
-  "torch.ao.nn.sparse.quantized.dynamic.linear": [
-    "LinearBlockSparsePattern",
-    "Optional",
-    "hide_packed_params_repr"
-  ],
-  "torch.ao.nn.sparse.quantized.linear": [
-    "Optional",
-    "hide_packed_params_repr"
-  ],
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",
@@ -1186,33 +1173,6 @@
     "map_aggregate",
     "map_arg"
   ],
-  "torch.fx.passes.net_min_base": [
-    "Any",
-    "Callable",
-    "Dict",
-    "FxNetAccFusionsFinder",
-    "Names",
-    "NodeList",
-    "NodeSet",
-    "Optional",
-    "ShapeProp",
-    "TensorOrTensors",
-    "Tensors",
-    "Tuple",
-    "compatibility",
-    "dataclass",
-    "map_arg",
-    "split_by_tags"
-  ],
-  "torch.fx.passes.operator_support": [
-    "IsNodeSupported",
-    "SupportDict",
-    "SupportedArgumentDTypes",
-    "TargetTypeName",
-    "TensorMetadata",
-    "compatibility",
-    "get_node_target"
-  ],
   "torch.fx.passes.param_fetch": [
     "Any",
     "Callable",
@@ -1610,17 +1570,8 @@
   "torch.nn.quantized": [
     "MaxPool2d"
   ],
-  "torch.nn.quantized.dynamic.modules.conv": [
-    "Tensor"
-  ],
   "torch.nn.quantized.dynamic.modules.rnn": [
-    "Dict",
-    "List",
-    "Optional",
-    "PackedSequence",
-    "Tensor",
-    "Tuple",
-    "Union"
+    "apply_permutation"
   ],
   "torch.nn.quantized.functional": [
     "List",
@@ -1633,31 +1584,6 @@
   ],
   "torch.nn.quantized.modules.batchnorm": [
     "Tensor"
-  ],
-  "torch.nn.quantized.modules.conv": [
-    "List",
-    "Optional",
-    "TypeVar",
-    "WeightedQuantizedModule",
-    "fuse_conv_bn_weights"
-  ],
-  "torch.nn.quantized.modules.embedding_ops": [
-    "List",
-    "Optional",
-    "Tensor",
-    "hide_packed_params_repr"
-  ],
-  "torch.nn.quantized.modules.functional_modules": [
-    "List",
-    "Tensor"
-  ],
-  "torch.nn.quantized.modules.linear": [
-    "Iterable",
-    "Optional",
-    "WeightedQuantizedModule",
-    "fuse_linear_bn_weights",
-    "hide_packed_params_repr",
-    "type_before_parametrizations"
   ],
   "torch.nn.quantized.modules.utils": [
     "repeat"
