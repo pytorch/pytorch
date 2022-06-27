@@ -765,7 +765,7 @@
   device_guard: False
   tags: inplace_view
   dispatch:
-    CompositeExplicitAutograd: as_strided_
+    CompositeExplicitAutogradNonFunctional: as_strided_
 
 - func: asin(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1099,6 +1099,7 @@
   dispatch:
     SparseCPU: bmm_sparse_cpu
     SparseCUDA: bmm_sparse_cuda
+    NestedTensorCPU, NestedTensorCUDA: bmm_nested
 
 - func: bmm.out(Tensor self, Tensor mat2, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -1975,7 +1976,7 @@
 - func: new_empty_strided(Tensor self, int[] size, int[] stride, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
   dispatch:
-    CompositeExplicitAutograd: new_empty_strided
+    CompositeExplicitAutogradNonFunctional: new_empty_strided
 
 - func: new_full(Tensor self, int[] size, Scalar fill_value, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   variants: method
@@ -3026,7 +3027,8 @@
 - func: logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
-    CompositeExplicitAutograd: logsumexp_out
+    # calls squeeze
+    CompositeExplicitAutogradNonFunctional: logsumexp_out
 
 - func: logsumexp.names(Tensor self, Dimname[1] dim, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -3593,6 +3595,7 @@
   dispatch:
     CompositeExplicitAutograd: permute
     MPS: permute_mps
+    SparseCPU, SparseCUDA: permute_sparse_coo
 
 - func: movedim.intlist(Tensor(a) self, int[] source, int[] destination) -> Tensor(a)
   variants: function, method
@@ -3635,12 +3638,12 @@
 - func: pixel_shuffle(Tensor self, int upscale_factor) -> Tensor
   dispatch:
     CPU: pixel_shuffle_cpu
-    CompositeExplicitAutograd: math_pixel_shuffle
+    CompositeExplicitAutogradNonFunctional: math_pixel_shuffle
 
 - func: pixel_unshuffle(Tensor self, int downscale_factor) -> Tensor
   dispatch:
     CPU: pixel_unshuffle_cpu
-    CompositeExplicitAutograd: math_pixel_unshuffle
+    CompositeExplicitAutogradNonFunctional: math_pixel_unshuffle
 
 - func: channel_shuffle(Tensor self, int groups) -> Tensor
   dispatch:
@@ -4086,7 +4089,7 @@
   device_check: NoCheck
   device_guard: False
   dispatch:
-    CompositeExplicitAutograd: select_backward
+    CompositeExplicitAutogradNonFunctional: select_backward
 
 - func: selu(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -4918,7 +4921,8 @@
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, int[] expand1, int[] expand2, int[] expand3, int[] sumdim, int unroll_dim=1) -> Tensor
   dispatch:
-    CompositeExplicitAutograd: _trilinear
+      # calls unsqueeze
+    CompositeExplicitAutogradNonFunctional: _trilinear
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, float margin=1.0, float p=2, float eps=1e-06, bool swap=False, int reduction=Mean) -> Tensor
 
@@ -8297,6 +8301,7 @@
   dispatch:
     CPU: cpu_equal
     CUDA: cuda_equal
+    MPS: mps_equal
     QuantizedCPU: equal_quantized_cpu
 
 - func: pow.Tensor_Tensor_out(Tensor self, Tensor exponent, *, Tensor(a!) out) -> Tensor(a!)
@@ -11645,13 +11650,15 @@
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_inv_ex
+    # calls transpose_
+    CompositeExplicitAutogradNonFunctional: linalg_inv_ex
 
 - func: linalg_inv_ex.inverse(Tensor self, *, bool check_errors=False, Tensor(a!) inverse, Tensor(b!) info) -> (Tensor(a!) inverse, Tensor(b!) info)
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_inv_ex_out
+    # calls transpose_
+    CompositeExplicitAutogradNonFunctional: linalg_inv_ex_out
 
 - func: linalg_inv(Tensor self) -> Tensor
   python_module: linalg
@@ -11763,7 +11770,9 @@
   python_module: linalg
   variants: function
   dispatch:
-    CompositeExplicitAutograd: linalg_pinv
+    # calls svd, which calls mH() (view op)
+    # also calls narrow()
+    CompositeExplicitAutogradNonFunctional: linalg_pinv
 
 - func: linalg_pinv.atol_rtol_tensor_out(Tensor self, *, Tensor? atol=None, Tensor? rtol=None, bool hermitian=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
@@ -12015,7 +12024,7 @@
 - func: expand_copy.SymInt(Tensor self, SymInt[] size, *, bool implicit=False) -> Tensor
   variants: function
   dispatch:
-    CompositeExplicitAutogradNonFunctional: expand_copy_SymInt
+    CompositeExplicitAutograd: expand_copy_SymInt
   tags: view_copy
 
 - func: permute_copy(Tensor self, int[] dims) -> Tensor
@@ -12811,6 +12820,19 @@
 - func: special_modified_bessel_k1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: special_modified_bessel_k1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_scaled_modified_bessel_k1(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_scaled_modified_bessel_k1.out
+  variants: function
+
+- func: special_scaled_modified_bessel_k1.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_scaled_modified_bessel_k1_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True

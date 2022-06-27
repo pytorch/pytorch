@@ -43,11 +43,18 @@ class DetectorBase(ABC):
 
     def _get_targeting_node(self, prepared_fx_model: GraphModule, target_fqn: str) -> torch.fx.node.Node:
         r"""
-        Takes in a GraphModule and the target_fqn and finds the node object that targets this fqn
+        Takes in a GraphModule and the target_fqn and finds the node whose target is this fqn.
 
         If it's not found, it means it is most likely inside a fused layer
             We just go one layer up in terms of the fqn we are searching for until we find parent node
             If we get to empty string, then we know that it doesn't exist
+
+        The reason for the recursion is that if the model that we are looking for got fused,
+        we will have module fqn as e.g. x.linear.0 but the graph will only have a node for the fused module,
+        which would have fqn as x.linear so they will not match.
+        To handle this, if we don't match, we then take off the last bit of the fqn e.g. x.linear.0 -> x.linear,
+        or more generally foo.bar.baz -> foo.bar and search again, this will allow us to locate the correct module
+        even in cases with fusion
 
         Args:
             prepared_fx_model (GraphModule):  The prepared Fx GraphModule
