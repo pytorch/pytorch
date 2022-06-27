@@ -1513,6 +1513,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.std_var',
         '_refs.swap_axes',
         '_refs.uniform',
+        '_refs.scalar_tensor',
+        '_refs.trunc_divide',
         '_refs.zeros',
         '_refs.zeros_like'
     }
