@@ -83,7 +83,6 @@ IS_CI = bool(os.getenv('CI'))
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
-IS_SLOW_GRADCHECK = bool(os.getenv("PYTORCH_TEST_WITH_SLOW_GRADCHECK"))
 
 RETRY_TEST_CASES = os.getenv('PYTORCH_RETRY_TEST_CASES') == '1'
 OVERRIDE_FLAKY_SIGNAL = os.getenv('PYTORCH_OVERRIDE_FLAKY_SIGNAL') == '1'
