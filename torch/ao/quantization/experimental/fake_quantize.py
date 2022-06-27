@@ -11,9 +11,7 @@ class APoTFakeQuantize(FakeQuantizeBase):
         self.observer = observer
 
     def calculate_qparams(self, signed: bool, min_val=None, max_val=None):  # type: ignore[override]
-        qparams = self.observer.calculate_qparams(signed=signed, min_val=min_val, max_val=max_val)
-
-        return qparams
+        return self.observer.calculate_qparams(signed=signed, min_val=min_val, max_val=max_val)
 
     def forward(self, X: torch.Tensor, signed: bool):  # type: ignore[override]
         if self.observer_enabled[0] == 1:
