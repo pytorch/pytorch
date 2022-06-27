@@ -204,7 +204,7 @@ class TestNonUniformObserver(unittest.TestCase):
 
         X = obs.forward(X)
 
-        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(True)
+        alpha, gamma, quantization_levels, level_indices = obs.calculate_qparams(signed=True)
 
         min_val = torch.min(X)
         max_val = torch.max(X)
