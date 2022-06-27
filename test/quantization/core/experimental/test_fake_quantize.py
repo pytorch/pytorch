@@ -12,11 +12,10 @@ class TestFakeQuantize(unittest.TestCase):
          Uses hard-coded values: alpha=1.0, b=4, k=2.
     """
     def test_fake_calc_qparams(self):
-        observer = APoTObserver(b=4, k=2)
         observer.min_val = torch.tensor([0.0])
         observer.max_val = torch.tensor([1.0])
 
-        apot_fake = APoTFakeQuantize(observer)
+        apot_fake = APoTFakeQuantize(b=4, k=2)
 
         alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(signed=False)
 
@@ -38,7 +37,6 @@ class TestFakeQuantize(unittest.TestCase):
         # between 0 -> 1000 to quantize -> dequantize
         X = 1000 * torch.rand(20)
 
-        observer = APoTObserver(b=4, k=2)
         observer.forward(X)
         alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
@@ -49,10 +47,9 @@ class TestFakeQuantize(unittest.TestCase):
 
         X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
 
-        # float_to_reduced_precision method converts fp values to reduced precision
-        # by mapping fp values to quantization levels.
-        # accomplishes same task as quantize -> dequantize
-        X_expected = X.apply_(lambda x: float_to_reduced_precision(x, quantization_levels, level_indices))
+        # get X_expected by converting fp -> apot -> fp to simulate quantize -> dequantize
+        X_expected = X.apply_(lambda x: float_to_apot(x, quantization_levels, level_indices))
+        X_expected = X_expected.apply_(lambda x: apot_to_float(x, quantization_levels, level_indices))
 
         self.assertTrue(torch.equal(X_reduced_precision_fp, X_expected))
 
@@ -64,11 +61,10 @@ class TestFakeQuantize(unittest.TestCase):
         # between 0 -> 1000 to quantize -> dequantize
         X = 1000 * torch.rand(20)
 
-        observer = APoTObserver(b=4, k=2)
         observer.forward(X)
         alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
-        apot_fake = APoTFakeQuantize(observer)
+        apot_fake = APoTFakeQuantize(b=4, k=2)
         # disable observer so qparams not set, qparams are all None
         apot_fake.disable_observer()
         apot_fake.enable_fake_quant()

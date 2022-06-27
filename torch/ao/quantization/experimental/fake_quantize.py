@@ -10,10 +10,9 @@ class APoTFakeQuantize(FakeQuantizeBase):
     quantization_levels: Tensor
     level_indices: Tensor
 
-    def __init__(self, observer: APoTObserver):
+    def __init__(self, **observer_kwargs):
         super().__init__()
-        self.activation_post_process = observer
-        self.alpha = self.gamma = self.quantization_levels = self.level_indices = Tensor()
+        self.activation_post_process = APoTObserver(**observer_kwargs)
 
     def calculate_qparams(self, signed: bool):  # type: ignore[override]
         return self.activation_post_process.calculate_qparams(signed=signed)
