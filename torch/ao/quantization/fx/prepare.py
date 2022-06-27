@@ -67,7 +67,10 @@ from .utils import (
     NON_QUANTIZABLE_WEIGHT_OPS,
     WEIGHT_INDEX_DICT,
     BIAS_INDEX_DICT,
+    get_skipped_module_name_and_classes,
 )
+
+from .tracer import QuantizationTracer
 
 from torch.ao.quantization.quantize import (
     is_activation_post_process,
@@ -162,6 +165,48 @@ def _cleanup_args(model: GraphModule) -> GraphModule:
             n.kwargs = {}
     return model
 
+def _normalize_args_for_model(
+        model: GraphModule,
+        prepare_custom_config: PrepareCustomConfig,
+        is_standalone_module: bool):
+    """ Normalize the arguments for nodes in a GraphModule to be keyword arguments,
+    and then move all keyword arguments to be positional arguments
+
+    Args:
+        model (GraphModule): the model to apply argument normalization
+        prepare_custom_config (PrepareCustomConfig): custom config for prepare function,
+        we need to know preserved_attributes so that these attributes won't get lost
+        during this process
+        is_standalone_module (bool): a flag indicates whether we are running prepare function
+        for a standalone module or not (TODO): should we remove this flag? since
+        prepare custom config for standalone module and non-standalone module are not
+        shared
+    """
+    # record the preserved attributes in a dictionary so that it won't get lost
+    # during NormalizeArgs and retracing with QuantizationTracer
+    preserved_attribute_names = prepare_custom_config.preserved_attributes
+    preserved_attributes = {}
+    for attr_name in preserved_attribute_names:
+        preserved_attributes[attr_name] = getattr(model, attr_name)
+
+    # normalize the arguments of module/functions to be kwargs in positional order
+    # this depends on operator_schema from torchscript, we may want to replace
+    # this with something more robust by using real example_inputs in the future
+    model = NormalizeArgs(model).transform()
+
+    # redo tracing to update node_name_to_scope
+    skipped_module_names, skipped_module_classes = \
+        get_skipped_module_name_and_classes(prepare_custom_config, is_standalone_module)
+    # symbolically trace the model
+    tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
+    retraced_model = GraphModule(model, tracer.trace(model))
+    for attr_name in preserved_attribute_names:
+        setattr(retraced_model, attr_name, preserved_attributes[attr_name])
+    model = retraced_model
+
+    model = _move_all_kwargs_to_args(model)
+    model = _cleanup_args(model)
+    return model
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
@@ -1504,12 +1549,7 @@ def prepare(
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
-    # normalize the arguments of module/functions to be kwargs in positional order
-    # this depends on operator_schema from torchscript, we may want to replace
-    # this with something more robust by using real example_inputs in the future
-    model = NormalizeArgs(model).transform()
-    model = _move_all_kwargs_to_args(model)
-    model = _cleanup_args(model)
+    model = _normalize_args_for_model(model, prepare_custom_config, is_standalone_module)
 
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, equalization_config)
