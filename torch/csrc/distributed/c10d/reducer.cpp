@@ -678,7 +678,8 @@ void Reducer::all_reduce_local_used_map() {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
   std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
-  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
+  local_used_work_ =
+      ops::allreduce(process_group_, temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
@@ -2060,7 +2061,8 @@ void verify_params_across_processes(
   }
 
   std::vector<at::Tensor> param_size_vec{param_size_tensor};
-  process_group->allgather(param_size_output_tensors, param_size_vec)->wait();
+  ops::allgather(process_group, param_size_output_tensors, param_size_vec)
+      ->wait();
   auto result_size_tensors = param_size_output_tensors.front();
   for (size_t i = 0; i < world_size; ++i) {
     auto param_size_for_rank = result_size_tensors[i][0].item<int>();

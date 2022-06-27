@@ -20,7 +20,8 @@ from torch.optim.lr_scheduler import LambdaLR, MultiplicativeLR, SequentialLR, S
     _LRScheduler, CyclicLR, CosineAnnealingWarmRestarts, OneCycleLR, ChainedScheduler, \
     EPOCH_DEPRECATION_WARNING
 from torch.optim.swa_utils import AveragedModel, SWALR, update_bn
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, load_tests, \
+    parametrize, instantiate_parametrized_tests
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -1470,6 +1471,21 @@ class TestLRScheduler(TestCase):
         scheduler = SequentialLR(self.opt, schedulers=schedulers, milestones=milestones)
         self._test(scheduler, targets, epochs)
 
+    def test_sequentiallr4(self):
+        optimizer = torch.optim.SGD([torch.tensor(0.5)], lr=0.1)
+        prev_lr = optimizer.param_groups[0]["lr"]
+
+        schedulers = [
+            torch.optim.lr_scheduler.ConstantLR(optimizer, factor=1),
+            torch.optim.lr_scheduler.ConstantLR(optimizer, factor=0.1)
+        ]
+        scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers, milestones=[10])
+
+        new_lr = optimizer.param_groups[0]["lr"]
+
+        # Ensure that multiple schedulers does not affect the initial learning rate
+        self.assertEqual(prev_lr, new_lr)
+
     def test_get_last_lr_sequentiallr(self):
         epochs = 12
         milestones = [3, 6]
@@ -2018,23 +2034,22 @@ class TestLRScheduler(TestCase):
         scheduler = MultiplicativeLR(self.opt, lr_lambda=[lambda x1: 0.9, lambda x2: 0.8])
         self._test(scheduler, targets, epochs)
 
-    def test_CosineAnnealingWarmRestarts_lr1(self):
+    @parametrize("T_mult", [1, 2, 4])
+    def test_CosineAnnealingWarmRestarts_lr1(self, T_mult):
         iters = 100
         eta_min = 1e-10
-        T_mults = [1, 2, 4]
-        for T_mult in T_mults:
-            T_i = 10
-            T_cur = 0
-            targets = [[0.05], [0.5]]
-            scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
-            for _ in range(1, iters, 1):
-                T_cur += 1
-                if T_cur >= T_i:
-                    T_cur = T_cur - T_i
-                    T_i = int(T_mult) * T_i
-                targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-                targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
-            self._test(scheduler, targets, iters)
+        T_i = 10
+        T_cur = 0
+        targets = [[0.05], [0.5]]
+        scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=T_i, T_mult=T_mult, eta_min=eta_min)
+        for _ in range(1, iters, 1):
+            T_cur += 1
+            if T_cur >= T_i:
+                T_cur = T_cur - T_i
+                T_i = int(T_mult) * T_i
+            targets[0] += [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+            targets[1] += [eta_min + (0.5 - eta_min) * (1 + math.cos(math.pi * T_cur / T_i)) / 2]
+        self._test(scheduler, targets, iters)
 
     def test_CosineAnnealingWarmRestarts_lr2(self):
         iters = 30
@@ -2648,6 +2663,7 @@ class TestSWAUtils(TestCase):
         # check that momentum is preserved
         self.assertEqual(dnn.bn.momentum, 0.3)
 
+instantiate_parametrized_tests(TestLRScheduler)
 
 if __name__ == '__main__':
     run_tests()

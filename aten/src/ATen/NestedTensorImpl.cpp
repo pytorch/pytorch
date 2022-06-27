@@ -9,8 +9,10 @@ namespace at {
 namespace native {
 
 inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
+  // torch.tensor([]) is considered to have `dim() = 1` and `size(0) = 0`
+  // torch.nested_tensor([]) should also has `dim() = 1` and `size(0) = 0`
   if (sizes.dim() == 0) {
-    return std::vector<int64_t>();
+    return std::vector<int64_t>({0});
   }
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
   std::vector<int64_t> result(1, sizes.sizes()[0]);
@@ -35,6 +37,35 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
   return result;
 }
 
+// assume contiguous, we can construct stride from size
+inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
+  // empty `sizes` means empty nested tensor, so return empty strides
+  if (sizes.dim() == 0) {
+    return sizes;
+  }
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
+  int64_t orig_dim = sizes.size(1);
+  // `sizes`.sizes() = ntensors x 0 means empty but shaped `sizes`
+  // in this case strides is also empty but shaped
+  if (orig_dim == 0) {
+    return sizes;
+  }
+  at::Tensor strides = sizes.new_empty(sizes.sizes());
+  const int64_t* sizes_ptr = sizes.data_ptr<int64_t>();
+  int64_t* strides_ptr = strides.data_ptr<int64_t>();
+  for (int64_t i = 0; i < sizes.size(0); i++) {
+    strides_ptr[orig_dim - 1] = 1;
+    int64_t product = sizes_ptr[orig_dim - 1];
+    for (int64_t j = orig_dim - 2; j >= 0; j--) {
+      strides_ptr[j] = product;
+      product *= sizes_ptr[j];
+    }
+    sizes_ptr += orig_dim;
+    strides_ptr += orig_dim;
+  }
+  return strides;
+}
+
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_size_tensor)
@@ -45,6 +76,7 @@ NestedTensorImpl::NestedTensorImpl(
           buffer.device()),
       buffer_(std::move(buffer)),
       nested_size_tensor_(std::move(nested_size_tensor)),
+      nested_stride_tensor_(construct_nested_stride_tensor(nested_size_tensor_)),
       opt_sizes_(construct_opt_sizes(nested_size_tensor_))
 {
   TORCH_WARN_ONCE(
@@ -75,6 +107,13 @@ bool NestedTensorImpl::is_contiguous_custom(MemoryFormat) const {
 }
 IntArrayRef NestedTensorImpl::sizes_custom() const {
   TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
+c10::SymIntArrayRef NestedTensorImpl::sym_sizes_custom() const {
+  TORCH_CHECK(false, "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
+}
+
+c10::SymIntArrayRef NestedTensorImpl::sym_sizes() const {
+  return sym_sizes_custom();
 }
 
 IntArrayRef NestedTensorImpl::strides_custom() const {
