@@ -284,7 +284,9 @@ static void upsample_bilinear2d_out_cuda_template(
     return;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
     // heuristic: only use channels_last path when it's faster than the contiguous path
     if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 16 && \
           output.is_contiguous(memory_format)) {
@@ -396,7 +398,9 @@ static void upsample_bilinear2d_backward_out_cuda_template(
     return;
   }
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
+      grad_output_.scalar_type(), "upsample_bilinear2d_backward_out_frame", [&] {
     if (memory_format == at::MemoryFormat::ChannelsLast && channels >= 4 && \
           grad_input.is_contiguous(memory_format)) {
       using accscalar_t = at::acc_type<scalar_t, true>;
@@ -696,7 +700,8 @@ static void upsample_gen2d_aa_out_cuda_template(
   int block_x = std::min<int>(maxThreadsDim[0], at::cuda::warp_size());
   int grid_x = std::min<int>(maxGridSize[0], ceil_div(output_width, block_x));
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       input.scalar_type(), "upsample_bilinear2d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
@@ -797,7 +802,8 @@ static void upsample_gen2d_aa_backward_out_cuda_template(
   int grid_y = std::min<int>(maxGridSize[1], ceil_div(output_height, block_y));
   const dim3 grid(grid_x, grid_y);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half, at::ScalarType::BFloat16,
       grad_output.scalar_type(), "upsample_gen2d_backward_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
