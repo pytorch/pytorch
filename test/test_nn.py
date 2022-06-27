@@ -21713,6 +21713,9 @@ class TestFunctionalPickle(TestCase):
         # Make sure it does not throw an exception
         s = pickle.dumps(F.softsign)
 
+def _hook_to_pickle(*args, **kwargs):
+    pass
+
 class TestStateDictHooks(TestCase):
 
     def test_load_state_dict_pre_hook(self):
@@ -21745,15 +21748,12 @@ class TestStateDictHooks(TestCase):
         m_load.load_state_dict(m_state_dict)
         self.assertEqual(2, hook_called)
 
-    def _hook_with_module(self, *args, **kwargs):
-        pass
-
     def test_no_extra_ref_to_module(self):
         try:
             gc.disable()
             m = nn.Linear(10, 10)
 
-            m._register_load_state_dict_pre_hook(self._hook_with_module, True)
+            m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
             weak_m = weakref.ref(m)
             del m
 
@@ -21763,8 +21763,8 @@ class TestStateDictHooks(TestCase):
 
     def test_pickled_hook(self):
         m = nn.Linear(10, 10)
-        m._register_load_state_dict_pre_hook(self._hook_with_module, True)
-        assert pickle.loads(pickle.dumps(m)) == m
+        m._register_load_state_dict_pre_hook(_hook_to_pickle, True)
+        pickle.loads(pickle.dumps(m))
 
     def test_load_state_dict_module_pre_hook(self):
         hook_called = 0
