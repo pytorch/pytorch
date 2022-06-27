@@ -4,7 +4,8 @@ from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
-from torch._subclasses.fake_tensor import FakeTensor
+import weakref
+from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 
 import torch
 
@@ -62,6 +63,27 @@ TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
 TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
 
 
+# In order to keep things like aliasing relationships and storage
+# consistent wrt/meta tensors, FakeTensors own a FakeTensorMode
+# which caches conversions to Meta Tensors. We would like to use
+# one consistent mode among along FakeTensors, which we store here.
+# We store a weakref, so that when all previous FakeTensors are
+# the present mode will also deallocate. FakeTensorMode holds onto
+# tensors that are converted to Meta so we don't want to persist it
+# longer than necessary.x
+prim_fake_mode_ref = None
+
+
+def get_prim_fake_mode():
+    global prim_fake_mode_ref
+    if prim_fake_mode_ref is None or prim_fake_mode_ref() is None:
+        mode = FakeTensorMode()
+        prim_fake_mode_ref = weakref.ref(mode)
+        return mode
+    else:
+        return prim_fake_mode_ref()
+
+
 def TensorMeta(
     tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
     *,
@@ -102,9 +124,30 @@ def TensorMeta(
     if isinstance(device, str):
         device = torch.device(device)
 
-    return FakeTensor(
-        torch.empty_strided(shape, strides, dtype=dtype, device="meta"), device
-    )
+    if isinstance(tensorlike, FakeTensor):
+        mode = tensorlike.fake_mode
+    else:
+        mode = get_prim_fake_mode()
+
+    if device.type == "meta":
+        return torch.empty_strided(shape, strides, dtype=dtype, device="meta")
+    else:
+        return FakeTensor(
+            mode,
+            torch.empty_strided(shape, strides, dtype=dtype, device="meta"),
+            device,
+        )
+
+
+def same_shape(a: ShapeType, b: ShapeType) -> bool:
+    if len(a) != len(b):
+        return False
+
+    for x, y in zip(a, b):
+        if x != y:
+            return False
+
+    return True
 
 
 # TODO: look at using torch.testing.assert_close instead with an option
@@ -120,10 +163,9 @@ def compare_tensor_meta(a: TensorLikeType, b: TensorLikeType):
     assert isinstance(a, TensorLike)
     assert isinstance(b, TensorLike)
 
-    for x, y in zip(a.shape, b.shape):
-        if x != y:
-            msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
-            raise AssertionError(msg)
+    if not same_shape(a.shape, b.shape):
+        msg = "Shapes {0} and {1} are not equal!".format(a.shape, b.shape)
+        raise AssertionError(msg)
 
     if a.dtype != b.dtype:
         msg = "Dtypes {0} and {1} are not equal!".format(a.dtype, b.dtype)
@@ -1133,7 +1175,7 @@ def check(
     b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
 ) -> None:
     """
-    Helper function for raising a RuntimeError if a boolean condition fails.
+    Helper function for raising an error_type (default: RuntimeError) if a boolean condition fails.
     Error message is a callable producing a string (to avoid wasting time
     string formatting in non-error case, and also to make it easier for torchdynamo
     to trace.)

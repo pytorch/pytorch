@@ -1,37 +1,30 @@
+from collections import defaultdict
+
+from typing import Dict, List, Optional, Sequence, Tuple, Union
+
+import torchgen.api.dispatcher as dispatcher
+from torchgen.api.translate import translate
+from torchgen.api.types import Binding, DispatcherSignature, Expr
+from torchgen.context import with_native_function
 from torchgen.model import (
+    Annotation,
     Argument,
+    BackendIndex,
+    BackendMetadata,
+    BaseTy,
+    BaseType,
+    DEFAULT_KERNEL_NAMESPACE,
+    DeviceCheckType,
     DispatchKey,
     FunctionSchema,
-    BaseType,
-    BaseTy,
-    Return,
-    Annotation,
     NativeFunction,
     NativeFunctionsGroup,
     OperatorName,
-    BackendIndex,
-    BackendMetadata,
-    DeviceCheckType,
+    Return,
     SchemaKind,
     Variant,
 )
-from torchgen.utils import (
-    concatMap,
-)
-from torchgen.context import (
-    with_native_function,
-)
-from torchgen.api.types import (
-    DispatcherSignature,
-    Expr,
-    Binding,
-)
-import torchgen.api.dispatcher as dispatcher
-from torchgen.api.translate import translate
-
-
-from typing import List, Tuple, Sequence, Dict, Optional, Union
-from collections import defaultdict
+from torchgen.utils import concatMap
 
 # See Note: [Out ops with functional variants that don't get grouped properly]
 OUT_OPS_THAT_DONT_GET_GROUPED_PROPERLY = [
@@ -229,7 +222,9 @@ def generate_function(
 
     backend_metadata = {
         DispatchKey.CompositeExplicitAutograd: {
-            func.name: BackendMetadata(cpp.name(func), structured=False)
+            func.name: BackendMetadata(
+                cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
+            )
         }
     }
 
@@ -256,9 +251,11 @@ def generate_function(
             is_abstract=f.is_abstract,
             has_composite_implicit_autograd_kernel=False,
             has_composite_explicit_autograd_kernel=True,
+            has_composite_explicit_autograd_non_functional_kernel=False,
             # Every generated NativeFunction gets a "generated" tag, so it's easy to tell
             # which NativeFunction objects did not come directly from native_functions.yaml.
             tags=set(["generated"]),
+            namespace=f.namespace,
         ),
         backend_metadata,
     )

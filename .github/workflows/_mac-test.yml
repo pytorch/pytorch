@@ -20,10 +20,6 @@ on:
         required: true
         description: secret acess key for test stats upload
 
-env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
-
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
@@ -41,13 +37,12 @@ jobs:
     env:
       GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-      COMPACT_JOB_NAME: ${{ inputs.build-environment }}
-      JOB_BASE_NAME: ${{ inputs.build-environment }}-test
       TEST_CONFIG: ${{ matrix.config }}
       SHARD_NUMBER: ${{ matrix.shard }}
       NUM_TEST_SHARDS: ${{ matrix.num_shards }}
       PR_BODY: ${{ github.event.pull_request.body }}
       PYTORCH_RETRY_TEST_CASES: 1
+      PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -77,6 +72,7 @@ jobs:
         run: .github/scripts/parse_ref.py
 
       - name: Test
+        id: test
         run: |
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
           export COMMIT_MESSAGES
@@ -85,14 +81,14 @@ jobs:
 
       - name: Get workflow job id
         id: get-job-id
-        uses: pytorch/pytorch/.github/actions/get-workflow-job-id@master
+        uses: ./.github/actions/get-workflow-job-id
         if: always()
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
-        if: always()
+        if: always() && (steps.test.conclusion == 'success' || steps.test.conclusion == 'failure')
         with:
           use-gha: true
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -103,11 +99,12 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
           GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
-          JOB_BASE_NAME: ${{ inputs.build-environment }}-test
           TEST_CONFIG: ${{ matrix.config }}
           SHARD_NUMBER: ${{ matrix.shard }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PYTORCH_RETRY_TEST_CASES: 1
+          PYTORCH_OVERRIDE_FLAKY_SIGNAL: 1
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           TAG: ${{ steps.parse-ref.outputs.tag }}
           WORKFLOW_ID: ${{ github.run_id }}

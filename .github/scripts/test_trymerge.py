@@ -11,11 +11,21 @@ import json
 import os
 from hashlib import sha256
 
-from trymerge import find_matching_merge_rule, gh_graphql, gh_get_team_members, GitHubPR, MergeRule, MandatoryChecksMissingError
+from trymerge import (find_matching_merge_rule,
+                      gh_graphql,
+                      gh_get_team_members,
+                      read_merge_rules,
+                      GitHubPR,
+                      MergeRule,
+                      MandatoryChecksMissingError,
+                      main as trymerge_main)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-from typing import cast, Any, List, Optional
+from typing import Any, List, Optional
 from unittest import TestCase, main, mock
 from urllib.error import HTTPError
+
+if 'GIT_REMOTE_URL' not in os.environ:
+    os.environ['GIT_REMOTE_URL'] = "https://github.com/pytorch/pytorch"
 
 def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
     gql_db_fname = os.path.join(os.path.dirname(__file__), "gql_mocks.json")
@@ -53,36 +63,83 @@ def mocked_gh_graphql(query: str, **kwargs: Any) -> Any:
 
     return rc
 
+def mock_parse_args(revert: bool = False,
+                    force: bool = False) -> Any:
+    class Object(object):
+        def __init__(self) -> None:
+            self.revert = revert
+            self.force = force
+            self.pr_num = 76123
+            self.dry_run = True
+            self.comment_id = 0
+            self.on_mandatory = False
+            self.on_green = False
+            self.reason = 'this is for testing'
 
-def mocked_read_merge_rules(repo: Optional[GitRepo], org: str, project: str) -> List[MergeRule]:
-    mock_merge_rules = """
-    [
-        {
-            "name": "mock with nonexistent check",
-            "patterns": ["*"],
-            "approved_by": [],
-            "mandatory_checks_name": [
-                "Facebook CLA Check",
-                "Lint",
-                "nonexistent"
-            ]
-        }
+    return Object()
+
+def mock_revert(repo: GitRepo, pr: GitHubPR, *,
+                dry_run: bool = False,
+                comment_id: Optional[int] = None,
+                reason: Optional[str] = None) -> None:
+    pass
+
+def mock_merge(pr_num: int, repo: GitRepo,
+               dry_run: bool = False,
+               force: bool = False,
+               comment_id: Optional[int] = None,
+               mandatory_only: bool = False,
+               on_green: bool = False,
+               timeout_minutes: int = 400,
+               stale_pr_days: int = 3) -> None:
+    pass
+
+def mock_gh_get_info() -> Any:
+    return {"closed": False, "isCrossRepository": False}
+
+
+def mocked_read_merge_rules_NE(repo: Any, org: str, project: str) -> List[MergeRule]:
+    return [
+        MergeRule(name="mock with nonexistent check",
+                  patterns=["*"],
+                  approved_by=[],
+                  mandatory_checks_name=["Lint",
+                                         "Facebook CLA Check",
+                                         "nonexistent"],
+                  ),
     ]
-    """
-    rc = json.loads(mock_merge_rules, object_hook=lambda x: MergeRule(**x))
-    return cast(List[MergeRule], rc)
+
+
+def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule]:
+    return [
+        MergeRule(name="super",
+                  patterns=["*"],
+                  approved_by=["pytorch/metamates"],
+                  mandatory_checks_name=["Lint",
+                                         "Facebook CLA Check",
+                                         "linux-xenial-cuda11.3-py3.7-gcc7 / build",
+                                         ],
+                  ),
+    ]
 
 
 class TestGitHubPR(TestCase):
+    def test_merge_rules_valid(self) -> None:
+        "Test that merge_rules.json can be parsed"
+        repo = GitRepo(get_git_repo_dir(), get_git_repo_dir())
+        self.assertGreater(len(read_merge_rules(repo, "pytorch", "pytorch")), 1)
+
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_match_rules(self, mocked_gql: Any) -> None:
+    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
+    def test_match_rules(self, mocked_gql: Any, mocked_rmr: Any) -> None:
         "Tests that PR passes merge rules"
         pr = GitHubPR("pytorch", "pytorch", 77700)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
         self.assertTrue(find_matching_merge_rule(pr, repo) is not None)
 
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
-    def test_lint_fails(self, mocked_gql: Any) -> None:
+    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
+    def test_lint_fails(self, mocked_gql: Any, mocked_rmr: Any) -> None:
         "Tests that PR fails mandatory lint check"
         pr = GitHubPR("pytorch", "pytorch", 74649)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
@@ -169,7 +226,7 @@ class TestGitHubPR(TestCase):
         self.assertGreater(len(authors), 50)
         self.assertTrue("@" in pr.get_author())
 
-    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules)
+    @mock.patch('trymerge.read_merge_rules', side_effect=mocked_read_merge_rules_NE)
     @mock.patch('trymerge.gh_graphql', side_effect=mocked_gh_graphql)
     def test_pending_status_check(self, mocked_gql: Any, mocked_read_merge_rules: Any) -> None:
         """ Tests that PR with nonexistent/pending status checks fails with the right reason.
@@ -198,6 +255,38 @@ class TestGitHubPR(TestCase):
         conclusions = pr.get_checkrun_conclusions()
         self.assertTrue("linux-docs / build-docs (cpp)" in conclusions.keys())
 
+    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
+    @mock.patch('trymerge.parse_args', return_value=mock_parse_args(True, False))
+    @mock.patch('trymerge.try_revert', side_effect=mock_revert)
+    def test_main_revert(self, mock_revert: Any, mock_parse_args: Any, gh_get_pr_info: Any) -> None:
+        trymerge_main()
+        mock_revert.assert_called_once()
+
+    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
+    @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, True))
+    @mock.patch('trymerge.merge', side_effect=mock_merge)
+    def test_main_force(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
+        trymerge_main()
+        mock_merge.assert_called_once_with(mock.ANY,
+                                           mock.ANY,
+                                           dry_run=mock.ANY,
+                                           force=True,
+                                           comment_id=mock.ANY,
+                                           on_green=False,
+                                           mandatory_only=False)
+
+    @mock.patch('trymerge.gh_get_pr_info', return_value=mock_gh_get_info())
+    @mock.patch('trymerge.parse_args', return_value=mock_parse_args(False, False))
+    @mock.patch('trymerge.merge', side_effect=mock_merge)
+    def test_main_merge(self, mock_merge: Any, mock_parse_args: Any, mock_gh_get_info: Any) -> None:
+        trymerge_main()
+        mock_merge.assert_called_once_with(mock.ANY,
+                                           mock.ANY,
+                                           dry_run=mock.ANY,
+                                           force=False,
+                                           comment_id=mock.ANY,
+                                           on_green=False,
+                                           mandatory_only=False)
 
 if __name__ == "__main__":
     main()
