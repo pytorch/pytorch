@@ -48,8 +48,10 @@ __all__ = [
     "abs",
     "acos",
     "acosh",
+    "asinh",
     "asin",
     "atan",
+    "atanh",
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
@@ -289,11 +291,13 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             if preserve_cpu_scalar_tensors and utils.is_cpu_scalar_tensor(x):
                 return x
 
-            if tuple(x.shape) != common_shape:
+            if not utils.same_shape(x.shape, common_shape):
                 common_rank = len(common_shape) + 1
                 start = common_rank - (len(x.shape) + 1)
                 dims = tuple(range(start, len(x.shape) + start))
                 return prims.broadcast_in_dim(x, common_shape, dims)
+
+            return x
         else:
             raise RuntimeError(
                 "Unexpected type when broadcasting: " + str(type(x)) + "!"
@@ -371,8 +375,18 @@ def asin(a):
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def asinh(a):
+    return prims.asinh(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def atan(a):
     return prims.atan(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def atanh(a):
+    return prims.atanh(a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
@@ -1658,10 +1672,10 @@ def atleast_1d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_1d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
     return res if len(res) > 1 else res[0]
@@ -1681,10 +1695,10 @@ def atleast_2d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_2d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
     res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
@@ -1695,10 +1709,10 @@ def atleast_3d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
     """Reference implementation of :func:`torch.atleast_3d`."""
-    if not args and isinstance(arg, collections.Sequence):
+    if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.Sequence)
+        assert not isinstance(arg, collections.abc.Sequence)
         args_ = (arg,) + args
     unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
     res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
