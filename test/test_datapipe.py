@@ -51,7 +51,7 @@ from torch.utils.data.datapipes.utils.decoder import (
     basichandlers as decoder_basichandlers,
 )
 from torch.utils.data.datapipes.utils.snapshot import (
-    simple_fast_forward_graph
+    _simple_snapshot_graph
 )
 from torch.utils.data.datapipes.dataframe import CaptureDataFrame
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
@@ -2653,11 +2653,6 @@ class TestIterDataPipeCountSampleYielded(TestCase):
         res = list(datapipe)
         self.assertEqual(len(res), datapipe._number_of_samples_yielded)
 
-        # Functional Test: Check for reset behavior and if iterator also works
-        it = iter(datapipe)  # reset the DataPipe
-        res = list(it)
-        self.assertEqual(len(res), datapipe._number_of_samples_yielded)
-
         # Functional Test: Check if the count is correct when DataPipe is partially read
         it = iter(datapipe)
         res = []
@@ -2666,6 +2661,11 @@ class TestIterDataPipeCountSampleYielded(TestCase):
             if i == n_expected_samples - 1:
                 break
         self.assertEqual(n_expected_samples, datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check for reset behavior and if iterator also works
+        it = iter(datapipe)  # reset the DataPipe
+        res = list(it)
+        self.assertEqual(len(res), datapipe._number_of_samples_yielded)
 
     def test_iterdatapipe_sample_yielded_generator_function(self):
         # Functional Test: `__iter__` is a generator function
@@ -2764,13 +2764,22 @@ class TestIterDataPipeCountSampleYielded(TestCase):
 class TestIterDataPipeGraphFastForward(TestCase):
 
     def _fast_forward_graph_test_helper(self, datapipe, fast_forward_fn, n_iterations=3, rng=None):
+        datapipe._restored = True
         if rng is None:
             rng = torch.Generator()
         initial_rng_state = rng.get_state()
         torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
         expected_full_res = list(datapipe)
 
+        # The next 3 lines simulate the effect of starting another epoch
+        # Then the reminder test cases show that you can restore to first epoch if needed
+        # as long as you have the initial RNG state
+        rng = rng.manual_seed(100)
+        torch.utils.data.graph_settings.apply_shuffle_seed(datapipe, rng)
+        list(datapipe)
+
         # Test Case: fast forward works with list
+        datapipe._restored = True
         rng.set_state(initial_rng_state)
         fast_forward_fn(datapipe, n_iterations, rng)
         actual_res = list(datapipe)
@@ -2778,6 +2787,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
         self.assertEqual(expected_full_res[n_iterations:], actual_res)
 
         # Test Case: fast forward works with iterator
+        datapipe._restored = True
         rng.set_state(initial_rng_state)
         fast_forward_fn(datapipe, n_iterations, rng)
         it = iter(datapipe)
@@ -2787,33 +2797,36 @@ class TestIterDataPipeGraphFastForward(TestCase):
         with self.assertRaises(StopIteration):
             next(it)
 
-    def test_simple_fast_forward_graph(self):
+    def test_simple_snapshot_graph(self):
         graph1 = dp.iter.IterableWrapper(range(10))
-        self._fast_forward_graph_test_helper(graph1, simple_fast_forward_graph)
+        self._fast_forward_graph_test_helper(graph1, _simple_snapshot_graph)
 
         graph2 = graph1.map(_mul_10)
-        self._fast_forward_graph_test_helper(graph2, simple_fast_forward_graph)
+        self._fast_forward_graph_test_helper(graph2, _simple_snapshot_graph)
 
         rng = torch.Generator()
         graph3 = graph2.shuffle()
-        self._fast_forward_graph_test_helper(graph3, simple_fast_forward_graph, rng=rng)
+        self._fast_forward_graph_test_helper(graph3, _simple_snapshot_graph, rng=rng)
 
         graph4 = graph3.map(_mul_10)
-        self._fast_forward_graph_test_helper(graph4, simple_fast_forward_graph, rng=rng)
+        self._fast_forward_graph_test_helper(graph4, _simple_snapshot_graph, rng=rng)
 
         graph5 = graph4.batch(2)
-        self._fast_forward_graph_test_helper(graph5, simple_fast_forward_graph, rng=rng)
+        self._fast_forward_graph_test_helper(graph5, _simple_snapshot_graph, rng=rng)
 
         # With `fork` and `zip`
         cdp1, cdp2 = graph5.fork(2)
         graph6 = cdp1.zip(cdp2)
-        self._fast_forward_graph_test_helper(graph6, simple_fast_forward_graph, rng=rng)
+        self._fast_forward_graph_test_helper(graph6, _simple_snapshot_graph, rng=rng)
 
         # With `fork` and `concat`
         graph7 = cdp1.concat(cdp2)
-        self._fast_forward_graph_test_helper(graph7, simple_fast_forward_graph, rng=rng)
+        self._fast_forward_graph_test_helper(graph7, _simple_snapshot_graph, rng=rng)
 
     def _snapshot_test_helper(self, datapipe, n_iter=3, rng=None):
+        """
+        Extend the previous test with serialization and deserialization test.
+        """
         if rng is None:
             rng = torch.Generator()
         initial_rng_state = rng.get_state()
@@ -2828,10 +2841,10 @@ class TestIterDataPipeGraphFastForward(TestCase):
 
         rng_for_deserialized = torch.Generator()
         rng_for_deserialized.set_state(initial_rng_state)
-        simple_fast_forward_graph(deserialized_graph, n_iter, rng=rng_for_deserialized)
+        _simple_snapshot_graph(deserialized_graph, n_iter, rng=rng_for_deserialized)
         self.assertEqual(list(it), list(deserialized_graph))
 
-    def test_snapshot_simple_fast_forward(self):
+    def test_simple_snapshot_graph_with_serialization(self):
         graph1 = dp.iter.IterableWrapper(range(10))
         self._snapshot_test_helper(graph1)
 
