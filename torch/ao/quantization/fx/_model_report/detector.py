@@ -1,4 +1,4 @@
-from typing import Any, Dict, Set, Tuple, Union
+from typing import Any, Dict, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from torch.ao.quantization.fake_quantize import FakeQuantize
 from torch.ao.quantization.fx.graph_module import GraphModule
 from torch.ao.quantization.observer import ObserverBase
+from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.qconfig import QConfig
 
 # Adding base class for detectors
@@ -25,7 +26,7 @@ class DetectorBase(ABC):
         super().__init__()
 
     @abstractmethod
-    def determine_observer_insert_points(self, model) -> Union[None, Tuple[Set[str], Any]]:
+    def determine_observer_insert_points(self, model) -> Dict:
         r"""
         Args
             model (nn.Module or subclass): model to find observer insertion points
@@ -72,7 +73,7 @@ class PerChannelDetector(DetectorBase):
         "onednn": set([nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]),
     }
 
-    def __init__(self, backend=torch.backends.quantized.engine):
+    def __init__(self, backend: str = torch.backends.quantized.engine):
         super().__init__()
 
         # store the backend information
@@ -87,11 +88,13 @@ class PerChannelDetector(DetectorBase):
         r""" returns the string name of this detector"""
         return "per_channel_detector"
 
-    def determine_observer_insert_points(self, model):
+    def determine_observer_insert_points(self, model: nn.Module) -> Dict:
         r"""
-        There is no observers inserted for the PerChannelDetector
+        There is no observers inserted for the PerChannelDetector.
+
+        Returns an empty dictionary since no observers are added or needed
         """
-        raise NotImplementedError("No observers are inserted in the PerChannelDetector.")
+        return {}
 
 
     def _detect_per_channel_helper(self, model: nn.Module, per_channel_info: Dict):
@@ -244,9 +247,77 @@ class DynamicStaticDetector(DetectorBase):
         self.tolerance = tolerance
         self.useful_observer_fqns: Set[str] = set([])
 
-    def determine_observer_insert_points(self, model) -> Tuple[Set[str], Any]:
+    def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
+        r"""
+        Determines where observers need to be inserted for the Dynamic vs Static detector.
+        For this detector, we want to place observers on either side of linear layers in the model.
 
-        raise NotImplementedError("Will be implemented in a future commit")
+        Currently inserts observers for:
+            linear layers
+
+        Args:
+            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
+            key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
+            key "insert_observer" -> the observer we wish to insert (ObserverBase)
+            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_args" -> The arguments that are meant to be passed into the observer
+        """
+
+        # observer for this detector is ModelReportObserver
+        obs_ctr = ModelReportObserver
+
+        # return dict
+        obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
+
+        for fqn, module in prepared_fx_model.named_modules():
+            # check to see if module is of a supported type
+            is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+
+            if is_supported_type:
+                # if it's a supported type, we want to get node and add observer insert locations
+                targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
+
+                # add entry for pre-observer
+                pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
+
+                obs_fqn_to_info[pre_obs_fqn] = {
+                    "target_node": targeted_node,
+                    "insert_observer": obs_ctr,
+                    "insert_post": False,
+                    "observer_args": targeted_node.args
+                }
+
+                # add entry for post-observer
+                post_obs_fqn = fqn + "." + self.DEFAULT_POST_OBSERVER_NAME
+
+                obs_fqn_to_info[post_obs_fqn] = {
+                    "target_node": targeted_node,
+                    "insert_observer": obs_ctr,
+                    "insert_post": True,
+                    "observer_args": (targeted_node,)
+                }
+
+        return obs_fqn_to_info
+
+
+    def _get_targeting_node(self, prepared_fx_model: GraphModule, target_fqn: str) -> torch.fx.node.Node:
+        r"""
+        Takes in a GraphModule and the target_fqn and finds the node object that targets this fqn
+
+        Args:
+            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
+            target_fqn (str): The fqn of the layer we are trying to target
+
+        Returns the node object we are trying to add observers around
+        """
+        for node in prepared_fx_model.graph.nodes:
+            # if the node's target is our target, return it
+            if node.target == target_fqn:
+                return node
+
+        raise ValueError("passed in target_fqn not found in graph's targets.")
 
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
@@ -413,3 +484,75 @@ class DynamicStaticDetector(DetectorBase):
 
         # return the string as well as the dictionary of information
         return (dynamic_vs_static_string, module_dynamic_static_info)
+
+
+class InputWeightEqualizationDetector(DetectorBase):
+    r"""
+    Determines whether input-weight equalization can help improve quantization for certain modules.
+
+    Specifically, this list of modules includes:
+        linear
+        conv
+
+    Determines whether input-weight equalization is recommended based on the comp stat:
+        s_c = sqrt(w_c/W)/sqrt(i_c/I)
+        where:
+            w_c is range of weight for channel c, W is range of weight over all channels
+            i_c is range of input for channel c, I is range of input over all channels
+
+        if s_c >= threshold or <= 1 / threshold, recommends input-weight equalization
+
+    Args:
+        ratio_threshold (float): The threshold for s_c to determine if input-weight equalization is sugggested
+        channel (int, optional): The channel being observed to determine input weight equalization
+            Default: 1
+    """
+
+    def __init__(self):
+        pass
+
+    def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
+        r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
+        For this detector, we want to place observers in front of supported layers.
+
+        Currently inserts observers for:
+            linear layers
+            conv layers
+
+        Args:
+            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
+
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict with:
+            key "target_node" -> the node we are trying to observe with this observer (torch.fx.node.Node)
+            key "insert_observer" -> the observer we wish to insert (ObserverBase)
+            key "insert_post" -> True if this is meant to be a post-observer for target_node, False if pre-observer
+            key "observer_args" -> The arguments that are meant to be passed into the observer
+        """
+
+    def get_detector_name(self) -> str:
+        r""" Returns the name of this detector """
+        return "input_weight_equalization_detector"
+
+    def generate_detector_report(self, model: GraphModule) -> Tuple[str, Dict[str, Any]]:
+        r"""
+        Determines whether input weight equalization is appropriate for a given module.
+
+        Takes advantage of the ModelReport Observer which records per channel information of input range
+        It then uses the passed in weight info inconjunction to compute the desired ratio
+        Finally, it gives suggestions based on this information for each module of interest
+
+        Args:
+            model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
+            weight_info (Dict): Maps modules of interest to information on their weights to be analyzed
+
+        Returns a tuple with two elements:
+            String report of of whether input weight equalization is recommended for certain modules
+            Dictionary mapping modules of interst to:
+                whether input weight equalization is recommended
+                their s_c metric compared to the threshold
+                the threshold used to make the recommendation
+                the channel used for recording data
+                the input channel range ratio
+                the weight channel range ratio
+        """
+        pass
