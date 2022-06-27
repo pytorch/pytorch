@@ -177,6 +177,19 @@
       ]
    },
    {
+      "name": "Distributions"
+      "patterns": [
+          "torch/distributions/**",
+          "test/distributions/**"
+      ],
+      "approved_by": ["fritzo", "neerajprad", "alicanb", "vishwakftw"],
+      "mandatory_checks_name": [
+         "Facebook CLA Check",
+         "Lint",
+         "pull"
+      ]
+   },
+   {
       "name": "Distributed",
        "patterns": [
          "docs/source/pipeline.rst",
