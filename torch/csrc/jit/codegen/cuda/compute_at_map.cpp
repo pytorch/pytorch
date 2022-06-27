@@ -226,7 +226,8 @@ void IterDomainGraph::initializeId(
   }
 }
 
-ComputeAtMap::ComputeAtMap(Fusion* fusion) : id_graph_(fusion) {
+ComputeAtMap::ComputeAtMap(Fusion* fusion)
+    : id_graph_(fusion), fusion_(fusion) {
   build(fusion);
 }
 
@@ -254,6 +255,105 @@ void ComputeAtMap::validateAndPropagatePType() {
     for (auto id : loop_disjoint_set->vector()) {
       id->parallelize(common_ptype);
     }
+  }
+}
+
+void ComputeAtMap::allocateIndexVariables() {
+  // Run through all disjoint sets registered in loop map,
+  //  all lowered kir::ForLoop will correspond to one of the disjoint sets
+  //  and we only need one index variable for each set.
+  for (const auto& loop_disjoint_set : id_graph_.loopNodes().disjointSets()) {
+    ParallelType ptype;
+    // first allocate thread and grid parallel indices:
+    //  The validation pass will check that the parallel bindings within the
+    //  loop nodes are consistent so all the loops within this disjoint set
+    //  will be realized implicitly using parallel index variables.
+    if (std::any_of(
+            loop_disjoint_set->vector().begin(),
+            loop_disjoint_set->vector().end(),
+            [&ptype](IterDomain* id) {
+              if (id->isThread() &&
+                  // Halo extended parallel loops currently are handled
+                  // differently and an index variable would still
+                  // be allocated in this case.
+                  (GpuLower::current()->haloInfo().getExtent(id) == nullptr)) {
+                ptype = id->getParallelType();
+                return true;
+              }
+              return false;
+            })) {
+      loop_index_variable_map_[loop_disjoint_set.get()] =
+          NamedScalar::getParallelIndex(ptype);
+      continue;
+    }
+
+    // All loops in this set are non-parallel, non-concretized broadcast
+    //  iterdomains, their "index variable" should be zero.
+    if (std::all_of(
+            loop_disjoint_set->vector().begin(),
+            loop_disjoint_set->vector().end(),
+            [](IterDomain* id) { return id->isBroadcast(); })) {
+      loop_index_variable_map_[loop_disjoint_set.get()] = fusion_->zeroVal();
+      continue;
+    }
+
+    // Allocate variable for the iterdomains:
+    auto concrete_loop_id_it = concrete_id_cache_.find(loop_disjoint_set);
+    TORCH_INTERNAL_ASSERT(
+        concrete_loop_id_it != concrete_id_cache_.end(),
+        "Concrete id not computed");
+
+    auto concrete_loop_id = concrete_loop_id_it->second;
+
+    // Need to allocate double buffered loop differently.
+    if (GpuLower::current()->doubleBufferInfo().isDoubleBufferedIterDomain(
+            concrete_loop_id)) {
+      // Allocate index variable for each stage of the double buffered loop.
+      double_buffered_loop_index_variable_map_[loop_disjoint_set.get()] =
+          std::make_unique<DoubleBufferIndices>(DoubleBufferIndices(
+              {{DoubleBufferLoopStage::Prolog,
+                IrBuilder::create<Int>(c10::nullopt)},
+               {DoubleBufferLoopStage::Main,
+                IrBuilder::create<Int>(c10::nullopt)},
+               {DoubleBufferLoopStage::Epilog,
+                IrBuilder::create<Int>(c10::nullopt)}}));
+    } else {
+      // Everything now should be serial concrete loops,
+      //   we just allocate a loop index integer for each set of loops.
+      loop_index_variable_map_[loop_disjoint_set.get()] =
+          IrBuilder::create<Int>(c10::nullopt);
+    }
+  }
+}
+
+Val* ComputeAtMap::getIndexVariable(
+    IterDomain* id,
+    DoubleBufferLoopStage double_buffer_loop_stage) const {
+  TORCH_INTERNAL_ASSERT(
+      id_graph_.loopNodes().mappingExists(id),
+      "Index Variable: no index variable allocated as ",
+      id->toString(),
+      " is not registered in loop map");
+  const auto* loop_set = &(id_graph_.loopNodes().getDisjointSetOf(id));
+
+  // Check if this loop was modified by double buffer pass.
+  bool is_double_buffer_iterdomain =
+      GpuLower::current()->doubleBufferInfo().isDoubleBufferedIterDomain(id);
+
+  if (is_double_buffer_iterdomain) {
+    // Use dedicated double buffer index variable if the loop is double buffer
+    // loop
+    if (double_buffer_loop_stage == DoubleBufferLoopStage::NotApplicable) {
+      // The double buffered loop stages are created after the loop nest
+      //  lowering phase so this function will be querried before the double
+      //  buffer pass. At that point, no forloop has any double buffer
+      //  stage defined, and we just default to using the main stage index.
+      double_buffer_loop_stage = DoubleBufferLoopStage::Main;
+    }
+    return double_buffered_loop_index_variable_map_.at(loop_set)->at(
+        double_buffer_loop_stage);
+  } else {
+    return loop_index_variable_map_.at(loop_set);
   }
 }
 
