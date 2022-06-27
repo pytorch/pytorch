@@ -123,7 +123,8 @@ class DispatchKey(Enum):
     Autograd = auto()
     CompositeImplicitAutograd = auto()
     CompositeExplicitAutograd = auto()
-    EndOfAliasKeys = CompositeExplicitAutograd
+    CompositeExplicitAutogradNonFunctional = auto()
+    EndOfAliasKeys = CompositeExplicitAutogradNonFunctional
 
     CPUTensorId = CPU
     CUDATensorId = CUDA
@@ -162,6 +163,7 @@ dispatch_keys = [
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
     DispatchKey.CompositeExplicitAutograd,
+    DispatchKey.CompositeExplicitAutogradNonFunctional,
     DispatchKey.NestedTensorCPU,
     DispatchKey.NestedTensorCUDA,
     # Meta is a magic key: it is automatically generated for structured
@@ -175,6 +177,7 @@ dispatch_keys = [
 def is_generic_dispatch_key(dk: DispatchKey) -> bool:
     return dk in {
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.CompositeImplicitAutograd,
     }
 
@@ -422,6 +425,7 @@ class NativeFunction:
     # Whether or not the NativeFunction contains a backend-agnostic kernel
     has_composite_implicit_autograd_kernel: bool
     has_composite_explicit_autograd_kernel: bool
+    has_composite_explicit_autograd_non_functional_kernel: bool
 
     # Tags are used to describe semantic information about (groups of) operators,
     # That aren't easily inferrable directly from the operator's schema.
@@ -613,11 +617,17 @@ class NativeFunction:
                 cpp.name(func), structured=False, cpp_namespace=DEFAULT_KERNEL_NAMESPACE
             )
 
-        assert not (
-            DispatchKey.CompositeExplicitAutograd in dispatch
-            and DispatchKey.CompositeImplicitAutograd in dispatch
-        ), (
-            "cannot specify both CompositeExplicitAutograd and CompositeImplicitAutograd on a single kernel; each "
+        composites_in_dispatch = [
+            d
+            for d in dispatch
+            if d == DispatchKey.CompositeExplicitAutograd
+            or d == DispatchKey.CompositeExplicitAutogradNonFunctional
+            or d == DispatchKey.CompositeImplicitAutograd
+        ]
+
+        assert len(composites_in_dispatch) <= 1, (
+            "cannot specify more than one of CompositeExplicitAutograd, CompositeExplicitAutogradNonFunctional, "
+            "or CompositeImplicitAutograd on a single kernel; each "
             "strictly subsumes the other.  If you wanted to provide an explicit autograd "
             "implementation, specify CompositeExplicitAutograd; otherwise specify CompositeImplicitAutograd only"
         )
@@ -673,6 +683,9 @@ class NativeFunction:
         has_composite_explicit_autograd_kernel = (
             DispatchKey.CompositeExplicitAutograd in dispatch.keys()
         )
+        has_composite_explicit_autograd_non_functional_kernel = (
+            DispatchKey.CompositeExplicitAutogradNonFunctional in dispatch.keys()
+        )
 
         # We aren't going to store dispatch metadata inline in NativeFunctions;
         # instead it is separately indexed by backend (so other backends can
@@ -715,6 +728,7 @@ class NativeFunction:
                 is_abstract=is_abstract,
                 has_composite_implicit_autograd_kernel=has_composite_implicit_autograd_kernel,
                 has_composite_explicit_autograd_kernel=has_composite_explicit_autograd_kernel,
+                has_composite_explicit_autograd_non_functional_kernel=has_composite_explicit_autograd_non_functional_kernel,
                 tags=tags,
                 namespace=namespace,
             ),
@@ -789,6 +803,7 @@ class NativeFunction:
         return (
             self.has_composite_implicit_autograd_kernel
             or self.has_composite_explicit_autograd_kernel
+            or self.has_composite_explicit_autograd_non_functional_kernel
         )
 
     @property
@@ -819,7 +834,7 @@ class NativeFunction:
         return self.func.name.name.base
 
 
-SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable"))
+SchemaKind = Enum("SchemaKind", ("functional", "inplace", "out", "mutable", "scratch"))
 
 # A structured kernel is guaranteed to have a functional and out variant, and
 # optionally an inplace variant.
@@ -1186,7 +1201,15 @@ class FunctionSchema:
                 ), "out= ops that accept tensor lists as out arguments "
                 "are expected to have no return type (since you can't do method chaining on them)"
             else:
-                assert len(self.arguments.out) == len(
+                # mutable keyward arguments whose name has _scratch_ prefix are
+                # scratch tensors for memory planning and should not be returned
+                assert len(
+                    [
+                        arg
+                        for arg in self.arguments.out
+                        if not arg.name.startswith("_scratch_")
+                    ]
+                ) == len(
                     self.returns
                 ), "Must return as many arguments as there are out arguments, or no return at all"
 
@@ -1266,6 +1289,9 @@ class FunctionSchema:
         the result into an explicitly provided out argument.
         """
         is_out = bool(self.arguments.out)
+        is_scratch = bool(
+            [arg for arg in self.arguments.out if arg.name.startswith("_scratch_")]
+        )
         is_inplace = self.name.name.inplace
         is_mutable = any(
             a.annotation is not None and a.annotation.is_write
@@ -1281,7 +1307,15 @@ class FunctionSchema:
         # we can probably manually write code for them instead of forcing the codegen to handle them.
         if is_inplace:
             return SchemaKind.inplace
+        elif is_scratch:
+            assert (
+                is_out
+            ), "invariant: all scratch operators are expected to be out= operators too"
+            return SchemaKind.scratch
         elif is_out:
+            assert (
+                not is_scratch
+            ), "We should not categorize a scratch op as an out variant. Check if the order of if statements are expected!"
             return SchemaKind.out
         elif is_mutable:
             return SchemaKind.mutable

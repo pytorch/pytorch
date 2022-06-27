@@ -62,7 +62,9 @@ class TestModels(TestCase):
     keep_initializers_as_inputs = False
 
     def exportTest(self, model, inputs, rtol=1e-2, atol=1e-7):
-        with torch.onnx.select_model_mode_for_export(model, None):
+        with torch.onnx.select_model_mode_for_export(
+            model, torch.onnx.TrainingMode.EVAL
+        ):
             graph = torch.onnx.utils._trace(model, inputs, OperatorExportTypes.ONNX)
             torch._C._jit_pass_lint(graph)
             verify(

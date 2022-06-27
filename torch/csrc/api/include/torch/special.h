@@ -615,6 +615,25 @@ inline Tensor softmax(
   return torch::special_softmax(self, dim, dtype);
 }
 
+/// Airy function Ai.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_ai.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::airy_ai(x);
+/// ```
+inline Tensor airy_ai(const Tensor& x) {
+  return torch::special_airy_ai(x);
+}
+
+inline Tensor& airy_ai_out(Tensor& y, const Tensor& x) {
+  return torch::special_airy_ai_out(y, x);
+}
+
 /// Bessel function of the first kind of order 0.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j0.
@@ -1137,6 +1156,26 @@ inline Tensor modified_bessel_k1(const Tensor& self) {
 
 inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
   return torch::special_modified_bessel_k1_out(result, self);
+}
+
+/// Scaled modified Bessel function of the second kind of order 1.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_k1(x);
+/// ```
+inline Tensor scaled_modified_bessel_k1(const Tensor& x) {
+  return torch::special_scaled_modified_bessel_k1(x);
+}
+
+inline Tensor& scaled_modified_bessel_k1_out(Tensor& y, const Tensor& x) {
+  return torch::special_scaled_modified_bessel_k1_out(y, x);
 }
 
 /// Shifted Chebyshev polynomial of the first kind.

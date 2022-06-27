@@ -1,22 +1,11 @@
 #include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 
+static const torch::lazy::DimensionNode* DimCast(torch::lazy::Output output) {
+  return dynamic_cast<const torch::lazy::DimensionNode*>(output.node);
+}
+
 namespace torch {
 namespace lazy {
-
-DimensionNode::DimensionNode(OpKind op, OpList operands, hash_t hash_seed)
-    : TsNode(
-          op,
-          operands,
-          /*num_outputs=*/1,
-          /* hash_seed */ HashCombine(op.hash(), hash_seed)) {}
-
-const DimensionNode* DimensionNode::getOpDimNode(size_t index) const {
-  return dynamic_cast<const DimensionNode*>(operand(index).node);
-}
-
-std::string DimensionNode::ToString() const {
-  return "DimensionNode";
-}
 
 TSOpVector SizeNode::Lower(
     std::shared_ptr<torch::jit::GraphFunction> function,
@@ -34,9 +23,11 @@ TSOpVector SizeNode::Lower(
 }
 
 SizeNode::SizeNode(Value input, size_t dim)
-    : DimensionNode(
+    : TsNode(
           OpKind{c10::Symbol::fromQualString("aten::size")},
           {input},
+          std::vector<Shape>{},
+          1,
           MHash(dim)),
       dim_(dim){};
 
@@ -57,14 +48,19 @@ std::string SizeNode::ToString() const {
 }
 
 SizeAdd::SizeAdd(Value a, Value b)
-    : DimensionNode(OpKind{c10::Symbol::fromQualString("aten::add")}, {a, b}){};
+    : TsNode(
+          OpKind{c10::Symbol::fromQualString("aten::add")},
+          {a, b},
+          std::vector<Shape>{},
+          1){};
 
 int64_t SizeAdd::getStaticValue() const {
-  return getOpDimNode(0)->getStaticValue() + getOpDimNode(1)->getStaticValue();
+  return DimCast(operand(0))->getStaticValue() +
+      DimCast(operand(1))->getStaticValue();
 }
 
 bool SizeAdd::isDynamic() const {
-  return getOpDimNode(0)->isDynamic() || getOpDimNode(1)->isDynamic();
+  return DimCast(operand(0))->isDynamic() || DimCast(operand(1))->isDynamic();
 }
 
 std::string SizeAdd::ToString() const {
@@ -72,14 +68,19 @@ std::string SizeAdd::ToString() const {
 }
 
 SizeMul::SizeMul(Value a, Value b)
-    : DimensionNode(OpKind{c10::Symbol::fromQualString("aten::mul")}, {a, b}){};
+    : TsNode(
+          OpKind{c10::Symbol::fromQualString("aten::mul")},
+          {a, b},
+          std::vector<Shape>{},
+          1){};
 
 int64_t SizeMul::getStaticValue() const {
-  return getOpDimNode(0)->getStaticValue() * getOpDimNode(1)->getStaticValue();
+  return DimCast(operand(0))->getStaticValue() *
+      DimCast(operand(1))->getStaticValue();
 }
 
 bool SizeMul::isDynamic() const {
-  return getOpDimNode(0)->isDynamic() || getOpDimNode(1)->isDynamic();
+  return DimCast(operand(0))->isDynamic() || DimCast(operand(1))->isDynamic();
 }
 
 std::string SizeMul::ToString() const {
@@ -87,17 +88,22 @@ std::string SizeMul::ToString() const {
 }
 
 SizeDiv::SizeDiv(Value a, Value b)
-    : DimensionNode(OpKind{c10::Symbol::fromQualString("aten::div")}, {a, b}){};
+    : TsNode(
+          OpKind{c10::Symbol::fromQualString("aten::div")},
+          {a, b},
+          std::vector<Shape>{},
+          1){};
 
 int64_t SizeDiv::getStaticValue() const {
   TORCH_CHECK(
-      getOpDimNode(1)->getStaticValue() != 0,
+      DimCast(operand(1))->getStaticValue() != 0,
       "Can't divide a dimension by zero");
-  return getOpDimNode(0)->getStaticValue() / getOpDimNode(1)->getStaticValue();
+  return DimCast(operand(0))->getStaticValue() /
+      DimCast(operand(1))->getStaticValue();
 }
 
 bool SizeDiv::isDynamic() const {
-  return getOpDimNode(0)->isDynamic() || getOpDimNode(1)->isDynamic();
+  return DimCast(operand(0))->isDynamic() || DimCast(operand(1))->isDynamic();
 }
 
 std::string SizeDiv::ToString() const {
