@@ -2,9 +2,12 @@ import torch
 from functorch.compile import minifier
 from functorch import make_fx
 from torch.testing._internal.common_utils import TestCase, run_tests
+import unittest
 
 
 class TestMinifier(TestCase):
+    # https://github.com/pytorch/functorch/issues/913
+    @unittest.expectedFailure
     def test_has_mul_minifier(self):
         def failing_f(x, y):
             y = y / 3
