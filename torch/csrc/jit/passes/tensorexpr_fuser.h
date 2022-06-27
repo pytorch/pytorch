@@ -25,6 +25,8 @@ TORCH_API void setTensorExprDynamicShapeFusionEnabled(bool val);
 TORCH_API bool tensorExprDynamicShapeFusionEnabled();
 TORCH_API bool setTexprReductionsEnabled(bool value);
 TORCH_API bool texprReductionsEnabled();
+TORCH_API bool setTexprQuantEnabled(bool value);
+TORCH_API bool texprQuantEnabled();
 
 TORCH_API void RemoveProfileNodesAndSpecializeTypes(
     std::shared_ptr<Graph>& graph);
@@ -72,6 +74,11 @@ TORCH_API bool isSupported(Node* node);
 /// @return Reference of the custome operator set
 ///
 TORCH_API OperatorSet& getCustomOperatorSet();
+
+/// Get the modifiable quantization operator set object.
+/// @return Reference of the quantization operator set
+///
+TORCH_API OperatorSet& getQuantizationOperatorSet();
 } // namespace tensorexpr
 } // namespace jit
 } // namespace torch

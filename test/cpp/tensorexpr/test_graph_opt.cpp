@@ -316,5 +316,88 @@ TEST_F(GraphOpt, AOTGraphPrepPasses) {
   testing::FileCheck().check("return (%x, %y, %z)")->run(*g);
 }
 
+TEST_F(GraphOpt, DecomposeQuantizationAddandMul) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+    graph(%x : Float(8, 16, strides=[16, 1], device=cpu)):
+      %1 : int = prim::Constant[value=0]()
+      %2 : float = prim::Constant[value=0.86077326536178589]()
+      %3 : int = prim::Constant[value=63]()
+      %4 : float = prim::Constant[value=0.16712260246276855]()
+      %5 : int = prim::Constant[value=60]()
+      %6 : float = prim::Constant[value=0.08735954761505127]()
+      %7 : int = prim::Constant[value=13]()
+      %8 : Long(device=cpu) = prim::Constant[value={59}]()
+      %9 : Float(device=cpu) = prim::Constant[value={0.0421975}]()
+      %10 : QUInt8(8, 16, strides=[16, 1], device=cpu) = aten::quantize_per_tensor(%x, %9, %8, %7)
+      %11 : QUInt8(8, 16, strides=[16, 1], device=cpu) = quantized::add(%10, %10, %6, %5)
+      %12 : QUInt8(8, 16, strides=[16, 1], device=cpu) = quantized::add(%11, %11, %4, %3)
+      %mul_1.1 : QUInt8(8, 16, strides=[16, 1], device=cpu) = quantized::mul(%12, %12, %2, %1)
+      %14 : Float(8, 16, strides=[16, 1], device=cpu) = aten::dequantize(%mul_1.1)
+      return (%14))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get(), true);
+  g->lint();
+
+  TensorExprKernel kernel(g);
+
+  // Quantized::add should be decomposed to be
+  //   aten::dequantize/aten::add/aten::quantize_per_tensor
+  // Similar for quantized::mul
+  testing::FileCheck()
+      .check("aten::quantize_per_tensor")
+      ->check("aten::dequantize")
+      ->check("aten::add")
+      ->check("aten::quantize_per_tensor")
+      ->check("aten::dequantize")
+      ->check("aten::add")
+      ->check("aten::quantize_per_tensor")
+      ->check("aten::dequantize")
+      ->check("aten::mul")
+      ->check("aten::quantize_per_tensor")
+      ->check("aten::dequantize")
+      ->run(*kernel.graph());
+#endif
+}
+
+TEST_F(GraphOpt, DecomposeQuantizationAddRelu) {
+#ifdef TORCH_ENABLE_LLVM
+  const auto graph_string = R"IR(
+    graph(%x : Float(8, 16, strides=[16, 1], device=cpu)):
+      %1 : float = prim::Constant[value=0.20982688665390015]()
+      %2 : int = prim::Constant[value=0]()
+      %3 : float = prim::Constant[value=0.045946117490530014]()
+      %4 : int = prim::Constant[value=13]()
+      %5 : Long(device=cpu) = prim::Constant[value={59}]()
+      %6 : Float(device=cpu) = prim::Constant[value={0.0421975}]()
+      %7 : QUInt8(8, 16, strides=[16, 1], device=cpu) = aten::quantize_per_tensor(%x, %6, %5, %4)
+      %8 : QUInt8(8, 16, strides=[16, 1], device=cpu) = quantized::add_relu(%7, %7, %3, %2)
+      %mul_1.1 : QUInt8(8, 16, strides=[16, 1], device=cpu) = quantized::mul(%8, %8, %1, %2)
+      %10 : Float(8, 16, strides=[16, 1], device=cpu) = aten::dequantize(%mul_1.1)
+      return (%10))IR";
+  auto g = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, g.get(), true);
+  g->lint();
+
+  TensorExprKernel kernel(g);
+
+  // Quantized::add_relu should be decomposed to be
+  //   aten::dequantize/aten::add/aten::relu/aten::quantize_per_tensor
+  // Quantized::mul should be decomposed to be
+  //   aten::dequantize/aten::mul/aten::quantize_per_tensor
+  testing::FileCheck()
+      .check("aten::quantize_per_tensor")
+      ->check("aten::dequantize")
+      ->check("aten::add")
+      ->check("aten::relu")
+      ->check("aten::quantize_per_tensor")
+      ->check("aten::dequantize")
+      ->check("aten::mul")
+      ->check("aten::quantize_per_tensor")
+      ->check("aten::dequantize")
+      ->run(*kernel.graph());
+#endif
+}
+
 } // namespace jit
 } // namespace torch

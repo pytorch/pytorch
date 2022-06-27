@@ -1061,5 +1061,114 @@ TEST(ExternalCall, JitCustomFusionOp) {
 #endif
 }
 
+TEST(ExternalCall, JitCustomQuantOp) {
+  const char* custom_op_schema_literal =
+      "nnc_custom::special_mul(Tensor qa, Tensor qb, float scale, int zero_point) -> Tensor qc";
+  const char* external_func_name = "nnc_special_mul";
+
+  auto special_mul_lowering_func =
+      [external_func_name](
+          const std::vector<torch::jit::tensorexpr::ArgValue>& inputs,
+          const std::vector<torch::jit::tensorexpr::ExprHandle>& output_shape,
+          const std::vector<torch::jit::tensorexpr::ExprHandle>& output_strides,
+          const c10::optional<torch::jit::tensorexpr::ScalarType>& output_type,
+          at::Device device) {
+        auto output_dtype = Dtype(*output_type);
+        const torch::jit::tensorexpr::BufHandle& qa =
+            c10::get<torch::jit::tensorexpr::BufHandle>(inputs[0]);
+        const torch::jit::tensorexpr::BufHandle& qb =
+            c10::get<torch::jit::tensorexpr::BufHandle>(inputs[1]);
+        const auto out_qscale =
+            DoubleImm::make(c10::get<double>(inputs[2])).node();
+        const auto out_qzero =
+            LongImm::make(c10::get<int64_t>(inputs[3])).node();
+
+        BufHandle result_buf(
+            "nnc_special_mul_res_buf", output_shape, output_dtype);
+        result_buf.node()->set_qscale(out_qscale);
+        result_buf.node()->set_qzero(out_qzero);
+
+        torch::jit::tensorexpr::StmtPtr s =
+            torch::jit::tensorexpr::ExternalCall::make(
+                result_buf,
+                external_func_name,
+                {qa, qb},
+                {ExprHandle(qa.node()->qscale()),
+                 ExprHandle(qa.node()->qzero()),
+                 (int64_t)qa.dtype().scalar_type(),
+                 ExprHandle(qb.node()->qscale()),
+                 ExprHandle(qb.node()->qzero()),
+                 (int64_t)qb.dtype().scalar_type(),
+                 ExprHandle(out_qscale),
+                 ExprHandle(out_qzero)});
+        return Tensor(result_buf.node(), s);
+      };
+
+  auto special_mul_external_func = [](int64_t bufs_num,
+                                      void** buf_data,
+                                      int64_t* buf_ranks,
+                                      int64_t* buf_dims,
+                                      int64_t* buf_strides,
+                                      int8_t* buf_dtypes,
+                                      int64_t args_num,
+                                      int64_t* extra_args) {};
+
+  torch::jit::RegisterOperators reg({Operator(
+      custom_op_schema_literal,
+      [](const Node* node) -> Operation {
+        return [](Stack& _stack) {
+          auto a = std::move(peek(_stack, 0, 2)).toTensor();
+          auto b = std::move(peek(_stack, 1, 2)).toTensor();
+          drop(_stack, 2);
+          auto result = a * b;
+          pack(_stack, std::move(result));
+          return 0;
+        };
+      },
+      c10::AliasAnalysisKind::FROM_SCHEMA)});
+
+  auto& custom_operator_set =
+      torch::jit::tensorexpr::getQuantizationOperatorSet();
+  custom_operator_set.insert({custom_op_schema_literal});
+
+  auto& te_lowering_registry = torch::jit::tensorexpr::getNNCLoweringRegistry();
+  te_lowering_registry.insert(
+      parseSchema(custom_op_schema_literal), special_mul_lowering_func);
+
+  auto& te_nnc_func_registry = torch::jit::tensorexpr::getNNCFunctionRegistry();
+  te_nnc_func_registry[external_func_name] = special_mul_external_func;
+
+  const auto graph_string = R"IR(
+      graph(%x1 : Float(1, 3, 224, 224, strides=[150528, 1, 672, 3], device=cpu),
+            %x2 : Float(1, 3, 224, 224, strides=[150528, 1, 672, 3], device=cpu)):
+        %2 : int = prim::Constant[value=12]()
+        %qz1 : int = prim::Constant[value=13]()
+        %qs1 : float = prim::Constant[value=0.1]()
+        %qz2 : int = prim::Constant[value=13]()
+        %qs2 : float = prim::Constant[value=0.1]()
+        %qza : int = prim::Constant[value=13]()
+        %qsa : float = prim::Constant[value=0.1]()
+        %q1 : QUInt8(1, 3, 224, 224, strides=[150528, 1, 672, 3], device=cpu) = aten::quantize_per_tensor(%x1, %qs1, %qz1, %2)
+        %q2 : QUInt8(1, 3, 224, 224, strides=[150528, 1, 672, 3], device=cpu) = aten::quantize_per_tensor(%x2, %qs2, %qz2, %2)
+        %qa : QUInt8(1, 3, 224, 224, strides=[150528, 1, 672, 3], device=cpu) = nnc_custom::special_mul(%q1, %q2, %qsa, %qza)
+        %6 : Float(1, 3, 224, 224, strides=[150528, 1, 672, 3], device=cpu) = aten::dequantize(%qa)
+        return (%6))IR";
+
+  auto graph = std::make_shared<Graph>();
+  torch::jit::parseIR(graph_string, graph.get());
+
+#ifdef TORCH_ENABLE_LLVM
+  setTexprQuantEnabled(true);
+  FuseTensorExprs(graph, 1);
+  torch::jit::testing::FileCheck()
+      .check("prim::TensorExprGroup_")
+      ->check("nnc_custom::special_mul")
+      ->run(*graph);
+#else
+  torch::jit::testing::FileCheck()
+      .check("nnc_custom::special_mul")
+      ->run(*graph);
+#endif
+}
 } // namespace jit
 } // namespace torch

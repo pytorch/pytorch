@@ -979,6 +979,8 @@ void initJITBindings(PyObject* module) {
           "_jit_texpr_dynamic_shape_enabled",
           &tensorExprDynamicShapeFusionEnabled)
       .def("_jit_texpr_reductions_enabled", &texprReductionsEnabled)
+      .def("_jit_set_texpr_quantization_enabled", &setTexprQuantEnabled)
+      .def("_jit_texpr_quantization_enabled", &texprQuantEnabled)
       .def(
           "_jit_set_te_generate_block_code",
           [](bool gen_block_code) {

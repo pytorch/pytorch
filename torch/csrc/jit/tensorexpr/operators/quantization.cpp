@@ -169,7 +169,9 @@ Tensor computeQuantizePerTensor(
       ExprHandleVectorToExprVector(outputShape),
       dtype,
       nullptr,
-      c10::nullopt,
+      isChannelsLast(c10::get<BufHandle>(inputs[0]))
+          ? make_channels_last_strides(outputShape)
+          : make_contiguous_strides(outputShape),
       qscale.node(),
       qzero.node());
   return Tensor(buf, vars, e.node());
@@ -319,8 +321,8 @@ Tensor computeQuantizedConv2dPrepack(
        // NOLINTNEXTLINE(facebook-hte-LocalUncheckedArrayBounds)
        dilation[1],
        groups,
-       immQScale(qw),
-       immQZero(qw),
+       ExprHandle(qw.node()->qscale()),
+       ExprHandle(qw.node()->qzero()),
        (int64_t)immQDType(qw)});
   return Tensor(ResultBuf.node(), s);
 }
@@ -349,8 +351,8 @@ Tensor computeQuantizedConv1d(
       ResultBuf,
       "nnc_aten_quantized_conv1d",
       {qx, prepacked},
-      {immQScale(qx),
-       immQZero(qx),
+      {ExprHandle(qx.node()->qscale()),
+       ExprHandle(qx.node()->qzero()),
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
@@ -381,8 +383,8 @@ Tensor computeQuantizedConv2d(
       ResultBuf,
       "nnc_aten_quantized_conv2d",
       {qx, prepacked},
-      {immQScale(qx),
-       immQZero(qx),
+      {ExprHandle(qx.node()->qscale()),
+       ExprHandle(qx.node()->qzero()),
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
@@ -413,8 +415,8 @@ Tensor computeQuantizedConv2dRelu(
       ResultBuf,
       "nnc_aten_quantized_conv2d_relu",
       {qx, prepacked},
-      {immQScale(qx),
-       immQZero(qx),
+      {ExprHandle(qx.node()->qscale()),
+       ExprHandle(qx.node()->qzero()),
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
@@ -445,8 +447,8 @@ Tensor computeQuantizedLinear(
       ResultBuf,
       "nnc_aten_quantized_linear",
       {qx, prepacked},
-      {immQScale(qx),
-       immQZero(qx),
+      {ExprHandle(qx.node()->qscale()),
+       ExprHandle(qx.node()->qzero()),
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
@@ -477,8 +479,8 @@ Tensor computeQuantizedLinearRelu(
       ResultBuf,
       "nnc_aten_quantized_linear_relu",
       {qx, prepacked},
-      {immQScale(qx),
-       immQZero(qx),
+      {ExprHandle(qx.node()->qscale()),
+       ExprHandle(qx.node()->qzero()),
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});
@@ -518,11 +520,11 @@ Tensor computeQuantizedAddExternalCall(
       ResultBuf,
       "nnc_aten_quantized_add",
       {qa, qb},
-      {immQScale(qa),
-       immQZero(qa),
+      {ExprHandle(qa.node()->qscale()),
+       ExprHandle(qa.node()->qzero()),
        (int64_t)immQDType(qa),
-       immQScale(qb),
-       immQZero(qb),
+       ExprHandle(qb.node()->qscale()),
+       ExprHandle(qb.node()->qzero()),
        (int64_t)immQDType(qb),
        out_qscale,
        out_qzero});
@@ -549,11 +551,11 @@ Tensor computeQuantizedMul(
       ResultBuf,
       "nnc_aten_quantized_mul",
       {qa, qb},
-      {immQScale(qa),
-       immQZero(qa),
+      {ExprHandle(qa.node()->qscale()),
+       ExprHandle(qa.node()->qzero()),
        (int64_t)immQDType(qa),
-       immQScale(qb),
-       immQZero(qb),
+       ExprHandle(qb.node()->qscale()),
+       ExprHandle(qb.node()->qzero()),
        (int64_t)immQDType(qb),
        out_qscale,
        out_qzero});
@@ -572,18 +574,19 @@ Tensor computeQuantizedMulScalar(
   const auto scalar = c10::get<double>(inputs[1]);
   // Change to dtype based on outputType when dtype propagation implemented
   const auto out_qdtype = immQDType(qa);
-  double scale1 = immQScale(qa);
+  auto scale1 = ExprHandle(qa.node()->qscale());
+  auto out_scale = scale1 * DoubleImm::make(scalar);
   auto ResultBuf = makeQBufHandleContiguous(
       "quantized_mul_scalar",
       outputShape,
       Dtype(out_qdtype),
-      scale1 * scalar,
-      immQZero(qa));
+      out_scale.node(),
+      qa.node()->qzero());
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_mul_scalar",
       {qa},
-      {scale1, immQZero(qa), (int64_t)immQDType(qa), scalar});
+      {scale1, ExprHandle(qa.node()->qzero()), (int64_t)immQDType(qa), scalar});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -602,19 +605,21 @@ Tensor computeQuantizedRelu(
                                           "quantized_relu",
                                           outputShape,
                                           Dtype(out_qdtype),
-                                          immQScale(qa),
-                                          immQZero(qa))
+                                          qa.node()->qscale(),
+                                          qa.node()->qzero())
                                     : makeQBufHandleContiguous(
                                           "quantized_relu",
                                           outputShape,
                                           Dtype(out_qdtype),
-                                          immQScale(qa),
-                                          immQZero(qa));
+                                          qa.node()->qscale(),
+                                          qa.node()->qzero());
   StmtPtr s = ExternalCall::make(
       ResultBuf,
       "nnc_aten_quantized_relu",
       {qa},
-      {immQScale(qa), immQZero(qa), (int64_t)immQDType(qa)});
+      {ExprHandle(qa.node()->qscale()),
+       ExprHandle(qa.node()->qzero()),
+       (int64_t)immQDType(qa)});
   return Tensor(ResultBuf.node(), s);
 }
 
@@ -639,8 +644,8 @@ Tensor computeQuantizedCat(
   for (const auto i : c10::irange(n)) {
     const BufHandle& bh = inputList[i];
     args.emplace_back(bh);
-    extra_args.emplace_back(immQScale(bh));
-    extra_args.emplace_back(immQZero(bh));
+    extra_args.emplace_back(ExprHandle(bh.node()->qscale()));
+    extra_args.emplace_back(ExprHandle(bh.node()->qzero()));
     extra_args.emplace_back((int64_t)immQDType(bh));
   }
   extra_args.emplace_back(argDim);
@@ -684,9 +689,16 @@ Tensor computeDequantize(
     indices.push_back(VarHandle(var));
   }
   auto y = dequant(tensorOrConstant(inputs[0], indices), dtype, qscale, qzero);
-  BufPtr buf = alloc<Buf>(
-      "dequantize", ExprHandleVectorToExprVector(outputShape), dtype);
-  return Tensor(buf, vars, y.node());
+
+  auto strides = isChannelsLast(qx) ? make_channels_last_strides(outputShape)
+                                    : make_contiguous_strides(outputShape);
+  BufHandle buf = Buf::make(
+      "dequantize",
+      outputShape,
+      dtype,
+      c10::nullopt, // initializer
+      fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); }));
+  return Tensor(buf.node(), vars, y.node());
 }
 
 Tensor computeUpsampleNearest2d(
@@ -759,12 +771,13 @@ Tensor computeUpsampleNearest2dExternalCall(
     scale_factor_w = (*scale_factors)[1];
   }
   const BufHandle& x = c10::get<BufHandle>(inputs[0]);
-  double qx_qscale = -1.f;
-  int64_t qx_qzero = -1l;
+  // dummy initialization needed as for non-quant scenarios
+  ExprHandle qx_qscale = DoubleImm::make(0.0f);
+  ExprHandle qx_qzero = LongImm::make(1l);
   int64_t qx_qdtype = -1l;
   if (isQuantized(x)) {
-    qx_qscale = immQScale(x);
-    qx_qzero = immQZero(x);
+    qx_qscale = ExprHandle(x.node()->qscale());
+    qx_qzero = ExprHandle(x.node()->qzero());
     qx_qdtype = (int64_t)immQDType(x);
   }
 
@@ -774,8 +787,8 @@ Tensor computeUpsampleNearest2dExternalCall(
           "upsample_nearest2d",
           outputShape,
           Dtype(immQDType(x)),
-          qx_qscale,
-          qx_qzero);
+          qx_qscale.node(),
+          qx_qzero.node());
     }
     return BufHandle("upsample_nearest2d", outputShape, dtype);
   }();
@@ -823,8 +836,8 @@ Tensor computeQuantizedSigmoidExternalCall(
       ResultBuf,
       "nnc_aten_quantized_sigmoid",
       {qx},
-      {immQScale(qx),
-       immQZero(qx),
+      {ExprHandle(qx.node()->qscale()),
+       ExprHandle(qx.node()->qzero()),
        (int64_t)immQDType(qx),
        out_qscale,
        out_qzero});

@@ -275,12 +275,14 @@ class TORCH_API TensorExprKernel {
     c10::optional<c10::Layout> layout;
     c10::optional<c10::Device> device;
     c10::optional<bool> pinned_memory;
+    c10::optional<c10::MemoryFormat> memory_format;
 
     UnpackedTensorOptions(const c10::TensorOptions& opts)
         : dtype(optTypeMetaToScalarType(opts.dtype_opt())),
           layout(opts.layout_opt()),
           device(opts.device_opt()),
-          pinned_memory(opts.pinned_memory_opt()) {}
+          pinned_memory(opts.pinned_memory_opt()),
+          memory_format(opts.memory_format_opt()) {}
   };
 
   ExprHandle getVarForShape(const c10::ShapeSymbol& ss);
@@ -305,8 +307,12 @@ class TORCH_API TensorExprKernel {
   std::vector<CodeGen::BufferArg> bufferArgs_;
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
+  std::vector<ExprPtr> tensorOutputQscales_;
+  std::vector<ExprPtr> tensorOutputQzeros_;
+  std::unordered_map<std::string, size_t> qtensorInputIndex_;
   std::vector<torch::jit::StrideInput> tensorOutputStrideDesc_;
   std::vector<bool> isOutputScalar_;
+  std::vector<bool> isOutputQuantized_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<BufPtr> bufOutputs_;
   std::unordered_map<const torch::jit::Value*, BufPtr> bufs_;

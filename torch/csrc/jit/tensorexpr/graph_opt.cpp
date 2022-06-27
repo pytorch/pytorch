@@ -1,6 +1,10 @@
 #include <torch/csrc/jit/tensorexpr/graph_opt.h>
 
+#include <torch/csrc/jit/ir/irparser.h>
+#include <torch/csrc/jit/ir/subgraph_matcher.h>
 #include <torch/csrc/jit/jit_log.h>
+#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/symbolic_shape_registry_util.h>
@@ -179,6 +183,236 @@ bool OptimizeCat(const std::shared_ptr<Graph>& graph) {
     return true;
   }
   return false;
+}
+
+Node* insertDequant(Graph* graph, Value* quantized_val) {
+  Node* dequant = graph->create(Symbol::aten("dequantize"), {quantized_val});
+  auto tt = quantized_val->type()->cast<TensorType>();
+  TORCH_INTERNAL_ASSERT(
+      tt != nullptr,
+      buildErrorMessage("Value to be dequanted should be a tensortype."));
+  auto output_type = tt->withScalarType(at::ScalarType::Float);
+  dequant->output()
+      ->setDebugName(quantized_val->debugName() + ".dequant")
+      ->setType(output_type);
+
+  return graph->insertNode(dequant);
+}
+
+Node* insertQuant(
+    Graph* graph,
+    std::vector<Value*>& inputs,
+    c10::optional<c10::ScalarType> dtype) {
+  // TODO: also to deal with quantize_per_channel
+  inputs.push_back(
+      graph->insertConstant(IValue(static_cast<int64_t>(dtype.value()))));
+  Node* quant = graph->create(Symbol::aten("quantize_per_tensor"), inputs);
+
+  Value* fp32_value = inputs.at(0);
+  auto output_type =
+      fp32_value->type()->cast<TensorType>()->withScalarType(dtype);
+  quant->output()
+      ->setDebugName(fp32_value->debugName() + ".quant")
+      ->setType(output_type);
+
+  return graph->insertNode(quant);
+}
+
+void DecomposeQuantizedOp(
+    std::shared_ptr<Graph> graph,
+    Graph& pattern_graph,
+    Graph& target_graph,
+    c10::optional<Graph*>& post_op_graph) {
+  std::vector<Value*> values_to_rewrite;
+  std::unordered_map<Value*, Value*> rewrite_map;
+  std::unordered_set<Node*> nodes_to_delete_;
+
+  // Locate the pattern graph and replace with target graph
+  const auto& matches = findPatternMatches(pattern_graph, *graph);
+  for (const Match& match : matches) {
+    // Collect original inputs and insertion point for target graph
+    Node* ins_point = nullptr;
+    c10::optional<c10::ScalarType> quant_dtype = c10::nullopt;
+    std::vector<Value*> inputs, outputs;
+    std::vector<size_t> qtensor_pos_list;
+    for (const auto idx : c10::irange(pattern_graph.inputs().size())) {
+      Value* input = match.values_map.at(pattern_graph.inputs().at(idx));
+      inputs.push_back(input);
+      if (!ins_point || ins_point->isBefore(input->node())) {
+        ins_point = input->node();
+      }
+      c10::TensorTypePtr inputType = input->type()->cast<TensorType>();
+      if (inputType) {
+        auto scalarType = inputType->scalarType();
+        if (scalarType == at::ScalarType::QInt8 ||
+            scalarType == at::ScalarType::QUInt8) {
+          qtensor_pos_list.push_back(idx);
+        }
+      }
+    }
+    AT_ASSERT(ins_point);
+
+    // Prepare the outputs for target graph
+    for (Value* v : pattern_graph.outputs()) {
+      Value* output = match.values_map.at(v);
+      outputs.push_back(output);
+      if (quant_dtype == c10::nullopt) {
+        c10::TensorTypePtr outputType = output->type()->cast<TensorType>();
+        if (outputType) {
+          // Assume all the outputs have same dtype
+          quant_dtype = outputType->scalarType();
+        }
+      }
+    }
+
+    if (quant_dtype == c10::nullopt) {
+      // Can't decompose if havn't got quant dtype from any output, skip this
+      // match
+      continue;
+    }
+
+    // Insert dequant nodes and replace the outputs in the original inputs
+    ins_point = ins_point->next();
+    WithInsertPoint insert_point(ins_point);
+    for (const auto idx : c10::irange(qtensor_pos_list.size())) {
+      size_t qtensor_pos = qtensor_pos_list.at(idx);
+      ins_point = insertDequant(graph.get(), inputs.at(qtensor_pos));
+      inputs.at(qtensor_pos) = ins_point->output();
+    }
+
+    // Prepare the inputs for quantization OP (partially) and FP32 OP
+    // TODO: assume quantize_per_tensor here, need to support per_channel in
+    // future
+    std::vector<Value*> quant_inputs;
+    quant_inputs.push_back(nullptr);
+    quant_inputs.push_back(inputs.at(inputs.size() - 2));
+    quant_inputs.push_back(inputs.at(inputs.size() - 1));
+    inputs.pop_back();
+    inputs.pop_back();
+
+    // Insert the according FP32 OP
+    std::vector<Value*> new_outputs = insertGraph(*graph, target_graph, inputs);
+    AT_ASSERT(outputs.size() == new_outputs.size());
+
+    // Insert post-op nodes
+    if (post_op_graph != c10::nullopt) {
+      for (const auto idx : c10::irange(new_outputs.size())) {
+        Value* v = new_outputs.at(idx);
+        Value* v_ori = outputs.at(idx);
+        if (v->type()->cast<TensorType>()) {
+          v->setType(v_ori->type()->cast<TensorType>()->withScalarType(
+              at::ScalarType::Float));
+          std::vector<Value*> post_op_outputs =
+              insertGraph(*graph, **post_op_graph, {v});
+          new_outputs.at(idx) = post_op_outputs[0];
+        }
+      }
+    }
+
+    // Insert quant nodes
+    for (const auto idx : c10::irange(new_outputs.size())) {
+      Value* v = new_outputs.at(idx);
+      Value* v_ori = outputs.at(idx);
+      if (v->type()->cast<TensorType>()) {
+        v->setType(v_ori->type()->cast<TensorType>()->withScalarType(
+            at::ScalarType::Float));
+        quant_inputs.at(0) = v;
+        ins_point = insertQuant(graph.get(), quant_inputs, quant_dtype);
+        new_outputs.at(idx) = ins_point->output();
+      }
+    }
+
+    // Record all planned rewritings
+    AT_ASSERT(outputs.size() == new_outputs.size());
+    for (const auto idx : c10::irange(outputs.size())) {
+      values_to_rewrite.push_back(outputs[idx]);
+      rewrite_map[outputs[idx]] =
+          new_outputs[idx]->setType(outputs[idx]->type());
+    }
+    // Record all planned deletions
+    for (Node* pattern_n : pattern_graph.nodes()) {
+      if (match.nodes_map.count(pattern_n)) {
+        Node* n = match.nodes_map.at(pattern_n);
+        nodes_to_delete_.insert(n);
+      }
+    }
+  }
+
+  // Perform planned rewritings
+  for (auto v : values_to_rewrite) {
+    v->replaceAllUsesWith(rewrite_map.at(v));
+  }
+
+  // Perform planned deletions
+  for (auto n : nodes_to_delete_) {
+    n->removeAllInputs();
+  }
+  for (auto n : nodes_to_delete_) {
+    n->destroy();
+  }
+  nodes_to_delete_.clear();
+}
+
+void DecomposeQuantizedOps(std::shared_ptr<Graph> graph) {
+  std::vector<std::pair<std::string, std::string>> op_list;
+  // Only support unary OPs with shape not changed
+  std::vector<c10::optional<std::string>> post_op_list;
+
+  op_list.push_back({
+      R"(graph(%a_quant, %b_quant, %scale, %zero_point):
+         %add_out = quantized::add(%a_quant, %b_quant, %scale, %zero_point)
+         return (%add_out) )",
+      R"(graph(%a, %b):
+         %1 : int = prim::Constant[value=1]()
+         %add_out = aten::add(%a, %b, %1)
+         return (%add_out) )"});
+  post_op_list.push_back(c10::nullopt);
+
+  op_list.push_back({
+      R"(graph(%a_quant, %b_quant, %scale, %zero_point):
+         %mul_out = quantized::mul(%a_quant, %b_quant, %scale, %zero_point)
+         return (%mul_out) )",
+      R"(graph(%a, %b):
+         %mul_out = aten::mul(%a, %b)
+         return (%mul_out) )"});
+  post_op_list.push_back(c10::nullopt);
+
+  op_list.push_back({
+      R"(graph(%a_quant, %b_quant, %scale, %zero_point):
+         %add_out = quantized::add_relu(%a_quant, %b_quant, %scale, %zero_point)
+         return (%add_out) )",
+      R"(graph(%a, %b):
+         %1 : int = prim::Constant[value=1]()
+         %add_out = aten::add(%a, %b, %1)
+         return (%add_out) )"});
+  post_op_list.push_back(c10::make_optional(std::string(
+      R"(graph(%a):
+      %relu_out = aten::relu(%a)
+      return (%relu_out) )")));
+
+  for (const auto idx : c10::irange(op_list.size())) {
+    Graph pattern_graph;
+    parseIR(op_list[idx].first, &pattern_graph);
+    Graph target_graph;
+    parseIR(op_list[idx].second, &target_graph);
+    c10::optional<Graph*> post_op_graph;
+    Graph post_op_g;
+    if (post_op_list[idx] != c10::nullopt) {
+      parseIR(post_op_list[idx].value(), &post_op_g);
+      post_op_graph.emplace(&post_op_g);
+    }
+    DecomposeQuantizedOp(graph, pattern_graph, target_graph, post_op_graph);
+  }
+}
+
+bool DecomposeOps(const std::shared_ptr<Graph>& graph) {
+  DecomposeQuantizedOps(graph);
+  GRAPH_DUMP("After DecomposeQuantizedOps:", graph);
+  EliminateCommonSubexpression(graph);
+  GRAPH_DUMP("After EliminateCommonSubexpression:", graph);
+  ConstantPooling(graph);
+  GRAPH_DUMP("After ConstantPooling:", graph);
+  return true;
 }
 
 void annotateInputShapes(

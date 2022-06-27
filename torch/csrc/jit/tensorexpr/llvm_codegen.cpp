@@ -404,6 +404,26 @@ at::Tensor LLVMCodeGen::empty_strided(
       size, stride, dtype_opt, layout_opt, device_opt, pin_memory_opt);
 }
 
+at::Tensor LLVMCodeGen::empty_strided_quantized(
+    c10::IntArrayRef size,
+    c10::optional<c10::ScalarType> dtype_opt,
+    c10::optional<c10::Layout> layout_opt,
+    c10::optional<c10::Device> device_opt,
+    c10::optional<bool> pin_memory_opt,
+    double scale,
+    int64_t zero_point,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
+  return at::native::empty_affine_quantized(
+      size,
+      dtype_opt,
+      layout_opt,
+      device_opt,
+      pin_memory_opt,
+      scale,
+      zero_point,
+      memory_format_opt);
+}
+
 void* LLVMCodeGen::getKernelAddress(LLVMCodeGenCallee* callee) {
   return (void*)callee->getKernelAddress();
 }

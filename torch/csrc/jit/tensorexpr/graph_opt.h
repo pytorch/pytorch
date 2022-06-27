@@ -57,6 +57,7 @@ namespace tensorexpr {
 //     aten_cat is the output buffer here.
 
 bool OptimizeCat(const std::shared_ptr<Graph>& graph);
+bool DecomposeOps(const std::shared_ptr<Graph>& graph);
 
 TORCH_API void annotateInputShapes(
     const std::shared_ptr<Graph>& graph,

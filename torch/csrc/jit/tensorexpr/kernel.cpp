@@ -4,6 +4,7 @@
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorGeometry.h>
+#include <ATen/quantized/QTensorImpl.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_utils.h>
@@ -1034,6 +1035,21 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
     }
   };
 
+  auto setQinfoAsNeeded = [&](c10::TensorTypePtr tt, BufHandle inBuffer) {
+    auto scalarType = tt->scalarType();
+    if (scalarType == at::ScalarType::QInt8 ||
+        scalarType == at::ScalarType::QUInt8) {
+      qtensorInputIndex_.emplace(
+          input_name_map_[input] + "_scale", bufferArgs_.size());
+      VarHandle scale(input_name_map_[input] + "_scale", kDouble);
+      bufferArgs_.emplace_back(scale);
+      VarHandle zero_point(input_name_map_[input] + "_zero", kLong);
+      bufferArgs_.emplace_back(zero_point);
+      inBuffer.node()->set_qscale(scale.node());
+      inBuffer.node()->set_qzero(zero_point.node());
+    }
+  };
+
   Tensor result(nullptr, nullptr);
   switch (t->kind()) {
     case TypeKind::TensorType: {
@@ -1069,6 +1085,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
             inBuffer.node()->is_contiguous(at::MemoryFormat::ChannelsLast3d));
         bufs_.emplace(input, inBuffer.node());
         bufferArgs_.emplace_back(inBuffer);
+        setQinfoAsNeeded(tt, inBuffer);
         break;
       }
 
@@ -1089,7 +1106,7 @@ Tensor TensorExprKernel::bindInput(const torch::jit::Value* input) {
           "t" + input_name_map_[input],
           {flat_size},
           ToDtype(static_cast<ScalarType>(*tt->scalarType())));
-
+      setQinfoAsNeeded(tt, inBuffer);
       result = Compute(
           "input" + c10::to_string(bufs_.size() + 1),
           size_handles,
@@ -1295,8 +1312,8 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
   // TODO: call into `convertOutputToCorrectStrides`. Currently this causes a
   // bug in IRSimplifier to occur. See explanation in
   // `convertOutputToCorrectStrides`
-  return Compute(
-      "output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
+  Tensor outputTensor =
+      Compute("output_1", dims, [&](const std::vector<VarHandle>& axes_input) {
         std::vector<ExprHandle> axes(axes_input.begin(), axes_input.end());
         auto absolute_position = ExprHandle(immLike(axes[0], 0));
         for (size_t i = 0; i < axes.size(); ++i) {
@@ -1319,6 +1336,11 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
         }
         return BufHandle(buf).load(new_axes);
       });
+
+  auto outputBuf = outputTensor.buf();
+  outputBuf->set_qscale(buf->qscale());
+  outputBuf->set_qzero(buf->qzero());
+  return outputTensor;
 }
 
 void TensorExprKernel::bindConstant(const torch::jit::Value* v) {
@@ -1566,6 +1588,10 @@ void TensorExprKernel::optimizeOwningGraph() {
   // Optimize the concatenation
   OptimizeCat(graph_);
 
+  GRAPH_DUMP("Before DecomposeOps:", graph_);
+  DecomposeOps(graph_);
+  GRAPH_DUMP("After DecomposeOps:", graph_);
+
   // Synchronize the symbolic strides information
   auto graph_outputs = graph_->outputs();
   TORCH_INTERNAL_ASSERT(graph_outputs.size() == _orignal_graph_outputs.size());
@@ -1654,14 +1680,18 @@ void TensorExprKernel::compile() {
     if (!bufs_.count(output)) {
       throw malformed_input("cannot find output Tensor");
     }
+    BufPtr outputBufPtr = bufs_.at(output);
     if (!output->type()->cast<TensorType>()) {
       // Scalar outputs are represented as 0-dim buffers.
-      bufOutputs_.insert(bufs_.at(output));
-      bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
+      bufOutputs_.insert(outputBufPtr);
+      bufferArgs_.emplace_back(BufHandle(outputBufPtr));
       tensorOutputTensorOptions_.emplace_back(
-          c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
+          c10::TensorOptions(tensorType(outputBufPtr)).device(device_));
       tensorOutputSizes_.emplace_back();
       tensorOutputStrides_.emplace_back();
+      tensorOutputQscales_.emplace_back(nullptr);
+      tensorOutputQzeros_.emplace_back(nullptr);
+      isOutputQuantized_.push_back(false);
       isOutputScalar_.push_back(true);
       bufs_.erase(output);
       continue;
@@ -1678,21 +1708,23 @@ void TensorExprKernel::compile() {
       tensorOutputStrideDesc_.push_back(stride_desc);
       Tensor properly_strided_output =
           convertSymbolicOutputToCorrectStrides(output);
+      outputBufPtr = properly_strided_output.buf();
       if (properly_strided_output.stmt()) {
         block->append_stmt(properly_strided_output.stmt());
       }
-      bufs_[output] = properly_strided_output.buf();
+      bufs_[output] = outputBufPtr;
     } else {
       // The "strided" tensor will be incorrect if used in NNC,
       // since NNC views it as contiguous. Only convert it to the right
       // strides at the end of the kernel (if already contiguous it's a no-op)
       Tensor properly_strided_output =
           convertStaticShapeOutputToCorrectStrides(output);
+      outputBufPtr = properly_strided_output.buf();
       if (properly_strided_output.stmt()) {
         block->append_stmt(properly_strided_output.stmt());
       }
       // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-      bufs_[output] = properly_strided_output.buf();
+      bufs_[output] = outputBufPtr;
       auto sizes = *tt->sizes().concrete_sizes();
       tensorOutputSizes_.push_back(sizes);
       auto strides = tt->strides().concrete_sizes();
@@ -1706,10 +1738,26 @@ void TensorExprKernel::compile() {
       }
     }
 
-    bufOutputs_.insert(bufs_.at(output));
-    bufferArgs_.emplace_back(BufHandle(bufs_.at(output)));
+    if (outputBufPtr->qscale()) {
+      tensorOutputQscales_.push_back(outputBufPtr->qscale());
+      tensorOutputQzeros_.push_back(outputBufPtr->qzero());
+      isOutputQuantized_.push_back(true);
+    } else {
+      tensorOutputQscales_.emplace_back(nullptr);
+      tensorOutputQzeros_.emplace_back(nullptr);
+      isOutputQuantized_.push_back(false);
+    }
+
+    auto memory_format =
+        outputBufPtr->is_contiguous(at::MemoryFormat::ChannelsLast)
+        ? at::MemoryFormat::ChannelsLast
+        : at::MemoryFormat::Contiguous;
+    bufOutputs_.insert(outputBufPtr);
+    bufferArgs_.emplace_back(BufHandle(outputBufPtr));
     tensorOutputTensorOptions_.emplace_back(
-        c10::TensorOptions(tensorType(bufs_.at(output))).device(device_));
+        c10::TensorOptions(tensorType(outputBufPtr))
+            .device(device_)
+            .memory_format(c10::make_optional(memory_format)));
     isOutputScalar_.push_back(false);
     bufs_.erase(output);
   }
@@ -1843,6 +1891,9 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
   // TODO: preallocate `runArgs` during compilation and fill in values where
   // possible (e.g. for constant tensors)
   std::vector<CodeGen::CallArg> runArgs;
+  const double dummyScale = 0.0f;
+  const int64_t dummyZero = 1l;
+
   runArgs.reserve(
       inputs.size() + input_stride_args_.size() + bufOutputs_.size());
 
@@ -1854,7 +1905,20 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
     } else if (input.isDouble()) {
       runArgs.emplace_back(input.toDouble());
     } else if (input.isTensor()) {
-      runArgs.emplace_back(input.toTensor().data_ptr());
+      const at::Tensor& inputTensor = input.toTensor();
+      runArgs.emplace_back(inputTensor.data_ptr());
+      if (inputTensor.is_quantized()) {
+        at::QuantizerPtr quantizer = inputTensor.quantizer();
+        TORCH_INTERNAL_ASSERT(
+            quantizer->qscheme() == c10::QScheme::PER_TENSOR_AFFINE,
+            "Only per_tensor_affine qtensor is supported in NNC currently.");
+        runArgs.emplace_back(
+            static_cast<at::PerTensorAffineQuantizer*>(quantizer.get())
+                ->scale());
+        runArgs.emplace_back(
+            static_cast<at::PerTensorAffineQuantizer*>(quantizer.get())
+                ->zero_point());
+      }
     }
   }
 
@@ -1872,25 +1936,46 @@ std::vector<CodeGen::CallArg> TensorExprKernel::prepareRunArgs(
 
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       auto const& opts = tensorOutputTensorOptions_[i];
-      outputs.emplace_back(codegen_->empty_strided(
-          static_sizes[i],
-          static_strides[i],
-          opts.dtype,
-          opts.layout,
-          opts.device,
-          opts.pinned_memory));
+      outputs.emplace_back(
+          isOutputQuantized_[i] ? codegen_->empty_strided_quantized(
+                                      static_sizes[i],
+                                      opts.dtype,
+                                      opts.layout,
+                                      opts.device,
+                                      opts.pinned_memory,
+                                      dummyScale,
+                                      dummyZero,
+                                      opts.memory_format)
+                                : codegen_->empty_strided(
+                                      static_sizes[i],
+                                      static_strides[i],
+                                      opts.dtype,
+                                      opts.layout,
+                                      opts.device,
+                                      opts.pinned_memory));
+
       runArgs.emplace_back(outputs.back().data_ptr());
     }
   } else {
     for (size_t i = 0, e = bufOutputs_.size(); i < e; ++i) {
       auto const& opts = tensorOutputTensorOptions_[i];
-      outputs.emplace_back(codegen_->empty_strided(
-          tensorOutputSizes_[i],
-          tensorOutputStrides_[i],
-          opts.dtype,
-          opts.layout,
-          opts.device,
-          opts.pinned_memory));
+      outputs.emplace_back(
+          isOutputQuantized_[i] ? codegen_->empty_strided_quantized(
+                                      tensorOutputSizes_[i],
+                                      opts.dtype,
+                                      opts.layout,
+                                      opts.device,
+                                      opts.pinned_memory,
+                                      dummyScale,
+                                      dummyZero,
+                                      opts.memory_format)
+                                : codegen_->empty_strided(
+                                      tensorOutputSizes_[i],
+                                      tensorOutputStrides_[i],
+                                      opts.dtype,
+                                      opts.layout,
+                                      opts.device,
+                                      opts.pinned_memory));
       runArgs.emplace_back(outputs.back().data_ptr());
     }
   }
@@ -1910,6 +1995,8 @@ void TensorExprKernel::runKernel(Stack& stack) const {
   // Set up arguments (inputs, then outputs) for kernel call.
   auto inputs = last(stack, nInputs_);
   std::vector<at::Tensor> outputs;
+  double qscale = 0.0f;
+  int64_t qzero = 1l;
 
   std::vector<CodeGen::CallArg> runArgs = prepareRunArgs(inputs, outputs);
 
@@ -1918,6 +2005,30 @@ void TensorExprKernel::runKernel(Stack& stack) const {
 
   // Update the stack.
   drop(stack, nInputs_);
+
+  // Reset qzero/qscale for quantized output as we may only know after run
+  //   type I: the quant info is from graph constants originally
+  //   type II: the quant info is from graph input originally
+  for (size_t i = 0, size = outputs.size(); i < size; ++i) {
+    if (isOutputQuantized_[i]) {
+      auto outputTensor =
+          static_cast<at::QTensorImpl*>(outputs[i].unsafeGetTensorImpl());
+      if (tensorOutputQscales_[i]->isConstant()) {
+        qscale = to<DoubleImm>(tensorOutputQscales_[i])->value();
+        qzero = to<LongImm>(tensorOutputQzeros_[i])->value();
+      } else {
+        VarPtr outputVar = to<Var>(tensorOutputQscales_[i]);
+        TORCH_INTERNAL_ASSERT(
+            outputVar != nullptr, "Expect a VarPtr but does not get it");
+        size_t idx = qtensorInputIndex_.at(outputVar->name_hint());
+        qscale = *runArgs[idx + 1].DoublePtr();
+        qzero = *runArgs[idx + 2].LongPtr();
+      }
+      auto quantizer = at::make_per_tensor_affine_quantizer(
+          qscale, qzero, outputTensor->quantizer()->scalar_type());
+      outputTensor->set_quantizer_(quantizer);
+    }
+  }
 
   int64_t idx = 0;
   for (auto& o : outputs) {
