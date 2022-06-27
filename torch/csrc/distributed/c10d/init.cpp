@@ -1304,7 +1304,10 @@ Arguments:
 
           .def(
               "barrier",
-              &::c10d::ProcessGroup::barrier,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const ::c10d::BarrierOptions& opts) {
+                return ::c10d::ops::barrier(self, opts);
+              },
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(

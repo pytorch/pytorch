@@ -110,6 +110,14 @@ c10::intrusive_ptr<ProcessGroup::Work> alltoall_(
       AllToAllOptions{std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> barrier(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const std::vector<int64_t>& device_ids,
+    int64_t timeout) {
+  return process_group->barrier(
+      BarrierOptions{device_ids, std::chrono::milliseconds(timeout)});
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup and Work definations are more like declarations.
   // They don't expose the details of the two classes into TorchScript.
@@ -142,6 +150,9 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "alltoall_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_));
+  m.def(
+      "barrier",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, barrier));
 }
 } // namespace
 
@@ -303,6 +314,18 @@ c10::intrusive_ptr<ProcessGroup::Work> alltoall(
                            int64_t)>();
   return op.call(
       output_tensors, input_tensors, process_group, opts.timeout.count());
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> barrier(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    const BarrierOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::barrier", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           const std::vector<int64_t>&,
+                           int64_t)>();
+  return op.call(process_group, opts.device_ids, opts.timeout.count());
 }
 
 } // namespace ops
