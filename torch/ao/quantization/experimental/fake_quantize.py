@@ -14,10 +14,17 @@ class APoTFakeQuantize(FakeQuantizeBase):
         return self.observer.calculate_qparams(signed=signed, min_val=min_val, max_val=max_val)
 
     def forward(self, X: torch.Tensor, signed: bool):  # type: ignore[override]
+        alpha = gamma = quantization_levels = level_indices = None
+
         if self.observer_enabled[0] == 1:
-            min_val, max_val = torch.aminmax(X)
-            alpha, gamma, quantization_levels, level_indices = self.observer.calculate_qparams(signed, min_val, max_val)
+            self.observer.forward(X)
+            alpha, gamma, quantization_levels, level_indices = self.observer.calculate_qparams(signed)
         if self.fake_quant_enabled[0] == 1:
+            assert (alpha is not None
+                    and gamma is not None
+                    and quantization_levels is not None
+                    and level_indices is not None), "Must set qparams for fake quant"
+
             quantizer = APoTQuantizer(alpha, gamma, quantization_levels, level_indices)
             X = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
             X = dequantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
