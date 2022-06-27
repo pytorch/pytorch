@@ -147,6 +147,8 @@ class FakeSymbolicTensor(torch.Tensor):
             dtype=dtype, layout=layout, requires_grad=requires_grad,
             device=device,
         )
+
+        r.sym_shape = sym_shape
         return r
 
     __torch_function__ = _disabled_torch_function_impl
@@ -156,8 +158,14 @@ class FakeSymbolicTensor(torch.Tensor):
 
     @classmethod
     def __torch_dispatch__(cls, func_overload, types, args=(), kwargs=None):
+
+        print(func_overload)
         if func_overload in meta_funcs:
             return meta_funcs[func_overload](*args, **kwargs)
+
+        if func_overload == torch.ops.aten.sym_size.default:
+            self = args[0]
+            return self.sym_shape
 
         if func_overload == torch.ops.aten.new_empty.default:
             self = args[0]
