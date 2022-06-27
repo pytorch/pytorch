@@ -2119,6 +2119,162 @@ const auto chebyshev_polynomial_w_string = jiterator_stringify(
     } // chebyshev_polynomial_w_forward(T x, T n)
 ); // chebyshev_polynomial_w_string
 
+const auto gamma_string = jiterator_stringify(
+    template<typename T>
+    T gamma_forward(T x) {
+        static const T P[] = {
+                +1.60119522476751861407e-4,
+                +1.19135147006586384913e-3,
+                +1.04213797561761569935e-2,
+                +4.76367800457137231464e-2,
+                +2.07448227648435975150e-1,
+                +4.94214826801497100753e-1,
+                +9.99999999999999996796e-1,
+        };
+
+        static const T Q[] = {
+                -2.31581873324120129819e-5,
+                +5.39605580493303397842e-4,
+                -4.45641913851797240494e-3,
+                +1.18139785222060435552e-2,
+                +3.58236398605498653373e-2,
+                -2.34591795718243348568e-1,
+                +7.14304917030273074085e-2,
+                +1.00000000000000000320e+0,
+        };
+
+        static const T R[] = {
+                +7.87311395793093628397e-4,
+                -2.29549961613378126380e-4,
+                -2.68132617805781232825e-3,
+                +3.47222221605458667310e-3,
+                +8.33333333333482257126e-2,
+        };
+
+        constexpr T PI = 3.14159265358979323846;
+
+        int sign_gamma = 1;
+
+        if (!isfinite(x)) {
+            return x;
+        }
+
+        if (abs(x) > T(33.0)) {
+            if (x < T(0.0)) {
+                T p = floor(abs(x));
+
+                if (p == abs(x)) {
+                    return INFINITY;
+                }
+
+                int previous_p = p;
+
+                if ((previous_p & 1) == 0) {
+                    sign_gamma = -1;
+                }
+
+                T z = abs(x) - p;
+
+                if (z > T(0.5)) {
+                    z = abs(x) - (p + T(1.0));
+                }
+
+                z = abs(x) * sin(PI * z);
+
+                if (z == T(0.0)) {
+                    return sign_gamma * INFINITY;
+                }
+
+                if (abs(x) >= T(171.624376956302725)) {
+                    return INFINITY;
+                }
+
+                T r = 0.0;
+
+                for (uint8_t index = 0; index <= 4; index++) {
+                    r = r * (T(1.0) / abs(x)) + R[index];
+                }
+
+                if (abs(x) > T(143.01608)) {
+                    return sign_gamma * PI / (abs(z) * (T(2.50662827463100050242) * (pow(abs(x), T(0.5) * abs(x) - T(0.25)) * (pow(abs(x), T(0.5) * abs(x) - T(0.25)) / exp(abs(x)))) * (T(1.0) + T(1.0) / abs(x) * r)));
+                }
+
+                return sign_gamma * PI / (abs(z) * (T(2.50662827463100050242) * (pow(abs(x), abs(x) - T(0.5)) / exp(abs(x))) * (T(1.0) + T(1.0) / abs(x) * r)));
+            }
+
+            if (x >= T(171.624376956302725)) {
+                return INFINITY;
+            }
+
+            T r = 0.0;
+
+            for (uint8_t index = 0; index <= 4; index++) {
+                r = r * (T(1.0) / x) + R[index];
+            }
+
+            if (x > T(143.01608)) {
+                return sign_gamma * (T(2.50662827463100050242) * (pow(x, T(0.5) * x - T(0.25)) * (pow(x, T(0.5) * x - T(0.25)) / exp(x))) * (T(1.0) + T(1.0) / x * r));
+            }
+
+            return sign_gamma * (T(2.50662827463100050242) * (pow(x, x - T(0.5)) / exp(x)) * (T(1.0) + T(1.0) / x * r));
+        }
+
+        T z = 1.0;
+
+        while (x >= T(3.0)) {
+            x = x - T(1.0);
+
+            z = z * x;
+        }
+
+        while (x < T(0.0)) {
+            if (x > -0.000000001) {
+                if (x == T(0.0)) {
+                    return INFINITY;
+                }
+
+                return z / ((T(1.0) + T(0.5772156649015329) * x) * x);
+            }
+
+            z = z / x;
+
+            x = x + T(1.0);
+        }
+
+        while (x < T(2.0)) {
+            if (x < 0.000000001) {
+                if (x == T(0.0)) {
+                    return INFINITY;
+                }
+
+                return z / ((T(1.0) + T(0.5772156649015329) * x) * x);
+            }
+
+            z = z / x;
+
+            x = x + T(1.0);
+        }
+
+        if (x == T(2.0)) {
+            return z;
+        }
+
+        T p = 0.0;
+
+        for (uint8_t index = 0; index <= 6; index++) {
+            p = p * (x - T(2.0)) + P[index];
+        }
+
+        T q = 0.0;
+
+        for (uint8_t index = 0; index <= 7; index++) {
+            q = q * (x - T(2.0)) + Q[index];
+        }
+
+        return z * p / q;
+    } // T gamma_forward(T x)
+); // gamma_string
+
 const auto hermite_polynomial_h_string = jiterator_stringify(
     template<typename T>
     T hermite_polynomial_h_forward(T x, int64_t n) {
@@ -2614,6 +2770,86 @@ const auto modified_bessel_k1_string = modified_bessel_i1_string + jiterator_str
         return exp(-x) * (T(0.5) * (b - p)) / sqrt(x);
     } // modified_bessel_k1_forward(T x)
 ); // modified_bessel_k1_string
+
+const auto scaled_modified_bessel_k1_string = modified_bessel_i1_string + jiterator_stringify(
+    template<typename T>
+    T scaled_modified_bessel_k1_forward(T x) {
+        static const T A[] = {
+                -7.02386347938628759343e-18,
+                -2.42744985051936593393e-15,
+                -6.66690169419932900609e-13,
+                -1.41148839263352776110e-10,
+                -2.21338763073472585583e-08,
+                -2.43340614156596823496e-06,
+                -1.73028895751305206302e-04,
+                -6.97572385963986435018e-03,
+                -1.22611180822657148235e-01,
+                -3.53155960776544875667e-01,
+                +1.52530022733894777053e+00,
+        };
+
+        static const T B[] = {
+                -5.75674448366501715755e-18,
+                +1.79405087314755922667e-17,
+                -5.68946255844285935196e-17,
+                +1.83809354436663880070e-16,
+                -6.05704724837331885336e-16,
+                +2.03870316562433424052e-15,
+                -7.01983709041831346144e-15,
+                +2.47715442448130437068e-14,
+                -8.97670518232499435011e-14,
+                +3.34841966607842919884e-13,
+                -1.28917396095102890680e-12,
+                +5.13963967348173025100e-12,
+                -2.12996783842756842877e-11,
+                +9.21831518760500529508e-11,
+                -4.19035475934189648750e-10,
+                +2.01504975519703286596e-09,
+                -1.03457624656780970260e-08,
+                +5.74108412545004946722e-08,
+                -3.50196060308781257119e-07,
+                +2.40648494783721712015e-06,
+                -1.93619797416608296024e-05,
+                +1.95215518471351631108e-04,
+                -2.85781685962277938680e-03,
+                +1.03923736576817238437e-01,
+                +2.72062619048444266945e+00,
+        };
+
+        if (x == T(0.0)) {
+            return INFINITY;
+        }
+
+        if (x < T(0.0)) {
+            return NAN;
+        }
+
+        T p;
+        T q = 0.0;
+
+        if (x <= T(2.0)) {
+            T a = A[0];
+
+            for (uint8_t index = 1; index < 11; index++) {
+                p = q;
+                q = a;
+                a = (x * x - T(2.0)) * q - p + A[index];
+            }
+
+            return (log(T(0.5) * x) * modified_bessel_i1_forward(x) + T(0.5) * (a - p) / x) * exp(x);
+        }
+
+        T b = B[0];
+
+        for (uint8_t index = 1; index < 25; index++) {
+            p = q;
+            q = b;
+            b = (T(8.0) / x - T(2.0)) * q - p + B[index];
+        }
+
+        return (T(0.5) * (b - p) / sqrt(x));
+    } // T scaled_modified_bessel_k1_forward(T x)
+); // scaled_modified_bessel_k1_string
 
 const auto shifted_chebyshev_polynomial_t_string = jiterator_stringify(
     template<typename T>
