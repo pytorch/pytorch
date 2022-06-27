@@ -2485,6 +2485,7 @@
     "shifted_chebyshev_polynomial_w",
     "sinc",
     "softmax",
+    "spherical_bessel_j0",
     "xlog1py",
     "xlogy",
     "zeta"
