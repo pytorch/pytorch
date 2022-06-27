@@ -4,7 +4,7 @@ namespace torch {
 namespace utils {
 
 bool SchemaInfo::hasSideEffects() const {
-  static std::vector<std::string> side_effects_ops = {
+  static const std::vector<std::string> side_effects_ops = {
       "aten::warn",
       "aten::save",
       "aten::manual_seed",
@@ -23,6 +23,13 @@ bool SchemaInfo::hasSideEffects() const {
 }
 
 bool SchemaInfo::isDeterministic() const {
+  if (torch::jit::getOperatorForLiteral(
+          "aten::dropout(Tensor input, float p, bool train) -> Tensor")
+              ->schema() == this->schema_ &&
+      value_map_.count("train") && !value_map_.at("train").toBool()) {
+    return true;
+  }
+
   static const std::vector<const char*> nondeterministic_ops = {
       "aten::dropout(Tensor input, float p, bool train) -> Tensor",
       "aten::_fused_dropout(Tensor self, float p, Generator? generator) -> (Tensor, Tensor)",
@@ -61,6 +68,23 @@ bool SchemaInfo::isMutating(int index) const {
   TORCH_INTERNAL_ASSERT(
       index < schema_.arguments().size() && index >= 0,
       "Invalid index for schema.");
+  static const char* batch_norm_literal =
+      "aten::batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float momentum, float eps, bool cudnn_enabled) -> Tensor";
+  static const char* instance_norm_literal =
+      "aten::instance_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool use_input_stats, float momentum, float eps, bool cudnn_enabled) -> Tensor";
+  if (torch::jit::getOperatorForLiteral(batch_norm_literal)->schema() ==
+          this->schema_ &&
+      (schema_.arguments()[index].name() == "running_mean" ||
+       schema_.arguments()[index].name() == "running_var")) {
+    return value_map_.count("training") && value_map_.at("training").toBool();
+  }
+  if (torch::jit::getOperatorForLiteral(instance_norm_literal)->schema() ==
+          this->schema_ &&
+      (schema_.arguments()[index].name() == "running_mean" ||
+       schema_.arguments()[index].name() == "running_var")) {
+    return value_map_.count("use_input_stats") &&
+        value_map_.at("use_input_stats").toBool();
+  }
 
   return schema_.arguments()[index].alias_info() != nullptr &&
       schema_.arguments()[index].alias_info()->isWrite();
@@ -122,5 +146,31 @@ bool SchemaInfo::areAliasing(
   }
   return false;
 }
+
+void SchemaInfo::addArgumentValue(
+    const std::string& name,
+    const at::IValue& value) {
+  c10::optional<int> index = schema_.argumentIndexWithName(name);
+  TORCH_INTERNAL_ASSERT(
+      index != c10::nullopt, "Schema has no argument named ", name);
+  value_map_[name] = value;
+}
+
+void SchemaInfo::addArgumentValues(
+    const std::vector<c10::optional<at::IValue>>& value_list) {
+  for (size_t i = 0; i < value_list.size(); i++) {
+    if (i < schema_.arguments().size() && value_list[i] != c10::nullopt) {
+      value_map_[schema_.arguments()[i].name()] = *(value_list[i]);
+    }
+  }
+}
+
+void SchemaInfo::addArgumentValues(
+    const std::unordered_map<std::string, at::IValue>& values) {
+  for (const auto& key_pair : values) {
+    addArgumentValue(key_pair.first, key_pair.second);
+  }
+}
+
 } // namespace utils
 } // namespace torch
