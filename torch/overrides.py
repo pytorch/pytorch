@@ -280,6 +280,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
         Tensor.to_padded_tensor,
+        Tensor.sym_size
     }
 
 
@@ -989,6 +990,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
+        torch.special.airy_ai: lambda input: -1,
         torch.special.bessel_j0: lambda input: -1,
         torch.special.bessel_j1: lambda input: -1,
         torch.special.bessel_y0: lambda input: -1,
@@ -1026,6 +1028,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.modified_bessel_i1: lambda input: -1,
         torch.special.modified_bessel_k0: lambda input: -1,
         torch.special.modified_bessel_k1: lambda input: -1,
+        torch.special.scaled_modified_bessel_k1: lambda input: -1,
         torch.special.multigammaln: lambda input, p: -1,
         torch.special.ndtr: lambda input: -1,
         torch.special.ndtri: lambda input: -1,
