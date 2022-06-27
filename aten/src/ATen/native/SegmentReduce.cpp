@@ -495,7 +495,7 @@ Tensor _segment_reduce_backward_kernel(
   axis = maybe_wrap_dim(axis, data.ndimension());
   // check that one of lengths or offsets is defined
   // codegen for derivatives.yaml passes an undefined Tensor for None rather than a c10::optional
-  // so checking has_value() doesn't work unlike in the forward pass
+  // so checking .has_value() doesn't work unlike in the forward pass
   auto lengths_has_value = lengths.has_value() && lengths.value().defined();
   auto offsets_has_value = offsets.has_value() && offsets.value().defined();
   TORCH_CHECK(

@@ -37,7 +37,6 @@ TORCH_API std::vector<torch::lazy::Shape> compute_shape_grid_sampler_2d_backward
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_index_select(const at::Tensor & self, int64_t dim, const at::Tensor & index);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_inverse(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_kl_div_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction, bool log_target);
-TORCH_API std::vector<torch::lazy::Shape> compute_shape_l1_loss_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & target, int64_t reduction);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_log_sigmoid_backward(const at::Tensor & grad_output, const at::Tensor & self, const at::Tensor & buffer);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_log_sigmoid_forward(const at::Tensor & self);
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_logdet(const at::Tensor & self);

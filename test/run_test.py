@@ -25,7 +25,7 @@ from torch.testing._internal.common_utils import (
     parser as common_parser,
 )
 import torch.distributed as dist
-from typing import Dict, Optional, List
+from typing import Optional, List
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -35,18 +35,9 @@ try:
     from tools.testing.test_selections import (
         export_S3_test_times,
         get_shard_based_on_S3,
-        # NS: Disable target determination
-        # get_slow_tests_based_on_S3,
-        get_specified_test_cases,
         get_reordered_tests,
         get_test_case_configs,
     )
-    # NS: Disable target determination
-    # from tools.testing.modulefinder_determinator import (
-    #     should_run_test,
-    #     TARGET_DET_LIST,
-    # )
-
     HAVE_TEST_SELECTION_TOOLS = True
 except ImportError:
     HAVE_TEST_SELECTION_TOOLS = False
@@ -109,7 +100,6 @@ TESTS = discover_tests(
         'test_static_runtime',
         'test_throughput_benchmark',
         'test_typing',
-        "distributed/algorithms/ddp_comm_hooks/test_ddp_hooks",
         "distributed/algorithms/quantization/test_quantization",
         "distributed/bin/test_script",
         "distributed/elastic/multiprocessing/bin/test_script",
@@ -267,8 +257,6 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_cuda_primary_ctx",
 ] + FSDP_TEST
 
-WINDOWS_COVERAGE_BLOCKLIST = []
-
 # A subset of our TEST list that validates PyTorch's ops, modules, and autograd function as expected
 CORE_TEST_LIST = [
     "test_autograd",
@@ -321,10 +309,6 @@ or `conda install ninja`. Alternatively, disable said tests with
 
 PYTORCH_COLLECT_COVERAGE = bool(os.environ.get("PYTORCH_COLLECT_COVERAGE"))
 
-ENABLE_PR_HISTORY_REORDERING = bool(
-    os.environ.get("ENABLE_PR_HISTORY_REORDERING", "0") == "1"
-)
-
 JIT_EXECUTOR_TESTS = [
     "test_jit_profiling",
     "test_jit_legacy",
@@ -338,50 +322,16 @@ TESTS_REQUIRING_LAPACK = [
     "distributions/test_distributions",
 ]
 
-# Dictionary matching test modules (in TESTS) to lists of test cases (within that test_module) that would be run when
-# options.run_specified_test_cases is enabled.
-# For example:
-# {
-#   "test_nn": ["test_doubletensor_avg_pool3d", "test_share_memory", "test_hook_requires_grad"],
-#   ...
-# }
-# then for test_nn.py, we would ONLY run test_doubletensor_avg_pool3d, test_share_memory, and test_hook_requires_grad.
-SPECIFIED_TEST_CASES_DICT: Dict[str, List[str]] = {}
-
-# The file from which the SPECIFIED_TEST_CASES_DICT will be filled, a CSV of test cases that would be run when
-# options.run_specified_test_cases is enabled.
-SPECIFIED_TEST_CASES_FILE: str = ".pytorch_specified_test_cases.csv"
-
 
 def print_to_stderr(message):
     print(message, file=sys.stderr)
-
-
-def get_test_case_args(test_module, using_pytest) -> List[str]:
-    args = []
-    # if test_module not specified or specified with '__all__' then run all tests
-    if (
-        test_module not in SPECIFIED_TEST_CASES_DICT
-        or "__all__" in SPECIFIED_TEST_CASES_DICT[test_module]
-    ):
-        return args
-
-    if using_pytest:
-        args.append("-k")
-        args.append(" or ".join(SPECIFIED_TEST_CASES_DICT[test_module]))
-    else:
-        for test in SPECIFIED_TEST_CASES_DICT[test_module]:
-            args.append("-k")
-            args.append(test)
-
-    return args
 
 
 def get_executable_command(options, allow_pytest, disable_coverage=False):
     if options.coverage and not disable_coverage:
         executable = ["coverage", "run", "--parallel-mode", "--source=torch"]
     else:
-        executable = [sys.executable]
+        executable = [sys.executable, "-bb"]
     if options.pytest:
         if allow_pytest:
             executable += ["-m", "pytest"]
@@ -413,22 +363,10 @@ def run_test(
         # use the downloaded test cases configuration, not supported in pytest
         unittest_args.extend(["--import-slow-tests", "--import-disabled-tests"])
 
-    # Multiprocessing related tests cannot run with coverage.
-    # Tracking issue: https://github.com/pytorch/pytorch/issues/50661
-    disable_coverage = (
-        sys.platform == "win32" and test_module in WINDOWS_COVERAGE_BLOCKLIST
-    )
-
     # Extra arguments are not supported with pytest
     executable = get_executable_command(
-        options, allow_pytest=not extra_unittest_args, disable_coverage=disable_coverage
+        options, allow_pytest=not extra_unittest_args
     )
-
-    # TODO: move this logic into common_utils.py instead of passing in "-k" individually
-    # The following logic for running specified tests will only run for non-distributed tests, as those are dispatched
-    # to test_distributed and not run_test (this function)
-    if options.run_specified_test_cases:
-        unittest_args.extend(get_test_case_args(test_module, "pytest" in executable))
 
     # Can't call `python -m unittest test_*` here because it doesn't run code
     # in `if __name__ == '__main__': `. So call `python test_*.py` instead.
@@ -764,31 +702,6 @@ def parse_args():
         help="exclude distributed tests",
     )
     parser.add_argument(
-        "--run-specified-test-cases",
-        nargs="?",
-        type=str,
-        const=SPECIFIED_TEST_CASES_FILE,
-        help="load specified test cases file dumped from previous OSS CI stats, format CSV. "
-        " If all test cases should run for a <test_module> please add a single row: \n"
-        " test_filename,test_case_name\n"
-        " ...\n"
-        " <test_module>,__all__\n"
-        " ...\n"
-        'how we use the stats will be based on option "--use-specified-test-cases-by".',
-    )
-    parser.add_argument(
-        "--use-specified-test-cases-by",
-        type=str,
-        choices=["include", "bring-to-front"],
-        default="include",
-        help='used together with option "--run-specified-test-cases". When specified test case '
-        "file is set, this option allows the user to control whether to only run the specified test "
-        "modules or to simply bring the specified modules to front and also run the remaining "
-        "modules. Note: regardless of this option, we will only run the specified test cases "
-        " within a specified test module. For unspecified test modules with the bring-to-front "
-        "option, all test cases will be run, as one may expect.",
-    )
-    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -845,13 +758,6 @@ def exclude_tests(exclude_list, selected_tests, exclude_message=None):
 
 
 def get_selected_tests(options):
-    # First make sure run specific test cases options are processed.
-    if options.run_specified_test_cases:
-        if options.use_specified_test_cases_by == "include":
-            options.include = list(SPECIFIED_TEST_CASES_DICT.keys())
-        elif options.use_specified_test_cases_by == "bring-to-front":
-            options.bring_to_front = list(SPECIFIED_TEST_CASES_DICT.keys())
-
     selected_tests = options.include
 
     # filter if there's JIT only and distributed only test options
@@ -984,16 +890,6 @@ def main():
         export_S3_test_times(test_times_filename)
         return
 
-    specified_test_cases_filename = options.run_specified_test_cases
-    if specified_test_cases_filename:
-        print(
-            f"Loading specified test cases to run from {specified_test_cases_filename}."
-        )
-        global SPECIFIED_TEST_CASES_DICT
-        SPECIFIED_TEST_CASES_DICT = get_specified_test_cases(
-            specified_test_cases_filename, TESTS
-        )
-
     test_directory = str(REPO_ROOT / "test")
     selected_tests = get_selected_tests(options)
 
@@ -1006,36 +902,8 @@ def main():
     if options.coverage and not PYTORCH_COLLECT_COVERAGE:
         shell(["coverage", "erase"])
 
-    # NS: Disable target determination until it can be made more reliable
-    # if options.determine_from is not None and os.path.exists(options.determine_from):
-    #     slow_tests = get_slow_tests_based_on_S3(
-    #         TESTS, TARGET_DET_LIST, SLOW_TEST_THRESHOLD
-    #     )
-    #     print_to_stderr(
-    #         "Added the following tests to target_det tests as calculated based on S3:"
-    #     )
-    #     print_to_stderr(slow_tests)
-    #     with open(options.determine_from, "r") as fh:
-    #         touched_files = [
-    #             os.path.normpath(name.strip())
-    #             for name in fh.read().split("\n")
-    #             if len(name.strip()) > 0
-    #         ]
-    #     # HACK: Ensure the 'test' paths can be traversed by Modulefinder
-    #     sys.path.append(test_directory)
-    #     selected_tests = [
-    #         test
-    #         for test in selected_tests
-    #         if should_run_test(
-    #             TARGET_DET_LIST + slow_tests, test, touched_files, options
-    #         )
-    #     ]
-    #     sys.path.remove(test_directory)
-
     if IS_CI:
-        selected_tests = get_reordered_tests(
-            selected_tests, ENABLE_PR_HISTORY_REORDERING
-        )
+        selected_tests = get_reordered_tests(selected_tests)
         # downloading test cases configuration to local environment
         get_test_case_configs(dirpath=test_directory)
 

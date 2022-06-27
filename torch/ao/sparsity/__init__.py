@@ -26,3 +26,7 @@ from .experimental.pruner.parametrization import BiasHook
 
 # Pruner
 from .experimental.pruner.base_pruner import BasePruner
+
+# Data Sparsifier
+from .experimental.data_sparsifier.base_data_sparsifier import BaseDataSparsifier
+from .experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
