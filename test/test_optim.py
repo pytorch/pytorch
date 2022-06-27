@@ -843,12 +843,14 @@ class TestOptim(TestCase):
     def test_rprop(self):
         for optimizer in [optim.Rprop, optim_mt.Rprop]:
             self._test_basic_cases(
-                lambda weight, bias: optimizer([weight, bias], lr=1e-3)
+                lambda weight, bias, maximize: optimizer([weight, bias], lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             self._test_basic_cases(
-                lambda weight, bias: optimizer(
+                lambda weight, bias, maximize: optimizer(
                     self._build_params_dict(weight, bias, lr=1e-2),
-                    lr=1e-3)
+                    lr=1e-3, maximize=maximize),
+                constructor_accepts_maximize=True
             )
             with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
                 optimizer(None, lr=1e-2, etas=(1.0, 0.5))
