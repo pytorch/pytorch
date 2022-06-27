@@ -49,8 +49,8 @@ class TestFakeQuantize(unittest.TestCase):
                                                                                       max_val=max_val)
 
         apot_fake = APoTFakeQuantize(observer)
-        apot_fake.observer_enabled[0] = 1
-        apot_fake.fake_quant_enabled[0] = 1
+        apot_fake.enable_fake_quant()
+        apot_fake.enable_observer()
 
         X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
 
