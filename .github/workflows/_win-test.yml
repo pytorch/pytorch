@@ -86,6 +86,7 @@ jobs:
           # trim all new lines from commit messages so we don't run into issues with batch environment
           # variable copying. see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
           export COMMIT_MESSAGES="${COMMIT_MESSAGES//[$'\n\r']}"
+
           .jenkins/pytorch/win-test.sh
 
       - name: Get workflow job id
