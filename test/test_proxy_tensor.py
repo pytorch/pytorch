@@ -6,7 +6,8 @@ import unittest
 import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_methods_invocations import DecorateInfo
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
+from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
 from torch.testing._internal.common_device_type import ops
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -59,7 +60,7 @@ except ImportError:
 
 
 class TestProxyTensor(TestCase):
-    def test_make_fx(self, device):
+    def test_make_fx_simple(self, device):
         def f(x):
             return torch.sin(x)
         inp = torch.randn(3)
@@ -110,11 +111,23 @@ class TestProxyTensor(TestCase):
             assert inp.grad is None
             torch.testing.assert_close(traced_graph_out, f(inp))
 
+    def test_inplace_metadata(self):
+        def f(x):
+            x = x.clone()
+            x.unsqueeze_(-1)
+            assert x.shape[-1] == 1
+            return x
+
+        inps = [torch.randn(5)]
+        fx_f = make_fx(f)(*inps)
+        self.assertEqual(fx_f(*inps), f(*inps))
+
     def test_mode_tracing_factory_function(self):
         def f(x):
             return x + torch.randn(x.shape)
 
-        traced = make_fx(f, trace_factory_functions=True)(torch.randn(3))
+        # default behavior should trace factory functions
+        traced = make_fx(f)(torch.randn(3))
         self.assertTrue(
             any(
                 isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
@@ -122,11 +135,11 @@ class TestProxyTensor(TestCase):
             )
         )
 
-    def test_mode_tracing_factory_function_default_behavior(self):
+    def test_mode_tracing_factory_function_no_factory_function(self):
         def f(x):
             return x + torch.randn(x.shape)
 
-        traced = make_fx(f)(torch.randn(3))  # default behavior should not trace factory functions
+        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))  # default behavior should not trace factory functions
         self.assertFalse(
             any(
                 isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
@@ -135,29 +148,22 @@ class TestProxyTensor(TestCase):
         )
 
 make_fx_failures = {
+    # unknown
     xfail('allclose'),
-    xfail('nn.functional.dropout'),
+    xfail('equal'),
     xfail('linalg.eigvals'),
-    xfail('nn.functional.max_pool1d', device_type='cpu'),  # precision problems?
-    xfail('randn_like'),  # randomness
-    xfail('rand_like'),  # randomness
-    xfail('randint_like'),  # randomness
-    skip('new_empty'),  # nondeterministic
-    skip('empty_like'),  # nondeterministic
-    skip('linalg.lstsq', 'grad_oriented'),  # flaky
-    xfail('normal', '', device_type='cpu'),
-    xfail('normal', 'number_mean', device_type='cpu'),
-    xfail('multinomial', device_type='cpu'),
-    xfail('nn.functional.feature_alpha_dropout', 'with_train', device_type='cpu'),
-    xfail('bernoulli', device_type='cpu'),
-    xfail('nn.functional.dropout2d', device_type='cpu'),
-    skip('nn.functional.max_unpool1d', '', device_type='cpu'),  # flaky
-    skip('nn.functional.max_unpool2d', '', device_type='cpu'),  # flaky
-    skip('nn.functional.max_unpool3d', '', device_type='cpu'),  # flaky
-    skip('empty'),  # nondeterministic
+    xfail('nn.functional.max_pool1d', device_type='cpu'),
+    # empty
+    skip('new_empty'),
+    skip('empty_like'),
+    skip('empty'),
+    # flaky
+    skip('linalg.lstsq', 'grad_oriented'),
+    skip('nn.functional.max_unpool1d', '', device_type='cpu'),
+    skip('nn.functional.max_unpool2d', '', device_type='cpu'),
+    skip('nn.functional.max_unpool3d', '', device_type='cpu'),
     skip('linalg.lstsq'),  # flaky, probably just a precision issue
-    xfail('histogram'),
-    xfail('scatter'),
+
     # data-dependent control flow
     xfail('cov'),
     xfail('istft'),
@@ -165,35 +171,92 @@ make_fx_failures = {
     xfail('nn.functional.gaussian_nll_loss'),
     xfail('quantile'),
     xfail('tensor_split'),
+    xfail('corrcoef'),
+    # Masked failures (creating a scalar tensor just to call `.item` on it)
+    xfail('_masked.amax'),
+    xfail('_masked.amax'),
+    xfail('_masked.amin'),
+    xfail('_masked.argmax'),
+    xfail('_masked.argmin'),
+    xfail('_masked.cumprod'),
+    xfail('_masked.cumsum'),
+    xfail('_masked.log_softmax'),
+    xfail('_masked.logaddexp'),
+    xfail('_masked.logsumexp'),
+    xfail('_masked.mean'),
+    xfail('_masked.median'),
+    xfail('_masked.norm'),
+    xfail('_masked.prod'),
+    xfail('_masked.softmax'),
+    xfail('_masked.softmin'),
+    xfail('_masked.std'),
+    xfail('_masked.sum'),
+    xfail('_masked.var'),
+
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
+
+    # ???
+    xfail('nn.functional.ctc_loss'),
+    # Sparse tensors are not supported with faketensors for now
+    xfail('to_sparse'),
+    # segfaults
+    skip('block_diag'),
+}
+
+fake_tensor_failures = {
+    # Needs complex-value support
+    xfail('polar'),
+    xfail('complex'),
+    xfail('linalg.eig'),
+    # FakeTensor fallback doesn't work
+    xfail('linalg.matrix_power'),
+    xfail('segment_reduce', 'lengths'),
+    xfail('multinomial'),
+    xfail('mvlgamma', 'mvlgamma_p_1'),
+    xfail('mvlgamma', 'mvlgamma_p_3'),
+    xfail('mvlgamma', 'mvlgamma_p_5'),
+    xfail('cholesky'),
+    xfail('cholesky_inverse'),
+    # ASAN failures due to divide by 0
+    skip('nn.functional.nll_loss'),
 }
 
 
+def _test_make_fx_helper(self, device, dtype, op, use_fake):
+    def f(args, kwargs):
+        return op.op(*args, **kwargs)
+    sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
+    new_f = None
+    for sample_input in sample_inputs_itr:
+        args = [sample_input.input] + list(sample_input.args)
+        kwargs = sample_input.kwargs
+
+        try:
+            new_f = make_fx(f, use_fake=use_fake)(args, kwargs)
+        except DynamicOutputShapeException as e:
+            self.skipTest("Dynamic output shape operation in trace")
+
+        for arg in args:
+            if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
+                arg.uniform_(0, 1)
+        try:
+            old_out = f(args, kwargs)
+        except Exception:
+            continue
+        new_out = wrapper_set_seed(new_f, args, kwargs)
+        self.assertEqual(new_out, old_out)
+
 class TestProxyTensorOpInfo(TestCase):
     @ops(op_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures
-             )
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
     def test_make_fx_exhaustive(self, device, dtype, op):
+        _test_make_fx_helper(self, device, dtype, op, False)
 
-        def f(args, kwargs):
-            return op.op(*args, **kwargs)
-        sample_inputs_itr = op.sample_inputs(device, dtype, requires_grad=False)
-        new_f = None
-        for sample_input in sample_inputs_itr:
-            args = [sample_input.input] + list(sample_input.args)
-            kwargs = sample_input.kwargs
-
-            new_f = make_fx(f)(args, kwargs)
-            for arg in args:
-                if isinstance(arg, torch.Tensor) and arg.dtype == torch.float:
-                    arg.uniform_(0, 1)
-            try:
-                old_out = f(args, kwargs)
-            except Exception:
-                continue
-            new_out = new_f(args, kwargs)
-            self.assertEqual(new_out, old_out)
+    @ops(op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
+    def test_make_fx_fake_exhaustive(self, device, dtype, op):
+        _test_make_fx_helper(self, device, dtype, op, True)
 
 
 

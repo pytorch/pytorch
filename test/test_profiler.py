@@ -1,25 +1,20 @@
 # Owner(s): ["oncall: profiler"]
-
 import collections
-import functools
 import gc
 import io
 import json
 import os
 import re
 import tempfile
-import textwrap
-import typing
 import unittest
-
-import expecttest
+from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
-from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_ROCM, IS_WINDOWS,
     TEST_WITH_CROSSREF, TemporaryFileName, TemporaryDirectoryName)
@@ -28,7 +23,8 @@ from torch.autograd.profiler import profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
     kineto_available, profile, record_function, supported_activities,
-    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver
+    DeviceType, ProfilerAction, ProfilerActivity, ExecutionGraphObserver,
+    _utils
 )
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 
@@ -96,93 +92,6 @@ class TestProfilerCUDA(TestCase):
             s = custom_layer(z)
             q = s.sum()
             q.backward()
-
-class IcicleNode:
-    OP_TEMPLATE = "[ {}]"
-    PAD_LENGTH = len(OP_TEMPLATE.format(""))
-
-    @staticmethod
-    def test(f):
-        """Mark unit test that will be using IcicleNode to test traces.
-
-        This decorator serves two purposes. First, it provides a method name
-        that `format` can use to tell where the test runner (which is
-        environment specific) ends and the unit test begins. Second, it runs
-        the test with replicates and allows `assertTreesMatch` to adjust
-        based on which replicate is running.
-        """
-
-        @functools.wraps(f)
-        def begin_unit_test_marker(self, replicates=5):
-            try:
-                for i in range(replicates):
-                    self.icicle_replicate = i
-                    return f(self)
-            finally:
-                delattr(self, "icicle_replicate")
-        return begin_unit_test_marker
-
-    @classmethod
-    def format(cls, profiler, indent: int = 0):
-        tree = profiler.kineto_results.experimental_event_tree()
-        lines = cls.cat([cls(i).materialize() for i in tree])
-        lines = lines[min([i + 1 for i, l in enumerate(lines) if "begin_unit_test_marker" in l] or [0]):]
-        out = "\n".join([textwrap.indent(l.rstrip(), " " * indent) for l in lines])
-        return f"{out}\n{' ' * indent}"
-
-    @staticmethod
-    def cat(inputs: typing.List[typing.List[str]], join_str="") -> typing.List[str]:
-        assert inputs and all(i for i in inputs), "inputs cannot be empty"
-        depth = max(len(i) for i in inputs)
-        widths = [max(len(j) for j in i) for i in inputs]
-        inputs = [i + [""] * (depth - len(i)) for i in inputs]
-        inputs = [[j.ljust(w) for j in i] for i, w in zip(inputs, widths)]
-        return [join_str.join(i) for i in zip(*inputs)]
-
-    @staticmethod
-    def fmt_name(name: str) -> str:
-        # torch::autograd::Node relies on c10::demangle to generate names, and
-        # Windows demangles to include `struct` in the name.
-        if IS_WINDOWS:
-            name = name.replace('struct torch::autograd::AccumulateGrad', 'torch::autograd::AccumulateGrad')
-
-        match = re.match(r"(.*)\.py\(([0-9]+)\): (.*)$", name)
-        if match:
-            filename, lineno, fn = match.groups()
-
-            # This test can appear as `test/test_profiler.py` depending on
-            # where it is run from.
-            if filename.endswith(os.path.splitext(__file__)[0]):
-                filename = os.path.split(os.path.splitext(__file__)[0])[1]
-
-            # We test against a string literal, so all paths have to look like POSIX paths.
-            filename = filename.replace(os.sep, "/")
-
-            # We don't want to have to update this test every time PyTorch changes.
-            lineno = lineno if os.path.split(filename.strip())[1] == "test_profiler" else "..."
-            return f"{filename}.py({lineno}): {fn}"
-
-        return re.sub(
-            "object at 0x[0-9a-fA-F]+>",
-            "object at 0xXXXXXXXXXXXX>",
-            name)
-
-    def __init__(self, event) -> None:
-        self.width = 0
-        self.children : typing.List[IcicleNode] = []
-        for child in event.children:
-            self.children.append(IcicleNode(child))
-            self.width += self.children[-1].width
-
-        self.name = self.fmt_name(event.name() + " ")
-        self.width = max(self.width, len(self.name) + self.PAD_LENGTH)
-
-    def materialize(self) -> typing.List[str]:
-        name = self.OP_TEMPLATE.format(self.name.ljust(self.width - self.PAD_LENGTH, "-"))
-        out = [name]
-        if self.children:
-            out.extend(self.cat([child.materialize() for child in self.children]))
-        return out
 
 class TestRecordFunction(TestCase):
     def _record_function_with_param(self):
@@ -302,13 +211,14 @@ class TestExecutionGraph(TestCase):
         u = torch.randn(3, 4, 5, requires_grad=True)
         with record_function("## TEST 1 ##", "1, 2, 3"):
             rf_handle = _record_function_with_args_enter("## TEST 2 ##", 1, False, 2.5, [u, u], (u, u), "hello", u)
-            x = torch.randn(10, 10)
+            x = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 x = x.cuda()
-            y = torch.randn(10, 10)
+            y = torch.randn(10, 10, requires_grad=True)
             if use_cuda:
                 y = y.cuda()
             z = x + y + x * y + x * y
+            z.backward(z)
             if use_cuda:
                 z = z.cpu()
             _record_function_with_args_exit(rf_handle)
@@ -478,6 +388,9 @@ class TestProfiler(TestCase):
 
         mod = DummyModule()
 
+        def call_module(x):
+            return mod(x)
+
         with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10, requires_grad=True)
             y = torch.randn(10, 10, requires_grad=True)
@@ -486,7 +399,7 @@ class TestProfiler(TestCase):
             v = 2 * w
             v.backward()
             a = torch.randn(2, 3, 2, 2, requires_grad=True)
-            b = mod(a)
+            b = call_module(a)
             c = b.sum()
             c.backward()
 
@@ -497,6 +410,22 @@ class TestProfiler(TestCase):
                     "test_source" in entry or
                     "ts_method_1" in entry or
                     "ts_method_2" in entry) for entry in e.stack]))
+
+        # TODO: https://github.com/pytorch/kineto/issues/617
+        if kineto_available() and not IS_WINDOWS:
+            with TemporaryFileName(mode="w+") as fname:
+                p.export_chrome_trace(fname)
+                with io.open(fname, 'r') as f:
+                    events = json.load(f)["traceEvents"]
+
+                def extract(pattern: str):
+                    matches = [e for e in events if re.search(pattern, e["name"])]
+                    self.assertEqual(len(matches), 1, repr([e["name"] for e in matches]))
+                    return matches[0]
+
+                module_event = extract(r"DummyModule_0")
+                wrapper_event = extract(r"call_module")
+                self.assertEqual(module_event["args"]["Python parent id"], wrapper_event["args"]["Python id"])
 
         torch._C._set_graph_executor_optimize(prev_opt)
 
@@ -884,7 +813,7 @@ class TestProfiler(TestCase):
         with _profile(record_shapes=True, with_flops=True, use_kineto=kineto_available()) as prof:
             model(inputs)
         profiler_output = prof.key_averages(group_by_input_shape=True).table(sort_by="cpu_time_total", row_limit=10)
-        self.assertIn("Total KFLOPs", profiler_output)
+        self.assertIn("Total MFLOPs", profiler_output)
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
@@ -897,7 +826,7 @@ class TestProfiler(TestCase):
             model(inputs)
         profiler_output = kineto_profiler.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1)
-        self.assertIn("Total KFLOPs", profiler_output)
+        self.assertIn("Total MFLOPs", profiler_output)
 
     def test_kineto_profiler_api(self):
         called_num = [0]
@@ -1157,221 +1086,202 @@ class TestProfiler(TestCase):
         with profile():
             self.assertEqual(profiler_type(), ActiveProfilerType.KINETO)
 
-    def assertTreesMatch(self, actual: str, expected: str):
-        # Warning: Here be dragons
-        #   Different platforms will have subtly different behavior for Python
-        #   tracing. Observed differences include:
-        #     1) Windows symbolicates names differently from posix
-        #     2) The profile callback for c_call does not fire for Tensor.__pow__
-        #        on certain platforms. This is not caused by the function tracer,
-        #        but by cPython itself.
-        #
-        # The purpose of these unit tests is to ensure that the profiler is
-        # doing reasonable things. When these platform dependent variations occur
-        # simply coerce them into a platform independent form. If you made a
-        # change in the codebase which changes the trace produced, simply use
-        # EXPECTTEST_ACCEPT=1 to update the tests to reflect the new structure.
-
-        replicate = getattr(self, "icicle_replicate", None)
-        self.assertIsNotNone(replicate, "Please annotate test with `@IcicleNode.test`")
-
-        def split(line):
-            open_count = 0
-            buffer = []
-            results = []
-            for i, char in enumerate(line):
-                buffer.append(char)
-                if char == "[":
-                    open_count += 1
-                elif char == "]":
-                    open_count -= 1
-                    if not open_count:
-                        results.append(re.sub(r"\s-*]$", " ]", "".join(buffer)))
-                        buffer.clear()
-            return results
-
-        # Best effort attempt to provide a human comprehensible summary of the
-        # difference between actual and expected.
-        if actual != expected and (not expecttest.ACCEPT or replicate > 0):
-            print(f"Replicate: {replicate}")
-            actual_lines = actual.splitlines(False)
-            expected_lines = expected.splitlines(False)
-            print(f"Lines: {len(actual_lines)} vs. {len(expected_lines)}")
-            for line_a, line_e in zip(actual_lines, expected_lines):
-                split_a, split_e = split(line_a), split(line_e)
-                if " ".join(split_a) != " ".join(split_e):
-                    print(f"  Ops: {len(split_a)} vs. {len(split_e)}")
-                    for a, e in zip(split_a, split_e):
-                        if a != e:
-                            print(f"    {a}\n    {e}\n")
-
-        # The profiler should produce deterministic results and should return
-        # to a clean state after each run. As a result, only the first
-        # replicate is allowed to update `expected`. If subsequent runs do not
-        # match it is a bug in the profiler.
-        if replicate:
-            self.assertEqual(actual, expected)
-        else:
-            self.assertExpectedInline(actual, expected, skip=1)
-
-    @IcicleNode.test
-    def test_profiler_experimental_tree(self):
-        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
-        with profile() as p:
-            z = torch.add(t1, t2)
-            y = torch.ones(1)
-            loss = (y - z) ** 2
-            loss.backward()
-
-        self.assertTreesMatch(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ]
-                         [ aten::empty ][ aten::fill_ ]             [ aten::result_type ][ aten::to ][ aten::empty_like ---][ aten::fill_ ][ PowBackward0 -----------------------------------------------------------------------------------][ SubBackward0 ]                                     [ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]                              [ torch::autograd::AccumulateGrad ]
-                                                                                                     [ aten::empty_strided ]               [ aten::pow -----------------------------------][ aten::mul -------------------------][ aten::mul ][ aten::neg ]                                                                                             [ aten::new_empty_strided ][ aten::copy_ ]                              [ aten::detach ]
-                                                                                                                                           [ aten::result_type ][ aten::to ][ aten::copy_ ][ aten::mul -------------------------]                                                                                                                       [ aten::empty_strided ]                                                 [ detach ]
-                                                                                                                                                                                           [ aten::to --------------------------]
-                                                                                                                                                                                           [ aten::_to_copy --------------------]
-                                                                                                                                                                                           [ aten::empty_strided ][ aten::copy_ ]
-            """  # noqa: B950
+    def test_profiler_correlation_id(self):
+        '''
+        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        So we will reuse id_uniqueness_set.
+        '''
+        id_uniqueness_set = set()
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
         )
+        inputs = torch.randn(40, 16, 18, 260)
+        uint32_max = 2**32 - 1
+        for i in range(5):
+            with profile() as prof:
+                model(inputs)
+            for event in prof.profiler.kineto_results.events():
+                corr_id = event.correlation_id()
+                if (corr_id):
+                    self.assertTrue(corr_id not in id_uniqueness_set)
+                    id_uniqueness_set.add(corr_id)
+                    self.assertTrue(corr_id < uint32_max)
 
-    @IcicleNode.test
-    def test_profiler_experimental_tree_with_record_function(self):
-        with profile() as p:
-            with torch.autograd.profiler.record_function("Top level Annotation"):
-                with torch.autograd.profiler.record_function("First Annotation"):
-                    x = torch.ones((1,), requires_grad=True)
-
-                # Check that we correctly handle the case when a user
-                # annotation does not call `__exit__`.
-                _ = torch.autograd.profiler.record_function("Second Annotation").__enter__()
-
-                y = x + 1
-                with torch.autograd.profiler.record_function("Third Annotation"):
-                    y.backward()
-
-        # NB: The `aten::zeros` before the record function annotations are due to
-        # `at::cpp_custom_type_hack`. When we switch to `torch::CustomClassHolder`
-        # they will disappear.
-        self.assertTreesMatch(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ aten::zeros ---------------][ Top level Annotation ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
-            [ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::zeros ---------------][ First Annotation -------------------------][ aten::zeros ---------------][ Second Annotation ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
-                                                         [ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::ones ----------------][ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::add -------------------------][ aten::zeros ---------------][ Third Annotation --------------------------------------------------------------------------------------------------------------------------------------------------------------]
-                                                                                                      [ aten::empty ][ aten::fill_ ]                                             [ aten::to --------------------------][ aten::empty ][ aten::zero_ ][ aten::empty ][ aten::ones_like -------------------][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ]
-                                                                                                                                                                                 [ aten::_to_copy --------------------]                                             [ aten::empty_like ---][ aten::fill_ ][ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]
-                                                                                                                                                                                 [ aten::empty_strided ][ aten::copy_ ]                                             [ aten::empty_strided ]                                                                    [ aten::new_empty_strided ][ aten::copy_ ]
-                                                                                                                                                                                                                                                                                                                                                               [ aten::empty_strided ]
-            """  # noqa: B950
-        )
-
-    @IcicleNode.test
-    def test_profiler_experimental_tree_with_memory(self):
-        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
-        with profile(profile_memory=True) as p:
-            z = torch.add(t1, t2)
-            y = torch.ones(1)
-            loss = (y - z) ** 2
-            loss.backward()
-
-        self.assertTreesMatch(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------------------------------------------------------------------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ [memory] ]
-            [ [memory] ] [ aten::empty ][ aten::fill_ ][ [memory] ] [ aten::result_type ][ aten::to ][ [memory] ][ aten::empty_like ---][ aten::fill_ ][ PowBackward0 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------][ [memory] ][ SubBackward0 ][ [memory] ]                         [ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]                              [ torch::autograd::AccumulateGrad ]
-                         [ [memory] ]                                                                            [ aten::empty_strided ]               [ aten::pow -----------------------------------------------][ aten::mul -------------------------------------------------------------------------][ aten::mul ][ [memory] ][ [memory] ]            [ aten::neg ]                                                                                             [ aten::new_empty_strided ][ aten::copy_ ]                              [ aten::detach ]
-                                                                                                                 [ [memory] ]                          [ aten::result_type ][ aten::to ][ [memory] ][ aten::copy_ ][ [memory] ][ aten::mul -------------------------------------------------][ [memory] ][ [memory] ]                                     [ [memory] ]                                                                                              [ aten::empty_strided ]                                                 [ detach ]
-                                                                                                                                                                                                                               [ aten::to --------------------------][ [memory] ][ [memory] ]                                                                                                                                                                       [ [memory] ]
-                                                                                                                                                                                                                               [ aten::_to_copy --------------------]
-                                                                                                                                                                                                                               [ aten::empty_strided ][ aten::copy_ ]
-                                                                                                                                                                                                                               [ [memory] ]
-            """  # noqa: B950
-        )
-
-        self.assertTreesMatch(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ aten::add ][ aten::ones ----------------][ aten::sub ][ aten::pow --------------------------------][ aten::ones_like -------------------][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------------------------------------------------------------------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ [memory] ]
-            [ [memory] ] [ aten::empty ][ aten::fill_ ][ [memory] ] [ aten::result_type ][ aten::to ][ [memory] ][ aten::empty_like ---][ aten::fill_ ][ PowBackward0 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------][ [memory] ][ SubBackward0 ][ [memory] ]                         [ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]                              [ torch::autograd::AccumulateGrad ]
-                         [ [memory] ]                                                                            [ aten::empty_strided ]               [ aten::pow -----------------------------------------------][ aten::mul -------------------------------------------------------------------------][ aten::mul ][ [memory] ][ [memory] ]            [ aten::neg ]                                                                                             [ aten::new_empty_strided ][ aten::copy_ ]                              [ aten::detach ]
-                                                                                                                 [ [memory] ]                          [ aten::result_type ][ aten::to ][ [memory] ][ aten::copy_ ][ [memory] ][ aten::mul -------------------------------------------------][ [memory] ][ [memory] ]                                     [ [memory] ]                                                                                              [ aten::empty_strided ]                                                 [ detach ]
-                                                                                                                                                                                                                               [ aten::to --------------------------][ [memory] ][ [memory] ]                                                                                                                                                                       [ [memory] ]
-                                                                                                                                                                                                                               [ aten::_to_copy --------------------]
-                                                                                                                                                                                                                               [ aten::empty_strided ][ aten::copy_ ]
-                                                                                                                                                                                                                               [ [memory] ]
-            """  # noqa: B950
-        )
-
-    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
-    @unittest.skipIf(TEST_CUDA, "CUDA invokes extra Python functions.")
-    @IcicleNode.test
-    def test_profiler_experimental_tree_with_memory_and_stack(self):
-        t1, t2 = torch.ones(1, requires_grad=True), torch.ones(1, requires_grad=True)
+    def test_extra_fields(self):
         with profile(with_stack=True, profile_memory=True) as p:
+            _ = torch.ones((1,))
+
+        def find_ones(nodes):
+            for n in nodes:
+                if n.name() == "aten::ones":
+                    return n
+                result = find_ones(n.children)
+                if result:
+                    return result
+
+        node = find_ones(p.profiler.kineto_results.experimental_event_tree())
+        self.assertIsNotNone(node)
+
+        self.assertIsInstance(
+            node.extra_fields,
+            torch._C._autograd._ExtraFields_TorchOp)
+
+        self.assertIsInstance(
+            node.parent.extra_fields,
+            torch._C._autograd._ExtraFields_PyCCall)
+
+        self.assertEqual(node.children[0].name(), "aten::empty")
+        self.assertEqual(node.children[0].children[0].name(), "[memory]")
+        self.assertIsInstance(
+            node.children[0].children[0].extra_fields,
+            torch._C._autograd._ExtraFields_Allocation)
+
+
+class TestExperimentalUtils(TestCase):
+
+    @staticmethod
+    def generate_mock_profile():
+
+        @dataclass(frozen=True)
+        class MockKinetoEvent():
+            _name: str
+            _start_us: int
+            _duration_us: int
+            _linked_correlation_id: int
+            _device_type: DeviceType
+
+            def name(self) -> str:
+                return self._name
+
+            def start_us(self) -> int:
+                return self._start_us
+
+            def duration_us(self) -> int:
+                return self._duration_us
+
+            def linked_correlation_id(self) -> int:
+                return self._linked_correlation_id
+
+            def device_type(self) -> DeviceType:
+                return self._device_type
+
+        @dataclass(frozen=True)
+        class MockProfilerEvent():
+            _name: str
+            id: int
+            start_time_ns: int
+            duration_time_ns: int
+            children = []
+            parent = None
+
+            @property
+            def end_time_ns(self):
+                return self.start_time_ns + self.duration_time_ns
+
+            def name(self) -> str:
+                return self._name
+
+        cuda_events = [
+            MockKinetoEvent("cudaLaunchKernel", 400, 100, 1, DeviceType.CPU),
+            MockKinetoEvent("cudaLaunchKernel", 500, 100, 2, DeviceType.CPU),
+            MockKinetoEvent("cudaLaunchKernel", 600, 100, 3, DeviceType.CPU),
+            MockKinetoEvent("GPU", 700, 100, 1, DeviceType.CUDA),
+            MockKinetoEvent("GPU", 800, 100, 2, DeviceType.CUDA),
+            MockKinetoEvent("GPU", 900, 100, 3, DeviceType.CUDA)
+        ]
+
+        cpu_events = [
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 1, 0, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 2, 100001, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 3, 200001, 100000),
+            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 4, 300001, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 5, 400001, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 6, 500001, 100000),
+            MockProfilerEvent("CPU (After cudaLaunchKernel)", 7, 600001, 100000),
+            MockProfilerEvent("CPU (After GPU)", 8, 700001, 100000),
+            MockProfilerEvent("CPU (After GPU)", 9, 800001, 100000),
+            MockProfilerEvent("CPU (After GPU)", 10, 900001, 100000),
+            MockProfilerEvent("CPU (No Event)", 11, 1000001, 100000),
+        ]
+
+        profiler = unittest.mock.Mock()
+        profiler.kineto_results = unittest.mock.Mock()
+        profiler.kineto_results.events = unittest.mock.Mock(
+            return_value=cuda_events)
+        profiler.kineto_results.experimental_event_tree = unittest.mock.Mock(
+            return_value=cpu_events)
+        return profiler
+
+    def test_utils_compute_self_time(self):
+        with profile() as prof:
+            t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
+                1, requires_grad=True)
             z = torch.add(t1, t2)
             y = torch.ones(1)
-            loss = torch.pow(y - z, 2)
+            loss = torch.nn.functional.binary_cross_entropy_with_logits(z, y)
             loss.backward()
+        basic_eval = _utils.BasicEvaluation(prof.profiler)
+        metrics = basic_eval.metrics
+        self.assertTrue(len(metrics) > 0)
+        for event_key, event_metrics in metrics.items():
+            self.assertEqual(
+                event_metrics.self_time_ns,
+                event_key.event.duration_time_ns - sum([
+                    child.duration_time_ns
+                    for child in event_key.event.children
+                ]))
 
-        self.assertTreesMatch(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ test_profiler.py(1312): test_profiler_experimental_tree_with_memory_and_stack ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
-            [ torch/profiler/profiler.py(...): __enter__ -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ <built-in method add of type object at 0xXXXXXXXXXXXX> ][ <built-in method ones of type object at 0xXXXXXXXXXXXX> ][ aten::sub ][ <built-in method pow of type object at 0xXXXXXXXXXXXX> ][ torch/_tensor.py(...): backward ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ torch/profiler/profiler.py(...): __exit__ ----------------------------------------------------------------------------------------------]
-            [ torch/profiler/profiler.py(...): start -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ aten::add ]                                             [ aten::ones ----------------]                             [ [memory] ] [ aten::pow --------------------------------]             [ <built-in function _has_torch_function_unary> ][ torch/autograd/__init__.py(...): backward -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ [memory] ][ torch/profiler/profiler.py(...): stop --------------------------------------------------------------------------------------------------]
-            [ torch/profiler/profiler.py(...): _transit_action -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ [memory] ]                                              [ aten::empty ][ aten::fill_ ]                                          [ aten::result_type ][ aten::to ][ [memory] ]                                                              [ <built-in function isinstance> ][ <built-in function isinstance> ][ <built-in function len> ][ torch/autograd/__init__.py(...): _tensor_or_tensors_to_tuple ][ torch/autograd/__init__.py(...): _make_grads ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ <built-in method numel of Tensor object at 0xXXXXXXXXXXXX> -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]            [ torch/profiler/profiler.py(...): _transit_action ---------------------------------------------------------------------------------------]
-            [ torch/profiler/profiler.py(...): start_trace -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]                                                          [ [memory] ]                                                                                                                                                                                                                                                                                                                                      [ <built-in function isinstance> ][ <built-in method numel of Tensor object at 0xXXXXXXXXXXXX> ][ <built-in method ones_like of type object at 0xXXXXXXXXXXXX> ][ <built-in method numel of Tensor object at 0xXXXXXXXXXXXX> ][ autograd::engine::evaluate_function: PowBackward0 ----------------------------------------------------------------------------------------------------------------------------------------------][ autograd::engine::evaluate_function: SubBackward0 ][ autograd::engine::evaluate_function: AddBackward0 ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ][ autograd::engine::evaluate_function: torch::autograd::AccumulateGrad ]            [ <built-in method numel of Tensor object at 0xXXXXXXXXXXXX> ][ torch/profiler/profiler.py(...): stop_trace ------------------------------]
-            [ torch/autograd/profiler.py(...): _start_trace ][ <built-in method kineto_available of PyCapsule object at 0xXXXXXXXXXXXX> ][ torch/profiler/profiler.py(...): _get_distributed_info --------------------------------------------------------]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            [ aten::ones_like -------------------]                                                                                        [ PowBackward0 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------][ [memory] ][ SubBackward0 ][ [memory] ]                         [ AddBackward0 ]                                     [ torch::autograd::AccumulateGrad -------]                              [ torch::autograd::AccumulateGrad ]                                                 [ enum.py(...): __hash__ --]                                  [ torch/autograd/profiler.py(...): __exit__ --------------------------------]
-                                                                                                                                         [ torch/distributed/__init__.py(...): is_available ][ torch/distributed/distributed_c10d.py(...): is_initialized ]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            [ aten::empty_like ---][ aten::fill_ ]                                                                                        [ aten::pow -----------------------------------------------][ aten::mul -------------------------------------------------------------------------][ aten::mul ][ [memory] ][ [memory] ]            [ aten::neg ]                                                                                             [ aten::new_empty_strided ][ aten::copy_ ]                              [ aten::detach ]                                                                    [ <built-in function hash> ]                                  [ <built-in method _disable_profiler of PyCapsule object at 0xXXXXXXXXXXXX> ]
-                                                                                                                                         [ <built-in function hasattr> ]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               [ aten::empty_strided ]                                                                                                       [ aten::result_type ][ aten::to ][ [memory] ][ aten::copy_ ][ [memory] ][ aten::mul -------------------------------------------------][ [memory] ][ [memory] ]                                     [ [memory] ]                                                                                              [ aten::empty_strided ]                                                 [ detach ]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       [ [memory] ]                                                                                                                                                                                          [ aten::to --------------------------][ [memory] ][ [memory] ]                                                                                                                                                                       [ [memory] ]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             [ aten::_to_copy --------------------]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             [ aten::empty_strided ][ aten::copy_ ]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             [ [memory] ]
-            """  # noqa: B950
-        )
+    def test_utils_compute_queue_depth(self):
 
-    @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
-    @unittest.skipIf(TEST_CUDA, "CUDA invokes extra Python functions.")
-    @IcicleNode.test
-    def test_profiler_experimental_tree_with_stack_and_modules(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layers = [
-                    torch.nn.ReLU(),
-                    torch.nn.Linear(1, 1),
-                    torch.nn.ReLU(),
-                ]
+        def format_queue_depth(queue_depth_list, events):
+            res = ""
+            for data, event in zip(queue_depth_list, events):
+                res += f"{data.queue_depth} [{event.name()}]\n"
+            return res
 
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                for l in self.layers:
-                    x = l(x)
-                return x
+        # We have to use Mock because time series data is too flaky to test
+        profiler = self.generate_mock_profile()
+        basic_evaluation = _utils.BasicEvaluation(profiler)
+        self.assertExpectedInline(
+            format_queue_depth(basic_evaluation.queue_depth_list,
+                               basic_evaluation.cuda_events), """\
+1 [cudaLaunchKernel]
+2 [cudaLaunchKernel]
+3 [cudaLaunchKernel]
+2 [GPU]
+1 [GPU]
+0 [GPU]
+""")
+        self.assertExpectedInline(
+            format_queue_depth([
+                basic_evaluation.metrics[k]
+                for k in basic_evaluation.event_keys
+            ], basic_evaluation.events), """\
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+0 [CPU (Before cudaLaunchKernel)]
+1 [CPU (After cudaLaunchKernel)]
+2 [CPU (After cudaLaunchKernel)]
+3 [CPU (After cudaLaunchKernel)]
+2 [CPU (After GPU)]
+1 [CPU (After GPU)]
+0 [CPU (After GPU)]
+0 [CPU (No Event)]
+""")
 
-        model = MyModule()
-        with profile(with_stack=True) as p:
-            for _ in range(2):
-                model(torch.ones((1,)))
+    def test_utils_compute_queue_depth_when_no_cuda_events(self):
+        # For traces with only cpu events, we expect empty queue depth list
+        x = torch.ones((1024, 1024))
+        with profile() as prof:
+            for _ in range(5):
+                x = x @ x
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        self.assertFalse(basic_evaluation.compute_queue_depth())
 
-        self.assertTreesMatch(
-            IcicleNode.format(p.profiler, 12),
-            """\
-            [ test_profiler.py(1355): test_profiler_experimental_tree_with_stack_and_modules --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]
-            [ torch/profiler/profiler.py(...): __enter__ -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ <built-in method ones of type object at 0xXXXXXXXXXXXX> ][ nn.Module: MyModule_0 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ <built-in method ones of type object at 0xXXXXXXXXXXXX> ][ nn.Module: MyModule_0 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ torch/profiler/profiler.py(...): __exit__ ------------------------------------------------------------------------------------------]
-            [ torch/profiler/profiler.py(...): start -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ aten::ones ----------------]                             [ <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX> ][ test_profiler.py(1349): forward -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ aten::ones ----------------]                             [ <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX> ][ test_profiler.py(1349): forward -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ torch/profiler/profiler.py(...): stop ----------------------------------------------------------------------------------------------]
-            [ torch/profiler/profiler.py(...): _transit_action -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ aten::empty ][ aten::fill_ ]                                                                                                           [ nn.Module: ReLU_0 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------][ nn.Module: Linear_0 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ nn.Module: ReLU_1 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------][ aten::empty ][ aten::fill_ ]                                                                                                           [ nn.Module: ReLU_0 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------][ nn.Module: Linear_0 -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------][ nn.Module: ReLU_1 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------][ torch/profiler/profiler.py(...): _transit_action -----------------------------------------------------------------------------------]
-            [ torch/profiler/profiler.py(...): start_trace -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]                                                                                                                                         [ <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX> ][ torch/nn/modules/activation.py(...): forward ------------------------------------------------------------][ <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX> ][ torch/nn/modules/linear.py(...): forward ----------------------------------------------------------------------------------------------------------------------------------------][ <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX> ][ torch/nn/modules/activation.py(...): forward ------------------------------------------------------------]                                                                                                                                         [ <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX> ][ torch/nn/modules/activation.py(...): forward ------------------------------------------------------------][ <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX> ][ torch/nn/modules/linear.py(...): forward ----------------------------------------------------------------------------------------------------------------------------------------][ <built-in method _get_tracing_state of PyCapsule object at 0xXXXXXXXXXXXX> ][ torch/nn/modules/activation.py(...): forward ------------------------------------------------------------][ <built-in method get of dict object at 0xXXXXXXXXXXXX> ][ torch/profiler/profiler.py(...): stop_trace ------------------------------]
-            [ torch/autograd/profiler.py(...): _start_trace ][ <built-in method kineto_available of PyCapsule object at 0xXXXXXXXXXXXX> ][ torch/profiler/profiler.py(...): _get_distributed_info --------------------------------------------------------]                                                                                                                                                                                                                       [ torch/nn/functional.py(...): relu -----------------------------------------------------------------------]                                                                              [ torch/nn/modules/module.py(...): __getattr__ ][ torch/nn/modules/module.py(...): __getattr__ ][ <built-in function linear> ------------------------------------------------------]                                                                              [ torch/nn/functional.py(...): relu -----------------------------------------------------------------------]                                                                                                                                                                                                                       [ torch/nn/functional.py(...): relu -----------------------------------------------------------------------]                                                                              [ torch/nn/modules/module.py(...): __getattr__ ][ torch/nn/modules/module.py(...): __getattr__ ][ <built-in function linear> ------------------------------------------------------]                                                                              [ torch/nn/functional.py(...): relu -----------------------------------------------------------------------][ enum.py(...): __hash__ --]                              [ torch/autograd/profiler.py(...): __exit__ --------------------------------]
-                                                                                                                                         [ torch/distributed/__init__.py(...): is_available ][ torch/distributed/distributed_c10d.py(...): is_initialized ]                                                                                                                                                                                                                       [ <built-in function _has_torch_function_unary> ][ <built-in method relu of type object at 0xXXXXXXXXXXXX> ]                                                                                                                                                                              [ aten::linear --------------------------------------------------------------------]                                                                              [ <built-in function _has_torch_function_unary> ][ <built-in method relu of type object at 0xXXXXXXXXXXXX> ]                                                                                                                                                                                                                       [ <built-in function _has_torch_function_unary> ][ <built-in method relu of type object at 0xXXXXXXXXXXXX> ]                                                                                                                                                                              [ aten::linear --------------------------------------------------------------------]                                                                              [ <built-in function _has_torch_function_unary> ][ <built-in method relu of type object at 0xXXXXXXXXXXXX> ][ <built-in function hash> ]                              [ <built-in method _disable_profiler of PyCapsule object at 0xXXXXXXXXXXXX> ]
-                                                                                                                                         [ <built-in function hasattr> ]                                                                                                                                                                                                                                                                                                                                                           [ aten::relu -----]                                                                                                                                                                                                                      [ aten::t ---------][ aten::matmul -----------------------------------][ aten::add ]                                                                                                                               [ aten::relu -----]                                                                                                                                                                                                                                                                                                                [ aten::relu -----]                                                                                                                                                                                                                      [ aten::t ---------][ aten::matmul -----------------------------------][ aten::add ]                                                                                                                               [ aten::relu -----]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   [ aten::clamp_min ]                                                                                                                                                                                                                      [ aten::transpose -][ aten::t ---------][ aten::mv -------------------]                                                                                                                                            [ aten::clamp_min ]                                                                                                                                                                                                                                                                                                                [ aten::clamp_min ]                                                                                                                                                                                                                      [ aten::transpose -][ aten::t ---------][ aten::mv -------------------]                                                                                                                                            [ aten::clamp_min ]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            [ aten::as_strided ][ aten::transpose -][ aten::empty ][ aten::addmv_ ]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        [ aten::as_strided ][ aten::transpose -][ aten::empty ][ aten::addmv_ ]
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                [ aten::as_strided ]                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           [ aten::as_strided ]
-            """  # noqa: B950
-        )
 
 if __name__ == '__main__':
     run_tests()

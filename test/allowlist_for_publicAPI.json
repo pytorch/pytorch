@@ -1,17 +1,4 @@
 {
-  "torch.amp.autocast_mode": [
-    "Any",
-    "Optional"
-  ],
-  "torch.ao.nn.sparse.quantized.dynamic.linear": [
-    "LinearBlockSparsePattern",
-    "Optional",
-    "hide_packed_params_repr"
-  ],
-  "torch.ao.nn.sparse.quantized.linear": [
-    "Optional",
-    "hide_packed_params_repr"
-  ],
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",
@@ -103,13 +90,6 @@
     "reverse3",
     "reverse_sequential_wrapper2"
   ],
-  "torch.ao.quantization.backend_config.observation_type": [
-    "Enum"
-  ],
-  "torch.ao.quantization.backend_config.tensorrt": [
-    "ObservationType",
-    "reverse_sequential_wrapper2"
-  ],
   "torch.ao.quantization.quantization_types": [
       "Any",
       "Node",
@@ -119,51 +99,6 @@
       "Tuple",
       "Union"
   ],
-  "torch.ao.quantization.fx.fuse": [
-    "ABC",
-    "Any",
-    "Callable",
-    "DefaultFuseHandler",
-    "Dict",
-    "FuseHandler",
-    "FusedGraphModule",
-    "Graph",
-    "GraphModule",
-    "List",
-    "MatchAllNode",
-    "Node",
-    "NodePattern",
-    "Optional",
-    "Pattern",
-    "Tuple",
-    "Union",
-    "abstractmethod",
-    "get_fuser_method_mapping",
-    "get_fuser_method_new",
-    "get_fusion_pattern_to_extra_inputs_getter",
-    "get_fusion_pattern_to_fuse_handler_cls",
-    "get_fusion_pattern_to_root_node_getter",
-    "get_native_backend_config_dict",
-    "is_match",
-    "map_arg",
-    "sorted_patterns_dict"
-  ],
-  "torch.ao.quantization.fx.fusion_patterns": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "Graph",
-    "List",
-    "MatchAllNode",
-    "Node",
-    "NodePattern",
-    "Optional",
-    "Pattern",
-    "Union",
-    "abstractmethod",
-    "get_fuser_method_new"
-  ],
   "torch.ao.quantization.fx.graph_module": [
     "Any",
     "Dict",
@@ -171,29 +106,6 @@
     "GraphModule",
     "Set",
     "Union"
-  ],
-  "torch.ao.quantization.fx.lower_to_fbgemm": [
-    "Dict",
-    "QConfigAny",
-    "QuantizedGraphModule",
-    "Tuple"
-  ],
-  "torch.ao.quantization.fx.match_utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Graph",
-    "List",
-    "MatchAllNode",
-    "MatchResult",
-    "Node",
-    "Optional",
-    "Pattern",
-    "QConfigAny",
-    "QuantizeHandler",
-    "Set",
-    "Tuple",
-    "is_observed_standalone_module"
   ],
   "torch.ao.quantization.fx.pattern_utils": [
     "Any",
@@ -229,25 +141,6 @@
     "QuantizerCls",
     "Tuple",
     "Union"
-  ],
-  "torch.ao.quantization.fx.utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "List",
-    "Node",
-    "Optional",
-    "Set",
-    "Tuple",
-    "Type",
-    "Union",
-    "is_activation_post_process",
-    "is_per_channel",
-    "is_per_tensor",
-    "map_arg",
-    "namedtuple"
   ],
   "torch.ao.quantization.fx.backend_config_utils": [
     "Any",
@@ -353,42 +246,6 @@
     "QConfig",
     "QuantType",
     "wrap_cpp_module"
-  ],
-  "torch.ao.sparsity.experimental.pruner.base_pruner": [
-    "ActivationReconstruction",
-    "BaseSparsifier",
-    "BiasHook",
-    "ModuleDict",
-    "ModuleList",
-    "PruningParametrization",
-    "ZeroesParametrization",
-    "fqn_to_module",
-    "module_to_fqn"
-  ],
-  "torch.ao.sparsity.experimental.pruner.parametrization": [
-    "Any",
-    "List"
-  ],
-  "torch.ao.sparsity.scheduler.base_scheduler": [
-    "BaseSparsifier",
-    "wraps"
-  ],
-  "torch.ao.sparsity.scheduler.lambda_scheduler": [
-    "BaseScheduler"
-  ],
-  "torch.ao.sparsity.sparsifier.base_sparsifier": [
-    "Dict",
-    "FakeSparsity",
-    "Optional",
-    "Tuple",
-    "defaultdict",
-    "fqn_to_module",
-    "module_to_fqn"
-  ],
-  "torch.ao.sparsity.sparsifier.weight_norm_sparsifier": [
-    "BaseSparsifier",
-    "Tuple",
-    "reduce"
   ],
   "torch.autograd": [
     "NestedIOFunction",
@@ -535,11 +392,6 @@
     "ProcessGroupMPI",
     "ProcessGroupNCCL"
   ],
-  "torch.distributed.algorithms.ddp_comm_hooks": [
-    "DistributedDataParallel",
-    "Enum",
-    "partial"
-  ],
   "torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks": [
     "Any",
     "GradBucket"
@@ -551,23 +403,6 @@
   "torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks": [
     "Any",
     "Callable"
-  ],
-  "torch.distributed.algorithms.join": [
-    "ABC",
-    "Any",
-    "List",
-    "NamedTuple",
-    "Optional",
-    "TracebackType",
-    "Type",
-    "abstractmethod"
-  ],
-  "torch.distributed.algorithms.model_averaging.averagers": [
-    "ABC",
-    "Dict",
-    "Iterable",
-    "Union",
-    "abstractmethod"
   ],
   "torch.distributed.algorithms.model_averaging.utils": [
     "Dict",
@@ -610,44 +445,11 @@
     "ProcessGroupMPI",
     "ProcessGroupNCCL"
   ],
-  "torch.distributed.elastic.agent.server.api": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "Event",
-    "EventSource",
-    "List",
-    "Optional",
-    "ProcessFailure",
-    "SignalException",
-    "Std",
-    "Store",
-    "Tuple",
-    "Union",
-    "closing",
-    "dataclass",
-    "field",
-    "get_logger",
-    "prof",
-    "put_metric",
-    "record"
-  ],
   "torch.distributed.elastic.events": [
     "Dict",
     "Enum",
     "EventMetadataValue",
     "Optional"
-  ],
-  "torch.distributed.elastic.events.api": [
-    "Dict",
-    "Enum",
-    "EventMetadataValue",
-    "Optional",
-    "Union",
-    "asdict",
-    "dataclass",
-    "field"
   ],
   "torch.distributed.elastic.events.handlers": [
     "Dict"
@@ -739,31 +541,7 @@
     "abstractmethod"
   ],
   "torch.distributed.elastic.rendezvous.dynamic_rendezvous": [
-    "ABC",
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "List",
-    "NodeState",
-    "Optional",
-    "PrefixStore",
-    "RendezvousClosedError",
-    "RendezvousError",
-    "RendezvousHandler",
-    "RendezvousParameters",
-    "RendezvousStateError",
-    "RendezvousTimeoutError",
-    "Set",
-    "Store",
-    "Token",
-    "Tuple",
-    "abstractmethod",
-    "cast",
-    "construct_and_record_rdzv_event",
-    "dataclass",
-    "datetime",
-    "timedelta"
+    "get_method_name"
   ],
   "torch.distributed.elastic.rendezvous.registry": [
     "RendezvousHandler",
@@ -1160,117 +938,6 @@
     "Optional",
     "Union"
   ],
-  "torch.distributed.rpc.server_process_global_profiler": [
-    "profile"
-  ],
-  "torch.distributions.bernoulli": [
-    "ExponentialFamily",
-    "Number",
-    "binary_cross_entropy_with_logits",
-    "broadcast_all",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.beta": [
-    "Dirichlet",
-    "ExponentialFamily",
-    "Number",
-    "Real",
-    "broadcast_all"
-  ],
-  "torch.distributions.binomial": [
-    "Distribution",
-    "broadcast_all",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.categorical": [
-    "Distribution",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.cauchy": [
-    "Distribution",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.chi2": [
-    "Gamma"
-  ],
-  "torch.distributions.continuous_bernoulli": [
-    "ExponentialFamily",
-    "Number",
-    "binary_cross_entropy_with_logits",
-    "broadcast_all",
-    "clamp_probs",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.dirichlet": [
-    "ExponentialFamily",
-    "Function",
-    "once_differentiable"
-  ],
-  "torch.distributions.distribution": [
-    "Any",
-    "Dict",
-    "Optional",
-    "lazy_property"
-  ],
-  "torch.distributions.exp_family": [
-    "Distribution"
-  ],
-  "torch.distributions.exponential": [
-    "ExponentialFamily",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.fishersnedecor": [
-    "Distribution",
-    "Gamma",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.gamma": [
-    "ExponentialFamily",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.geometric": [
-    "Distribution",
-    "Number",
-    "binary_cross_entropy_with_logits",
-    "broadcast_all",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.gumbel": [
-    "AffineTransform",
-    "ExpTransform",
-    "Number",
-    "TransformedDistribution",
-    "Uniform",
-    "broadcast_all"
-  ],
-  "torch.distributions.half_cauchy": [
-    "AbsTransform",
-    "Cauchy",
-    "TransformedDistribution"
-  ],
-  "torch.distributions.half_normal": [
-    "AbsTransform",
-    "Normal",
-    "TransformedDistribution"
-  ],
-  "torch.distributions.independent": [
-    "Dict",
-    "Distribution"
-  ],
   "torch.distributions.kl": [
     "Bernoulli",
     "Beta",
@@ -1302,141 +969,12 @@
     "Uniform",
     "total_ordering"
   ],
-  "torch.distributions.kumaraswamy": [
-    "AffineTransform",
-    "PowerTransform",
-    "TransformedDistribution",
-    "Uniform",
-    "broadcast_all"
-  ],
-  "torch.distributions.laplace": [
-    "Distribution",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.lkj_cholesky": [
-    "Beta",
-    "Distribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.log_normal": [
-    "ExpTransform",
-    "Normal",
-    "TransformedDistribution"
-  ],
-  "torch.distributions.logistic_normal": [
-    "Normal",
-    "StickBreakingTransform",
-    "TransformedDistribution"
-  ],
-  "torch.distributions.lowrank_multivariate_normal": [
-    "Distribution",
-    "lazy_property"
-  ],
-  "torch.distributions.mixture_same_family": [
-    "Categorical",
-    "Dict",
-    "Distribution"
-  ],
-  "torch.distributions.multinomial": [
-    "Binomial",
-    "Categorical",
-    "Distribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.multivariate_normal": [
-    "Distribution",
-    "lazy_property"
-  ],
-  "torch.distributions.negative_binomial": [
-    "Distribution",
-    "broadcast_all",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.normal": [
-    "ExponentialFamily",
-    "Number",
-    "Real",
-    "broadcast_all"
-  ],
-  "torch.distributions.one_hot_categorical": [
-    "Categorical",
-    "Distribution"
-  ],
-  "torch.distributions.pareto": [
-    "AffineTransform",
-    "ExpTransform",
-    "Exponential",
-    "TransformedDistribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.poisson": [
-    "ExponentialFamily",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.relaxed_bernoulli": [
-    "Distribution",
-    "Number",
-    "SigmoidTransform",
-    "TransformedDistribution",
-    "broadcast_all",
-    "clamp_probs",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.relaxed_categorical": [
-    "Categorical",
-    "Distribution",
-    "ExpTransform",
-    "TransformedDistribution",
-    "broadcast_all",
-    "clamp_probs"
-  ],
-  "torch.distributions.studentT": [
-    "Chi2",
-    "Distribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.transformed_distribution": [
-    "ComposeTransform",
-    "Dict",
-    "Distribution",
-    "Independent",
-    "Transform"
-  ],
-  "torch.distributions.uniform": [
-    "Distribution",
-    "Number",
-    "broadcast_all"
-  ],
   "torch.distributions.utils": [
     "Any",
     "Dict",
     "Number",
     "is_tensor_like",
     "update_wrapper"
-  ],
-  "torch.distributions.von_mises": [
-    "Distribution",
-    "broadcast_all",
-    "lazy_property"
-  ],
-  "torch.distributions.weibull": [
-    "AffineTransform",
-    "Exponential",
-    "PowerTransform",
-    "TransformedDistribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.wishart": [
-    "ExponentialFamily",
-    "Number",
-    "Union",
-    "lazy_property"
   ],
   "torch.fft": [
     "Tensor",
@@ -1578,25 +1116,6 @@
     "Tuple",
     "compatibility"
   ],
-  "torch.fx.interpreter": [
-    "Any",
-    "Argument",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "Iterator",
-    "List",
-    "Node",
-    "Optional",
-    "Proxy",
-    "Target",
-    "Tracer",
-    "Tuple",
-    "Union",
-    "compatibility",
-    "map_aggregate",
-    "map_arg"
-  ],
   "torch.fx.node": [
     "Any",
     "ArgsKwargsPair",
@@ -1654,33 +1173,6 @@
     "map_aggregate",
     "map_arg"
   ],
-  "torch.fx.passes.net_min_base": [
-    "Any",
-    "Callable",
-    "Dict",
-    "FxNetAccFusionsFinder",
-    "Names",
-    "NodeList",
-    "NodeSet",
-    "Optional",
-    "ShapeProp",
-    "TensorOrTensors",
-    "Tensors",
-    "Tuple",
-    "compatibility",
-    "dataclass",
-    "map_arg",
-    "split_by_tags"
-  ],
-  "torch.fx.passes.operator_support": [
-    "IsNodeSupported",
-    "SupportDict",
-    "SupportedArgumentDTypes",
-    "TargetTypeName",
-    "TensorMetadata",
-    "compatibility",
-    "get_node_target"
-  ],
   "torch.fx.passes.param_fetch": [
     "Any",
     "Callable",
@@ -1710,86 +1202,8 @@
     "Optional",
     "compatibility"
   ],
-  "torch.fx.passes.split_utils": [
-    "Dict",
-    "List",
-    "NodeList",
-    "NodeSet",
-    "Optional",
-    "compatibility",
-    "dataclass",
-    "field",
-    "map_arg"
-  ],
-  "torch.fx.passes.splitter_base": [
-    "Any",
-    "Dict",
-    "FxGraphDrawer",
-    "FxNetAccFusionsFinder",
-    "Iterable",
-    "List",
-    "NamedTuple",
-    "NodeList",
-    "NodeSet",
-    "OperatorSupportBase",
-    "Optional",
-    "Sequence",
-    "ShapeProp",
-    "Tensors",
-    "Tuple",
-    "compatibility",
-    "dataclass",
-    "defaultdict",
-    "get_node_target",
-    "get_size_of_node",
-    "is_node_output_tensor",
-    "map_arg",
-    "split_by_tags"
-  ],
-  "torch.fx.passes.tools_common": [
-    "Any",
-    "Dict",
-    "List",
-    "Mapping",
-    "Names",
-    "NodeList",
-    "NodeSet",
-    "Set",
-    "TensorOrTensors",
-    "Tensors",
-    "Tuple",
-    "Union",
-    "compatibility",
-    "dataclass"
-  ],
   "torch.fx.proxy": [
-    "Any",
-    "Argument",
-    "Callable",
-    "Dict",
-    "Graph",
-    "Iterable",
-    "Iterator",
-    "Node",
-    "Optional",
-    "Target",
-    "Tuple",
-    "check_for_mutable_operation",
-    "compatibility",
-    "map_aggregate"
-  ],
-  "torch.fx.subgraph_rewriter": [
-    "Callable",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "List",
-    "NamedTuple",
-    "Node",
-    "Optional",
-    "Set",
-    "compatibility",
-    "symbolic_trace"
+    "assert_fn"
   ],
   "torch.hub": [
     "HTTPError",
@@ -2080,17 +1494,6 @@
   "torch.nn.intrinsic.modules": [
     "_FusedModule"
   ],
-  "torch.nn.intrinsic.modules.fused": [
-    "BatchNorm1d",
-    "BatchNorm2d",
-    "BatchNorm3d",
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "Linear",
-    "ReLU",
-    "type_before_parametrizations"
-  ],
   "torch.nn.intrinsic.qat.modules.conv_fused": [
     "Parameter",
     "TypeVar",
@@ -2103,197 +1506,11 @@
   "torch.nn.intrinsic.quantized.modules.conv_relu": [
     "fuse_conv_bn_weights"
   ],
-  "torch.nn.modules.activation": [
-    "Module",
-    "NonDynamicallyQuantizableLinear",
-    "Optional",
-    "Parameter",
-    "Tensor",
-    "Tuple",
-    "constant_",
-    "xavier_normal_",
-    "xavier_uniform_"
-  ],
-  "torch.nn.modules.adaptive": [
-    "Linear",
-    "List",
-    "Module",
-    "ModuleList",
-    "Sequence",
-    "Sequential",
-    "Tensor",
-    "log_softmax",
-    "namedtuple"
-  ],
-  "torch.nn.modules.batchnorm": [
-    "Any",
-    "LazyModuleMixin",
-    "Module",
-    "Optional",
-    "Parameter",
-    "Tensor",
-    "UninitializedBuffer",
-    "UninitializedParameter",
-    "sync_batch_norm"
-  ],
-  "torch.nn.modules.channelshuffle": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.container": [
-    "Any",
-    "Dict",
-    "Iterable",
-    "Iterator",
-    "Mapping",
-    "Module",
-    "Optional",
-    "OrderedDict",
-    "Parameter",
-    "Tuple",
-    "TypeVar",
-    "Union",
-    "chain",
-    "islice",
-    "overload"
-  ],
-  "torch.nn.modules.conv": [
-    "LazyModuleMixin",
-    "List",
-    "Module",
-    "Optional",
-    "Parameter",
-    "Tensor",
-    "Tuple",
-    "UninitializedParameter",
-    "Union"
-  ],
-  "torch.nn.modules.distance": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.dropout": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.flatten": [
-    "Module",
-    "Tensor",
-    "Tuple",
-    "Union"
-  ],
-  "torch.nn.modules.fold": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.instancenorm": [
-    "Tensor"
-  ],
-  "torch.nn.modules.lazy": [
-    "Protocol",
-    "is_lazy"
-  ],
   "torch.nn.modules.linear": [
-    "LazyModuleMixin",
-    "Module",
-    "NonDynamicallyQuantizableLinear",
-    "Parameter",
-    "Tensor",
-    "UninitializedParameter"
-  ],
-  "torch.nn.modules.loss": [
-    "Callable",
-    "Module",
-    "Optional",
-    "PairwiseDistance",
-    "Tensor"
-  ],
-  "torch.nn.modules.module": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Iterator",
-    "List",
-    "Mapping",
-    "Optional",
-    "OrderedDict",
-    "Parameter",
-    "RemovableHandle",
-    "Set",
-    "Tensor",
-    "Tuple",
-    "TypeVar",
-    "Union",
-    "device",
-    "dtype",
-    "namedtuple",
-    "overload"
-  ],
-  "torch.nn.modules.normalization": [
-    "List",
-    "Module",
-    "Parameter",
-    "Size",
-    "Tensor",
-    "Tuple",
-    "Union"
-  ],
-  "torch.nn.modules.padding": [
-    "Module",
-    "Sequence",
-    "Tensor",
-    "Tuple"
-  ],
-  "torch.nn.modules.pixelshuffle": [
-    "Module",
-    "Tensor"
-  ],
-  "torch.nn.modules.pooling": [
-    "List",
-    "Module",
-    "Optional",
-    "Tensor"
+    "NonDynamicallyQuantizableLinear"
   ],
   "torch.nn.modules.rnn": [
-    "List",
-    "Module",
-    "Optional",
-    "PackedSequence",
-    "Parameter",
-    "Tensor",
-    "Tuple",
-    "overload"
-  ],
-  "torch.nn.modules.sparse": [
-    "Module",
-    "Optional",
-    "Parameter",
-    "Tensor"
-  ],
-  "torch.nn.modules.transformer": [
-    "Any",
-    "Callable",
-    "Dropout",
-    "LayerNorm",
-    "Linear",
-    "Module",
-    "ModuleList",
-    "MultiheadAttention",
-    "Optional",
-    "Tensor",
-    "Union",
-    "xavier_uniform_"
-  ],
-  "torch.nn.modules.upsampling": [
-    "Module",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.nn.modules.utils": [
-    "Any",
-    "Dict",
-    "List",
-    "repeat"
+    "apply_permutation"
   ],
   "torch.nn.parallel": [
     "DistributedDataParallelCPU"
@@ -2308,28 +1525,6 @@
     "parallel_apply",
     "replicate",
     "scatter_kwargs"
-  ],
-  "torch.nn.parallel.distributed": [
-    "Any",
-    "Callable",
-    "Enum",
-    "Function",
-    "Join",
-    "JoinHook",
-    "Joinable",
-    "Module",
-    "RRef",
-    "ReduceOp",
-    "Type",
-    "Variable",
-    "auto",
-    "contextmanager",
-    "dataclass",
-    "gather",
-    "is_namedtuple",
-    "scatter_kwargs",
-    "tree_flatten",
-    "tree_unflatten"
   ],
   "torch.nn.parallel.parallel_apply": [
     "ExceptionWrapper",
@@ -2375,17 +1570,8 @@
   "torch.nn.quantized": [
     "MaxPool2d"
   ],
-  "torch.nn.quantized.dynamic.modules.conv": [
-    "Tensor"
-  ],
   "torch.nn.quantized.dynamic.modules.rnn": [
-    "Dict",
-    "List",
-    "Optional",
-    "PackedSequence",
-    "Tensor",
-    "Tuple",
-    "Union"
+    "apply_permutation"
   ],
   "torch.nn.quantized.functional": [
     "List",
@@ -2399,37 +1585,12 @@
   "torch.nn.quantized.modules.batchnorm": [
     "Tensor"
   ],
-  "torch.nn.quantized.modules.conv": [
-    "List",
-    "Optional",
-    "TypeVar",
-    "WeightedQuantizedModule",
-    "fuse_conv_bn_weights"
-  ],
-  "torch.nn.quantized.modules.embedding_ops": [
-    "List",
-    "Optional",
-    "Tensor",
-    "hide_packed_params_repr"
-  ],
-  "torch.nn.quantized.modules.functional_modules": [
-    "List",
-    "Tensor"
-  ],
-  "torch.nn.quantized.modules.linear": [
-    "Iterable",
-    "Optional",
-    "WeightedQuantizedModule",
-    "fuse_linear_bn_weights",
-    "hide_packed_params_repr",
-    "type_before_parametrizations"
-  ],
   "torch.nn.quantized.modules.utils": [
     "repeat"
   ],
-  "torch.nn.utils.clip_grad": [
-    "Iterable",
-    "Union"
+  "torch.nn.utils.rnn": [
+    "bind",
+    "PackedSequence_"
   ],
   "torch.nn.utils.convert_parameters": [
     "Iterable",
@@ -2455,124 +1616,12 @@
     "Union",
     "contextmanager"
   ],
-  "torch.nn.utils.rnn": [
-    "Iterable",
-    "List",
-    "Optional",
-    "Tensor",
-    "Tuple",
-    "Union",
-    "namedtuple"
-  ],
-  "torch.nn.utils.spectral_norm": [
-    "Any",
-    "Module",
-    "Optional",
-    "TypeVar",
-    "normalize"
-  ],
-  "torch.nn.utils.weight_norm": [
-    "Any",
-    "Module",
-    "Parameter",
-    "TypeVar",
-    "UninitializedParameter",
-    "norm_except_dim"
-  ],
   "torch.onnx": [
     "Dict",
     "OperatorExportTypes",
     "Optional",
     "TensorProtoDataType",
     "TrainingMode"
-  ],
-  "torch.optim.adadelta": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adagrad": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adamax": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.adamw": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.asgd": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.lbfgs": [
-    "Optimizer",
-    "reduce"
-  ],
-  "torch.optim.lr_scheduler": [
-    "Counter",
-    "Optimizer",
-    "bisect_right",
-    "wraps"
-  ],
-  "torch.optim.nadam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.optimizer": [
-    "chain",
-    "deepcopy",
-    "defaultdict"
-  ],
-  "torch.optim.radam": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.rmsprop": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.rprop": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.sgd": [
-    "List",
-    "Optimizer",
-    "Optional",
-    "Tensor"
-  ],
-  "torch.optim.sparse_adam": [
-    "Optimizer"
-  ],
-  "torch.optim.swa_utils": [
-    "Module",
-    "deepcopy"
   ],
   "torch.overrides": [
     "BaseTorchFunctionMode",
@@ -2593,19 +1642,6 @@
     "ModuleType",
     "is_mangled"
   ],
-  "torch.package.analyze.trace_dependencies": [
-    "Any",
-    "Callable",
-    "Iterable",
-    "List",
-    "Tuple"
-  ],
-  "torch.package.file_structure_representation": [
-    "Dict",
-    "GlobGroup",
-    "GlobPattern",
-    "List"
-  ],
   "torch.package.find_file_dependencies": [
     "List",
     "Optional",
@@ -2616,91 +1652,11 @@
     "Iterable",
     "Union"
   ],
-  "torch.package.importer": [
-    "ABC",
-    "Any",
-    "Dict",
-    "List",
-    "ModuleType",
-    "Optional",
-    "Tuple",
-    "abstractmethod",
-    "demangle",
-    "get_mangle_prefix",
-    "is_mangled"
-  ],
-  "torch.package.package_exporter": [
-    "ActionHook",
-    "Any",
-    "BinaryIO",
-    "Callable",
-    "DefaultDict",
-    "DiGraph",
-    "Dict",
-    "Enum",
-    "GlobGroup",
-    "GlobPattern",
-    "Importer",
-    "List",
-    "Optional",
-    "OrderedDict",
-    "OrderedImporter",
-    "Path",
-    "RemovableHandle",
-    "Sequence",
-    "Set",
-    "Storage",
-    "Union",
-    "cast",
-    "create_pickler",
-    "dataclass",
-    "defaultdict",
-    "demangle",
-    "find_files_source_depends_on",
-    "is_mangled",
-    "is_stdlib_module",
-    "location_tag",
-    "normalize_storage_type"
-  ],
-  "torch.package.package_importer": [
-    "Any",
-    "BinaryIO",
-    "Callable",
-    "Dict",
-    "Directory",
-    "DirectoryReader",
-    "GlobPattern",
-    "Importer",
-    "List",
-    "Optional",
-    "PackageMangler",
-    "PackageUnpickler",
-    "Path",
-    "Union",
-    "WeakValueDictionary",
-    "cast",
-    "contextmanager",
-    "demangle"
-  ],
   "torch.profiler": [
     "DeviceType",
     "ProfilerActivity",
     "kineto_available",
     "record_function"
-  ],
-  "torch.profiler.profiler": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "Iterable",
-    "List",
-    "Optional",
-    "ProfilerActivity",
-    "Tuple",
-    "kineto_available",
-    "partial",
-    "warn"
   ],
   "torch.quantization": [
     "ABC",
@@ -2915,13 +1871,6 @@
     "Generator"
   ],
   "torch.return_types": [
-    "_det_lu_based_helper",
-    "_fake_quantize_per_tensor_affine_cachemask_tensor_qparams",
-    "_fused_moving_avg_obs_fq_helper",
-    "_linalg_svd",
-    "_linalg_svd_out",
-    "_lu_with_info",
-    "_unpack_dual",
     "attr",
     "pytree_register_structseq"
   ],
@@ -2956,6 +1905,7 @@
     "softmax"
   ],
   "torch.special": [
+    "airy_ai",
     "bessel_j0",
     "bessel_j1",
     "bessel_y0",
@@ -2973,6 +1923,7 @@
     "exp2",
     "expit",
     "expm1",
+    "gamma",
     "gammainc",
     "gammaincc",
     "gammaln",
@@ -2999,12 +1950,14 @@
     "polygamma",
     "psi",
     "round",
+    "scaled_modified_bessel_k1",
     "shifted_chebyshev_polynomial_t",
     "shifted_chebyshev_polynomial_u",
     "shifted_chebyshev_polynomial_v",
     "shifted_chebyshev_polynomial_w",
     "sinc",
     "softmax",
+    "spherical_bessel_j0",
     "xlog1py",
     "xlogy",
     "zeta"
@@ -3175,34 +2128,6 @@
     "make_np",
     "range"
   ],
-  "torch.utils.tensorboard.writer": [
-    "Event",
-    "EventFileWriter",
-    "ProjectorConfig",
-    "SessionLog",
-    "audio",
-    "custom_scalars",
-    "figure_to_image",
-    "get_embedding_info",
-    "graph",
-    "histogram",
-    "histogram_raw",
-    "hparams",
-    "image",
-    "image_boxes",
-    "load_onnx_graph",
-    "make_mat",
-    "make_np",
-    "make_sprite",
-    "make_tsv",
-    "mesh",
-    "pr_curve",
-    "pr_curve_raw",
-    "scalar",
-    "text",
-    "video",
-    "write_pbtxt"
-  ],
   "torch": [
     "BFloat16Storage",
     "BFloat16Tensor",
@@ -3262,7 +2187,6 @@
     "_cummax_helper",
     "_cummin_helper",
     "_debug_has_internal_overlap",
-    "_det_lu_based_helper",
     "_det_lu_based_helper_backward_helper",
     "_dim_arange",
     "_dirichlet_grad",

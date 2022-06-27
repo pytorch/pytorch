@@ -38,14 +38,14 @@ void InputOutputEncoder::push(const at::Tensor& t) {
     const auto& sizes = t.sizes();
     const auto dim = sizes.size();
     TORCH_CHECK(
-      dim <= std::numeric_limits<uint32_t>::max(),
-      "Cannot profile Tensors of size > uint32 max. Got dim: ", dim);
+        dim <= std::numeric_limits<uint32_t>::max(),
+        "Cannot profile Tensors of size > uint32 max. Got dim: ",
+        dim);
 
     tensor_metadata_.emplace_back(
-      /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
-      /*dtype_=*/t.scalar_type(),
-      /*dim_=*/(uint32_t)dim
-    );
+        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*dtype_=*/t.scalar_type(),
+        /*dim_=*/(uint32_t)dim);
 
     for (const auto i : sizes) {
       tensor_sizes_.emplace_back(i);
@@ -57,7 +57,8 @@ void InputOutputEncoder::push(const at::Tensor& t) {
 
 // This is a custom-iterator-like getter to obtain input shapes and dtypes.
 auto InputOutputEncoder::getNextShapesAndDtypes() {
-  return [this, tag_it = tags_.begin(),
+  return [this,
+          tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_it = tensor_sizes_.begin()]() mutable {
     struct Inputs out;
@@ -65,21 +66,19 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
     while (!terminate && tag_it != tags_.end()) {
       out.shapes_.emplace_back();
       switch (*tag_it) {
-        case Tag::Tensor:
-          {
-            const auto& md = *tensor_metadata_it++;
-            for (const auto _ : c10::irange(md.dim_)) {
-              (void)_; // Suppress unused variable warning
-              out.shapes_.back().push_back(*tensor_size_it++);
-            }
-            out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+        case Tag::Tensor: {
+          const auto& md = *tensor_metadata_it++;
+          for (const auto _ : c10::irange(md.dim_)) {
+            (void)_; // Suppress unused variable warning
+            out.shapes_.back().push_back(*tensor_size_it++);
           }
-          break;
+          out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
+        } break;
 
         case Tag::TensorListBegin:
-            while (*(++tag_it) != Tag::TERMINATOR) {
-              // TODO: Skip TensorLists for now.
-            }
+          while (*(++tag_it) != Tag::TERMINATOR) {
+            // TODO: Skip TensorLists for now.
+          }
           out.dtypes_.emplace_back("TensorList");
           break;
 
@@ -259,6 +258,23 @@ DEFINE_VISITOR(
 #undef DEFINE_VISITOR
 #undef OUT_T
 
+template <typename T, size_t ChunkSize>
+ThreadLocalSubqueue::EventBlock<T, ChunkSize>::EventBlock() {
+  static std::atomic<uint64_t> counter_{0};
+  id_start_ = 1 + ChunkSize * counter_++;
+}
+template <class... Args>
+std::pair<KinetoObserverContext::Event*, uint64_t> ThreadLocalSubqueue::OpList::
+    emplace_back(Args&&... args) {
+  maybe_grow();
+  *next_ = {std::forward<Args>(args)...};
+  auto corr_id = buffer_last_->correlation_id(next_);
+  return {next_++, corr_id};
+}
+uint64_t ThreadLocalSubqueue::OpList::correlationID(const OpList::Iterator& e) {
+  return e.address().first->correlation_id(&*e);
+}
+
 ThreadLocalSubqueue::ThreadLocalSubqueue(
     const uint64_t tid,
     const ProfilerConfig& config)
@@ -267,10 +283,10 @@ ThreadLocalSubqueue::ThreadLocalSubqueue(
 }
 
 std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
-    const at::RecordFunction& fn,
-    uint64_t correlation_id) {
-  auto event = op_events_.emplace_back(
-      correlation_id,
+    const at::RecordFunction& fn) {
+  KinetoObserverContext::Event* event;
+  uint64_t corr_id;
+  std::tie(event, corr_id) = op_events_.emplace_back(
       fn.seqNr(),
       fn.forwardThreadId(),
       fn.scope(),
@@ -279,6 +295,11 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
       fn.name());
   if (config_.report_input_shapes) {
     inputs_outputs_.push(fn.inputs());
+  }
+  if (fn.scope() == at::RecordScope::USER_SCOPE) {
+    torch::profiler::impl::kineto::pushUserCorrelationId(corr_id);
+  } else {
+    torch::profiler::impl::kineto::pushCorrelationId(corr_id);
   }
 
 #if !defined BUILD_LITE_INTERPRETER && !defined C10_MOBILE
@@ -343,8 +364,9 @@ ThreadLocalSubqueue* RecordQueue::getSubqueue() {
   std::lock_guard<std::mutex> guard(sub_queue_mutex_);
   auto it = sub_queues_.find(tid);
   if (it == sub_queues_.end()) {
-    it =
-        sub_queues_.emplace(tid, std::make_unique<ThreadLocalSubqueue>(tid, config_)).first;
+    it = sub_queues_
+             .emplace(tid, std::make_unique<ThreadLocalSubqueue>(tid, config_))
+             .first;
   }
 
   sub_queue_cache_ = SubQueueThreadCache{id_, it->second.get()};
@@ -518,7 +540,9 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     auto jit_module_it = queue.jit_modules_.begin();
     auto extra_args_it = queue.extra_args_.begin();
     auto gpu_fallback_it = queue.gpu_fallback_.begin();
-    for (auto& i : queue.op_events_) {
+    for (auto event = queue.op_events_.begin(); event != queue.op_events_.end();
+         ++event) {
+      auto& i = *event;
       auto start_time = converter(i.start_time_);
       out.emplace_back(Result::create(
           start_time,
@@ -527,6 +551,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
           /*extra_fields_=*/
           ExtraFields<EventType::TorchOp>(
               std::move(i.basic_fields_),
+              ThreadLocalSubqueue::OpList::correlationID(event),
               converter(i.end_time_),
               input_getter(),
               steal_or_default(jit_stack_it),

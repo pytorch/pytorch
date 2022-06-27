@@ -85,6 +85,45 @@ Tensor NestedTensor_add_NestedTensor_in_place(
   return self;
 }
 
+void NestedTensor_softmax_dropout(const Tensor& query, Tensor& attn_scores) {
+  const auto* query_nt = get_nested_tensor_impl_or_null(query);
+  TORCH_INTERNAL_ASSERT(query_nt != nullptr);
+  TORCH_INTERNAL_ASSERT(nested_tensor_impl_is_contiguous(query_nt));
+
+  const Tensor& sizes = query_nt->get_nested_size_tensor();
+  const auto num_tensors = sizes.sizes()[0];
+  const auto max_seq_len = attn_scores.sizes()[2];
+
+  for (int64_t i = 0; i < num_tensors; i++) {
+    auto seq_len = sizes.index({i, 0}).item<int64_t>();
+    auto subseq = attn_scores.index(
+        {i,
+         indexing::Slice(),
+         indexing::Slice(0, seq_len),
+         indexing::Slice(0, seq_len)});
+    auto subscores = at::softmax(subseq, subseq.dim() - 1);
+    attn_scores.index_put_(
+        {i,
+         indexing::Slice(),
+         indexing::Slice(0, seq_len),
+         indexing::Slice(0, seq_len)},
+        subscores);
+    attn_scores.index_put_(
+        {i,
+         indexing::Slice(),
+         indexing::Slice(0, seq_len),
+         indexing::Slice(seq_len, max_seq_len)},
+        0);
+    attn_scores.index_put_(
+        {i,
+         indexing::Slice(),
+         indexing::Slice(seq_len, max_seq_len),
+         indexing::Slice(0, max_seq_len)},
+        0);
+  }
+}
+
+
 Tensor NestedTensor_batch_offsets_from_size_tensor(
     const Tensor& sizes,
     int64_t extra_elements) {
@@ -137,6 +176,5 @@ Tensor NestedTensor_to_mask(const Tensor& nt, c10::optional<int64_t> mask_dim, c
   }
   return result;
 }
-
 } // namespace native
 } // namespace at

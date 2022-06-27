@@ -401,6 +401,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_sparse_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_special_functions.cpp"
     "${TORCH_SRC_DIR}/csrc/autograd/generated/python_return_types.cpp"
+    "${TORCH_SRC_DIR}/csrc/autograd/generated/python_enum_tag.cpp"
     )
 
   set(GENERATED_H_PYTHON
@@ -463,6 +464,7 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     "${TOOLS_PATH}/autograd/templates/python_sparse_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_special_functions.cpp"
     "${TOOLS_PATH}/autograd/templates/python_return_types.cpp"
+    "${TOOLS_PATH}/autograd/templates/python_enum_tag.cpp"
     "${TOOLS_PATH}/autograd/templates/variable_factories.h"
     "${TOOLS_PATH}/autograd/templates/annotated_fn_args.py.in"
     "${TOOLS_PATH}/autograd/deprecated.yaml"
@@ -983,8 +985,17 @@ elseif(USE_CUDA)
     target_link_libraries(torch_cuda_linalg PRIVATE
         torch_cpu
         torch_cuda
-        ${CUDA_cusolver_LIBRARY}
     )
+    if($ENV{ATEN_STATIC_CUDA})
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusolver_static.a
+          ${CUDA_TOOLKIT_ROOT_DIR}/lib64/liblapack_static.a     # needed for libcusolver_static
+      )
+    else()
+      target_link_libraries(torch_cuda_linalg PRIVATE
+          ${CUDA_cusolver_LIBRARY}
+      )
+    endif()
     # NS: TODO, is this really necessary?
     if(USE_MAGMA AND CAFFE2_STATIC_LINK_CUDA)
       target_link_libraries(torch_cuda_linalg PRIVATE
@@ -1120,7 +1131,7 @@ endif()
     ${TORCH_SRC_DIR}/csrc)
 
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/miniz-2.0.8)
+    ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
@@ -2008,6 +2019,9 @@ if(BUILD_PYTHON)
 
   target_link_libraries(caffe2_pybind11_state PRIVATE
       torch_library python::python pybind::pybind11)
+  if(CAFFE2_USE_MKLDNN)
+      target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
+  endif()
   if(WIN32)
     target_link_libraries(caffe2_pybind11_state PRIVATE onnx_proto)
   endif(WIN32)

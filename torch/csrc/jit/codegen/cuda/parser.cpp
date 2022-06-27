@@ -324,38 +324,8 @@ struct MemoryFormat {
   }
 
   // returns transpose map to achieve permutation on non-permuted tensor
-  // note: used for codegen transpose API
-  std::unordered_map<int, int> apply() const {
-    std::unordered_map<int, int> permute;
-    if (hasPermutation()) {
-      int rank = permuted_order_.size();
-      for (const auto i : c10::irange(rank)) {
-        if (permuted_order_[i] != rank - 1 - i) {
-          permute[permuted_order_[i]] = rank - 1 - i;
-        }
-      }
-    }
-    return permute;
-  }
-
-  // returns transpose map to restore back to non-permuted tensor
-  // note: used for codegen transpose API
-  std::unordered_map<int, int> restore() const {
-    std::unordered_map<int, int> permute;
-    if (hasPermutation()) {
-      int rank = permuted_order_.size();
-      for (const auto i : c10::irange(rank)) {
-        if (permuted_order_[i] != rank - 1 - i) {
-          permute[rank - 1 - i] = permuted_order_[i];
-        }
-      }
-    }
-    return permute;
-  }
-
-  // returns transpose map to achieve permutation on non-permuted tensor
-  // note: used for aten::permute API
-  std::vector<int64_t> apply_vec() const {
+  // note: used for aten::permute API and codegen tranpose API
+  std::vector<int64_t> apply() const {
     std::vector<int64_t> ret;
     if (hasPermutation()) {
       ret.resize(permuted_order_.size());
@@ -365,8 +335,8 @@ struct MemoryFormat {
   }
 
   // returns transpose map to restore back to non-permuted tensor
-  // note: used for aten::permute API
-  std::vector<int64_t> restore_vec() const {
+  // note: used for aten::permute API and codegen transpose API
+  std::vector<int64_t> restore() const {
     std::vector<int64_t> ret;
     if (hasPermutation()) {
       int rank = permuted_order_.size();
@@ -384,10 +354,6 @@ struct MemoryCompare {
       const {
     return format0.permutation_ < format1.permutation_;
   }
-};
-
-bool operator==(const MemoryFormat& a, const MemoryFormat& b) {
-  return a.permutation_ == b.permutation_;
 };
 
 typedef std::map<MemoryFormat, CgValue, MemoryCompare> MemoryFormatMap;
@@ -507,11 +473,11 @@ class ValueHolder {
 
     // restore source permutation
     if (format_s.hasPermutation()) {
-      tv = transpose(tv, format_s.restore());
+      tv = permute(tv, format_s.restore());
     }
     // apply destination permutation
     if (format_d.hasPermutation()) {
-      tv = transpose(tv, format_d.apply());
+      tv = permute(tv, format_d.apply());
     }
     return tv;
   }
@@ -785,13 +751,13 @@ class IrParser {
     for (const auto& i : c10::irange(fusion->inputs().size())) {
       const auto& entry = permuted_tensors.find(fusion->inputs()[i]);
       if (entry != permuted_tensors.end()) {
-        fusion->setPermutationOnInput(i, entry->second.apply_vec());
+        fusion->setPermutationOnInput(i, entry->second.apply());
       }
     }
     for (const auto& i : c10::irange(fusion->outputs().size())) {
       const auto& entry = permuted_tensors.find(fusion->outputs()[i]);
       if (entry != permuted_tensors.end()) {
-        fusion->setPermutationOnOutput(i, entry->second.restore_vec());
+        fusion->setPermutationOnOutput(i, entry->second.restore());
       }
     }
     return fusion;
@@ -3264,7 +3230,18 @@ class IrParser {
   }
 
   bool registerScalar(const JitValue* val) {
-    if (val->type()->isSubtypeOf(static_cast<c10::TypePtr>(FloatType::get()))) {
+    if (val->type()->isSubtypeOf(
+            static_cast<c10::TypePtr>(ComplexType::get()))) {
+      CgValue cg_val = nullptr;
+      if (auto ival = constant_as<c10::complex<double>>(val)) {
+        cg_val = IrBuilder::create<ComplexDouble>(ival.value());
+      } else {
+        cg_val = IrBuilder::create<ComplexDouble>();
+      }
+      value_map_.emplace(val->unique(), cg_val);
+      return true;
+    } else if (val->type()->isSubtypeOf(
+                   static_cast<c10::TypePtr>(FloatType::get()))) {
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       CgValue cg_val;
       if (auto ival = constant_as<double>(val)) {
@@ -3358,8 +3335,9 @@ class IrParser {
         std::vector<c10::ShapeSymbol> s_vec = opt_s_vec.value();
         // apply permutation
         auto permutation = format.apply();
-        for (const auto& p : permutation) {
-          s_vec[p.second] = opt_s_vec.value()[p.first];
+        for (auto new_axis : c10::irange(permutation.size())) {
+          auto old_axis = permutation.at(new_axis);
+          s_vec[new_axis] = opt_s_vec.value()[old_axis];
         }
 
         // copying stride properties because we need to permute it

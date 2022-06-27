@@ -13,10 +13,10 @@
 
 #include <c10/core/ScalarType.h>
 #include <c10/util/ArrayRef.h>
-#include <torch/csrc/lazy/core/hash.h>
-#include <torch/csrc/lazy/core/shape.h>
-#include <torch/csrc/lazy/core/ir_metadata.h>
 #include <c10/util/Flags.h>
+#include <torch/csrc/lazy/core/hash.h>
+#include <torch/csrc/lazy/core/ir_metadata.h>
+#include <torch/csrc/lazy/core/shape.h>
 
 C10_DECLARE_bool(ltc_enable_dynamic_shapes);
 
@@ -67,7 +67,10 @@ inline std::ostream& operator<<(std::ostream& stream, const OpKind& op) {
 
 using OpList = c10::ArrayRef<Value>;
 
-hash_t OperandHashes(const OpList& operands, const hash_t& seed, bool bakeInSizes);
+hash_t OperandHashes(
+    const OpList& operands,
+    const hash_t& seed,
+    bool bakeInSizes);
 // A node in the graph. Nodes for operations which require extra data to be
 // stored for lowering should inherit from this class and add an operation
 // specific member there. For example, a constant might create a new
@@ -87,10 +90,18 @@ class TORCH_API Node {
   Node(OpKind op, size_t num_outputs);
 
   // Construct node with operands and shapes
-  Node(OpKind op, OpList operands, std::vector<Shape>&& shapes, size_t num_outputs = 1);
+  Node(
+      OpKind op,
+      OpList operands,
+      std::vector<Shape>&& shapes,
+      size_t num_outputs = 1);
 
   // Construct node with operands and shape generated from a function
-  Node(OpKind op, OpList operands, const std::function<Shape()>& shape_fn, size_t num_outputs = 1);
+  Node(
+      OpKind op,
+      OpList operands,
+      const std::function<Shape()>& shape_fn,
+      size_t num_outputs = 1);
 
   // Construct node with operands and no shape
   Node(OpKind op, OpList operands, size_t num_outputs = 1);
@@ -122,6 +133,9 @@ class TORCH_API Node {
   virtual const std::vector<Output>& operands() const;
 
   virtual const Output& operand(size_t i) const;
+
+  // Gets operand at index i if index is valid, or kNullOutput otherwise.
+  virtual const Output& nullable_operand(size_t i) const;
 
   // Returns the hash of the dag used to look up the compiled graph
   virtual hash_t hash() const = 0;
@@ -156,7 +170,7 @@ class TORCH_API Node {
   // from UserMetaData.
   std::shared_ptr<UserMetaData> user_metadata_;
 
-protected:
+ protected:
   // Adds node's index output number as operand.
   void AddOperand(NodePtr node, size_t index = 0);
 
@@ -167,8 +181,6 @@ protected:
   // otherwise we get into circular reference counting.
   std::vector<Output> operands_as_outputs_;
 };
-
-
 
 inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
   stream << node.ToString();
@@ -199,7 +211,6 @@ const T* NodeCast(const Node* node) {
   // we have to use dynamic_cast here.
   return dynamic_cast<const T*>(node);
 }
-
 
 // Represents a specific output produced by a node. Since the output of a node
 // can be composed by multiple outputs, the node+index coordinates fully qualify
@@ -250,8 +261,10 @@ using OutputMap = std::unordered_map<Output, T, Output::Hasher>;
 // Represents an input/operand for a Node object.
 struct TORCH_API Value {
   Value() = default;
-  /* implicit */ Value(NodePtr&& node, size_t index = 0) : node(std::move(node)), index(index) {}
-  /* implicit */ Value(const NodePtr& node, size_t index = 0) : node(node), index(index) {}
+  /* implicit */ Value(NodePtr&& node, size_t index = 0)
+      : node(std::move(node)), index(index) {}
+  /* implicit */ Value(const NodePtr& node, size_t index = 0)
+      : node(node), index(index) {}
 
   hash_t hash() const;
   hash_t shapeHash() const;
@@ -280,6 +293,6 @@ struct TORCH_API Value {
 } // namespace torch
 
 namespace c10 {
-  // Explicit template instantiation to make ArrayRef<Value> work
-  template class at::ArrayRef<torch::lazy::Value>;
-}
+// Explicit template instantiation to make ArrayRef<Value> work
+template class at::ArrayRef<torch::lazy::Value>;
+} // namespace c10
