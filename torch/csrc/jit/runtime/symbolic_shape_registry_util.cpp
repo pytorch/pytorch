@@ -77,6 +77,7 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor", "unary"},
       {"aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor", "unary"},
       {"aten::mish(Tensor self) -> Tensor", "unary"},
+      {"aten::elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor", "unary"},
       {"aten::relu6(Tensor self) -> Tensor", "unary"},
       {"aten::gelu(Tensor self, *, str approximate='none') -> Tensor", "unary"},
       {"aten::neg(Tensor self) -> Tensor", "unary"},
