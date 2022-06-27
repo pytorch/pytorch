@@ -1440,7 +1440,7 @@ Val* where(Val* c, Val* v1, Val* v2) {
 
   std::vector<Val*> operands = {v1, v2};
   auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
-  auto cast_values = promoteValues({v1, v2}, common_dtype);
+  auto cast_values = promoteValues(operands, common_dtype);
   v1 = cast_values[0];
   v2 = cast_values[1];
 
