@@ -83,6 +83,7 @@ jobs:
 
       - name: Build
         env:
+          FOOBAR_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           # TODO duplicated
