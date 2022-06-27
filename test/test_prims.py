@@ -1,7 +1,6 @@
 # Owner(s): ["module: primTorch"]
 
 from functools import partial
-from itertools import product
 
 import torch
 from torch.testing import make_tensor
