@@ -97,6 +97,19 @@ c10::intrusive_ptr<ProcessGroup::Work> scatter_(
       ScatterOptions{root_rank, std::chrono::milliseconds(timeout)});
 }
 
+c10::intrusive_ptr<ProcessGroup::Work> alltoall_(
+    at::TensorList output_tensors,
+    at::TensorList input_tensors,
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    int64_t timeout) {
+  auto output_tensors_vec = output_tensors.vec();
+  auto input_tensors_vec = input_tensors.vec();
+  return process_group->alltoall(
+      output_tensors_vec,
+      input_tensors_vec,
+      AllToAllOptions{std::chrono::milliseconds(timeout)});
+}
+
 TORCH_LIBRARY(c10d, m) {
   // The following ProcessGroup and Work definations are more like declarations.
   // They don't expose the details of the two classes into TorchScript.
@@ -126,6 +139,9 @@ TORCH_LIBRARY(c10d, m) {
   m.def(
       "scatter_",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, scatter_));
+  m.def(
+      "alltoall_",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, alltoall_));
 }
 } // namespace
 
@@ -271,6 +287,22 @@ c10::intrusive_ptr<ProcessGroup::Work> scatter(
       process_group,
       opts.rootRank,
       opts.timeout.count());
+}
+
+c10::intrusive_ptr<ProcessGroup::Work> alltoall(
+    const c10::intrusive_ptr<ProcessGroup>& process_group,
+    at::TensorList output_tensors,
+    at::TensorList input_tensors,
+    const AllToAllOptions& opts) {
+  static auto op = c10::Dispatcher::singleton()
+                       .findSchemaOrThrow("c10d::alltoall_", "")
+                       .typed<c10::intrusive_ptr<::c10d::ProcessGroup::Work>(
+                           at::TensorList,
+                           at::TensorList,
+                           const c10::intrusive_ptr<::c10d::ProcessGroup>&,
+                           int64_t)>();
+  return op.call(
+      output_tensors, input_tensors, process_group, opts.timeout.count());
 }
 
 } // namespace ops
