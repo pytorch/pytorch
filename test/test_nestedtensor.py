@@ -856,6 +856,7 @@ class TestNestedTensorAutograd(TestCase):
         self.assertRaisesRegex(
             RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
         self.assertEqual(a.size(2), 4)
+
     def test_nested_tensor_linear(self):
 
         a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64)
