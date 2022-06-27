@@ -61,7 +61,7 @@ class TestFakeQuantize(unittest.TestCase):
     r""" Tests fake quantize forward() method
          throws error when qparams are None
     """
-    def test_forward_error(self):
+    def test_forward_exception(self):
         # generate a tensor of size 20 with random values
         # between 0 -> 1000 to quantize -> dequantize
         X = 1000 * torch.rand(20)
