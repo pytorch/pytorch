@@ -12014,14 +12014,14 @@ op_db: List[OpInfo] = [
                              'TestFFT', 'test_reference_nd')],
                      ),
     OpInfo('fft.fftshift',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
            sample_inputs_func=sample_inputs_fftshift,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            ),
     OpInfo('fft.ifftshift',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
            sample_inputs_func=sample_inputs_fftshift,
            supports_out=False,
            supports_forward_ad=True,
@@ -15259,7 +15259,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "roll",
         ref=np.roll,
-        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
         error_inputs_func=error_inputs_roll,
         supports_out=False,
         supports_forward_ad=True,
@@ -19678,6 +19678,34 @@ op_db: List[OpInfo] = [
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
+    UnaryUfuncInfo(
+        'special.gamma',
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=1.3e-05),
+                    torch.float64: tol(atol=1e-05, rtol=1.3e-05)
+                }
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.gamma if TEST_SCIPY else _NOTHING,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestUnaryUfuncs',
+                'test_reference_numerics_large',
+                dtypes=[torch.float32, torch.float64],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestUnaryUfuncs',
+                'test_reference_numerics_small',
+                dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64],
+            ),
+        ),
+        supports_autograd=False,
+    ),
     BinaryUfuncInfo(
         'special.hermite_polynomial_h',
         dtypes=all_types_and(torch.bool),
@@ -20214,7 +20242,6 @@ python_ref_db = [
         # Reference: https://github.com/pytorch/pytorch/issues/56012
         handles_complex_extremal_values=False,
         handles_large_floats=False,
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.sign",
@@ -20705,7 +20732,6 @@ python_ref_db = [
         # https://github.com/pytorch/pytorch/issues/76944
         supports_two_python_scalars=False,
         supports_one_python_scalar=True,
-        supports_nvfuser=False,
         skips=(
             # Reference result was farther (0.7433461727239705) from the precise
             # computation than the torch result was (nan)!
