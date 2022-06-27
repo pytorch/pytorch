@@ -621,7 +621,7 @@ void reportBackendEventToActiveKinetoProfiler(
 }
 
 void reportBackendMemoryEventToActiveKinetoProfiler(
-    void *ptr,
+    void* ptr,
     int64_t alloc_size,
     int64_t total_allocated,
     int64_t total_reserved,
@@ -634,12 +634,8 @@ void reportBackendMemoryEventToActiveKinetoProfiler(
   if (!state_ptr) {
     return;
   }
-  state_ptr->reportMemoryUsage(ptr,
-                              alloc_size,
-                              total_allocated,
-                              total_reserved,
-                              device);
-
+  state_ptr->reportMemoryUsage(
+      ptr, alloc_size, total_allocated, total_reserved, device);
 }
 
 void prepareProfiler(

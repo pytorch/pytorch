@@ -67,17 +67,13 @@ KinetoEdgeCPUProfiler::KinetoEdgeCPUProfiler(
 }
 
 void KinetoEdgeCPUProfiler::recordBackendMemoryEvent(
-    void *ptr,
+    void* ptr,
     int64_t alloc_size,
     int64_t total_allocated,
     int64_t total_reserved,
     c10::Device device) {
   torch::autograd::profiler::reportBackendMemoryEventToActiveKinetoProfiler(
-    ptr,
-    alloc_size,
-    total_allocated,
-    total_reserved,
-    device);
+      ptr, alloc_size, total_allocated, total_reserved, device);
 }
 
 void KinetoEdgeCPUProfiler::recordBackendEvent(

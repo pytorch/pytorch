@@ -341,12 +341,11 @@ TORCH_API void reportBackendEventToActiveKinetoProfiler(
     const std::string& backend_name);
 
 TORCH_API void reportBackendMemoryEventToActiveKinetoProfiler(
-    void *ptr,
+    void* ptr,
     int64_t alloc_size,
     int64_t total_allocated,
     int64_t total_reserved,
-    c10::Device device
-);
+    c10::Device device);
 
 TORCH_API void enableProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
