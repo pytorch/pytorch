@@ -2912,6 +2912,7 @@
     "polygamma",
     "psi",
     "round",
+    "scaled_modified_bessel_k1",
     "shifted_chebyshev_polynomial_t",
     "shifted_chebyshev_polynomial_u",
     "shifted_chebyshev_polynomial_v",
