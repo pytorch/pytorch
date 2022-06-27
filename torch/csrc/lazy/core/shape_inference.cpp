@@ -50,10 +50,12 @@
 #include <torch/csrc/lazy/core/shape_inference.h>
 
 #include <ATen/AccumulateType.h>
+#include <ATen/CompositeExplicitAutogradFunctions.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/Functions.h>
 #include <ATen/InferSize.h>
+#include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
@@ -470,6 +472,77 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
   return {Shape(tensors[0].scalar_type(), out_shape)};
 }
 
+std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& bias,
+    const c10::optional<at::Tensor>& running_mean,
+    const c10::optional<at::Tensor>& running_var,
+    bool training,
+    double momentum,
+    double eps) {
+  std::vector<torch::lazy::Shape> shapes;
+  shapes.reserve(3);
+  shapes.emplace_back(input.scalar_type(), input.sizes().vec());
+
+  // A separate mean and var needs to be kept for each channel.
+  TORCH_CHECK(
+      input.sizes().size() >= 2,
+      "Input tensor must have at least batch and channel dimensions!");
+  int64_t num_features = input.size(1);
+
+  if (running_mean.has_value()) {
+    shapes.emplace_back(
+        running_mean.value().scalar_type(), running_mean.value().sizes().vec());
+  } else {
+    shapes.emplace_back(
+        at::get_default_dtype_as_scalartype(),
+        std::vector<int64_t>{num_features});
+  }
+
+  if (running_var.has_value()) {
+    shapes.emplace_back(
+        running_var.value().scalar_type(), running_var.value().sizes().vec());
+  } else {
+    shapes.emplace_back(
+        at::get_default_dtype_as_scalartype(),
+        std::vector<int64_t>{num_features});
+  }
+  return shapes;
+}
+
+std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& input,
+    const c10::optional<at::Tensor>& weight,
+    const c10::optional<at::Tensor>& running_mean,
+    const c10::optional<at::Tensor>& running_var,
+    const c10::optional<at::Tensor>& save_mean,
+    const c10::optional<at::Tensor>& save_invstd,
+    bool train,
+    double eps,
+    ::std::array<bool, 3> output_mask) {
+  std::vector<torch::lazy::Shape> shapes;
+  shapes.reserve(3);
+  shapes.emplace_back(input.scalar_type(), input.sizes().vec());
+
+  // A separate mean and var needs to be kept for each channel.
+  TORCH_CHECK(
+      input.sizes().size() >= 2,
+      "Input tensor must have at least batch and channel dimensions!");
+  int64_t num_features = input.size(1);
+
+  // `weight` and `bias` are vectors of length C (number of channels)`
+  shapes.emplace_back(
+      at::get_default_dtype_as_scalartype(),
+      std::vector<int64_t>{num_features});
+  shapes.emplace_back(
+      at::get_default_dtype_as_scalartype(),
+      std::vector<int64_t>{num_features});
+
+  return shapes;
+}
+
 std::vector<Shape> compute_shape_native_layer_norm(
     const at::Tensor& input,
     at::IntArrayRef normalized_shape,
@@ -526,6 +599,17 @@ std::vector<Shape> compute_shape_mean(
     return {Shape(dtype.value(), {})};
   }
   return {Shape(self.scalar_type(), {})};
+}
+
+std::vector<Shape> compute_shape_new_empty_strided(
+    const at::Tensor& self,
+    at::IntArrayRef size,
+    at::IntArrayRef stride,
+    c10::optional<at::ScalarType> dtype,
+    c10::optional<at::Layout> layout,
+    c10::optional<at::Device> device,
+    c10::optional<bool> pin_memory) {
+  return {Shape(dtype.has_value() ? *dtype : self.scalar_type(), size.vec())};
 }
 
 std::vector<Shape> compute_shape_mv(
@@ -878,6 +962,12 @@ std::vector<Shape> compute_shape__to_copy(
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
+TORCH_API std::vector<Shape> compute_shape_clone(
+    const at::Tensor& self,
+    c10::optional<at::MemoryFormat> memory_format) {
+  return {Shape(self.scalar_type(), self.sizes().vec())};
+}
+
 std::vector<Shape> compute_shape_stack(at::TensorList tensors, int64_t dim) {
   TORCH_CHECK(tensors.size() > 0, "stack expects a non-empty TensorList");
   auto wrapped_dim = at::maybe_wrap_dim(dim, tensors[0].ndimension() + 1);
@@ -1035,6 +1125,106 @@ std::vector<Shape> compute_shape_unsqueeze(
   return {torch::lazy::Shape(
       input_shape.scalar_type(),
       BuildUnsqueezedDimensions(input_shape.sizes(), dim))};
+}
+
+std::vector<Shape> compute_shape_select_scatter(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    int64_t dim,
+    int64_t index) {
+  auto self_meta = at::native::empty_strided_meta(
+      self.sizes(),
+      self.strides(),
+      /*dtype=*/c10::make_optional(self.scalar_type()),
+      /*layout=*/c10::make_optional(self.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(
+      src.sizes(),
+      src.strides(),
+      /*dtype=*/c10::make_optional(src.scalar_type()),
+      /*layout=*/c10::make_optional(src.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::select_scatter(
+      self_meta, src_meta, dim, index);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_diagonal_scatter(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    int64_t offset,
+    int64_t dim1,
+    int64_t dim2) {
+  auto self_meta = at::native::empty_strided_meta(
+      self.sizes(),
+      self.strides(),
+      /*dtype=*/c10::make_optional(self.scalar_type()),
+      /*layout=*/c10::make_optional(self.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(
+      src.sizes(),
+      src.strides(),
+      /*dtype=*/c10::make_optional(src.scalar_type()),
+      /*layout=*/c10::make_optional(src.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::diagonal_scatter(
+      self_meta, src_meta, offset, dim1, dim2);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_slice_scatter(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    int64_t dim,
+    c10::optional<int64_t> start,
+    c10::optional<int64_t> end,
+    int64_t step) {
+  auto self_meta = at::native::empty_strided_meta(
+      self.sizes(),
+      self.strides(),
+      /*dtype=*/c10::make_optional(self.scalar_type()),
+      /*layout=*/c10::make_optional(self.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(
+      src.sizes(),
+      src.strides(),
+      /*dtype=*/c10::make_optional(src.scalar_type()),
+      /*layout=*/c10::make_optional(src.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::slice_scatter(
+      self_meta, src_meta, dim, start, end, step);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
+}
+
+std::vector<Shape> compute_shape_as_strided_scatter(
+    const at::Tensor& self,
+    const at::Tensor& src,
+    at::IntArrayRef size,
+    at::IntArrayRef stride,
+    c10::optional<int64_t> storage_offset) {
+  auto self_meta = at::native::empty_strided_meta(
+      self.sizes(),
+      self.strides(),
+      /*dtype=*/c10::make_optional(self.scalar_type()),
+      /*layout=*/c10::make_optional(self.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto src_meta = at::native::empty_strided_meta(
+      src.sizes(),
+      src.strides(),
+      /*dtype=*/c10::make_optional(src.scalar_type()),
+      /*layout=*/c10::make_optional(src.layout()),
+      /*device=*/c10::make_optional(c10::Device(c10::kMeta)),
+      /*pin_memory=*/c10::nullopt);
+  auto out_meta = at::compositeexplicitautograd::as_strided_scatter(
+      self_meta, src_meta, size, stride, storage_offset);
+  return {Shape(out_meta.scalar_type(), out_meta.sizes().vec())};
 }
 
 // Restore unused-parameters warnings
