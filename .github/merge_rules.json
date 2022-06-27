@@ -177,7 +177,7 @@
       ]
    },
    {
-      "name": "Distributions"
+      "name": "Distributions",
       "patterns": [
           "torch/distributions/**",
           "test/distributions/**"
