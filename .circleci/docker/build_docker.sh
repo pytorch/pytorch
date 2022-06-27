@@ -48,7 +48,11 @@ fi
 
 # Only push if `DOCKER_SKIP_PUSH` = false
 if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
-  docker push "${image}:${tag}"
+  # Only push if docker image doesn't exist already.
+  # ECR image tags are immutable so this will avoid pushing if only just testing if the docker jobs work
+  if ! docker manifest inspect "${DOCKER_IMAGE}" >/dev/null 2>/dev/null; then
+    docker push "${image}:${tag}"
+  fi
 fi
 
 if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then
