@@ -484,8 +484,8 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vjpvjp', vjp_fail.union({
         skip('nn.functional.max_unpool1d'),  # Flaky
         skip('nn.functional.max_unpool2d'),  # Flaky
-        skip('nn.functional.fractional_max_pool2d'), # randomness
-        skip('nn.functional.fractional_max_pool3d'), # randomness
+        skip('nn.functional.fractional_max_pool2d'),  # randomness
+        skip('nn.functional.fractional_max_pool3d'),  # randomness
     }))
     @opsToleranceOverride('TestOperators', 'test_vjpvjp', (
         tol1('nn.functional.conv_transpose3d',

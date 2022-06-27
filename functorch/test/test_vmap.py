@@ -39,6 +39,7 @@ from collections import namedtuple
 
 import functorch
 from functorch import vmap, grad, grad_and_value, jvp, vjp
+from functorch.experimental import chunk_vmap
 from functorch._C import reshape_dim_into, reshape_dim_outof
 from functorch._src.make_functional import functional_init_with_buffers
 
@@ -878,7 +879,6 @@ class TestVmapAPI(TestCase):
 
         def backward_on_vmapped_tensor(x):
             x.sum().backward()
-
 
         # FIXME
         return self.skipTest("error: element 0 of tensors does not require grad and does not have a grad_fn")
@@ -2719,14 +2719,28 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
         self.assertTrue(torch.randn(()).dim() == 0)
 
-    @parametrize('op', [torch.cos, torch.sinh], name_fn=lambda f: f.__name__)
-    def test_foobar_parametrize(self, op):
-        pass
+    @parametrize('in_dim', [0, 1, 2])
+    @parametrize('out_dim', [0, 1, 2])
+    @parametrize('randomness', ['error', 'same'])
+    def test_chunk_vmap(self, in_dim, out_dim, randomness):
 
-    @parametrize('op2', [torch.cos, torch.sinh], name_fn=lambda f: f.__name__)
-    @parametrize('op1', [torch.abs, torch.acos], name_fn=lambda f: f.__name__)
-    def test_parametrize_multiple(self, op1, op2):
-        pass
+        x = torch.randn(4, 5, 6)
+
+        def f(x):
+            y = x.sin()
+            if randomness != "error":
+                y = y + torch.rand_like(x)
+            return y
+
+        rs = torch.get_rng_state()
+        expected = vmap(f, in_dims=in_dim, out_dims=out_dim, randomness=randomness)(x)
+
+        for chunks in [1, 2, 3, 4, 7, 10, 16]:
+            torch.set_rng_state(rs)
+            output = chunk_vmap(
+                f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunks=chunks
+            )(x)
+            self.assertEqual(output, expected)
 
 
 instantiate_parametrized_tests(TestVmapOperators)
@@ -2905,10 +2919,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         x = _get_rand_no_zeros(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(torch.log1p, (x,))
         self._batched_grad_grad_test(torch.log1p, (x,))
-
-    @parametrize('param', ['foo', 'bar'])
-    def test_param_device(self, device, param):
-        pass
 
     @allowVmapFallbackUsage
     def test_max(self, device):
@@ -4159,6 +4169,24 @@ class TestRandomness(TestCase):
             def f(z):
                 return torch.rrelu(x)
             vmap(f, randomness='same')(z)
+
+    @parametrize('in_dim', [0, 1, 2])
+    @parametrize('out_dim', [0, 1, 2])
+    def test_chunk_vmap(self, in_dim, out_dim):
+
+        randomness = "different"
+
+        x = torch.randn(4, 5, 6)
+
+        def f(x):
+            y = x.sin() + torch.rand_like(x)
+            return y
+
+        for chunks in [1, 2, 3, 4, 7, 10, 16]:
+            output = chunk_vmap(
+                f, in_dims=in_dim, out_dims=out_dim, randomness=randomness, chunks=chunks
+            )(x)
+            self._assert_all_slices_unique(output)
 
 
 class TestTransformFailure(TestCase):
