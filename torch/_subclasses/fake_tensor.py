@@ -393,8 +393,8 @@ class FakeTensor(torch.Tensor):
 
 
 class FakeTensorMode(TorchDispatchMode):
-    def __init__(self, allow_cpu_fallback=True):
-        self.allow_cpu_fallback = allow_cpu_fallback
+    def __init__(self, allow_fallback_kernels=True):
+        self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
         # [in_kernel_invocation]
@@ -475,9 +475,9 @@ class FakeTensorMode(TorchDispatchMode):
                 try:
                     r = func(*args, **kwargs)
                 except NotImplementedError as not_implemented_error:
-                    if not self.allow_cpu_fallback:
+                    if not self.allow_fallback_kernels:
                         raise not_implemented_error
-                    r = run_cpu_fallback(func, args, kwargs, not_implemented_error)
+                    r = run_fallback_kernel(func, args, kwargs, not_implemented_error)
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
@@ -493,16 +493,16 @@ class FakeTensorMode(TorchDispatchMode):
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
 
-def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
+def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
     with no_dispatch():
-        def to_cpu(e):
+        def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                return torch.zeros_like(e, device="cpu")
+                return torch.zeros_like(e, device=e.fake_device)
             return e
 
         try:
-            args = tree_map(to_cpu, args)
-            kwargs = tree_map(to_cpu, kwargs)
+            args = tree_map(to_real_tensor, args)
+            kwargs = tree_map(to_real_tensor, kwargs)
 
             r = func(*args, **kwargs)
         except Exception as new_exception:
