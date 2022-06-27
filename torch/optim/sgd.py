@@ -257,7 +257,7 @@ def _multi_tensor_sgd(params: List[Tensor],
         return
 
     if has_sparse_grad is None:
-        has_sparse_grad = any([grad.is_sparse for grad in grads])
+        has_sparse_grad = any(grad.is_sparse for grad in grads)
 
     if weight_decay != 0:
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
