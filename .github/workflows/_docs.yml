@@ -29,7 +29,7 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
       matrix:
-        docs_type: [cpp, python]
+        docs_type: [python] # excluding cpp for now https://github.com/pytorch/pytorch/issues/80312
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
