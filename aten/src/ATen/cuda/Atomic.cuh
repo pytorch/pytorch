@@ -71,7 +71,7 @@ struct AtomicFPOp<double> {
   }
 };
 
-#define ATOMIC_INTEGER_IMPL(NAME)                                                                                      \
+#define ATOMIC_INTEGER_IMPL(NAME, OP)                                                                                  \
 template <typename T, size_t n>                                                                                        \
 struct Atomic##NAME##IntegerImpl;                                                                                      \
                                                                                                                        \
@@ -149,9 +149,9 @@ struct Atomic##NAME##IntegerImpl<T, 8> {                                        
   }                                                                                                                    \
 };
 
-#define OP(X, Y) X + Y
-ATOMIC_INTEGER_IMPL(Add)
-#undef OP
+#define SUM(X, Y) X + Y
+ATOMIC_INTEGER_IMPL(Add, SUM)
+#undef SUM
 
 
 static inline __device__ void gpuAtomicAdd(uint8_t *address, uint8_t val) {
@@ -310,9 +310,9 @@ static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { 
 
 // Atomic multiplication implementation.
 
-#define OP(X, Y) X * Y
-ATOMIC_INTEGER_IMPL(Mul)
-#undef OP
+#define PROD(X, Y) X * Y
+ATOMIC_INTEGER_IMPL(Mul, PROD)
+#undef PROD
 
 static inline __device__ void gpuAtomicMul(uint8_t *address, uint8_t val) {
   AtomicMulIntegerImpl<uint8_t, sizeof(uint8_t)>()(address, val);
@@ -389,9 +389,9 @@ __host__ __device__ T safe_max(T a, T b) {
   return max;
 }
 
-#define OP(X, Y) safe_max(X, Y)
-ATOMIC_INTEGER_IMPL(Max)
-#undef OP
+#define MAX(X, Y) safe_max(X, Y)
+ATOMIC_INTEGER_IMPL(Max, MAX)
+#undef MAX
 
 static inline __device__ void gpuAtomicMax(uint8_t *address, uint8_t val) {
   AtomicMaxIntegerImpl<uint8_t, sizeof(uint8_t)>()(address, val);
@@ -466,9 +466,9 @@ __host__ __device__ T safe_min(T a, T b) {
   return min;
 }
 
-#define OP(X, Y) safe_min(X, Y)
-ATOMIC_INTEGER_IMPL(Min)
-#undef OP
+#define MIN(X, Y) safe_min(X, Y)
+ATOMIC_INTEGER_IMPL(Min, MIN)
+#undef MIN
 
 static inline __device__ void gpuAtomicMin(uint8_t *address, uint8_t val) {
   AtomicMinIntegerImpl<uint8_t, sizeof(uint8_t)>()(address, val);
