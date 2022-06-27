@@ -18,6 +18,7 @@ class HolderModule(Module):
             self.add_module(k, v)
 
 
+@compatibility(is_backward_compatible=False)
 def lift_subgraph_as_module(gm: GraphModule, subgraph: Graph, class_name: str = 'GraphModule') -> GraphModule:
     """
     Create a GraphModule for subgraph, which copies the necessory attributes from the original parent graph_module.
