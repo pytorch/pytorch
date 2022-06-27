@@ -789,6 +789,31 @@ class TestNestedTensorAutograd(TestCase):
         data = (a, b, c)
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
 
+    def test_size_dim(self):
+        a = torch.nested_tensor([])
+        self.assertEqual(a.size(0), 0)
+
+        a = torch.nested_tensor([torch.tensor(1)])
+        self.assertEqual(a.size(0), 1)
+
+        a = torch.nested_tensor([torch.tensor(1), torch.tensor(2)])
+        self.assertEqual(a.size(0), 2)
+
+        a = torch.nested_tensor([torch.rand(1, 2),
+                                 torch.rand(1, 8)])
+        self.assertEqual(a.size(0), 2)
+        self.assertEqual(a.size(1), 1)
+        self.assertRaisesRegex(
+            RuntimeError, "Given dimension 2 is irregular and does not have a size", lambda: a.size(2))
+
+        a = torch.nested_tensor([torch.rand(3, 4),
+                                 torch.rand(5, 4)])
+        self.assertEqual(a.size(0), 2)
+        self.assertRaisesRegex(
+            RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
+        self.assertEqual(a.size(2), 4)
+
+
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
