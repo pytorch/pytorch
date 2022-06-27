@@ -39,6 +39,7 @@ jobs:
         ]}
 
   linux-docs:
+    if: false
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
     needs: linux-focal-py3_7-gcc7-build
