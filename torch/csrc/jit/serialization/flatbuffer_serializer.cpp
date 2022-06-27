@@ -338,7 +338,7 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
   mcu_ = &module.compilation_unit();
 
   // first element is None.
-  insertIValue(CreateIValue(fbb, mobile::serialization::IValueUnion::NONE, 0));
+  insertIValue(CreateIValue(fbb, mobile::serialization::IValueUnion::IValueUnion_NONE, 0));
 
   auto methods = module.get_methods();
   std::vector<uint32_t> functions_index;
@@ -464,7 +464,7 @@ flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
 flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
     classTypeToFB(FlatBufferBuilder& fbb, ClassTypePtr class_ptr) {
   mobile::serialization::TypeType typetype =
-      mobile::serialization::TypeType::UNSET;
+      mobile::serialization::TypeType::TypeType_UNSET;
 
   flatbuffers::Offset<
       flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>>
@@ -474,11 +474,11 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
   const mobile::Function* setstate = mcu_->find_function(setstate_name);
   const mobile::Function* getstate = mcu_->find_function(getstate_name);
   if (setstate != nullptr && getstate != nullptr) {
-    typetype = mobile::serialization::TypeType::CLASS_WITH_SETSTATE;
+    typetype = mobile::serialization::TypeType::TypeType_CLASS_WITH_SETSTATE;
   } else if (
       class_ptr->findMethod("__setstate__") &&
       class_ptr->findMethod("__getstate__")) {
-    typetype = mobile::serialization::TypeType::CUSTOM_CLASS;
+    typetype = mobile::serialization::TypeType::TypeType_CUSTOM_CLASS;
   } else {
     size_t num_attr = class_ptr->numAttributes();
     std::vector<flatbuffers::Offset<flatbuffers::String>> names;
@@ -487,7 +487,7 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
       names.push_back(fbb.CreateSharedString(class_ptr->getAttributeName(i)));
     }
     names_offset = fbb.CreateVector(names);
-    typetype = mobile::serialization::TypeType::CLASS_WITH_FIELD;
+    typetype = mobile::serialization::TypeType::TypeType_CLASS_WITH_FIELD;
   }
 
   auto name_offset = fbb.CreateString(class_ptr->name()->qualifiedName());
@@ -505,7 +505,7 @@ uint32_t FlatbufferSerializer::storeFunctionAndGetIndex(
 
   auto offset = CreateIValue(
       fbb,
-      mobile::serialization::IValueUnion::Function,
+      mobile::serialization::IValueUnion::IValueUnion_Function,
       functionToFB(fbb, qn, function).Union());
 
   uint32_t index = insertIValue(offset);
@@ -667,68 +667,68 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
     iValueToFB(flatbuffers::FlatBufferBuilder& fbb, const IValue& ivalue) {
   using mobile::serialization::IValueUnion;
 
-  IValueUnion ivalue_type = IValueUnion::NONE;
+  IValueUnion ivalue_type = IValueUnion::IValueUnion_NONE;
   flatbuffers::Offset<void> offset = 0;
 
   if (ivalue.isTensor()) {
-    ivalue_type = IValueUnion::TensorMetadata;
+    ivalue_type = IValueUnion::IValueUnion_TensorMetadata;
     offset = tensorToFB(fbb, ivalue).Union();
   } else if (ivalue.isTuple()) {
-    ivalue_type = IValueUnion::Tuple;
+    ivalue_type = IValueUnion::IValueUnion_Tuple;
     offset = tupleToFB(fbb, ivalue).Union();
   } else if (ivalue.isDouble()) {
-    ivalue_type = IValueUnion::Double;
+    ivalue_type = IValueUnion::IValueUnion_Double;
     offset = fbb.CreateStruct(mobile::serialization::Double(ivalue.toDouble()))
                  .Union();
   } else if (ivalue.isComplexDouble()) {
     auto comp = ivalue.toComplexDouble();
-    ivalue_type = IValueUnion::ComplexDouble;
+    ivalue_type = IValueUnion::IValueUnion_ComplexDouble;
     offset = fbb.CreateStruct(mobile::serialization::ComplexDouble(
                                   comp.real(), comp.imag()))
                  .Union();
   } else if (ivalue.isInt()) {
-    ivalue_type = IValueUnion::Int;
+    ivalue_type = IValueUnion::IValueUnion_Int;
     offset =
         fbb.CreateStruct(mobile::serialization::Int(ivalue.toInt())).Union();
   } else if (ivalue.isBool()) {
-    ivalue_type = IValueUnion::Bool;
+    ivalue_type = IValueUnion::IValueUnion_Bool;
     offset =
         fbb.CreateStruct(mobile::serialization::Bool(ivalue.toBool())).Union();
   } else if (ivalue.isString()) {
-    ivalue_type = IValueUnion::String;
+    ivalue_type = IValueUnion::IValueUnion_String;
     offset = mobile::serialization::CreateString(
                  fbb, fbb.CreateSharedString(ivalue.toString()->string()))
                  .Union();
   } else if (ivalue.isGenericDict()) {
-    ivalue_type = IValueUnion::Dict;
+    ivalue_type = IValueUnion::IValueUnion_Dict;
     offset = dictToFB(fbb, ivalue).Union();
   } else if (ivalue.isNone()) {
-    ivalue_type = IValueUnion::NONE;
+    ivalue_type = IValueUnion::IValueUnion_NONE;
     offset = 0;
   } else if (ivalue.isIntList()) {
-    ivalue_type = IValueUnion::IntList;
+    ivalue_type = IValueUnion::IValueUnion_IntList;
     offset = mobile::serialization::CreateIntList(
                  fbb, fbb.CreateVector(ivalue.toIntVector()))
                  .Union();
   } else if (ivalue.isDoubleList()) {
-    ivalue_type = IValueUnion::DoubleList;
+    ivalue_type = IValueUnion::IValueUnion_DoubleList;
     offset = mobile::serialization::CreateDoubleList(
                  fbb, fbb.CreateVector(ivalue.toDoubleVector()))
                  .Union();
   } else if (ivalue.isBoolList()) {
-    ivalue_type = IValueUnion::BoolList;
+    ivalue_type = IValueUnion::IValueUnion_BoolList;
     auto boollist = ivalue.toBoolList();
     std::vector<uint8_t> bool_vec(boollist.begin(), boollist.end());
     offset =
         mobile::serialization::CreateBoolListDirect(fbb, &bool_vec).Union();
   } else if (ivalue.isList()) {
-    ivalue_type = IValueUnion::List;
+    ivalue_type = IValueUnion::IValueUnion_List;
     offset = listToFB(fbb, ivalue).Union();
   } else if (ivalue.isObject()) {
-    ivalue_type = IValueUnion::Object;
+    ivalue_type = IValueUnion::IValueUnion_Object;
     offset = objectToFB(fbb, ivalue).Union();
   } else if (ivalue.isDevice()) {
-    ivalue_type = IValueUnion::Device;
+    ivalue_type = IValueUnion::IValueUnion_Device;
     offset = mobile::serialization::CreateDevice(
                  fbb, fbb.CreateSharedString(ivalue.toDevice().str()))
                  .Union();
@@ -737,7 +737,7 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
     const auto& qualified_class_name =
         enum_holder->type()->qualifiedClassName();
     uint32_t ival_pos = storeIValueAndGetIndex(fbb, enum_holder->value());
-    ivalue_type = IValueUnion::EnumValue;
+    ivalue_type = IValueUnion::IValueUnion_EnumValue;
     offset = mobile::serialization::CreateEnumValue(
                  fbb,
                  fbb.CreateSharedString(qualified_class_name.qualifiedName()),

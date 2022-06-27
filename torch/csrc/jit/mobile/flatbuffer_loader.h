@@ -164,7 +164,7 @@ class TORCH_API FlatbufferLoader {
   std::vector<IValue> all_ivalues_;
   std::array<
       IValueParser,
-      static_cast<uint8_t>(mobile::serialization::IValueUnion::MAX) + 1>
+      static_cast<uint8_t>(mobile::serialization::IValueUnion::IValueUnion_MAX) + 1>
       ivalue_parsers_;
   TypeResolver type_resolver_ = nullptr;
   mobile::serialization::Module* module_ = nullptr;

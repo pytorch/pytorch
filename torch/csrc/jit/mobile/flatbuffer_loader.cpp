@@ -124,29 +124,29 @@ FlatbufferLoader::FlatbufferLoader()
     : mcu_(std::make_shared<mobile::CompilationUnit>()),
       cu_(std::make_shared<CompilationUnit>()),
       ivalue_parsers_{nullptr} {
-  registerIValueParser(mobile::serialization::IValueUnion::NONE, &parseBasic);
-  registerIValueParser(mobile::serialization::IValueUnion::Int, &parseBasic);
-  registerIValueParser(mobile::serialization::IValueUnion::Bool, &parseBasic);
-  registerIValueParser(mobile::serialization::IValueUnion::Double, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_NONE, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_Int, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_Bool, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_Double, &parseBasic);
   registerIValueParser(
-      mobile::serialization::IValueUnion::ComplexDouble, &parseBasic);
+      mobile::serialization::IValueUnion::IValueUnion_ComplexDouble, &parseBasic);
   registerIValueParser(
-      mobile::serialization::IValueUnion::TensorMetadata, &parseTensor);
-  registerIValueParser(mobile::serialization::IValueUnion::String, &parseBasic);
-  registerIValueParser(mobile::serialization::IValueUnion::List, &parseList);
+      mobile::serialization::IValueUnion::IValueUnion_TensorMetadata, &parseTensor);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_String, &parseBasic);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_List, &parseList);
   registerIValueParser(
-      mobile::serialization::IValueUnion::IntList, &parseIntList);
+      mobile::serialization::IValueUnion::IValueUnion_IntList, &parseIntList);
   registerIValueParser(
-      mobile::serialization::IValueUnion::DoubleList, &parseDoubleList);
+      mobile::serialization::IValueUnion::IValueUnion_DoubleList, &parseDoubleList);
   registerIValueParser(
-      mobile::serialization::IValueUnion::BoolList, &parseBoolList);
-  registerIValueParser(mobile::serialization::IValueUnion::Tuple, &parseTuple);
-  registerIValueParser(mobile::serialization::IValueUnion::Dict, &parseDict);
+      mobile::serialization::IValueUnion::IValueUnion_BoolList, &parseBoolList);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_Tuple, &parseTuple);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_Dict, &parseDict);
   registerIValueParser(
-      mobile::serialization::IValueUnion::Object, &parseObject);
-  registerIValueParser(mobile::serialization::IValueUnion::Device, &parseBasic);
+      mobile::serialization::IValueUnion::IValueUnion_Object, &parseObject);
+  registerIValueParser(mobile::serialization::IValueUnion::IValueUnion_Device, &parseBasic);
   registerIValueParser(
-      mobile::serialization::IValueUnion::EnumValue, &parseEnum);
+      mobile::serialization::IValueUnion::IValueUnion_EnumValue, &parseEnum);
   internal_registerTypeResolver(&resolveType);
 }
 
@@ -346,21 +346,21 @@ IValue parseBasic(
     FlatbufferLoader&,
     const mobile::serialization::IValue& ivalue) {
   switch (ivalue.val_type()) {
-    case mobile::serialization::IValueUnion::NONE:
+    case mobile::serialization::IValueUnion::IValueUnion_NONE:
       return {};
-    case mobile::serialization::IValueUnion::Int:
+    case mobile::serialization::IValueUnion::IValueUnion_Int:
       return ivalue.val_as_Int()->int_val();
-    case mobile::serialization::IValueUnion::Bool:
+    case mobile::serialization::IValueUnion::IValueUnion_Bool:
       return ivalue.val_as_Bool()->bool_val();
-    case mobile::serialization::IValueUnion::Double:
+    case mobile::serialization::IValueUnion::IValueUnion_Double:
       return ivalue.val_as_Double()->double_val();
-    case mobile::serialization::IValueUnion::ComplexDouble: {
+    case mobile::serialization::IValueUnion::IValueUnion_ComplexDouble: {
       const auto* comp = ivalue.val_as_ComplexDouble();
       return c10::complex<double>(comp->real(), comp->imag());
     }
-    case mobile::serialization::IValueUnion::String:
+    case mobile::serialization::IValueUnion::IValueUnion_String:
       return ivalue.val_as_String()->data()->str();
-    case mobile::serialization::IValueUnion::Device: {
+    case mobile::serialization::IValueUnion::IValueUnion_Device: {
       return c10::Device(ivalue.val_as_Device()->str()->str());
     }
     default:
@@ -516,7 +516,7 @@ ClassTypePtr FlatbufferLoader::getOrCreateClassTypeForObject(
     TORCH_CHECK(object->type_index() < all_ivalues_.size());
     all_types_[object->type_index()] = cls;
 
-    if (obj_type->type() == mobile::serialization::TypeType::CLASS_WITH_FIELD) {
+    if (obj_type->type() == mobile::serialization::TypeType::TypeType_CLASS_WITH_FIELD) {
       for (uint32_t i = 0; i < object->attrs()->size(); i++) {
         IValue val = getIValue(object->attrs()->Get(i));
         // Need to use concrete object's field's type to set type of field.
@@ -541,7 +541,7 @@ IValue parseObject(
   auto cls = loader.getOrCreateClassTypeForObject(object);
   Stack stack;
   switch (obj_type->type()) {
-    case mobile::serialization::TypeType::CLASS_WITH_FIELD: {
+    case mobile::serialization::TypeType::TypeType_CLASS_WITH_FIELD: {
       auto obj = c10::ivalue::Object::create(
           at::StrongTypePtr(loader.cu_, cls), object->attrs()->size());
       for (uint32_t i = 0; i < object->attrs()->size(); i++) {
@@ -550,7 +550,7 @@ IValue parseObject(
       }
       return obj;
     }
-    case mobile::serialization::TypeType::CLASS_WITH_SETSTATE: {
+    case mobile::serialization::TypeType::TypeType_CLASS_WITH_SETSTATE: {
       IValue input = loader.getIValue(object->state());
       mobile::Function* setstate = loader.getFunction(object->setstate_func());
       auto obj =
@@ -560,7 +560,7 @@ IValue parseObject(
       setstate->run(stack);
       return obj;
     }
-    case mobile::serialization::TypeType::CUSTOM_CLASS: {
+    case mobile::serialization::TypeType::TypeType_CUSTOM_CLASS: {
       auto custom_class_type =
           torch::jit::getCustomClass(cls->name()->qualifiedName());
       IValue input = loader.getIValue(object->state());
