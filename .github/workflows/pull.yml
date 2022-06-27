@@ -45,6 +45,9 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
+      # excluding cpp for now https://github.com/pytorch/pytorch/issues/80312
+      matrix: |
+        { docs_type: [python] }
 
   linux-focal-py3_7-gcc7-no-ops:
     name: linux-focal-py3.7-gcc7-no-ops
