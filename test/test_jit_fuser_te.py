@@ -1362,6 +1362,7 @@ class TestTEFuser(JitTestCase):
             unary_ops = [
                 torch.lgamma,
                 torch.sigmoid,
+                F.silu,
                 torch.reciprocal,
                 torch.neg,
                 torch.relu,
@@ -1387,6 +1388,8 @@ class TestTEFuser(JitTestCase):
                 F.hardsigmoid,
                 F.hardswish,
                 F.softplus,
+                F.mish,
+                F.elu,
                 torch.sqrt,
                 torch.rsqrt,
                 torch.abs,
