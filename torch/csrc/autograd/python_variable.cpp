@@ -2339,6 +2339,19 @@ c10::IntArrayRef concrete_strides_fn(
   return c10::IntArrayRef(start, len);
 }
 
+static std::vector<int64_t> values_from_buffer(const c10::TensorImpl* self, py::handle values) {
+  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
+  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+
+  py::object os = py::module_::import("torch").attr("overrides");
+  py::function get_buffer =
+      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
+  auto buffer = get_buffer(py::handle(*mb_obj), values, "size");
+  auto result = THPUtils_unpackLongs(buffer.ptr());
+  return result;
+}
 
 c10::IntArrayRef concrete_sizes_fn(
     const c10::impl::PyInterpreter*,
@@ -2362,20 +2375,7 @@ c10::IntArrayRef concrete_sizes_fn(
   }
 
   py::object values = py::reinterpret_steal<py::object>(out.ptr());
-
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
-  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  PyObject* subclass = *mb_obj;
-  Py_INCREF(subclass);
-  py::object sub = py::reinterpret_steal<py::object>(subclass);
-
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(sub, values, "size");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
+  auto result = values_from_buffer(self, values);
   int64_t* start = (int64_t*)result[0];
   int64_t len = result[1];
 
@@ -2403,11 +2403,6 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
     return self->sym_sizes_default();
   }
 
-  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
-  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-
   // We need to squeeze SymIntNodes and ints into `SymInts`
   // since it's a format `sym_sizes()` are stored in
   py::list symints;
@@ -2419,11 +2414,7 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
     symints.append(si.data());
   }
 
-  py::object os = py::module_::import("torch").attr("overrides");
-  py::function get_buffer =
-      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
-  auto buffer = get_buffer(py::handle(*mb_obj), symints, "sym_size");
-  auto result = THPUtils_unpackLongs(buffer.ptr());
+  auto result = values_from_buffer(self, symints);
   c10::SymInt* start = (c10::SymInt*)result[0];  
   int64_t len = result[1];
 
