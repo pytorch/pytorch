@@ -72,6 +72,7 @@ const OperatorMap<std::string>& get_tensorexpr_elementwise_set() {
       {"aten::trunc(Tensor self) -> Tensor", "unary"},
       {"aten::threshold(Tensor self, Scalar threshold, Scalar value) -> Tensor", "unary"},
       {"aten::sigmoid(Tensor self) -> Tensor", "unary"},
+      {"aten::silu(Tensor self) -> Tensor", "unary"},
       {"aten::relu(Tensor self) -> Tensor", "unary"},
       {"aten::leaky_relu(Tensor self, Scalar negative_slope=0.01) -> Tensor", "unary"},
       {"aten::softplus(Tensor self, Scalar beta=1, Scalar threshold=20) -> Tensor", "unary"},
