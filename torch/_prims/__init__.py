@@ -601,6 +601,7 @@ ceil = _make_elementwise_unary_prim(
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
 def _conj_physical_meta(input: TensorLikeType):
     if not input.dtype.is_complex:
         raise RuntimeError("prims.conj_physical is only defined for complex dtypes")
@@ -610,11 +611,11 @@ def _conj_physical_meta(input: TensorLikeType):
 
 
 conj_physical = _make_prim(
-    "conj_physical",
+    schema="conj_physical(Tensor self) -> Tensor",
     meta=_conj_physical_meta,
     impl_aten=torch._conj_physical,
     doc="Returns the physical conjugation of a complex tensor",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+    return_type=RETURN_TYPE.NEW,
 )
 
 digamma = _make_elementwise_unary_prim(
@@ -1368,6 +1369,7 @@ def _conj_meta(a: TensorLikeType) -> TensorLikeType:
         raise RuntimeError("Expected complex dtype in prims.conj")
     return TensorMeta(a)
 
+
 _conj_doc = """
 Returns a conjugated view of the original tensor
 """
@@ -1379,6 +1381,7 @@ conj = _make_prim(
     return_type=RETURN_TYPE.VIEW,
     doc=_conj_doc,
 )
+
 
 def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
     """
