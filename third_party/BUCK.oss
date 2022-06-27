@@ -8,6 +8,20 @@ define_xnnpack()
 
 define_kineto()
 
+# a placeholder for libraries that are not implemented in OSS
+cxx_library(
+    name = "no-op",
+    visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "rt",
+    exported_platform_linker_flags = [
+        ("^linux-.*$", ["-lrt"]),
+    ],
+    visibility = ['PUBLIC'],
+)
+
 cxx_library(
     name = "fmt",
     srcs = ['fmt/src/format.cc'],
