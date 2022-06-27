@@ -2,6 +2,9 @@
 printf "\n[Creating .buckconfig]\n"
 cp .buckconfig.oss .buckconfig
 
+which clang
+which clang++
+
 cd third_party || return
 
 printf "\n[Generating wrappers for cpuionfo]\n"
