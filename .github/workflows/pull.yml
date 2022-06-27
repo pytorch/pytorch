@@ -18,6 +18,7 @@ jobs:
     name: linux-focal-py3.7-gcc7
     uses: ./.github/workflows/_linux-build.yml
     with:
+      foobar-token: ${{ secrets.MERGEBOT_TOKEN }}
       build-environment: linux-focal-py3.7-gcc7
       docker-image-name: pytorch-linux-focal-py3.7-gcc7
 

@@ -7,6 +7,9 @@ on:
         required: true
         type: string
         description: Top-level label for what's being built/tested.
+      foobar-token:
+        required: true
+        type: string
       docker-image-name:
         required: true
         type: string
@@ -83,7 +86,7 @@ jobs:
 
       - name: Build
         env:
-          FOOBAR_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
+          FOOBAR_TOKEN: ${{ inputs.foobar-token }}
           BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
           BRANCH: ${{ steps.parse-ref.outputs.branch }}
           # TODO duplicated
