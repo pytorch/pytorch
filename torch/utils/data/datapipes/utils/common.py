@@ -1,54 +1,19 @@
 import os
 import fnmatch
 import warnings
-import inspect
 
 from io import IOBase
-from typing import Dict, Iterable, List, Tuple, Union, Optional, Callable
+from typing import Dict, Iterable, List, Tuple, Union, Optional
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 __all__ = [
-    "validate_input_col",
     "StreamWrapper",
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
     "match_masks",
     "validate_pathname_binary_tuple",
 ]
-
-
-def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
-    """
-    Checks that function used in a map style datapipe works with the input column
-
-    Args:
-        fn: The function to check.
-        input_col: The input column to check.
-    Returns:
-        None.
-    Raises:
-        TypeError: If the function is not compatible with the input column.
-    """
-    sig = inspect.signature(fn)
-    if isinstance(input_col, (list, tuple)):
-        sz = len(input_col)
-    else:
-        sz = 1
-
-    if len(sig.parameters) > sz:
-        non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
-        if len(non_default_params) > sz:
-            raise ValueError(
-                f"The function {fn.__name__} takes {len(non_default_params)} "
-                f"non-default parameters, but {sz} are required for the given `input_col`."
-            )
-
-    if len(sig.parameters) < sz:
-        raise ValueError(
-            f"The function {fn.__name__} takes {len(sig.parameters)} "
-            f"parameters, but {sz} are required for the given `input_col`."
-        )
 
 
 def _check_lambda_fn(fn):
