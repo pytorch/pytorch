@@ -320,12 +320,19 @@ class TestOptim(TestCase):
 
             self.assertEqual(torch.view_as_real(complex_param), real_param)
 
-    def _test_complex_2d(self, optimizer_constructor, f=None):
+    def _test_complex_2d(self, optimizer_constructor, f=None, sparse=False):
         if f is None:
             f = rosenbrock
         a1 = torch.randn(2, dtype=torch.complex64, requires_grad=True)
-        a1_real = a1.real.clone().detach()
-        a1_imag = a1.imag.clone().detach()
+
+        if sparse:
+            i = torch.LongTensor([[1, 1]])
+            a1 = torch.sparse_coo_tensor(i, a1, torch.Size([2]))
+        a1_real = a1.real
+        a1_imag = a1.imag
+
+        a1_real = a1_real.clone().detach()
+        a1_imag = a1_imag.clone().detach()
         a1_real.requires_grad_()
         a1_imag.requires_grad_()
         optim1 = optimizer_constructor([a1])
@@ -657,6 +664,7 @@ class TestOptim(TestCase):
             True,
             True
         )
+        self._test_complex_2d(optim.SparseAdam, sparse=True)
         with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
         with self.assertRaisesRegex(ValueError, "SparseAdam requires dense parameter tensors"):

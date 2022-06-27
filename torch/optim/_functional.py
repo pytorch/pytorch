@@ -1,6 +1,7 @@
 r"""Functional interface"""
 import math
 from torch import Tensor
+import torch
 from typing import List
 
 from .adadelta import adadelta  # type: ignore[attr-defined] # noqa: F401
@@ -46,6 +47,11 @@ def sparse_adam(params: List[Tensor],
         exp_avg_sq = exp_avg_sqs[i]
         step = state_steps[i]
 
+        if torch.is_complex(param):
+            param = torch.view_as_real(param)
+            grad = torch.view_as_real(grad)
+            exp_avg = torch.view_as_real(exp_avg)
+            exp_avg_sq = torch.view_as_real(exp_avg_sq)
 
         def make_sparse(values):
             constructor = grad.new
