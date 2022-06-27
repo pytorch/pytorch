@@ -6284,6 +6284,7 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
 
 def sample_inputs_constant_pad_nd(*args, **kwargs):
     nn_samples = sample_inputs_nn_pad(*args, **kwargs, mode='constant')
+
     def drop_mode_argument(input, pad, mode=None, value=None):
         if value is None:
             return SampleInput(input, args=(pad,))
@@ -20103,6 +20104,11 @@ python_ref_db = [
         torch_opinfo_name="ceil",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.conj_physical",
+        torch_opinfo_name="conj_physical",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.cos",
         torch_opinfo_name="cos",
     ),
@@ -20936,6 +20942,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.column_stack",
         torch_opinfo_name="column_stack",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.conj",
+        torch_opinfo_name="conj",
         supports_nvfuser=False,
     ),
     PythonRefInfo(
