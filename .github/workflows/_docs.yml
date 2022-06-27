@@ -16,10 +16,6 @@ on:
         type: boolean
         default: false
         description: If set, push the docs to the docs website.
-      matrix:
-        required: true
-        type: string
-        description: JSON description of what docs configs to build.
 
     secrets:
       GH_PYTORCHBOT_TOKEN:
@@ -32,7 +28,8 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
-      matrix: ${{ fromJSON(inputs.matrix) }}
+      matrix:
+        docs_type: [cpp, python]
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -67,6 +64,8 @@ jobs:
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
 
       - name: Build ${{ matrix.docs_type }} docs
+        # excluding cpp on PRs for now https://github.com/pytorch/pytorch/issues/80312
+        if: github.event_name != pull_request || matrix.docs_type == 'python'
         env:
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
@@ -117,7 +116,8 @@ jobs:
 
       - name: Upload C++ Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
+        # excluding cpp on PRs for now https://github.com/pytorch/pytorch/issues/80312
+        if: false
         with:
           retention-days: 14
           if-no-files-found: error

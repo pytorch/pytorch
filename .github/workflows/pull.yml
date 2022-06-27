@@ -43,9 +43,6 @@ jobs:
     uses: ./.github/workflows/_docs.yml
     needs: linux-focal-py3_7-gcc7-build
     with:
-      # excluding cpp for now https://github.com/pytorch/pytorch/issues/80312
-      matrix: |
-        { docs_type: [python] }
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
 
