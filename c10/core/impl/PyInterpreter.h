@@ -7,6 +7,7 @@
 #include <c10/util/python_stub.h>
 #include <string>
 #include <vector>
+#include "c10/core/SymIntArrayRef.h"
 
 // Forward declarations
 
@@ -133,6 +134,8 @@ struct C10_API PyInterpreter {
   using dim_sig = int64_t(const PyInterpreter*, const TensorImpl*);
   using strides_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
   using sizes_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
+  using sym_sizes_sig =
+      c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -143,7 +146,8 @@ struct C10_API PyInterpreter {
       device_sig* device_fn,
       dim_sig* dim_fn,
       strides_sig* strides,
-      sizes_sig* sizes)
+      sizes_sig* sizes,
+      sym_sizes_sig* sym_sizes)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
         detach_fn_(detach),
@@ -152,7 +156,8 @@ struct C10_API PyInterpreter {
         device_fn_(device_fn),
         dim_fn_(dim_fn),
         strides_fn_(strides),
-        sizes_fn_(sizes) {}
+        sizes_fn_(sizes),
+        sym_sizes_fn_(sym_sizes) {}
 
   name_sig* name_fn_;
   decref_sig* decref_fn_;
@@ -163,6 +168,7 @@ struct C10_API PyInterpreter {
   dim_sig* dim_fn_;
   strides_sig* strides_fn_;
   sizes_sig* sizes_fn_;
+  sym_sizes_sig* sym_sizes_fn_;
 
   // UBSAN suppression fixes: "call to function
   // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
@@ -217,6 +223,11 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ c10::IntArrayRef sizes(
       const TensorImpl* self) const {
     return (*sizes_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ c10::SymIntArrayRef sym_sizes(
+      const TensorImpl* self) const {
+    return (*sym_sizes_fn_)(this, self);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.

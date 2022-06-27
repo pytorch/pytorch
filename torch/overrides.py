@@ -1961,7 +1961,7 @@ class enable_reentrant_dispatch():
 
 def get_buffer(tensor_subclass, data, prefix):
     import ctypes
-    assert prefix in {"stride", "size"}
+    assert prefix in {"stride", "size", "sym_size"}
     buffer_name = f"_{prefix}_buffer"
     if not hasattr(tensor_subclass, buffer_name):
         SizeType = ctypes.c_longlong * len(data)

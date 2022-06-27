@@ -45,6 +45,7 @@
 #include <memory>
 #include <utility>
 #include <vector>
+#include <c10/core/SymIntArrayRef.h>
 
 using namespace at;
 using namespace torch;
@@ -255,6 +256,9 @@ c10::IntArrayRef concrete_strides_fn(
 c10::IntArrayRef concrete_sizes_fn(
     const c10::impl::PyInterpreter*,
     const c10::TensorImpl* self);
+c10::SymIntArrayRef concrete_sym_sizes_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self);
 
 class PyInterpreterHolder {
  public:
@@ -268,7 +272,8 @@ class PyInterpreterHolder {
             &concrete_device_fn,
             &concrete_dim_fn,
             &concrete_strides_fn,
-            &concrete_sizes_fn)) {}
+            &concrete_sizes_fn,
+            &concrete_sym_sizes_fn)) {}
   // NB: intentionally leaks the memory
   ~PyInterpreterHolder() {
     impl_->disarm();
@@ -2373,6 +2378,64 @@ c10::IntArrayRef concrete_sizes_fn(
   int64_t len = result[1];
 
   return c10::IntArrayRef(start, len);
+}
+
+c10::SymIntArrayRef concrete_sym_sizes_fn(
+    const c10::impl::PyInterpreter*,
+    const c10::TensorImpl* self) {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  std::cerr << "Running concrete_sym_sizes_fn\n";
+  auto out = torchDispatchFromTensorImpl(
+      self,
+      "size",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_size")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten");
+
+  std::cerr << "After torchDispatchFromTensorImpl\n";
+  if (out == Py_None) {
+    std::cerr << "Calling default sym_sizes_default\n";
+    return self->sym_sizes_default();
+  }
+
+  std::cerr << "Writing to buffer\n";
+
+  py::object values = py::reinterpret_steal<py::object>(out.ptr());
+
+  c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
+  c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
+  TORCH_CHECK(
+      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
+  PyObject* subclass = *mb_obj;
+  Py_INCREF(subclass);
+  py::object sub = py::reinterpret_steal<py::object>(subclass);
+
+  // We need to squeeze SymIntNodes and ints into `SymInts`
+  // since it's a format `sym_sizes()` are stored in
+  py::list symints;
+  for (auto it = values.begin(); it != values.end(); it++) {
+    auto elm = *it;
+    auto si = torch::is_symint_node(elm)
+        ? elm.cast<c10::SymbolicIntNode*>()->toSymInt()
+        : c10::SymInt{py::cast<int64_t>(elm)};
+    symints.append(si.data());
+  }
+
+  py::object os = py::module_::import("torch").attr("overrides");
+  py::function get_buffer =
+      py::reinterpret_borrow<py::function>(os.attr("get_buffer"));
+  auto buffer = get_buffer(sub, symints, "sym_size");
+  auto result = THPUtils_unpackLongs(buffer.ptr());
+  c10::SymInt* start = (c10::SymInt*)result[0];
+  int64_t len = result[1];
+
+  return c10::SymIntArrayRef(start, len);
 }
 
 } // anonymous namespace
