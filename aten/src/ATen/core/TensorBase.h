@@ -165,10 +165,7 @@ class TORCH_API TensorBase {
   }
 
   int64_t size(int64_t dim) const {
-    const auto sizes = this->sizes();
-    const auto ndim = static_cast<int64_t>(sizes.size());
-    // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
-    return sizes[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
+    return impl_->size(dim);
   }
 
   int64_t stride(int64_t dim) const {

@@ -603,6 +603,11 @@ def _worker_init_fn(worker_id):
     torch.utils.data.graph_settings.apply_sharding(datapipe, num_workers, worker_id)
 
 
+lambda_fn1 = lambda x: x  # noqa: E731
+lambda_fn2 = lambda x: x % 2  # noqa: E731
+lambda_fn3 = lambda x: x >= 5  # noqa: E731
+
+
 class TestFunctionalIterDataPipe(TestCase):
 
     def _serialization_test_helper(self, datapipe, use_dill):
@@ -702,16 +707,41 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))
-        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
-            (dp.iter.Collator, (lambda x: x,), {}),
-            (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),
-            (dp.iter.Filter, (lambda x: x >= 5,), {}),
-            (dp.iter.Grouper, (lambda x: x >= 5,), {}),
-            (dp.iter.Mapper, (lambda x: x,), {}),
+
+        datapipes_with_lambda_fn: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
+            (dp.iter.Collator, (lambda_fn1,), {}),
+            (dp.iter.Demultiplexer, (2, lambda_fn2,), {}),
+            (dp.iter.Filter, (lambda_fn3,), {}),
+            (dp.iter.Grouper, (lambda_fn3,), {}),
+            (dp.iter.Mapper, (lambda_fn1,), {}),
         ]
+
+        def _local_fns():
+            def _fn1(x):
+                return x
+
+            def _fn2(x):
+                return x % 2
+
+            def _fn3(x):
+                return x >= 5
+
+            return _fn1, _fn2, _fn3
+
+        fn1, fn2, fn3 = _local_fns()
+
+        datapipes_with_local_fn: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
+            (dp.iter.Collator, (fn1,), {}),
+            (dp.iter.Demultiplexer, (2, fn2,), {}),
+            (dp.iter.Filter, (fn3,), {}),
+            (dp.iter.Grouper, (fn3,), {}),
+            (dp.iter.Mapper, (fn1,), {}),
+        ]
+
         dp_compare_children = {dp.iter.Demultiplexer}
+
         if HAS_DILL:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
+            for dpipe, dp_args, dp_kwargs in datapipes_with_lambda_fn + datapipes_with_local_fn:
                 if dpipe in dp_compare_children:
                     dp1, dp2 = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                     self._serialization_test_for_dp_with_children(dp1, dp2, use_dill=True)
@@ -719,13 +749,16 @@ class TestFunctionalIterDataPipe(TestCase):
                     datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                     self._serialization_test_for_single_dp(datapipe, use_dill=True)
         else:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
-                with warnings.catch_warnings(record=True) as wa:
-                    datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                    self.assertEqual(len(wa), 1)
-                    self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
-                    with self.assertRaises(AttributeError):
-                        p = pickle.dumps(datapipe)
+            msgs = (
+                r"^Lambda function is not supported by pickle",
+                r"^Local function is not supported by pickle"
+            )
+            for dps, msg in zip((datapipes_with_lambda_fn, datapipes_with_local_fn), msgs):
+                for dpipe, dp_args, dp_kwargs in dps:
+                    with self.assertWarnsRegex(UserWarning, msg):
+                        datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                    with self.assertRaises((pickle.PicklingError, AttributeError)):
+                        pickle.dumps(datapipe)
 
     def test_iterable_wrapper_datapipe(self):
 
@@ -1145,42 +1178,43 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
-        def _helper(ref_fn, fn, input_col=None, output_col=None):
+        def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             for constr in (list, tuple):
                 datapipe = dp.iter.IterableWrapper([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
-                res_dp = datapipe.map(fn, input_col, output_col)
-                ref_dp = datapipe.map(ref_fn)
-                self.assertEqual(list(res_dp), list(ref_dp))
-                # Reset
-                self.assertEqual(list(res_dp), list(ref_dp))
+                if ref_fn is None:
+                    with self.assertRaises(error):
+                        res_dp = datapipe.map(fn, input_col, output_col)
+                        list(res_dp)
+                else:
+                    res_dp = datapipe.map(fn, input_col, output_col)
+                    ref_dp = datapipe.map(ref_fn)
+                    self.assertEqual(list(res_dp), list(ref_dp))
+                    # Reset
+                    self.assertEqual(list(res_dp), list(ref_dp))
 
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
         _helper(lambda data: (data[0], (-data[1], data[1]), data[2]), fn_1n, 1)
         # The index of input column is out of range
-        with self.assertRaises(IndexError):
-            _helper(None, fn_1n, 3)
+        _helper(None, fn_1n, 3, error=IndexError)
         # Unmatched input columns with fn arguments
-        with self.assertRaises(TypeError):
-            _helper(None, fn_n1, 1)
+        _helper(None, fn_n1, 1, error=TypeError)
+
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
         _helper(lambda data: (data[0], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
 
         # output_col can only be specified when input_col is not None
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, 1)
+        _helper(None, fn_n1, None, 1, error=ValueError)
         # output_col can only be single-element list or tuple
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, [0, 1])
+        _helper(None, fn_n1, None, [0, 1], error=ValueError)
         # Single-element list as output_col
         _helper(lambda data: (-data[1], data[1], data[2]), fn_11, 1, [0])
         # Replacing with one input column and single specified output column
         _helper(lambda data: (-data[1], data[1], data[2]), fn_11, 1, 0)
         _helper(lambda data: (data[0], data[1], (-data[1], data[1])), fn_1n, 1, 2)
         # The index of output column is out of range
-        with self.assertRaises(IndexError):
-            _helper(None, fn_1n, 1, 3)
+        _helper(None, fn_1n, 1, 3, error=IndexError)
         _helper(lambda data: (data[0], data[0] + data[2], data[2]), fn_n1, [0, 2], 1)
         _helper(lambda data: ((-data[1], -data[2], data[1] + data[2]), data[1], data[2]), fn_nn, [1, 2], 0)
 
@@ -1213,38 +1247,39 @@ class TestFunctionalIterDataPipe(TestCase):
                     del _data[idx]
             return _data
 
-        def _helper(ref_fn, fn, input_col=None, output_col=None):
+        def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             datapipe = dp.iter.IterableWrapper(
                 [{"x": 0, "y": 1, "z": 2},
                  {"x": 3, "y": 4, "z": 5},
                  {"x": 6, "y": 7, "z": 8}]
             )
-            res_dp = datapipe.map(fn, input_col, output_col)
-            ref_dp = datapipe.map(ref_fn)
-            self.assertEqual(list(res_dp), list(ref_dp))
-            # Reset
-            self.assertEqual(list(res_dp), list(ref_dp))
+            if ref_fn is None:
+                with self.assertRaises(error):
+                    res_dp = datapipe.map(fn, input_col, output_col)
+                    list(res_dp)
+            else:
+                res_dp = datapipe.map(fn, input_col, output_col)
+                ref_dp = datapipe.map(ref_fn)
+                self.assertEqual(list(res_dp), list(ref_dp))
+                # Reset
+                self.assertEqual(list(res_dp), list(ref_dp))
 
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
         _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
         # The key of input column is not in dict
-        with self.assertRaises(KeyError):
-            _helper(None, fn_1n, "a")
+        _helper(None, fn_1n, "a", error=KeyError)
         # Unmatched input columns with fn arguments
-        with self.assertRaises(TypeError):
-            _helper(None, fn_n1, "y")
+        _helper(None, fn_n1, "y", error=TypeError)
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
             data, {"z": (-data["z"], -data["y"], data["y"] + data["z"])}, ["y"]), fn_nn, ["z", "y"])
 
         # output_col can only be specified when input_col is not None
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, "x")
+        _helper(None, fn_n1, None, "x", error=ValueError)
         # output_col can only be single-element list or tuple
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, ["x", "y"])
+        _helper(None, fn_n1, None, ["x", "y"], error=ValueError)
         # Single-element list as output_col
         _helper(lambda data: _dict_update(data, {"x": -data["y"]}), fn_11, "y", ["x"])
         # Replacing with one input column and single specified output column
@@ -1617,24 +1652,41 @@ class TestFunctionalMapDataPipe(TestCase):
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.map.SequenceWrapper(range(10))
-        unpicklable_datapipes: List[
+
+        datapipes_with_lambda_fn: List[
             Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Mapper, (lambda x: x,), {}),
+            (dp.map.Mapper, (lambda_fn1,), {}),
         ]
+
+        def _local_fns():
+            def _fn1(x):
+                return x
+
+            return _fn1
+
+        fn1 = _local_fns()
+
+        datapipes_with_local_fn: List[
+            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
+        ] = [
+            (dp.map.Mapper, (fn1,), {}),
+        ]
+
         if HAS_DILL:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
+            for dpipe, dp_args, dp_kwargs in datapipes_with_lambda_fn + datapipes_with_local_fn:
                 _ = dill.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
         else:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
-                with warnings.catch_warnings(record=True) as wa:
-                    datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                    self.assertEqual(len(wa), 1)
-                    self.assertRegex(
-                        str(wa[0].message), r"^Lambda function is not supported for pickle"
-                    )
-                    with self.assertRaises(AttributeError):
-                        p = pickle.dumps(datapipe)
+            msgs = (
+                r"^Lambda function is not supported by pickle",
+                r"^Local function is not supported by pickle"
+            )
+            for dps, msg in zip((datapipes_with_lambda_fn, datapipes_with_local_fn), msgs):
+                for dpipe, dp_args, dp_kwargs in dps:
+                    with self.assertWarnsRegex(UserWarning, msg):
+                        datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                    with self.assertRaises((pickle.PicklingError, AttributeError)):
+                        pickle.dumps(datapipe)
 
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))

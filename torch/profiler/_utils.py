@@ -3,8 +3,7 @@ from dataclasses import dataclass
 from typing import Dict, List
 import re
 
-import numpy as np
-
+import torch
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 from torch.autograd import _KinetoEvent
@@ -87,7 +86,6 @@ class BasicEvaluation:
             for child_event in curr_event.children:
                 self_time -= child_event.duration_time_ns
                 stack.append(child_event)
-
             assert EventKey(
                 curr_event
             ) not in self.metrics, f"Duplicate id: {curr_event.id}, {curr_event.name()}"
@@ -184,6 +182,14 @@ class BasicEvaluation:
         idle = False
         idle_start = 0
         idle_intervals: List[Interval] = []
+        if self.queue_depth_list and self.events:
+            idle_intervals += [
+                Interval(self.events[0].start_time_ns,
+                         self.queue_depth_list[0].start),
+                Interval(self.queue_depth_list[-1].end,
+                         self.events[-1].end_time_ns)
+            ]
+
         for data_point in self.queue_depth_list:
             if data_point.queue_depth == 0 and not idle:
                 idle_start = data_point.end
@@ -235,15 +241,17 @@ class BasicEvaluation:
             if event.intervals_overlap(decrease_interval)
         ]
         if event_list:
-            self_time = np.array(
-                [self.metrics[event].self_time_ns for event in event_list])
-            idle_time = np.array(
-                [self.metrics[event].idle_time_ns for event in event_list])
+            self_time = torch.tensor(
+                [self.metrics[event].self_time_ns for event in event_list],
+                dtype=torch.float32)
+            idle_time = torch.tensor(
+                [self.metrics[event].idle_time_ns for event in event_list],
+                dtype=torch.float32)
 
             normalized_gain = (idle_time -
-                               np.mean(idle_time)) / np.std(idle_time)
+                               torch.mean(idle_time)) / torch.std(idle_time)
             normalized_self = (self_time -
-                               np.mean(self_time)) / np.std(self_time)
+                               torch.mean(self_time)) / torch.std(self_time)
             heuristic_score_list = normalized_gain + normalized_self
 
             # Sort events by heuristic
