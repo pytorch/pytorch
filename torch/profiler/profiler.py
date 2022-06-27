@@ -18,6 +18,8 @@ from torch._C._autograd import (
 )
 from torch.autograd import ProfilerActivity, kineto_available
 
+__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
+           'ExecutionGraphObserver']
 
 def supported_activities():
     """

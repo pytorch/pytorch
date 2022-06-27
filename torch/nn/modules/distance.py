@@ -3,6 +3,7 @@ from .. import functional as F
 
 from torch import Tensor
 
+__all__ = ['PairwiseDistance', 'CosineSimilarity']
 
 class PairwiseDistance(Module):
     r"""
