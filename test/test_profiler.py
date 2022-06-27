@@ -1143,7 +1143,7 @@ class TestProfiler(TestCase):
 class TestExperimentalUtils(TestCase):
 
     @staticmethod
-    def generate_mock_profile():
+    def generate_mock_profile(cpu_events_json="", cuda_events_json=""):
 
         @dataclass(frozen=True)
         class MockKinetoEvent():
@@ -1151,7 +1151,7 @@ class TestExperimentalUtils(TestCase):
             _start_us: int
             _duration_us: int
             _linked_correlation_id: int
-            _device_type: DeviceType
+            _device_type: int
 
             def name(self) -> str:
                 return self._name
@@ -1166,16 +1166,25 @@ class TestExperimentalUtils(TestCase):
                 return self._linked_correlation_id
 
             def device_type(self) -> DeviceType:
-                return self._device_type
+                return DeviceType.CUDA if self._device_type == 1 else DeviceType.CPU
 
-        @dataclass(frozen=True)
         class MockProfilerEvent():
-            _name: str
-            id: int
-            start_time_ns: int
-            duration_time_ns: int
-            children = []
-            parent = None
+
+            def __init__(self,
+                         _name,
+                         id,
+                         start_time_ns,
+                         duration_time_ns,
+                         correlation_id=0,
+                         children=None,
+                         parent=None):
+                self._name = _name
+                self.id = id
+                self.start_time_ns = start_time_ns
+                self.duration_time_ns = duration_time_ns
+                self.correlation_id = correlation_id
+                self.children = children if children is not None else []
+                self.parent = parent
 
             @property
             def end_time_ns(self):
@@ -1184,31 +1193,71 @@ class TestExperimentalUtils(TestCase):
             def name(self) -> str:
                 return self._name
 
-        cuda_events = [
-            MockKinetoEvent("cudaLaunchKernel", 400, 100, 1, DeviceType.CPU),
-            MockKinetoEvent("cudaLaunchKernel", 500, 100, 2, DeviceType.CPU),
-            MockKinetoEvent("cudaLaunchKernel", 600, 100, 3, DeviceType.CPU),
-            MockKinetoEvent("cudaLaunchKernel", 1500, 100, 4, DeviceType.CPU),
-            MockKinetoEvent("GPU", 700, 100, 1, DeviceType.CUDA),
-            MockKinetoEvent("GPU", 800, 100, 2, DeviceType.CUDA),
-            MockKinetoEvent("GPU", 900, 100, 3, DeviceType.CUDA),
-            MockKinetoEvent("GPU", 1700, 100, 4, DeviceType.CUDA)
-        ]
+        if cuda_events_json == "":
+            cuda_events = [
+                MockKinetoEvent("cudaLaunchKernel", 400, 100, 1, 0),
+                MockKinetoEvent("cudaLaunchKernel", 500, 100, 2, 0),
+                MockKinetoEvent("cudaLaunchKernel", 600, 100, 3, 0),
+                MockKinetoEvent("cudaLaunchKernel", 700, 100, 4, 0),
+                MockKinetoEvent("cudaLaunchKernel", 800, 100, 5, 0),
+                MockKinetoEvent("cudaLaunchKernel", 1500, 100, 6, 0),
+                MockKinetoEvent("GPU", 900, 100, 1, 1),
+                MockKinetoEvent("GPU", 1000, 100, 2, 1),
+                MockKinetoEvent("GPU", 1100, 100, 3, 1),
+                MockKinetoEvent("GPU", 1200, 100, 4, 1),
+                MockKinetoEvent("GPU", 1300, 100, 5, 1),
+                MockKinetoEvent("GPU", 1700, 100, 6, 1)
+            ]
+        else:
+            json_list = json.loads(cuda_events_json)
+            cuda_events = [
+                MockKinetoEvent(*event.values()) for event in json_list
+            ]
 
-        cpu_events = [
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 1, 0, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 2, 100000, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 3, 200000, 100000),
-            MockProfilerEvent("CPU (Before cudaLaunchKernel)", 4, 300000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 5, 400000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 6, 500000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 7, 600000, 100000),
-            MockProfilerEvent("CPU (After cudaLaunchKernel)", 8, 700000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 9, 800000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 10, 900000, 100000),
-            MockProfilerEvent("CPU (After GPU)", 11, 1100000, 100000),
-            MockProfilerEvent("CPU (No Event)", 12, 1200000, 500000),
-        ]
+        if cpu_events_json == "":
+            cpu_events = [
+                MockProfilerEvent("CPU (Before cudaLaunchKernel)", 1, 0,
+                                  100000),
+                MockProfilerEvent("CPU (Before cudaLaunchKernel)", 2, 100000,
+                                  100000),
+                MockProfilerEvent("CPU (Before cudaLaunchKernel)", 3, 200000,
+                                  100000),
+                MockProfilerEvent("CPU (Before cudaLaunchKernel)", 4, 300000,
+                                  100000),
+                MockProfilerEvent("CPU (After cudaLaunchKernel)", 5, 400000,
+                                  100000),
+                MockProfilerEvent("CPU (After cudaLaunchKernel)", 6, 500000,
+                                  100000),
+                MockProfilerEvent("CPU (After cudaLaunchKernel)", 7, 600000,
+                                  100000),
+                MockProfilerEvent("CPU (After cudaLaunchKernel)", 8, 700000,
+                                  100000),
+                MockProfilerEvent("CPU (After GPU)", 9, 800000, 100000),
+                MockProfilerEvent("CPU (After GPU)", 10, 900000, 100000),
+                MockProfilerEvent("CPU (After GPU)", 11, 1100000, 100000),
+                MockProfilerEvent("CPU (After GPU)", 12, 1200000, 500000),
+            ]
+        else:
+            json_list = json.loads(cpu_events_json)
+            cpu_events = []
+            id_map = {}
+            for e in json_list:
+                event = MockProfilerEvent(e['_name'],
+                                          e['id'],
+                                          e['start_time_ns'],
+                                          e['duration_time_ns'],
+                                          correlation_id=e['correlation_id'],
+                                          children=e['children'],
+                                          parent=e['parent'])
+                id_map[event.id] = event
+                cpu_events.append(event)
+            for event in cpu_events:
+                if event.parent is not None:
+                    event.parent = id_map[event.parent]
+                event.children = [id_map[child] for child in event.children]
+            cpu_events = [
+                event for event in cpu_events if event.parent is None
+            ]
 
         profiler = unittest.mock.Mock()
         profiler.kineto_results = unittest.mock.Mock()
@@ -1254,6 +1303,10 @@ class TestExperimentalUtils(TestCase):
 1 [cudaLaunchKernel]
 2 [cudaLaunchKernel]
 3 [cudaLaunchKernel]
+4 [cudaLaunchKernel]
+5 [cudaLaunchKernel]
+4 [GPU]
+3 [GPU]
 2 [GPU]
 1 [GPU]
 0 [GPU]
@@ -1272,11 +1325,11 @@ class TestExperimentalUtils(TestCase):
 1 [CPU (After cudaLaunchKernel)]
 2 [CPU (After cudaLaunchKernel)]
 3 [CPU (After cudaLaunchKernel)]
-2 [CPU (After cudaLaunchKernel)]
+4 [CPU (After cudaLaunchKernel)]
+5 [CPU (After GPU)]
+4 [CPU (After GPU)]
+2 [CPU (After GPU)]
 1 [CPU (After GPU)]
-0 [CPU (After GPU)]
-0 [CPU (After GPU)]
-0 [CPU (No Event)]
 """)
 
     def test_utils_compute_queue_depth_when_no_cuda_events(self):
@@ -1297,44 +1350,36 @@ class TestExperimentalUtils(TestCase):
 
         self.assertExpectedInline(
             res, """\
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
-0 [CPU (Before cudaLaunchKernel)]
+100000 [CPU (Before cudaLaunchKernel)]
+100000 [CPU (Before cudaLaunchKernel)]
+100000 [CPU (Before cudaLaunchKernel)]
+100000 [CPU (Before cudaLaunchKernel)]
 0 [CPU (After cudaLaunchKernel)]
 0 [CPU (After cudaLaunchKernel)]
 0 [CPU (After cudaLaunchKernel)]
 0 [CPU (After cudaLaunchKernel)]
+0 [CPU (After GPU)]
 0 [CPU (After GPU)]
 0 [CPU (After GPU)]
 100000 [CPU (After GPU)]
-300000 [CPU (No Event)]
 """)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     def test_utils_get_optimizable_events(self):
-
-        def garbage_code():
-            for i in range(100):
-                x[0, i] = i
-
-        x = torch.ones((8192, 8192)).to("cuda")
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                     record_shapes=True,
-                     profile_memory=True,
-                     with_stack=True,
-                     with_flops=True,
-                     with_modules=True) as prof:
-            for _ in range(100):
-                x = x @ x
-            garbage_code()
-            for _ in range(100):
-                x = x @ x
-        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        from test_profiler_utils_golden import profiler_event_string, kineto_event_string
+        basic_evaluation = _utils.BasicEvaluation(
+            self.generate_mock_profile(profiler_event_string,
+                                       kineto_event_string))
         optimizable_events = basic_evaluation.get_optimizable_events(
-            5, print_enable=False)
-        self.assertTrue(len(optimizable_events) == 5)
-        self.assertTrue("garbage_code" in optimizable_events[0].event.name())
+            2, print_enable=False)
+        res = ""
+        for event_key in optimizable_events:
+            res += f"{event_key.event.name()}\n"
+        self.assertExpectedInline(
+            res, """\
+<built-in function _cuda_synchronize>
+aten::copy_
+""")
 
 
 if __name__ == '__main__':
