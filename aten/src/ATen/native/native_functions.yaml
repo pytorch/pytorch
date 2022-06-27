@@ -12625,6 +12625,19 @@
   python_module: special
   variants: function
 
+- func: special_gamma(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_gamma.out
+  variants: function
+
+- func: special_gamma.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_gamma_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
 - func: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
@@ -12984,4 +12997,17 @@
     CompositeExplicitAutograd: special_shifted_chebyshev_polynomial_w_out
   device_check: NoCheck
   python_module: special
+  variants: function
+
+- func: special_spherical_bessel_j0(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_spherical_bessel_j0.out
+  variants: function
+
+- func: special_spherical_bessel_j0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_spherical_bessel_j0_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
   variants: function

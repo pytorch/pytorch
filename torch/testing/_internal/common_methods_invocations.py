@@ -12014,14 +12014,14 @@ op_db: List[OpInfo] = [
                              'TestFFT', 'test_reference_nd')],
                      ),
     OpInfo('fft.fftshift',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
            sample_inputs_func=sample_inputs_fftshift,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            ),
     OpInfo('fft.ifftshift',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
            sample_inputs_func=sample_inputs_fftshift,
            supports_out=False,
            supports_forward_ad=True,
@@ -14732,18 +14732,22 @@ op_db: List[OpInfo] = [
                          active_if=(IS_MACOS or IS_WINDOWS)),
         ),
     ),
-    OpInfo(
+    UnaryUfuncInfo(
         'nn.functional.threshold',
-        aten_backward_name='threshold_backward',
-        ref=lambda x, threshold, value: np.where(x > threshold, x, value).astype(x.dtype),
+        ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        supports_autograd=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        sample_kwargs=lambda device, dtype, input: ({'threshold': 0.123,
+                                                    'value': -9},
+                                                    {'threshold': 0.123,
+                                                    'value': -9}),
+        # TODO(whc) should not need sample_inputs_func, but without it
+        # kwargs aren't being hooked up properly
         sample_inputs_func=sample_inputs_threshold,
     ),
     OpInfo(
@@ -15259,7 +15263,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "roll",
         ref=np.roll,
-        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
+        dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
         error_inputs_func=error_inputs_roll,
         supports_out=False,
         supports_forward_ad=True,
@@ -16618,7 +16622,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_index,
            error_inputs_func=error_inputs_index_select,
            supports_forward_ad=True,
@@ -16626,7 +16630,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19377,7 +19381,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "repeat_interleave",
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
@@ -19678,6 +19682,34 @@ op_db: List[OpInfo] = [
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
+    UnaryUfuncInfo(
+        'special.gamma',
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=1.3e-05),
+                    torch.float64: tol(atol=1e-05, rtol=1.3e-05)
+                }
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.gamma if TEST_SCIPY else _NOTHING,
+        skips=(
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestUnaryUfuncs',
+                'test_reference_numerics_large',
+                dtypes=[torch.float32, torch.float64],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                'TestUnaryUfuncs',
+                'test_reference_numerics_small',
+                dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64],
+            ),
+        ),
+        supports_autograd=False,
+    ),
     BinaryUfuncInfo(
         'special.hermite_polynomial_h',
         dtypes=all_types_and(torch.bool),
@@ -19839,6 +19871,20 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
         supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.spherical_bessel_j0',
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=1e-03),
+                    torch.float64: tol(atol=1e-05, rtol=1e-03),
+                }
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
 ]
@@ -20064,7 +20110,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.atanh",
         torch_opinfo_name="atanh",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
@@ -20290,6 +20335,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.threshold",
+        torch_opinfo_name="nn.functional.threshold",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
