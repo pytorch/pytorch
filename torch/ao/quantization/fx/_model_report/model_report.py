@@ -126,7 +126,6 @@ class ModelReport:
             target_node = target_node.next
 
         with prepared_fx_model.graph.inserting_before(target_node):
-            obs_to_insert = obs_to_insert()
             prepared_fx_model.add_submodule(obs_fqn, obs_to_insert)
             prepared_fx_model.graph.create_node(op="call_module", target=obs_fqn, args=observer_args)
 
