@@ -309,8 +309,6 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         self.run_test(model, (x, model.hidden))
 
     def get_image(self, rel_path: str, size: Tuple[int, int]) -> Tensor:
-        import os
-
         from PIL import Image
         from torchvision import transforms
 
