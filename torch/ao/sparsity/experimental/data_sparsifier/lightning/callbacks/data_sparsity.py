@@ -1,3 +1,4 @@
+from collections import defaultdict
 from copy import deepcopy
 import torch
 from dataclasses import dataclass, field
@@ -121,7 +122,7 @@ class TrainingAwareDataSparsity(_DataSparsity):
     def __post_init__(self):
         assert self.data_scheduler_type is not None
         assert self.data_scheduler_args is not None
-        self.data_sparsifier_state_dict: Dict = None
+        self.data_sparsifier_state_dict = None
 
     def on_train_start(self, trainer, pl_module) -> None:
         # create sparsifier
@@ -139,7 +140,7 @@ class TrainingAwareDataSparsity(_DataSparsity):
         self.data_sparsifier.load_state_dict(self.data_sparsifier_state_dict)
 
     def __create_config_based_on_state(self, pl_module):
-        config: Dict = dict()
+        config: Dict = defaultdict()
         if self.data_sparsifier_state_dict is None:
             return config
         for name, _ in pl_module.model.named_parameters():
