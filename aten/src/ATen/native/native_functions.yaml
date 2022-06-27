@@ -12998,3 +12998,16 @@
   device_check: NoCheck
   python_module: special
   variants: function
+
+- func: special_spherical_bessel_j0(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_spherical_bessel_j0.out
+  variants: function
+
+- func: special_spherical_bessel_j0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_spherical_bessel_j0_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
