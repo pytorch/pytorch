@@ -40,13 +40,13 @@
 
 #include <ATen/ATen.h>
 
+#include <c10/core/SymIntArrayRef.h>
 #include <structmember.h>
 #include <cstdint>
 #include <iostream>
 #include <memory>
 #include <utility>
 #include <vector>
-#include <c10/core/SymIntArrayRef.h>
 
 using namespace at;
 using namespace torch;
@@ -2339,7 +2339,9 @@ c10::IntArrayRef concrete_strides_fn(
   return c10::IntArrayRef(start, len);
 }
 
-static std::vector<int64_t> values_from_buffer(const c10::TensorImpl* self, py::handle values) {
+static std::vector<int64_t> values_from_buffer(
+    const c10::TensorImpl* self,
+    py::handle values) {
   c10::TensorImpl* ptr = const_cast<c10::TensorImpl*>(self);
   c10::optional<PyObject*> mb_obj = ptr->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
@@ -2415,11 +2417,13 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   }
 
   auto result = values_from_buffer(self, symints);
-  c10::SymInt* start = (c10::SymInt*)result[0];  
-  int64_t len = result[1];
+  c10::SymInt* start = (c10::SymInt*)result[0];
+  t64_t len = result[1];
 
   return c10::SymIntArrayRef(start, len);
-  }
+ 
 
 
-} // anonymous namespace
+
+// anonymous namespace
+  
