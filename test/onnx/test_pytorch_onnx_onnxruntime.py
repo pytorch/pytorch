@@ -11,7 +11,6 @@ from typing import Dict, List, Optional, Tuple, Union
 
 import model_defs.word_language_model as word_language_model
 import numpy as np
-import onnx
 import parameterized
 import test_onnx_common
 import torchvision
@@ -48,7 +47,6 @@ from torchvision.models.detection.rpn import (
 from torchvision.models.detection.transform import GeneralizedRCNNTransform
 
 import torch
-import torch.nn.functional as F
 import torch.onnx.verification as verification
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
@@ -2818,6 +2816,43 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
     @skipIfUnsupportedMinOpsetVersion(10)
     def test_interpolate_downsample(self):
         self._interpolate_tests(False)
+
+    @skipIfUnsupportedMinOpsetVersion(11)
+    def test_interpolate_half_pixel(self):
+        # testing whether it uses "half_pixel" or "pytorch_half_pixel"
+        # see https://github.com/onnx/onnx/blob/main/docs/Operators.md#Resize
+
+        class MyModel(torch.nn.Module):
+            def __init__(self, mode, size):
+                super().__init__()
+                self.mode = mode
+                self.size = size
+
+            def forward(self, x):
+                return torch.nn.functional.interpolate(
+                    x, mode=self.mode, size=self.size
+                )
+
+        modes = ["linear", "bicubic"]
+        x = [
+            torch.randn(1, 2, 6, requires_grad=True),
+            torch.randn(1, 2, 4, 6, requires_grad=True),
+            torch.randn(1, 2, 4, 4, 6, requires_grad=True),
+        ]
+        for mode in modes:
+            for xi in x:
+                mode_i = mode
+                if mode == "bicubic" and xi.dim() != 4:
+                    continue
+                elif mode == "linear":
+                    if xi.dim() == 4:
+                        mode_i = "bilinear"
+                    elif xi.dim() == 5:
+                        mode_i = "trilinear"
+                for i in range(xi.dim() - 2):
+                    size = list(xi.shape[2:])
+                    size[i] = 1
+                    self.run_test(MyModel(mode_i, size), xi)
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_interpolate_no_shape(self):
@@ -9006,25 +9041,6 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
             dynamic_axes={"output_1": [1]},
         )
 
-    def test_onnx_proto_checker(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-
-            def forward(self, x):
-                return 2 * x
-
-        x = torch.randn(1, 2, 3, requires_grad=True)
-        f = io.BytesIO()
-        torch.onnx._export(Model(), x, f)
-        model = onnx.load(f)
-        model.ir_version = 0
-
-        def check_proto():
-            torch._C._check_onnx_proto(model.SerializeToString())
-
-        self.assertRaises(RuntimeError, check_proto)
-
     @skipScriptTest(min_opset_version=11)  # dynamic split support addded in 11
     def test_split_tensor_scalar(self):
         class SplitModel(torch.nn.Module):
@@ -9890,140 +9906,6 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
             atol=1e-5,
         )
         self.run_test(model_export, (x,), training=torch.onnx.TrainingMode.EVAL)
-
-    def test_script_custom_class_error(self):
-        class BoxCoder:
-            def __init__(self, bbox_xform_clip: float) -> None:
-                self.bbox_xform_clip = bbox_xform_clip
-
-            def decode(self, rel_codes: Tensor, boxes: List[Tensor]) -> Tensor:
-                boxes = torch.cat(boxes, dim=0)
-                pred_ctr_x = (
-                    torch.clamp(rel_codes[:, 0::4], max=self.bbox_xform_clip)
-                    * boxes[:, 2]
-                )
-                return pred_ctr_x
-
-        class MyModule(torch.nn.Module):
-            __annotations__ = {
-                "box_coder": BoxCoder,
-            }
-
-            def __init__(self):
-                super().__init__()
-                self.box_coder = BoxCoder(1.4)
-
-            def forward(self, box_regression: Tensor, proposals: List[Tensor]):
-                return self.box_coder.decode(box_regression, proposals)
-
-        model = torch.jit.script(MyModule())
-        box_regression = torch.randn([4, 4])
-        proposal = [torch.randn(2, 4), torch.randn(2, 4)]
-
-        with self.assertRaises(RuntimeError) as cm:
-            onnx_model = io.BytesIO()
-            torch.onnx.export(
-                model,
-                (box_regression, proposal),
-                onnx_model,
-                opset_version=self.opset_version,
-            )
-
-    def test_initializer_sequence(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self, input_size, hidden_size, num_classes):
-                super().__init__()
-                self.fc1 = torch.nn.Linear(input_size, hidden_size)
-                self.relu = torch.nn.ReLU()
-                self.fc2 = torch.nn.Linear(hidden_size, num_classes)
-
-            def forward(self, x):
-                out = self.fc1(x)
-                out = self.relu(out)
-                out = self.fc2(out)
-                return out
-
-        test_model = MyModule(3, 4, 10)
-        state_dict_list = [k for (k, v) in test_model.state_dict().items()]
-        named_params_list = [k for (k, v) in test_model.named_parameters()]
-
-        x = torch.randn(32, 3)
-        f = io.BytesIO()
-        torch.onnx._export(test_model, (x,), f, do_constant_folding=False)
-        loaded_model = onnx.load_from_string(f.getvalue())
-
-        actual_list = [p.name for p in loaded_model.graph.initializer]
-        assert actual_list == state_dict_list, (
-            "Initializers' sequence is not as same as state_dict(). Expected: ("
-            + ", ".join(state_dict_list)
-            + "). Actual:("
-            + ", ".join(actual_list)
-            + ")."
-        )
-        assert actual_list == named_params_list, (
-            "Initializers' sequence is not as same as named_parameters(). Expected: ("
-            + ", ".join(named_params_list)
-            + "). Actual:("
-            + ", ".join(actual_list)
-            + ")."
-        )
-
-    def test_initializer_sequence_script_model(self):
-        def list_is_expected(short_list, long_list) -> bool:
-            if len(short_list) > len(long_list):
-                return False
-
-            for i in range(len(short_list)):
-                if short_list[i] not in long_list[i]:
-                    return False
-
-            return True
-
-        def loop(x, y):
-            for i in range(int(y)):
-                x = x + i
-            return x
-
-        class MyModule(torch.nn.Module):
-            def __init__(self, input_size, hidden_size, num_classes):
-                super().__init__()
-                self.fc1 = torch.nn.Linear(input_size, hidden_size)
-                self.relu = torch.nn.ReLU()
-                self.fc2 = torch.nn.Linear(hidden_size, num_classes)
-
-            def forward(self, x, y):
-                x = loop(x, y)
-                out = self.fc1(x)
-                out = self.relu(out)
-                out = self.fc2(out)
-                return out
-
-        test_model = torch.jit.script(MyModule(3, 4, 10))
-        state_dict_list = [k for (k, v) in test_model.state_dict().items()]
-        named_params_list = [k for (k, v) in test_model.named_parameters()]
-
-        x = torch.ones(2, 3, dtype=torch.float)
-        y = torch.tensor(5, dtype=torch.long)
-        f = io.BytesIO()
-
-        torch.onnx.export(test_model, (x, y), f, do_constant_folding=False)
-        loaded_model = onnx.load_from_string(f.getvalue())
-
-        actual_list = [p.name for p in loaded_model.graph.initializer]
-        assert list_is_expected(state_dict_list, actual_list), (
-            "ScriptModel - Initializers' sequence is not as same as state_dict(). Expected: ("
-            + ", ".join(state_dict_list)
-            + "). Actual:("
-            + ", ".join(actual_list)
-            + ")."
-        )
-        assert list_is_expected(named_params_list, actual_list), (
-            "ScriptModel - Initializers' sequence is not as same as named_parameters(). Expected: ("
-            + ", ".join(named_params_list)
-            + "). Actual:("
-            + ", ".join(actual_list)
-            + ")."
-        )
 
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_nms(self):
@@ -11766,31 +11648,6 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         x = torch.randn(10, 5)
         self.run_test(M(), (x,))
 
-    def test_onnx_checker_invalid_graph(self):
-        class CustomAddModule(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.add(x, y)
-
-        def symbolic_custom_invalid_add(g, input, other, alpha=None):
-            return g.op("Add", input, other, invalid_attr_i=1)
-
-        register_custom_op_symbolic("::add", symbolic_custom_invalid_add, 1)
-
-        x = torch.randn(2, 3, 4)
-        y = torch.randn(2, 3, 4)
-
-        test_model = CustomAddModule()
-        f = io.BytesIO()
-
-        try:
-            with self.assertRaises(torch.onnx.errors.CheckerError):
-                torch.onnx.export(test_model, (x, y), f)
-        finally:
-            unregister_custom_op_symbolic("::add", 1)
-
-        self.assertTrue(f.getvalue(), "ONNX graph was not exported.")
-        loaded_model = onnx.load_from_string(f.getvalue())
-
     def test_tuple_output_from_if_with_raised_exception(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -11804,36 +11661,6 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
 
         x = torch.zeros(1)
         self.run_test(torch.jit.script(M()), (x,))
-
-    def test_shape_value_map(self):
-        class RSoftMax(torch.nn.Module):
-            def __init__(self, radix, cardinality):
-                super().__init__()
-                self.radix = radix
-                self.cardinality = cardinality
-
-            def forward(self, x):
-                batch = x.size(0)
-                x = x.view(batch, self.cardinality, self.radix, -1).transpose(1, 2)
-                x = F.softmax(x, dim=1)
-                x = x.reshape(batch, -1)
-                return x
-
-        radix = 2
-        cardinality = 1
-        x = torch.randn(10, 1, 128, 1)
-        f = io.BytesIO()
-        torch.onnx.export(
-            RSoftMax(radix, cardinality),
-            (x,),
-            f,
-            input_names=["x"],
-            dynamic_axes={"x": [0]},
-        )
-        loaded_model = onnx.load_from_string(f.getvalue())
-        self.assertEqual(
-            loaded_model.graph.output[0].type.tensor_type.shape.dim[1].dim_value, 128
-        )
 
     # NOTE: For quantization tests, choose scale and zero point carefully
     #       such that inputs and outputs do not always overflow/underflow.
