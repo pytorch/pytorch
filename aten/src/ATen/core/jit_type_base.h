@@ -247,7 +247,7 @@ struct TORCH_API Type {
     // nvcc; see comment in destroy() below.
     struct SharedPtrWrapper {
       SharedPtrWrapper(std::shared_ptr<T> &&x)
-          : repr_(std::move(x)) {}
+          : repr_(x) {}
       std::shared_ptr<T> repr_;
     };
     union Repr {

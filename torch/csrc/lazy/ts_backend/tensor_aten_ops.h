@@ -38,6 +38,36 @@ torch::lazy::LazyTensorPtr narrow(
     int64_t start,
     int64_t length);
 
+std::tuple<
+    torch::lazy::LazyTensorPtr,
+    torch::lazy::LazyTensorPtr,
+    torch::lazy::LazyTensorPtr>
+ts_native_batch_norm(
+    const torch::lazy::LazyTensorPtr& input,
+    const torch::lazy::LazyTensorPtr& weight,
+    const torch::lazy::LazyTensorPtr& bias,
+    torch::lazy::LazyTensorPtr& running_mean,
+    torch::lazy::LazyTensorPtr& running_var,
+    bool training,
+    double momentum,
+    double eps);
+
+std::tuple<
+    torch::lazy::LazyTensorPtr,
+    torch::lazy::LazyTensorPtr,
+    torch::lazy::LazyTensorPtr>
+ts_native_batch_norm_backward(
+    const torch::lazy::LazyTensorPtr& grad_out,
+    const torch::lazy::LazyTensorPtr& input,
+    const torch::lazy::LazyTensorPtr& weight,
+    const torch::lazy::LazyTensorPtr& running_mean,
+    const torch::lazy::LazyTensorPtr& running_var,
+    const torch::lazy::LazyTensorPtr& save_mean,
+    const torch::lazy::LazyTensorPtr& save_invstd,
+    bool training,
+    double eps,
+    c10::ArrayRef<bool> output_mask);
+
 // Permute the dimensions of this tensor according to the given permutation.
 torch::lazy::LazyTensorPtr permute(
     const torch::lazy::LazyTensorPtr& input,

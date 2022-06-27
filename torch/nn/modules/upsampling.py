@@ -5,7 +5,6 @@ from torch import Tensor
 from typing import Optional
 from ..common_types import _size_2_t, _ratio_2_t, _size_any_t, _ratio_any_t
 
-__all__ = ['Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d']
 
 class Upsample(Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.

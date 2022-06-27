@@ -561,10 +561,3 @@ def meta_remainder_scalar(scalar, other):
 @torch.library.impl(meta_lib, "logical_not_")
 def meta_logical_not_(self):
     return self
-
-
-# We must also trigger meta registrations from PrimTorch ref
-# decompositions
-import torch._refs
-import torch._refs.nn.functional
-import torch._refs.special

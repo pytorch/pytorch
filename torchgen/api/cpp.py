@@ -34,12 +34,11 @@ from torchgen.api.types import (
     tensorT,
     voidT,
     longT,
-    SymIntT,
-    symIntArrayRefT,
     BaseTypeToCppMapping,
     intArrayRefT,
     optionalIntArrayRefT,
     tensorOptionsT,
+    symIntArrayRefT,
 )
 from torchgen import local
 from torchgen.utils import assert_never
@@ -156,11 +155,6 @@ def argumenttype_type(
                 return NamedCType(binds, VectorCType(BaseCType(longT)))
             else:
                 return NamedCType(binds, BaseCType(intArrayRefT))
-        if str(t.elem) == "SymInt":
-            if remove_non_owning_ref_types:
-                return NamedCType(binds, VectorCType(BaseCType(SymIntT)))
-            else:
-                return NamedCType(binds, BaseCType(symIntArrayRefT))
         elif str(t.elem) == "Tensor":
             return NamedCType(binds, BaseCType(tensorListT))
         elif str(t.elem) == "Scalar":

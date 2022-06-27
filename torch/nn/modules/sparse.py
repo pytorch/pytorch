@@ -8,7 +8,6 @@ from .module import Module
 from .. import functional as F
 from .. import init
 
-__all__ = ['Embedding', 'EmbeddingBag']
 
 class Embedding(Module):
     r"""A simple lookup table that stores embeddings of a fixed dictionary and size.

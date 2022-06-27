@@ -1,41 +1,33 @@
 # Owner(s): ["oncall: quantization"]
 
 import torch
+import random
 import unittest
-from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT
+from torch.ao.quantization.experimental.quantizer import APoTQuantizer
+from torch.ao.quantization.experimental.APoT_tensor import TensorAPoT
 
 class TestQuantizedTensor(unittest.TestCase):
     r""" Tests int_repr on APoTQuantizer with random tensor2quantize
-    and hard-coded values
+    and hard-coded values b=4, k=2
     """
     def test_int_repr(self):
-        # generate tensor with random fp values
-        tensor2quantize = tensor2quantize = torch.tensor([0, 0.0215, 0.1692, 0.385, 1, 0.0391])
+        # generate random size of tensor2dequantize between 1 -> 20
+        size = random.randint(1, 20)
 
-        observer = APoTObserver(b=4, k=2)
+        # generate tensor with random fp values between 0 -> 1000
+        tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
+        orig_tensor2quantize = torch.clone(tensor2quantize)
 
-        observer.forward(tensor2quantize)
-
-        qparams = observer.calculate_qparams(signed=False)
+        quantizer = APoTQuantizer(4, 2, torch.max(tensor2quantize), False)
 
         # get apot quantized tensor result
-        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
-                                alpha=qparams[0],
-                                gamma=qparams[1],
-                                quantization_levels=qparams[2],
-                                level_indices=qparams[3])
+        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
 
-        qtensor_data = qtensor.int_repr().int()
+        tensor_apot = TensorAPoT(quantizer, orig_tensor2quantize)
 
-        # expected qtensor values calculated based on
-        # corresponding level_indices to nearest quantization level
-        # for each fp value in tensor2quantize
-        # e.g.
-        # 0.0215 in tensor2quantize nearest 0.0208 in quantization_levels -> 3 in level_indices
-        expected_qtensor_data = torch.tensor([0, 3, 8, 13, 5, 12], dtype=torch.int32)
+        qtensor_int_rep = tensor_apot.int_repr()
 
-        self.assertTrue(torch.equal(qtensor_data, expected_qtensor_data))
+        self.assertTrue(torch.equal(qtensor, qtensor_int_rep))
 
 if __name__ == '__main__':
     unittest.main()

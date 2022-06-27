@@ -28,7 +28,6 @@
 #include <ATen/ops/_validate_sparse_csc_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsr_tensor_args_native.h>
 #include <ATen/ops/_validate_sparse_bsc_tensor_args_native.h>
-#include <ATen/ops/aminmax.h>
 #include <ATen/ops/ccol_indices_native.h>
 #include <ATen/ops/clone_native.h>
 #include <ATen/ops/col_indices_native.h>
@@ -59,206 +58,199 @@ namespace {
 
 } // end anonymous namespace
 
-/*
-  Validate the arguments to sparse compressed (CSR, CSC, BSR, and BSC)
-  tensor factory functions.
-
-  The CSR and BSR invariants for PyTorch are outlined in
-
-    https://pearu.github.io/csr_tensor_invariants.html
-    https://pearu.github.io/bsr_tensor_invariants.html
-
-  that in what follows are generalized for all sparse compressed
-  formats with support to batched and dense dimensions.
-*/
-
 void _validate_sparse_compressed_tensor_args_worker(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, const IntArrayRef size, const Layout& layout) {
-  // Layout must be Sparse Compressed, 2.4
+
+  // Layout must be Sparse Compressed
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args", [&]{});
 
   const std::string layout_name = layoutToString(layout, /*upper=*/ true);
   const std::string compressed_indices_name = compressedIndicesName(layout);
   const std::string plain_indices_name = plainIndicesName(layout);
-  const std::string compressed_dim_name = compressedDimName(layout);
-  const std::string plain_dim_name = plainDimName(layout);
 
   // Layout Invariants
-  // 2.1, 3.5
   TORCH_CHECK(
-              plain_indices.layout() == kStrided && plain_indices.is_contiguous(),
-              "expected ", plain_indices_name, " to be a strided and contiguous tensor");
+      plain_indices.layout() == kStrided && plain_indices.is_contiguous(),
+      "expected ", plain_indices_name, " to be a strided and contiguous tensor");
 
-  // 2.2, 3.6
   TORCH_CHECK(
-              compressed_indices.layout() == kStrided && compressed_indices.is_contiguous(),
-              "expected ", compressed_indices_name ," to be a strided and contiguous tensor");
+      compressed_indices.layout() == kStrided && compressed_indices.is_contiguous(),
+      "expected ", compressed_indices_name ," to be a strided and contiguous tensor");
 
-  // 2.3, partially 3.7
-  // TODO: allow values be contiguous along both block dimensions when the format is BSR or BSC
   TORCH_CHECK(
       values.layout() == kStrided && values.is_contiguous(),
       "expected values to be a strided and contiguous tensor");
 
-  const int base_ndim = 2;  // corresponds to compressed and plain indices
-  const int batch_ndim = compressed_indices.dim() - 1;
-  const int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
-                           layout, "validate_sparse_compressed_tensor_args",
-                           [&] { return 0; }, [&] { return 2; });
-  const int dense_ndim = values.dim() - batch_ndim - block_ndim - 1;
   // Shape and Strides invariants
+  TORCH_CHECK(
+              size.size() >= 2,
+              "size of a batched ", layout_name, " tensor must have length >= 2, but got: ",
+              size.size());
+  TORCH_CHECK(
+              compressed_indices.dim() >= 1,
+              compressed_indices_name, " must have dim >= 1 but got ", compressed_indices_name, ".dim() = ",
+              compressed_indices.dim());
+  TORCH_CHECK(
+              plain_indices.dim() >= 1,
+              plain_indices_name, " must have dim >= 1 but got ", plain_indices_name, ".dim() = ",
+              plain_indices.dim());
+  TORCH_CHECK(
+              values.dim() >= 1,
+              "values must have dim >= 1 but got values.dim() = ",
+              values.dim());
 
-  // 3.2
   TORCH_CHECK(
-              batch_ndim >= 0,
-              compressed_indices_name, " must have dimensionality >= 1 but got ", compressed_indices.dim());
+      compressed_indices.dim() == plain_indices.dim(),
+      "number of dimensions of ", compressed_indices_name, " and ", plain_indices_name, " must be the same but got ",
+      compressed_indices.dim(), " and ", plain_indices.dim(), ", respectively");
 
-  // 3.3
-  TORCH_CHECK(
-              compressed_indices.dim() == plain_indices.dim(),
-              compressed_indices_name, " and ", plain_indices_name, " dimensionalities must be equal but got ",
-              compressed_indices.dim(), " and ", plain_indices.dim(), ", respectively");
+  int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(
+      layout, "validate_sparse_compressed_tensor_args",
+      [&] {
+        TORCH_CHECK(
+                    compressed_indices.dim() <= values.dim(),
+                    "number of dimensions of indices (=", compressed_indices.dim(),
+                    ") must be equal or less than the number of dimensions of values (=", values.dim(), ")");
+        return 0;
+      },
+      [&] {
+        TORCH_CHECK(
+                    compressed_indices.dim() + 2 <= values.dim(),
+                    "number of dimensions of indices (=", compressed_indices.dim(),
+                    ") plus two must be equal or less than the number of dimensions of values (=", values.dim(), ")");
+        return 2;
+      });
+  int dense_ndim = values.dim() - compressed_indices.dim() - block_ndim;
+  TORCH_CHECK(dense_ndim == 0, "non-zero dense dimensions (=", dense_ndim, ") is not supported for ", layout, " layout");
 
-  // 3.4
+  int batch_ndim = size.size() - 2 - dense_ndim;
+  TORCH_INTERNAL_ASSERT(block_ndim >= 0 && dense_ndim >=0 && batch_ndim >= 0);
+
   TORCH_CHECK(
-              dense_ndim >= 0,
-              "values must have dimensionality > sum of batch and block dimensionalities (=",
-              batch_ndim, " + ", block_ndim, ") but got ", values.dim());
-  // 3.1
-  TORCH_CHECK(
-              static_cast<int>(size.size()) == batch_ndim + base_ndim + dense_ndim,
-              "tensor dimensionality must be sum of batch, base, and dense dimensionalites (=",
-              batch_ndim, " + ", base_ndim, " + ", dense_ndim, ") but got ", size.size());
+      static_cast<size_t>(compressed_indices.dim()) == size.size() - 1 - dense_ndim,
+      "number of dimensions of indices must be one less than the number of dimensions of the provided size",
+      " (minus the number of dense dimensions) but got ",
+      compressed_indices.dim(), " not equal to ", size.size(), " - 1 - ", dense_ndim);
 
   // For CSR/CSC formats, we define blocksize=(1, 1) so that checking
   // the sparse compressed tensor invariants can be unified with the
   // BSR/BSC invariants.
-  // 3.10
   DimVector blocksize{
-                      (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 1)) : 1),
-                      (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 2)) : 1),
+                      (block_ndim == 2 ? std::max<int64_t>(1, values.sizes()[values.dim() - dense_ndim - 2]) : 1),
+                      (block_ndim == 2 ? std::max<int64_t>(1, values.sizes()[values.dim() - dense_ndim - 1]) : 1),
   };
   TORCH_INTERNAL_ASSERT(blocksize.size() == 2 && blocksize[0] > 0 && blocksize[1] > 0);
 
-  // All batch sizes must be the same and consistent with tensor batchsize, 3.1, 3.8, 3.9, 3.10
-  DimVector batchsize = DimVector(size.slice(0, batch_ndim));
-  DimVector compressed_indices_batchsize = DimVector(compressed_indices.sizes().slice(0, batch_ndim));
-  DimVector plain_indices_batchsize = DimVector(plain_indices.sizes().slice(0, batch_ndim));
-  DimVector values_batchsize = DimVector(values.sizes().slice(0, batch_ndim));
-  const int values_nnz = (values.numel() ? values.size(batch_ndim) : 0);
-  DimVector values_blocksize = DimVector(values.sizes().slice(batch_ndim + 1, block_ndim));
-  DimVector values_densesize = DimVector(values.sizes().slice(batch_ndim + 1 + block_ndim, dense_ndim));
-  TORCH_CHECK(
-      batchsize == compressed_indices_batchsize && batchsize == plain_indices_batchsize && batchsize == values_batchsize,
-      "all batch dimensions of ", compressed_indices_name," (=", compressed_indices_batchsize, "), ", plain_indices_name," (=",
-      plain_indices_batchsize, "), and values (=", values_batchsize, ") must be equal to tensor batch dimensions (=",
-      batchsize, ")");
+  int64_t numel_per_block = blocksize[0] * blocksize[1];
+  int compressed_dim = compressedDimension(layout, size, dense_ndim);
+  int plain_dim = plainDimension(layout, size, dense_ndim);
 
-  // A tensor constitutes of full blocks, 3.1
+  // All batch sizes must be the same
+  DimVector batch_size = DimVector(size.slice(0, batch_ndim));
+  DimVector compressed_indices_batch_size = DimVector(compressed_indices.sizes().slice(0, compressed_indices.dim() - 1));
+  DimVector plain_indices_batch_size = DimVector(plain_indices.sizes().slice(0, plain_indices.dim() - 1));
+  DimVector values_batch_size = DimVector(values.sizes().slice(0, values.dim() - 1 - block_ndim - dense_ndim));
+  TORCH_CHECK(
+      batch_size == compressed_indices_batch_size &&
+      batch_size == plain_indices_batch_size &&
+      batch_size == values_batch_size,
+      "all batch dimensions of the provided size (", batch_size, "), indices (",
+      compressed_indices_batch_size,", ", plain_indices_batch_size, "), and values (",
+      values_batch_size,") must be the same.");
+
+  // A tensor constitutes of full blocks
   for (int i=0; i<block_ndim; i++) {
-      TORCH_CHECK(size[batch_ndim + i] % blocksize[i] == 0,
-                  "tensor shape[", batch_ndim + i, "] (=", size[batch_ndim + i],
-                  ") must be divisible with blocksize[", i, "] (=", blocksize[i],
-                  ") as defined by values shape");
+    TORCH_CHECK(size[batch_ndim + i] % blocksize[i] == 0, "tensor size(", batch_ndim + i, ") ", size[batch_ndim + i],
+                " needs to be divisible with blocksize[", i, "] ", blocksize[i]);
   }
-  const int nrows = size[batch_ndim] / blocksize[0];
-  const int ncols = size[batch_ndim + 1] / blocksize[1];
-  int ncompressed_dims, nplain_dims;
-  std::tie(ncompressed_dims, nplain_dims) = AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "validate_sparse_compressed_tensor_args",
-                                                                                      [&] { return std::make_tuple(nrows, ncols); },
-                                                                                      [&] { return std::make_tuple(ncols, nrows); });
-  // 3.8
-  TORCH_CHECK(
-              compressed_indices.size(-1) == ncompressed_dims + 1,
-              compressed_indices_name, ".shape[-1] must be equal to the number of ",
-              compressed_dim_name, "s + 1 (=", ncompressed_dims + 1, "), but got ", compressed_indices.size(-1));
-  // 3.9, 3.10
-  TORCH_CHECK(
-              plain_indices.size(-1) == values_nnz,
-              plain_indices_name, ".shape[-1] must be equal to nnz (=", values_nnz,
-              ") as defined by values.shape[", batch_ndim, "], but got ", plain_indices.size(-1));
+
+  // Note, this check also enforces `compressed_indices.size(-1) >= 1`
+  if (block_ndim == 2) {
+    TORCH_CHECK(
+                compressed_indices.size(-1) == (size[compressed_dim] / blocksize[compressed_dim - batch_ndim] + 1),
+                compressed_indices_name, ".size(-1) must be equal to size[-", (size.size() - compressed_dim),
+                "]/blocksize[",  compressed_dim - batch_ndim, "] + 1 (that is ",
+                size[compressed_dim] / blocksize[compressed_dim - batch_ndim] + 1, "), but got: ", compressed_indices.size(-1));
+    TORCH_CHECK(
+                plain_indices.numel() * numel_per_block == values.numel(),
+                "number of ", plain_indices_name, " elements must be the same as the number of blocks in values, but got ",
+                plain_indices_name, ".numel() * numel_per_block: ", plain_indices.numel() * numel_per_block,
+                ", values.numel(): ", values.numel(),", numel_per_block: ", numel_per_block);
+  } else {
+    TORCH_CHECK(
+                compressed_indices.size(-1) == (size[compressed_dim] + 1),
+                compressed_indices_name, ".size(-1) must be equal to size[-", (size.size() - compressed_dim),
+                "] + 1 (that is ",
+                size[compressed_dim] + 1, "), but got: ", compressed_indices.size(-1));
+    TORCH_CHECK(
+                plain_indices.numel() == values.numel(),
+                "number of ", plain_indices_name, " elements must be the same number of elements, but got ",
+                plain_indices_name, ".numel(): ", plain_indices.numel(),
+                ", values.numel(): ", values.numel());
+  }
+
   // Type Invariants
   auto compressed_indices_type = compressed_indices.scalar_type();
   auto plain_indices_type = plain_indices.scalar_type();
-  // 1.1, 1.2, 1.3
   TORCH_CHECK(
       compressed_indices_type == plain_indices_type,
-      compressed_indices_name, " and ", plain_indices_name, " must have the same dtype, bot got ",
+      "both ", compressed_indices_name, " and ", plain_indices_name, " should have the same type, bot got ",
       compressed_indices_type, " and ", plain_indices_type, ", respectively");
   TORCH_CHECK(
       compressed_indices_type == kInt || compressed_indices_type == kLong,
-      compressed_indices_name, " and ", plain_indices_name, " dtype must be Int or Long, but got ",
+      compressed_indices_name, " and ", plain_indices_name, " must be an int32 or int64 type, but got: ",
       compressed_indices_type);
 
   // Indices invariants
   AT_DISPATCH_INDEX_TYPES(compressed_indices_type, "validate_sparse_compressed_tensor_args",
-    [&] {
-      if (plain_indices.numel() > 0) {
+      [&] {
         Tensor compressed_indices_cpu = compressed_indices.to(kCPU);
-        Tensor plain_indices_cpu = plain_indices.to(kCPU);
-        int64_t batch_compressed_stride = compressed_indices_cpu.dim() >= 2 ? compressed_indices_cpu.stride(-2) : 0;
-        int64_t batch_plain_stride = plain_indices_cpu.dim() >= 2 ? plain_indices_cpu.stride(-2) : 0;
         auto compressed_indices_data_ptr = compressed_indices_cpu.data_ptr<index_t>();
-        auto plain_indices_data_ptr = plain_indices_cpu.data_ptr<index_t>();
+        auto batch_stride = compressed_indices_cpu.dim() >= 2 ? compressed_indices_cpu.stride(-2) : 0;
+        auto compressed_dims = (block_ndim == 0 ? size[compressed_dim] : size[compressed_dim] / blocksize[compressed_dim - batch_ndim]);
         for (const auto batch_id : c10::irange(batchCount(compressed_indices_cpu))) {
-          int64_t start = compressed_indices_data_ptr[batch_id*batch_compressed_stride];
-          const std::string at_batch_id = (batch_ndim > 0 ? " at batch id " + std::to_string(batch_id) : "");
-          const std::string batch_indices = (batch_ndim > 0 ? "..., " : "");
-          // 5.1
-          TORCH_CHECK(start == 0, compressed_indices_name, "[", batch_indices, "0] (=", start, ") == 0 is unsatisfied", at_batch_id);
-          for (int i = 1; i <= ncompressed_dims; i++) {
-            int64_t end = compressed_indices_data_ptr[batch_id*batch_compressed_stride + i];
-            // 5.2
-            TORCH_CHECK(end <= values_nnz,
-                        compressed_indices_name, "[", batch_indices, i, "] (=", end, ") ",
-                        "<= nnz (=", values_nnz, ") is unsatisfied", at_batch_id);
-            // 5.3
-            TORCH_CHECK(start <= end, compressed_indices_name, " must be ordered sequence but ",
-                        compressed_indices_name, "[", batch_indices, i - 1, "] (=", start, ") <= ",
-                        compressed_indices_name, "[", batch_indices, i, "] (=", end, ") is unsatisfied", at_batch_id);
-            TORCH_CHECK(end - start <= nplain_dims,
-                        compressed_indices_name, "[", batch_indices, i, "] (=", end, ") - ",
-                        compressed_indices_name, "[", batch_indices, i - 1, "] (=", start, ") <= number of ",
-                        plain_dim_name, "s (=", nplain_dims, ") is unsatisfied", at_batch_id);
-            int64_t last_plain_index = -1;
-            for (int n = start; n < end; n++) {
-              int64_t plain_index = plain_indices_data_ptr[batch_id*batch_plain_stride + n];
-              // 5.4, 5.5
-              TORCH_CHECK(0 <= plain_index && plain_index < nplain_dims,
-                          plain_indices_name, "[", batch_indices, n, "] (=", plain_index, ") is out of range (0, ", nplain_dims, ")", at_batch_id);
-              // 5.6
-              TORCH_CHECK(plain_index > last_plain_index, plain_indices_name, " must be ordered sequence of distinct integers but ",
-                          plain_indices_name, "[", batch_indices, n - 1, "] (=", last_plain_index, ") < ",
-                          plain_indices_name, "[", batch_indices, n, "] (=", plain_index, ") is unsatisfied", at_batch_id);
-              last_plain_index = plain_index;
-            }
-            start = end;
+          TORCH_CHECK(
+                      compressed_indices_data_ptr[batch_id*batch_stride] == 0,
+                      "(Batch element ", batch_id, ") ",
+                      ": 0th value of ", compressed_indices_name, " must be 0, but it is ", compressed_indices_data_ptr[batch_id*batch_stride]);
+          TORCH_CHECK(
+                      compressed_indices_data_ptr[batch_id*batch_stride + compressed_indices.size(-1) - 1] == plain_indices.size(-1),
+                      "(Batch element ", batch_id, ") ",
+                      "last value of ", compressed_indices_name, " should be equal to the length of ", plain_indices_name, ".");
+          for (int i =  1; i <= compressed_dims; i++) {
+            TORCH_CHECK(
+                        compressed_indices_data_ptr[batch_id*batch_stride + i - 1] <= compressed_indices_data_ptr[batch_id*batch_stride + i],
+                        "(Batch element ", batch_id, ") ",
+                        "at position i = ", i, ", the condition ", compressed_indices_name, "[i - 1] <= ", compressed_indices_name, "[i] fails, got ",
+                        compressed_indices_data_ptr[batch_id*batch_stride + i - 1], " <= ", compressed_indices_data_ptr[batch_id*batch_stride + i]);
           }
         }
-      }
-    });
+        if (plain_indices.numel() > 0) {
+          TORCH_CHECK(0 <= plain_indices.min().item<index_t>(), plain_indices_name, ".min() should be greater or equal to zero");
+          TORCH_CHECK(size[plain_dim] > plain_indices.max().item<index_t>(), "size[-", (size.size() - plain_dim),"] should be greater than ", plain_indices_name, ".max()");
+        }
+      });
 
   // Device Invariants
-  // 4.1
+  TORCH_CHECK(
+      plain_indices.get_device() == compressed_indices.get_device(),
+      compressed_indices_name, " and ", plain_indices_name, " devices (",
+      compressed_indices.get_device(),
+      ", ",
+      plain_indices.get_device(),
+      ") must match");
+  TORCH_CHECK(
+      compressed_indices.get_device() == values.get_device(),
+      "device of ", compressed_indices_name, " (",
+      compressed_indices.get_device(),
+      ") must match device of values (",
+      values.get_device(),
+      ")");
   TORCH_CHECK(
       values.device().type() == kCPU || values.device().type() == kCUDA,
       "device type of values (",
       values.device().type(),
       ") must be CPU or CUDA");
-  // 4.2, 4.3, 4.4
-  TORCH_CHECK(
-      compressed_indices.get_device() == values.get_device(),
-      "device of ", compressed_indices_name, " (=",
-      compressed_indices.device(),
-      ") must match device of values (=",
-      values.device(),
-      ")");
-  TORCH_CHECK(
-      compressed_indices.get_device() == plain_indices.get_device(),
-      "device of ", compressed_indices_name, " (=",
-      compressed_indices.device(),
-      ") must match device of ", plain_indices_name," (=",
-      plain_indices.device(),
-      ")");
+
 }
 
 void _validate_sparse_compressed_tensor_args(const Tensor& compressed_indices, const Tensor& plain_indices, const Tensor& values, IntArrayRef size, Layout layout) {
@@ -368,54 +360,34 @@ DimVector _estimate_sparse_compressed_tensor_size(
     const Tensor& plain_indices,
     const Tensor& values,
     Layout layout) {
-  const int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size", [&] { return 0; }, [&] { return 2; });
-  const int base_ndim = 2;  // corresponds to compressed and plain indices
-  const int batch_ndim = compressed_indices.dim() - 1;
-  const std::string compressed_indices_name = compressedIndicesName(layout);
-  const std::string plain_indices_name = plainIndicesName(layout);
-  TORCH_CHECK(
-              batch_ndim >= 0,
-              compressed_indices_name, " must have dimensionality >= 1 but got ", compressed_indices.dim());
-  TORCH_CHECK(
-              compressed_indices.dim() == plain_indices.dim(),
-              compressed_indices_name, " and ", plain_indices_name, " dimensionalities must be equal but got ",
-              compressed_indices.dim(), " and ", plain_indices.dim(), ", respectively");
-  const int dense_ndim = values.dim() - batch_ndim - block_ndim - 1;
-  TORCH_CHECK(
-              dense_ndim >= 0,
-              "values must have dimensionality > sum of batch and block dimensionalities (=",
-              batch_ndim, " + ", block_ndim, ") but got ", values.dim());
+  int block_ndim = AT_DISPATCH_PLAIN_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size", [&] { return 0; }, [&] { return 2; });
+  int dense_ndim = values.dim() - compressed_indices.dim() - block_ndim;
   DimVector blocksize{
-                      (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 1)) : 1),
-                      (block_ndim == 2 ? std::max<int64_t>(1, values.size(batch_ndim + 2)) : 1)
+                      (block_ndim == 2 ? std::max<int64_t>(1, values.sizes()[values.dim() - dense_ndim - 2]) : 1),
+                      (block_ndim == 2 ? std::max<int64_t>(1, values.sizes()[values.dim() - dense_ndim - 1]) : 1),
   };
-  DimVector size = DimVector(compressed_indices.sizes().slice(0, batch_ndim));
-  int64_t ncompressed_dims = (compressed_indices.dim() > 0 && compressed_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
-  int64_t nplain_dims = AT_DISPATCH_INTEGRAL_TYPES(plain_indices.scalar_type(), "estimate_sparse_compressed_tensor_size",
-                                                   [&]() -> int64_t {
-                                                     if (plain_indices.numel() > 0) {
-                                                       return plain_indices.max().item<scalar_t>() + 1;
-                                                     } else {
-                                                       return 0;
-                                                     }
+  DimVector size = DimVector(IntArrayRef(plain_indices.sizes().data(), plain_indices.dim() - 1));
+  int64_t compressed_dim = (plain_indices.size(-1) > 0 ? compressed_indices.size(-1) - 1 : 0);
+  int64_t plain_dim = AT_DISPATCH_INTEGRAL_TYPES(plain_indices.scalar_type(), "estimate_sparse_compressed_tensor_size",
+                                                 [&]() -> int64_t {
+                                                   if (plain_indices.numel() > 0) {
+                                                     return plain_indices.max().item<scalar_t>() + 1;
+                                                   } else {
+                                                     return 0;
+                                                   }
                                                    });
   AT_DISPATCH_ROW_SPARSE_COMPRESSED_LAYOUTS(layout, "estimate_sparse_compressed_tensor_size",
       [&]{
-        size.push_back(ncompressed_dims * blocksize[0]);
-        size.push_back(nplain_dims * blocksize[1]);
+        size.push_back(compressed_dim * blocksize[0]);
+        size.push_back(plain_dim * blocksize[1]);
       },
       [&]{
-        size.push_back(nplain_dims * blocksize[0]);
-        size.push_back(ncompressed_dims * blocksize[1]);
+        size.push_back(plain_dim * blocksize[0]);
+        size.push_back(compressed_dim * blocksize[1]);
       });
   for (int i=0; i<dense_ndim; i++) {
-    int64_t j = batch_ndim + 1 + base_ndim + i;
-    size.push_back((j < values.dim() ? values.size(j) : 1));
+    size.push_back(values.size(values.dim() - dense_ndim + i));
   }
-  TORCH_CHECK(
-              static_cast<int>(size.size()) == batch_ndim + base_ndim + dense_ndim,
-              "tensor dimensionality must be sum of batch, base, and dense dimensionalites (=",
-              batch_ndim, " + ", base_ndim, " + ", dense_ndim, ") but got ", size.size());
   return size;
 }
 

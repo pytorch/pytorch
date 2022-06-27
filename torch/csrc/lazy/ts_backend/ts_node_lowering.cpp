@@ -11,6 +11,7 @@
 #include <torch/csrc/lazy/core/ops/utils.h>
 #include <torch/csrc/lazy/core/permutation_util.h>
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
+#include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
 
 namespace torch {
@@ -103,6 +104,41 @@ TSOpVector TsNode::Lower(
   for (const torch::lazy::Output& output : operands()) {
     arguments.emplace_back(loctx->GetOutputOp(output));
   }
+  return LowerBuiltin(this, function, arguments);
+}
+
+// TS specific ops
+TSOpVector TSNativeBatchNormForward::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
+    TSLoweringContext* loctx) const {
+  std::vector<torch::jit::NamedValue> arguments;
+  for (size_t i = 0; i < 5; ++i) {
+    arguments.emplace_back(loctx->GetOutputOp(operand(i)));
+  }
+  arguments.emplace_back(training_);
+  arguments.emplace_back(momentum_);
+  arguments.emplace_back(eps_);
+  return LowerBuiltin(this, function, arguments);
+}
+
+TSOpVector TSNativeBatchNormBackward::Lower(
+    std::shared_ptr<torch::jit::GraphFunction> function,
+    TSLoweringContext* loctx) const {
+  std::vector<torch::jit::NamedValue> arguments;
+  for (size_t i = 0; i < 3; ++i) {
+    arguments.emplace_back(loctx->GetOutputOp(operand(i)));
+  }
+  c10::optional<at::Tensor> null_arg;
+  if (operands().size() == 5) {
+    arguments.emplace_back(null_arg);
+    arguments.emplace_back(null_arg);
+  }
+  for (size_t i = 3; i < operands().size(); ++i) {
+    arguments.emplace_back(loctx->GetOutputOp(operand(i)));
+  }
+  arguments.emplace_back(training_);
+  arguments.emplace_back(eps_);
+  arguments.emplace_back(output_mask_);
   return LowerBuiltin(this, function, arguments);
 }
 
