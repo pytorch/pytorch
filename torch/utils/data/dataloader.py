@@ -92,17 +92,26 @@ class _InfiniteConstantSampler(Sampler):
             yield None
 
 
-def _sharding_worker_init_fn(worker_init_fn, worker_id):
+def _get_distributed_settings():
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_world_size(), dist.get_rank()
+    else:
+        return 1, 0
+
+
+def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
     global_worker_id = worker_id
     info = torch.utils.data.get_worker_info()
     total_workers = info.num_workers
     datapipe = info.dataset
-    if dist.is_available() and dist.is_initialized():
-        total_workers *= dist.get_world_size()
-        global_worker_id = dist.get_rank() * info.num_workers + global_worker_id
+    # To distribute elements across distributed process evenly, we should shard data on distributed
+    # processes first then shard on worker processes
+    total_workers *= world_size
+    global_worker_id = global_worker_id * world_size + rank_id
     torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
     if worker_init_fn is not None:
         worker_init_fn(worker_id)
+
 
 class DataLoader(Generic[T_co]):
     r"""
@@ -239,13 +248,20 @@ class DataLoader(Generic[T_co]):
         # 2. Additional worker init function will take care of sharding in MP and Distributed
         if isinstance(self.dataset, IterDataPipe):
             self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
-            self.worker_init_fn = functools.partial(
-                _sharding_worker_init_fn, self.worker_init_fn)
+            ws, rank = _get_distributed_settings()
+            if num_workers > 0:
+                self.worker_init_fn = functools.partial(
+                    _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
+            else:
+                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
         elif isinstance(self.dataset, MapDataPipe):
             self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
-            self.worker_init_fn = functools.partial(
-                _sharding_worker_init_fn, self.worker_init_fn)
-
+            ws, rank = _get_distributed_settings()
+            if num_workers > 0:
+                self.worker_init_fn = functools.partial(
+                    _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
+            else:
+                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
 
 
         # Arg-check dataset related before checking samplers because we want to
@@ -545,21 +561,28 @@ class DataLoader(Generic[T_co]):
 
     def _get_shared_seed(self):
         if isinstance(self.dataset, IterDataPipe):
-            _shared_tensor_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator)
+            _shared_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator).item()
             if dist.is_available() and dist.is_initialized():
                 rank = dist.get_rank()
+                ws = dist.get_world_size()
+                store = dist.distributed_c10d._get_default_store()
                 if rank == 0:
-                    ws = dist.get_world_size()
-                    reqs = []
-                    for rank_id in range(1, ws):
-                        req = dist.isend(tensor=_shared_tensor_seed, dst=rank_id, tag=rank_id)
-                        reqs.append(req)
-                    for req in reqs:
-                        req.wait()
+                    store.set("_dl_shared_seed", str(_shared_seed))
+                    # Reset after all distributed processes have received the shared seed
+                    store.add("_dl_shared_seed_recv_cnt", 1)
+                    _shared_seed_recv_cnt = 1
+                    while _shared_seed_recv_cnt != ws:
+                        _shared_seed_recv_cnt = int(store.get("_dl_shared_seed_recv_cnt"))
+                    store.set("_dl_shared_seed", "")
+                    store.add("_dl_shared_seed_recv_cnt", -ws)
+                    assert int(store.get("_dl_shared_seed_recv_cnt")) == 0
                 else:
-                    dist.recv(tensor=_shared_tensor_seed, src=0, tag=rank)
-            _shared_seed = _shared_tensor_seed.item()
-            del _shared_tensor_seed
+                    _shared_seed_str = ""
+                    store.wait(["_dl_shared_seed"], _utils.MP_STATUS_CHECK_INTERVAL)
+                    while len(_shared_seed_str) == 0:
+                        _shared_seed_str = store.get("_dl_shared_seed")
+                    store.add("_dl_shared_seed_recv_cnt", 1)
+                    _shared_seed = int(_shared_seed_str)
             return _shared_seed
         else:
             return None

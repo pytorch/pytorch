@@ -5,6 +5,7 @@
 #include <ATen/core/functional.h>
 #include <c10/util/irange.h>
 #include <c10d/reducer.hpp>
+#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/utils/tensor_flatten.h>
 
 namespace c10d {
@@ -20,7 +21,7 @@ class BroadcastWork {
         flat_tensor_({torch::utils::flatten_dense_tensors(bucket_tensors_)}) {
     BroadcastOptions broadcastOptions;
     broadcastOptions.rootRank = root_rank;
-    work_ = process_group->broadcast(flat_tensor_, broadcastOptions);
+    work_ = ops::broadcast(process_group, flat_tensor_, broadcastOptions);
   }
 
   void finish() {
@@ -30,7 +31,7 @@ class BroadcastWork {
     auto output_tensors = torch::utils::unflatten_dense_tensors(
         flat_tensor_.front(), bucket_tensors_);
     TORCH_INTERNAL_ASSERT(output_tensors.size() == bucket_tensors_.size());
-    for(const auto i : c10::irange(output_tensors.size())) {
+    for (const auto i : c10::irange(output_tensors.size())) {
       bucket_tensors_[i].copy_(output_tensors[i], /*non_blocking=*/true);
     }
   }

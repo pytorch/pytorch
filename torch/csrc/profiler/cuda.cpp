@@ -1,7 +1,7 @@
-#include <torch/csrc/autograd/profiler.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <nvToolsExt.h>
+#include <torch/csrc/autograd/profiler.h>
 
 #include <sstream>
 
@@ -10,8 +10,8 @@ namespace profiler {
 namespace impl {
 namespace {
 
-static inline void cudaCheck(cudaError_t result, const char * file, int line) {
-  if(result != cudaSuccess) {
+static inline void cudaCheck(cudaError_t result, const char* file, int line) {
+  if (result != cudaSuccess) {
     std::stringstream ss;
     ss << file << ":" << line << ": ";
     if (result == cudaErrorInitializationError) {
@@ -31,10 +31,11 @@ static inline void cudaCheck(cudaError_t result, const char * file, int line) {
     throw std::runtime_error(ss.str());
   }
 }
-#define TORCH_CUDA_CHECK(result) cudaCheck(result,__FILE__,__LINE__);
+#define TORCH_CUDA_CHECK(result) cudaCheck(result, __FILE__, __LINE__);
 
 struct CUDAMethods : public CUDAStubs {
-  void record(int* device, CUDAEventStub* event, int64_t* cpu_ns) const override {
+  void record(int* device, CUDAEventStub* event, int64_t* cpu_ns)
+      const override {
     if (device) {
       TORCH_CUDA_CHECK(cudaGetDevice(device));
     }
@@ -51,14 +52,15 @@ struct CUDAMethods : public CUDAStubs {
     TORCH_CUDA_CHECK(cudaEventRecord(cuda_event_ptr, stream));
   }
 
-  float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2) const override{
+  float elapsed(const CUDAEventStub* event, const CUDAEventStub* event2)
+      const override {
     TORCH_CUDA_CHECK(cudaEventSynchronize(event->get()));
     TORCH_CUDA_CHECK(cudaEventSynchronize(event2->get()));
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     float ms;
     TORCH_CUDA_CHECK(cudaEventElapsedTime(&ms, event->get(), event2->get()));
     // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-avoid-magic-numbers,cppcoreguidelines-narrowing-conversions)
-    return ms*1000.0;
+    return ms * 1000.0;
   }
 
   void nvtxMarkA(const char* name) const override {
@@ -79,7 +81,7 @@ struct CUDAMethods : public CUDAStubs {
     at::cuda::OptionalCUDAGuard device_guard;
     // NOLINTNEXTLINE(bugprone-signed-char-misuse)
     int count = at::cuda::device_count();
-    for(const auto i : c10::irange(count)) {
+    for (const auto i : c10::irange(count)) {
       device_guard.set_index(i);
       op(i);
     }

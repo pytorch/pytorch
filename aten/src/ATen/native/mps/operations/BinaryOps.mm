@@ -7,6 +7,7 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <torch/library.h>
 #include <c10/util/Optional.h>
+#include <ATen/native/BinaryOps.h>
 
 namespace at {
 namespace native {
@@ -15,13 +16,16 @@ namespace mps {
 struct BinaryOpCachedGraph : public MPSCachedGraph
 {
   BinaryOpCachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-  MPSGraphTensor *primaryTensor = nil, *secondaryTensor = nil, *outputTensor = nil;
+  MPSGraphTensor *primaryTensor = nil, *secondaryTensor = nil;
+  MPSGraphTensor *alphaTensor = nil, *outputTensor = nil;
 };
 
-typedef MPSGraphTensor* (^BinaryOpBlock)(MPSGraph*, MPSGraphTensor*, MPSGraphTensor*);
-#define BinaryOpFn() MPSGraphTensor* (MPSGraph* mpsGraph, MPSGraphTensor* primary, MPSGraphTensor* secondary)
+typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, MPSGraphTensor*);
+#define BinaryOpFn(graph, primary, secondary) MPSGraphTensor* (mps::BinaryOpCachedGraph* graph, MPSGraphTensor* primary, MPSGraphTensor* secondary)
 
-void binaryOpTensor(const Tensor& self, const Tensor& other, const Tensor& output, std::string op_name, BinaryOpBlock binaryBlock)
+// alpha is always 1.0 except when this function is called from add_sub_template()
+void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha,
+                    const Tensor& output, std::string op_name, BinaryOpBlock binaryBlock)
 {
   // it's possible to receive empty tensors here
   if (self.numel() == 0 || other.numel() == 0) {
@@ -32,12 +36,9 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Tensor& outpu
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
 
-  const MPSDataType self_dtype = getMPSScalarType((is_self_scalar && !is_other_scalar ? other : self).scalar_type());
-  const MPSDataType other_dtype = getMPSScalarType((!is_other_scalar ? other : self).scalar_type());
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other}, /*use_scalar_value*/ false);
+    string key = op_name + getTensorsStringKey({self, other, output}, /*use_scalar_value*/ false);
     BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -46,31 +47,53 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Tensor& outpu
         @autoreleasepool {
           MPSGraph* mpsGraph = make_mps_graph();
           newCachedGraph = new BinaryOpCachedGraph(mpsGraph);
-          newCachedGraph->primaryTensor   = mpsGraphRankedPlaceHolder(mpsGraph, self_dtype , getMPSShape(self));
-          newCachedGraph->secondaryTensor = mpsGraphRankedPlaceHolder(mpsGraph, other_dtype, getMPSShape(other));
-          newCachedGraph->outputTensor = binaryBlock(mpsGraph, newCachedGraph->primaryTensor, newCachedGraph->secondaryTensor);
+          newCachedGraph->primaryTensor   = mpsGraphRankedPlaceHolder(mpsGraph, self);
+          newCachedGraph->secondaryTensor = mpsGraphRankedPlaceHolder(mpsGraph, other);
+
+          MPSGraphTensor* primaryCastTensor   = newCachedGraph->primaryTensor;
+          MPSGraphTensor* secondaryCastTensor = newCachedGraph->secondaryTensor;
+
+          // this type inference is only required at the time of graph creation
+          const ScalarType common_dtype = c10::promoteTypes(self.scalar_type(), other.scalar_type());
+          if (self.scalar_type() != common_dtype) {
+            primaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->primaryTensor, common_dtype);
+          }
+          if (other.scalar_type() != common_dtype) {
+            secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
+          }
+          newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
+          // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to int32 tensor
+          // Output tensor should have been promoted but it remains an int32 tensor
+          if (output.scalar_type() != common_dtype) {
+            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, output.scalar_type());
+          }
         }
         return newCachedGraph;
       });
       cachedGraph = static_cast<BinaryOpCachedGraph *>(tmpCachedGraph);
     }
 
-    NSMutableDictionary *feeds   = [[NSMutableDictionary new] autorelease];
+    NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
     Placeholder selfPlaceholder;
     Placeholder otherPlaceholder;
 
     if (is_self_scalar) {
-      feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self.item(), self_dtype);
+      feeds[cachedGraph->primaryTensor] = getMPSGraphTensorFromScalar(mpsStream, self.item(), getMPSScalarType(self.scalar_type()));
     } else {
       selfPlaceholder = Placeholder(cachedGraph->primaryTensor, self);
       feeds[selfPlaceholder.getMPSGraphTensor()] = selfPlaceholder.getMPSGraphTensorData();
     }
     if (is_other_scalar) {
-      feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other.item(), other_dtype);
+      feeds[cachedGraph->secondaryTensor] = getMPSGraphTensorFromScalar(mpsStream, other.item(), getMPSScalarType(other.scalar_type()));
     } else {
       otherPlaceholder = Placeholder(cachedGraph->secondaryTensor, other);
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
+    // 'cachedGraph->alphaTensor' is not nil only if add_sub_template() was called with an alpha value != 1.0
+    if (cachedGraph->alphaTensor) {
+      feeds[cachedGraph->alphaTensor] = getMPSGraphTensorFromScalar(mpsStream, alpha, getMPSScalarType(other.scalar_type()));
+    }
+
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
       outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
@@ -79,18 +102,20 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Tensor& outpu
   }
 }
 
-void binaryOpScalar(const Tensor& self, const Scalar& other, const Tensor& output, std::string op_name, BinaryOpBlock binaryBlock)
+void binaryOpScalar(const Tensor& self, const Scalar& other, const Scalar& alpha,
+                    const Tensor& output, std::string op_name, BinaryOpBlock binaryBlock)
 {
-  binaryOpTensor(self, wrapped_scalar_tensor(other), output, op_name, binaryBlock);
+  binaryOpTensor(self, wrapped_scalar_tensor(other), alpha, output, op_name, binaryBlock);
 }
 
 void div_mode_template(const Tensor& self, const Tensor& other,
                        c10::optional<c10::string_view> rounding_mode,
                        const Tensor& output, const string op_name)
 {
-  BinaryOpBlock div_mode_op_block = ^BinaryOpFn() {
-    MPSGraphTensor* divTensor =  [mpsGraph divisionWithPrimaryTensor:primary
-                                                     secondaryTensor:secondary
+  BinaryOpBlock div_mode_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* divTensor =  [mpsGraph divisionWithPrimaryTensor:primaryCastTensor
+                                                     secondaryTensor:secondaryCastTensor
                                                                 name:nil];
     if (!rounding_mode.has_value()) {
       return divTensor;
@@ -102,54 +127,66 @@ void div_mode_template(const Tensor& self, const Tensor& other,
     assert(0 && "Invalid rounding mode\n");
     return nullptr;
   };
-  binaryOpTensor(self, other, output, op_name + "_out_mps:" + (rounding_mode.has_value() ? c10::str(*rounding_mode) : ""), div_mode_op_block);
+  binaryOpTensor(self, other, Scalar(1.0), output, op_name + "_out_mps:" + (rounding_mode.has_value() ? c10::str(*rounding_mode) : ""), div_mode_op_block);
 }
 
 void add_sub_template(const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& output, std::string op_name)
 {
-  BinaryOpBlock add_sub_op_block = ^BinaryOpFn() {
-    double alpha_val = alpha.toDouble();
-    MPSGraphTensor* secondaryTensor = secondary;
+  if (alpha.toDouble() == 0.0)
+    const_cast<Tensor&>(output) = self.clone();
+
+  const bool alpha_has_value = alpha.toDouble() != 1.0;
+  if (alpha_has_value) {
+    auto commonDtype = at::result_type(self, other);
+    at::native::alpha_check(commonDtype, alpha);
+  }
+
+  BinaryOpBlock add_sub_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
+    MPSGraph* mpsGraph = cachedGraph->graph();
+    MPSGraphTensor* secondaryTensor = secondaryCastTensor;
 
     // if alpha is 1.0, then we don't bother adding another multiply to graph
-    if (alpha_val != 1.0) {
-      MPSGraphTensor* alphaTensor = mpsGraphConstantPlaceHolder(mpsGraph, alpha_val, getMPSShape(other), getMPSDataType(other.scalar_type()));
-      secondaryTensor = [mpsGraph multiplicationWithPrimaryTensor:secondary
-                                                  secondaryTensor:alphaTensor
+    if (alpha_has_value) {
+      cachedGraph->alphaTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSScalarType(other.scalar_type()), @[@1]);
+      secondaryTensor = [mpsGraph multiplicationWithPrimaryTensor:secondaryCastTensor
+                                                  secondaryTensor:cachedGraph->alphaTensor
                                                              name:nil];
     }
     if (op_name == "add")
-      return [mpsGraph additionWithPrimaryTensor:primary
+      return [mpsGraph additionWithPrimaryTensor:primaryCastTensor
                                  secondaryTensor:secondaryTensor
                                             name:nil];
     else
-      return [mpsGraph subtractionWithPrimaryTensor:primary
+      return [mpsGraph subtractionWithPrimaryTensor:primaryCastTensor
                                     secondaryTensor:secondaryTensor
                                                name:nil];
   };
-  binaryOpTensor(self, other, output, op_name + "_out_mps:" + std::to_string(alpha.toDouble()), add_sub_op_block);
+  // add alpha's type to the key only if multiply was added to graph
+  binaryOpTensor(self, other, alpha, output, op_name + "_out_mps:" + (alpha_has_value ? getMPSTypeString(alpha.type()) : ""), add_sub_op_block);
 }
 
 } // namespace mps
 
 #define CREATE_MPS_BINARY_OP_FUNC(func_out, func_stub, other_type)                              \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
-  mps::binaryOp##other_type(self, other, output, #func_stub,                                    \
-    ^BinaryOpFn() {                                                                             \
-      return [mpsGraph func_stub##WithPrimaryTensor:primary                                     \
-                                    secondaryTensor:secondary                                   \
+  mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
+    ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
+      MPSGraph* mpsGraph = cachedGraph->graph();                                                \
+      return [mpsGraph func_stub##WithPrimaryTensor:primaryCastTensor                           \
+                                    secondaryTensor:secondaryCastTensor                         \
                                                name:nil]; });                                   \
 }
 
 // Boolean Ops require casting output to "MPSDataTypeBool"
 #define CREATE_MPS_BOOLEAN_OP_FUNC(func_out, func_stub, other_type)                             \
 TORCH_IMPL_FUNC(func_out) (const Tensor& self, const other_type& other, const Tensor& output) { \
-  mps::binaryOp##other_type(self, other, output, #func_stub,                                    \
-    ^BinaryOpFn() {                                                                             \
-      MPSGraphTensor* outputTensor = [mpsGraph func_stub##WithPrimaryTensor:primary             \
-                                                            secondaryTensor:secondary           \
+  mps::binaryOp##other_type(self, other, Scalar(1.0), output, #func_stub,                       \
+    ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {                          \
+      MPSGraph* mpsGraph = cachedGraph->graph();                                                \
+      MPSGraphTensor* outputTensor = [mpsGraph func_stub##WithPrimaryTensor:primaryCastTensor   \
+                                                            secondaryTensor:secondaryCastTensor \
                                                                        name:nil];               \
-      return [mpsGraph castTensor:outputTensor toType:MPSDataTypeBool name:@"boolOut"]; });     \
+      return mps::castMPSTensor(mpsGraph, outputTensor, ScalarType::Bool); });                  \
 }
 
 // Boolean Binary Ops

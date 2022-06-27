@@ -2,6 +2,7 @@ import torch
 
 import torch._prims.utils as utils
 from torch._prims.utils import (
+    ShapeType,
     TensorLike,
     TensorLikeType,
     NumberType,
@@ -19,24 +20,30 @@ from torch._refs import (
     _make_elementwise_binary_reference,
 )
 
-from typing import Optional
+from typing import Optional, Union
 
 __all__ = [
     "celu",
     "dropout",
     "elu",
-    "relu",
+    "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "mish",
+    "relu",
     "selu",
     "softplus",
+    "softshrink",
     "tanhshrink",
+    "threshold",
 ]
+
+Tensor = torch.Tensor
 
 # celu is implemented specially because it has an alpha argument
 # celu is very similar to elu
+@register_decomposition(torch.ops.aten.celu)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -61,11 +68,11 @@ def celu(
                 )
             )
             raise ValueError(msg)
-        rhs = refs.mul(alpha, refs.expm1(refs.true_divide(a, alpha)))
+        rhs = alpha * torch.expm1(torch.true_divide(a, alpha))  # type: ignore[arg-type]
     else:
-        rhs = refs.expm1(a)
+        rhs = torch.expm1(a)
 
-    return refs.where(refs.gt(a, 0), a, rhs)
+    return torch.where(a > 0, a, rhs)
 
 
 # TODO: should we allow the user to set a different dtype for the mask generation?
@@ -98,6 +105,7 @@ def dropout(
 
 
 # elu is implemented specially because it has an alpha argument
+# This cannot be used as a decomposition because the aten op takes in 2 extra kwargs
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -108,7 +116,6 @@ def elu(
     """
     Reference implementation of torch.nn.functional.elu
     """
-
     if inplace:
         raise NotImplementedError
 
@@ -122,11 +129,11 @@ def elu(
                 )
             )
             raise ValueError(msg)
-        rhs = refs.mul(alpha, refs.expm1(a))
+        rhs = alpha * torch.expm1(a)
     else:
-        rhs = refs.expm1(a)
+        rhs = torch.expm1(a)
 
-    return refs.where(refs.gt(a, 0), a, rhs)
+    return torch.where(a > 0, a, rhs)
 
 
 @register_decomposition(torch.ops.aten.relu)
@@ -143,6 +150,19 @@ def relu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
         raise NotImplementedError
 
     return torch.where(torch.le(a, 0), 0, a)
+
+
+def layer_norm(
+    input: Tensor,
+    normalized_shape: ShapeType,
+    weight: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    eps: float = 1e-5,
+) -> Tensor:
+    """
+    Reference implementation of :func:`torch.nn.functional.layer_norm`.
+    """
+    return torch.native_layer_norm(input, normalized_shape, weight, bias, eps)[0]
 
 
 @register_decomposition(torch.ops.aten.leaky_relu)
@@ -167,6 +187,7 @@ def leaky_relu(
     return torch.where(torch.gt(a, 0), a, torch.mul(a, negative_slope))
 
 
+@register_decomposition(torch.ops.aten.mish)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -178,8 +199,7 @@ def mish(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
 
     if inplace:
         raise NotImplementedError
-
-    return refs.mul(a, refs.tanh(refs.nn.functional.softplus(a)))
+    return a * torch.tanh(torch.nn.functional.softplus(a))
 
 
 @elementwise_type_promotion_wrapper(
@@ -190,19 +210,19 @@ def selu(a: TensorLikeType, inplace: bool = False) -> TensorLikeType:
     """
     Reference implementation of torch.nn.functional.selu
     """
-
     if inplace:
         raise NotImplementedError
 
     alpha = 1.6732632423543772848170429916717
     scale = 1.0507009873554804934193349852946
 
-    rhs = refs.mul(alpha, refs.expm1(a))
+    rhs = alpha * torch.expm1(a)
 
-    return refs.mul(scale, refs.where(refs.gt(a, 0), a, rhs))
+    return scale * torch.where(a > 0, a, rhs)
 
 
 # softplus is implemented specially because it has beta and threshold arguments
+@register_decomposition(torch.ops.aten.softplus)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a",),
@@ -229,13 +249,37 @@ def softplus(
                 type(beta), python_type
             )
             raise ValueError(msg)
-        scaled_input = refs.mul(a, beta)
-        rhs = refs.true_divide(refs.log1p(refs.exp(scaled_input)), beta)
+        scaled_input = a * beta
+        rhs = torch.true_divide(torch.log1p(torch.exp(scaled_input)), beta)  # type: ignore[arg-type]
+
     else:
         scaled_input = a
-        rhs = refs.log1p(refs.exp(scaled_input))
+        rhs = torch.log1p(torch.exp(scaled_input))
 
-    return refs.where(refs.gt(scaled_input, threshold), a, rhs)
+    return torch.where(scaled_input > threshold, a, rhs)
+
+
+@out_wrapper
+def hardshrink(a: TensorLikeType, lambd: float = 0.5):
+    # Formula for reference,
+    # hardshrink(x) = x if x > lambd
+    #               = x if x < -lambd
+    #               = 0 otherwise
+    return refs.where(abs(a) > abs(lambd), a, 0)
+
+
+@out_wrapper
+def softshrink(a: TensorLikeType, lambd: float = 0.5):
+    # Formula for reference,
+    # softshrink(x) = x - lambd if x > lambd
+    #               = x + lambd if x < -lambd
+    #               = 0 otherwise
+    ge_mask = a > lambd
+    le_mask = a < -lambd
+    zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
+    result = refs.where(ge_mask, a - lambd, a)
+    result = refs.where(le_mask, a + lambd, result)
+    return refs.where(zero_mask, 0, result)
 
 
 # Losses
@@ -314,6 +358,27 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
     return refs.sub(a, refs.tanh(a))
 
 
+@register_decomposition(torch.ops.aten.threshold)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def threshold(
+    a: TensorLikeType,
+    threshold: NumberType,
+    value: Union[bool, int, float],
+    inplace: bool = False,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.threshold
+    """
+
+    if inplace:
+        raise NotImplementedError
+
+    return torch.where(a <= threshold, value, a)
+
+
 @register_decomposition(torch.ops.aten.hardtanh)
 @elementwise_unary_scalar_wrapper
 @elementwise_type_promotion_wrapper(
@@ -331,10 +396,6 @@ def hardtanh(
     """
     if inplace:
         raise NotImplementedError
-    if not isinstance(a, TensorLike):
-        raise RuntimeError(
-            "Expected a tensor input for an elementwise unary operation!"
-        )
     if utils.is_boolean_dtype(a.dtype):
         raise RuntimeError("Bool inputs not supported for hardtanh")
 
@@ -347,3 +408,34 @@ def hardtanh(
                 "Cannot do hardtanh on an unsigned type with negative limits"
             )
     return torch.clamp(a, min_val, max_val)  # type: ignore[arg-type]
+
+
+@register_decomposition(torch.ops.aten.gelu)
+@out_wrapper
+@elementwise_unary_scalar_wrapper
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def gelu(a: TensorLikeType, approximate: str = "none") -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.gelu
+    """
+    if not isinstance(a, TensorLike):
+        raise RuntimeError(
+            "Expected a tensor input for an elementwise unary operation!"
+        )
+    M_SQRT2 = 1.41421356237309504880
+    M_SQRT1_2 = 0.70710678118654752440
+    M_2_SQRTPI = 1.12837916709551257390
+    if approximate == "tanh":
+        kBeta = M_SQRT2 * M_2_SQRTPI * 0.5
+        kKappa = 0.044715
+        a_cube = a * a * a
+        inner = kBeta * (a + kKappa * a_cube)
+        return 0.5 * a * (1 + torch.tanh(inner))
+    elif approximate == "none":
+        kAlpha = M_SQRT1_2
+        return a * 0.5 * (1 + torch.erf(a * kAlpha))
+    else:
+        raise RuntimeError("approximate argument must be either none or tanh.")

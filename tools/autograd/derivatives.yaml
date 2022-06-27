@@ -208,7 +208,7 @@
 
 - name: add.Scalar(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
-  result: self_t
+  result: self_t.clone()
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   self: maybe_multiply(grad, beta.conj())
@@ -426,7 +426,7 @@
 
 - name: _neg_view(Tensor(a) self) -> Tensor(a)
   self: grad.neg()
-  result: self_t.neg()
+  result: self_t._neg_view()
 
 - name: _conj_physical(Tensor self) -> Tensor
   self: grad.conj_physical()
@@ -493,8 +493,9 @@
   self: deg2rad_backward(grad)
   result: auto_element_wise
 
-- name: _det_lu_based_helper(Tensor self) -> (Tensor det, Tensor lu, Tensor pivs)
-  self: _det_lu_based_helper_backward(grad, det, self, lu, pivs)
+- name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
+  A: linalg_det_backward(grad, result, A, LU, pivots)
+  result: at::linalg_lu_solve(LU, pivots, A_t).diagonal(0, -2, -1).sum(-1) * result
   output_differentiability: [True, False, False]
 
 - name: block_diag(Tensor[] tensors) -> Tensor
@@ -528,7 +529,7 @@
 - name: div.Tensor(Tensor self, Tensor other) -> Tensor
   self: div_tensor_self_backward(grad, other, self.scalar_type())
   other: div_tensor_other_backward(grad, self, other)
-  result: self_t / other_p - other_t * (self_p / other_p) / other_p
+  result: (self_t - other_t * result) / other_p
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: div_tensor_self_backward(grad, at::scalar_to_tensor(other), self.scalar_type())
@@ -974,9 +975,10 @@
   U: std::get<1>(linalg_lu_jvp(A_t, P, L, U, pivot))
   output_differentiability: [False, True, True]
 
-- name: lu_solve(Tensor self, Tensor LU_data, Tensor LU_pivots) -> Tensor
-  self, LU_data: lu_solve_backward(grad, result, LU_data, LU_pivots, grad_input_mask)
-  result: lu_solve_jvp(result, LU_data_p, LU_data_t, self_t, LU_pivots)
+- name: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor
+  LU: linalg_lu_solve_LU(grad, LU, pivots, result, left, adjoint)
+  B: "at::linalg_lu_solve(LU, pivots, grad, left, !adjoint)"
+  result: linalg_lu_solve_jvp(result, LU_p, pivots, LU_t, B_t, left, adjoint)
 
 - name: lu_unpack(Tensor LU_data, Tensor LU_pivots, bool unpack_data=True, bool unpack_pivots=True) -> (Tensor P, Tensor L, Tensor U)
   LU_data: lu_unpack_backward(grad_L, grad_U, LU_data.size(-2), LU_data.size(-1))
@@ -1030,11 +1032,11 @@
   result: other_t + (self_p > other_p).logical_or_(other_p.isnan()) * (self_t - other_t)
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
-  self: grad.expand(self.sizes()).to(self.scalar_type()) / self.numel()
+  self: grad.expand(self.sizes()) / self.numel()
   result: auto_linear
 
 - name: mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
-  self: sum_backward(grad, self.sizes(), dim, keepdim).to(self.scalar_type()) / _safe_size(self.sizes(), dim)
+  self: mean_backward(grad, self.sizes(), dim, self.numel(), keepdim)
   result: auto_linear
 
 - name: median(Tensor self) -> Tensor
@@ -1087,9 +1089,11 @@
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
+  result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
 - name: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
+  result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
   self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), self.layout(), 1)
@@ -1384,8 +1388,11 @@
   result: auto_element_wise
 
 - name: sgn(Tensor self) -> Tensor
-  self: sgn_backward(result, grad, self)
-  result: auto_element_wise
+  self: sgn_backward(self, grad, result)
+  # Cannot use auto_element_wise here because the Jacobian is *not* Hermitian (in fact, it is symmetric)
+  # The function is not holomorphic, so there's no reason for its Jacobian to be Hermitian
+  # auto_element_wise has a name that's a bit deceiving in the complex case
+  result: sgn_backward(self_p, self_t, result)
 
 - name: sin(Tensor self) -> Tensor
   self: grad * self.cos().conj()
@@ -1436,10 +1443,10 @@
   self: slogdet_backward(grad, self, sign, logabsdet)
   output_differentiability: [false, true]
 
-- name: linalg_solve(Tensor input, Tensor other) -> Tensor
-  input: solve_backward_A(grad, other, input, result)
-  other: solve_backward_self(grad, other, input)
-  result: solve_jvp(result, input_p, input_t, other_t)
+- name: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+  A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
+  result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
+  output_differentiability: [True, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
@@ -1489,10 +1496,14 @@
 
 - name: std.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
   self: std_backward(result, grad, self, dim, correction, keepdim)
-  result: handle_r_to_c(result.scalar_type(), var_jvp(self_t, self_p, result, dim, correction, keepdim) / (2 * result))
+  # pointwise (variance) + sum + sqrt
+  result: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result)).masked_fill_(result == 0, 0)
 
 - name: std_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, true)
+  self: std_mean_backward(grads[0], grads[1], self, result0, dim, correction, keepdim)
+  result0: (at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim)) / (2. * result0)).masked_fill_(result0 == 0, 0)
+  # linear
+  result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
 - name: sub.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   self: handle_r_to_c(self.scalar_type(), grad)
@@ -1522,6 +1533,7 @@
 
 - name: nansum(Tensor self, int[1] dim=[], bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   self: nansum_backward(grad.to(self.scalar_type()), self, dim, keepdim)
+  result: at::where(self_p.isnan(), 0, self_t).sum(dim, keepdim, dtype)
 
 # We never call _linalg_svd with compute_uv=False in an autograd context, so we don't even consider it here
 - name: _linalg_svd(Tensor A, bool full_matrices=False, bool compute_uv=True, *, str? driver=None) -> (Tensor U, Tensor S, Tensor Vh)
@@ -1536,9 +1548,9 @@
 - name: symeig(Tensor self, bool eigenvectors=False, bool upper=True) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors_return, /*is_hermitian=*/true, /*symeig_eigenvector=*/eigenvectors)
 
-- name: linalg_eigh(Tensor self, str UPLO="L") -> (Tensor eigenvalues, Tensor eigenvectors)
-  self: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/true)
-  eigenvalues, eigenvectors: linalg_eig_jvp(self_t, eigenvalues, eigenvectors, /*is_hermitian=*/true)
+- name: _linalg_eigh(Tensor A, str UPLO="L", bool compute_v=True) -> (Tensor eigenvalues, Tensor eigenvectors)
+  A: linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/true)
+  eigenvalues, eigenvectors: linalg_eig_jvp(A_t, eigenvalues, eigenvectors, /*is_hermitian=*/true)
 
 - name: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   self: handle_r_to_c(self.scalar_type(), linalg_eig_backward(grads[0], grads[1], eigenvalues, eigenvectors, /*is_hermitian=*/false))
@@ -1683,10 +1695,14 @@
 
 - name: var.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> Tensor
   self: var_backward(grad, self, dim, correction, keepdim)
-  result: handle_r_to_c(result.scalar_type(), var_jvp(self_t, self_p, result, dim, correction, keepdim))
+  # pointwise + sum
+  result: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
 
 - name: var_mean.correction(Tensor self, int[1]? dim, *, int? correction, bool keepdim=False) -> (Tensor, Tensor)
-  self: var_std_mean_backward(grads, self, result0, result1, dim, correction, keepdim, false)
+  self: var_mean_backward(grads[0], grads[1], self, dim, correction, keepdim)
+  result0: at::real(var_backward(self_t.conj(), self_p, dim, correction, true).sum(dim.value_or(IntArrayRef({})), keepdim))
+  # linear
+  result1: mean(self_t, dim.value_or(IntArrayRef({})), keepdim)
 
 - name: view(Tensor(a) self, int[] size) -> Tensor(a)
   self: grad.reshape(self.sizes())
@@ -1786,6 +1802,7 @@
 - name: embedding_dense_backward(Tensor grad_output, Tensor indices, int num_weights, int padding_idx, bool scale_grad_by_freq) -> Tensor
   grad_output: embedding_dense_double_backward(grad, indices, padding_idx)
   indices: non_differentiable
+  result: auto_linear
 
 - name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False, int padding_idx=-1) -> (Tensor, Tensor, Tensor, Tensor)
   indices: non_differentiable
@@ -1807,11 +1824,6 @@
   self: kl_div_backward(grad, self, target, reduction, log_target)
   target: kl_div_target_backward(grad, self, target, reduction, log_target)
   result: apply_loss_reduction(kl_div_backward(self_t, self_p, target_p, at::Reduction::None, log_target) +  kl_div_target_backward(target_t, self_p, target_p, at::Reduction::None, log_target), reduction)
-
-- name: l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
-  self: l1_loss_backward(grad, self, target, reduction)
-  target: l1_loss_backward(grad, target, self, reduction)
-  result: apply_loss_reduction(l1_loss_backward(self_t.conj(), self_p, target_p, at::Reduction::None).conj() + l1_loss_backward(target_t.conj(), target_p, self_p, at::Reduction::None).conj(), reduction)
 
 - name: mse_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor
   self: mse_loss_backward(grad, self, target, reduction)
@@ -2293,16 +2305,6 @@
   self: zeros_like(grad)
   target: zeros_like(grad)
 
-- name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, int reduction) -> Tensor
-  grad_output: l1_loss_double_backward_grad_output(grad, grad_output, self, target, reduction)
-  self: l1_loss_double_backward(grad, grad_output, self, target, reduction)
-  target: l1_loss_double_backward(grad, grad_output, target, target, reduction)
-  result: "self_p.is_complex()
-          ?  l1_loss_double_backward_grad_output(grad_output_t, grad_output_p, self_p, target_p, reduction)
-           + l1_loss_double_backward(self_t, grad_output_p, self_p, target_p, reduction)
-           + l1_loss_double_backward(target_t, grad_output_p, target_p, target_p, reduction)
-          : l1_loss_double_backward_grad_output(grad_output_t, grad_output_p, self_p, target_p, reduction)"
-
 - name: log_sigmoid_backward(Tensor grad_output, Tensor self, Tensor buffer) -> Tensor
   grad_output: log_sigmoid_backward(grad, self, buffer)
   self: log_sigmoid_double_backward(grad * grad_output, self)
@@ -2665,6 +2667,22 @@
 - name: _mkldnn_reshape(Tensor self, int[] shape) -> Tensor
   self: grad.reshape(self.sizes())
 
+# Nested Tensor
+- name: nested_tensor(Tensor[] list, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
+  list: "grad.defined()? at::unbind(grad) : std::vector<Tensor>(list.size())"
+
+- name: _nested_tensor_from_mask(Tensor t, Tensor mask) -> Tensor
+  t: grad.to_padded_tensor(0, t.sizes())
+  mask: non_differentiable
+
+- name: _nested_from_padded(Tensor padded, Tensor cpu_nested_shape_example, bool fuse_transform_0213=False) -> Tensor
+  padded: _nested_from_padded_backward(grad, padded, fuse_transform_0213)
+  cpu_nested_shape_example: non_differentiable
+
+- name: to_padded_tensor(Tensor self, float padding, int[]? output_size=None) -> Tensor
+  self: at::_nested_from_padded(grad, self._nested_tensor_size())
+  padding: non_differentiable
+
 # fft
 - name: _fft_r2c(Tensor self, int[] dim, int normalization, bool onesided) -> Tensor
   self: fft_r2c_backward(grad, dim, normalization, onesided, self.size(dim.back()))
@@ -2744,8 +2762,8 @@
 - name: nonzero(Tensor self) -> Tensor
   output_differentiability: [False]
 
-- name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
-  data: _segment_reduce_backward(grad, result, data, reduce, lengths)
+- name: segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor
+  data: _segment_reduce_backward(grad, result, data, reduce, lengths, offsets, axis, initial)
 
 - name: _pin_memory(Tensor self, Device? device=None) -> Tensor
   self: grad
@@ -2779,6 +2797,9 @@
 - name: scatter_reduce.two(Tensor self, int dim, Tensor index, Tensor src, str reduce, *, bool include_self=True) -> Tensor
   self, src: scatter_reduce_backward(grad, self, dim, index, src, reduce, include_self, result)
   index: non_differentiable
+
+- name: special_airy_ai(Tensor x) -> Tensor
+  x: non_differentiable
 
 - name: special_bessel_j0(Tensor self) -> Tensor
   self: non_differentiable
@@ -2830,6 +2851,9 @@
   n: non_differentiable
 
 - name: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_gamma(Tensor x) -> Tensor
   x: non_differentiable
 
 - name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
@@ -2884,6 +2908,9 @@
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
   self: non_differentiable
 
+- name: special_scaled_modified_bessel_k1(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_shifted_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
   x: non_differentiable
   n: non_differentiable
@@ -2922,4 +2949,7 @@
   n: non_differentiable
 
 - name: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_spherical_bessel_j0(Tensor x) -> Tensor
   x: non_differentiable

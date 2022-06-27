@@ -3,7 +3,8 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from typing import Iterable, List, Tuple, Union, Optional, Dict, Any
+from typing import  Any, Dict, Iterable, List, Set, Tuple, Union, Optional
+
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
@@ -104,6 +105,25 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
         )
 
 
+# Deprecated function names and its corresponding DataPipe type and kwargs for the `_deprecation_warning` function
+_iter_deprecated_functional_names: Dict[str, Dict] = {"open_file_by_fsspec":
+                                                      {"old_class_name": "FSSpecFileOpener",
+                                                       "deprecation_version": "0.4.0",
+                                                       "removal_version": "0.6.0",
+                                                       "old_functional_name": "open_file_by_fsspec",
+                                                       "new_functional_name": "open_files_by_fsspec",
+                                                       "deprecate_functional_name_only": True},
+                                                      "open_file_by_iopath":
+                                                      {"old_class_name": "IoPathFileOpener",
+                                                       "deprecation_version": "0.4.0",
+                                                       "removal_version": "0.6.0",
+                                                       "old_functional_name": "open_file_by_iopath",
+                                                       "new_functional_name": "open_files_by_iopath",
+                                                       "deprecate_functional_name_only": True}}
+
+_map_deprecated_functional_names: Dict[str, Dict] = {}
+
+
 def _deprecation_warning(
     old_class_name: str,
     *,
@@ -114,6 +134,7 @@ def _deprecation_warning(
     new_class_name: str = "",
     new_functional_name: str = "",
     new_argument_name: str = "",
+    deprecate_functional_name_only: bool = False,
 ) -> None:
     if new_functional_name and not old_functional_name:
         raise ValueError("Old functional API needs to be specified for the deprecation warning.")
@@ -124,7 +145,9 @@ def _deprecation_warning(
         raise ValueError("Deprecating warning for functional API and argument should be separated.")
 
     msg = f"`{old_class_name}()`"
-    if old_functional_name:
+    if deprecate_functional_name_only and old_functional_name:
+        msg = f"{msg}'s functional API `.{old_functional_name}()` is"
+    elif old_functional_name:
         msg = f"{msg} and its functional API `.{old_functional_name}()` are"
     elif old_argument_name:
         msg = f"The argument `{old_argument_name}` of {msg} is"
@@ -157,7 +180,7 @@ class StreamWrapper:
     DataPipe operation like `FileOpener`. StreamWrapper would guarantee
     the wrapped file handler is closed when it's out of scope.
     '''
-    session_streams: Dict[Any, int] = {}
+    session_streams: Set[Any] = {}
 
     def __init__(self, file_obj, parent_stream=None, name=None):
         self.file_obj = file_obj
@@ -170,7 +193,7 @@ class StreamWrapper:
                 raise RuntimeError('Parent steam should be StreamWrapper, {} was given'.format(type(parent_stream)))
             parent_stream.child_counter += 1
             self.parent_stream = parent_stream
-        StreamWrapper.session_streams[self] = 1
+        StreamWrapper.session_streams.update(self)
 
     @classmethod
     def close_streams(cls, v, depth=0):
@@ -184,10 +207,10 @@ class StreamWrapper:
         else:
             # Traverve only simple structures
             if isinstance(v, dict):
-                for vv in v.items():
+                for kk, vv in v.items():
                     cls.close_streams(vv, depth=depth + 1)
             elif isinstance(v, list) or isinstance(v, tuple):
-                for kk, vv in v:
+                for vv in v:
                     cls.close_streams(vv, depth=depth + 1)
 
     def __getattr__(self, name):
@@ -195,7 +218,7 @@ class StreamWrapper:
         return getattr(file_obj, name)
 
     def close(self, *args, **kwargs):
-        del StreamWrapper.session_streams[self]
+        StreamWrapper.session_streams.remove(self)
         if self.parent_stream is not None:
             self.parent_stream.child_counter -= 1
             if not self.parent_stream.child_counter and self.parent_stream.close_on_last_child:

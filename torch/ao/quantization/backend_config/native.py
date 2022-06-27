@@ -117,7 +117,7 @@ _DEFAULT_OP_INT8_CONFIGS = [
         torch.nn.functional.layer_norm,
     ]]
 
-def _get_fixed_qparams_op_configs():
+def _get_fixed_qparams_op_configs(dtype_configs):
     fixed_qparams_op_configs = []
     for fixed_qparam_op, output_observer in [
             (torch.nn.Hardsigmoid, default_fixed_qparams_range_0to1_observer),
@@ -145,10 +145,7 @@ def _get_fixed_qparams_op_configs():
             # everything to use backend_config_dict
             "_overwrite_output_fake_quantizer": FixedQParamsFakeQuantize.with_args(observer=output_observer),
             "_overwrite_output_observer": output_observer,
-            "dtype_configs": [
-                weighted_op_int8_dtype_config,
-                default_op_fp16_dtype_config,
-            ],
+            "dtype_configs": dtype_configs,
         })
     return fixed_qparams_op_configs
 
@@ -250,14 +247,16 @@ def _get_embedding_op_configs():
         })
     return embedding_op_configs
 
-def get_native_backend_config_dict():
-    """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
+def get_test_only_legacy_native_backend_config_dict():
+    """
+    This is a backend configuration for the union of fbgemm/qnnpack
+    and various additional fp16 ops.
+    """
     conv_dtype_configs = [weighted_op_int8_dtype_config]
     linear_dtype_configs = [
         weighted_op_int8_dtype_config,
         default_dynamic_int8_dtype_config,
         default_dynamic_float16_dtype_config,
-        # TODO: maybe remove this since fbgemm/qnnpack doesn't have kernels for it
         default_op_fp16_dtype_config,
     ]
     binary_op_dtype_configs = [
@@ -268,6 +267,44 @@ def get_native_backend_config_dict():
         default_op_quint8_dtype_config,
         default_op_fp16_dtype_config
     ]
+    fixed_qparams_op_dtype_configs = [
+        weighted_op_int8_dtype_config,
+        default_op_fp16_dtype_config,
+    ]
+    return {
+        # optional
+        "name": "_native_and_fp16",
+        "configs": [
+            *_DEFAULT_OP_INT8_CONFIGS,
+            *_get_linear_configs(linear_dtype_configs),
+            *_get_conv_configs(conv_dtype_configs),
+            *_get_binary_op_configs(binary_op_dtype_configs),
+            *_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs),
+            _CAT_CONFIG,
+            *_get_bn_configs(),
+            *_get_share_qparams_op_configs(share_qparams_op_dtype_configs),
+            *_get_rnn_op_configs(),
+            *_get_embedding_op_configs(),
+        ],
+    }
+
+def get_native_backend_config_dict():
+    """ Get backend_config_dict for PyTorch Native backend (fbgemm/qnnpack). """
+    conv_dtype_configs = [weighted_op_int8_dtype_config]
+    linear_dtype_configs = [
+        weighted_op_int8_dtype_config,
+        default_dynamic_int8_dtype_config,
+        default_dynamic_float16_dtype_config,
+    ]
+    binary_op_dtype_configs = [
+        weighted_op_int8_dtype_config,
+    ]
+    share_qparams_op_dtype_configs = [
+        default_op_quint8_dtype_config,
+    ]
+    fixed_qparams_op_dtype_configs = [
+        weighted_op_int8_dtype_config,
+    ]
     return {
         # optional
         "name": "native",
@@ -276,7 +313,7 @@ def get_native_backend_config_dict():
             *_get_linear_configs(linear_dtype_configs),
             *_get_conv_configs(conv_dtype_configs),
             *_get_binary_op_configs(binary_op_dtype_configs),
-            *_get_fixed_qparams_op_configs(),
+            *_get_fixed_qparams_op_configs(fixed_qparams_op_dtype_configs),
             _CAT_CONFIG,
             *_get_bn_configs(),
             *_get_share_qparams_op_configs(share_qparams_op_dtype_configs),
@@ -286,5 +323,6 @@ def get_native_backend_config_dict():
     }
 
 __all__ = [
+    "get_test_only_legacy_native_backend_config_dict",
     "get_native_backend_config_dict",
 ]

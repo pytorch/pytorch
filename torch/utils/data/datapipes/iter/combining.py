@@ -512,16 +512,17 @@ class ZipperIterDataPipe(IterDataPipe[Tuple[T_co]]):
 
     def __iter__(self) -> Iterator[Tuple[T_co]]:
         iterators = [iter(datapipe) for datapipe in self.datapipes]
-        for data in zip(*iterators):
-            yield data
+        try:
+            for data in zip(*iterators):
+                yield data
+        finally:
+            unused = []
+            for iterator in iterators:
+                unused += list(iterator)
 
-        unused = []
-        for iterator in iterators:
-            unused += list(iterator)
-
-        # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
-        for item in unused:
-            StreamWrapper.close_streams(item)
+            # TODO(VitalyFedyunin): This should be Exception or warning when torchdata.debug is enabled
+            for item in unused:
+                StreamWrapper.close_streams(item)
 
     def __len__(self) -> int:
         if self.length is not None:
