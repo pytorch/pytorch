@@ -173,13 +173,13 @@ TensorImpl::TensorImpl(
     // grad.
     //       See Note [Dream: skip VariableType kernel when requires_grad=false]
 
-    // [Note: Nested Tensor Autograd] The Nested Tensor key is a functionality key and therefore
-    // getAutogradRelatedKeySetFromBackend will return the wrong autograd key
-    // For this specific impl we make sure to register the correct Autograd key
-    if (key_set.has_any(c10::DispatchKeySet{c10::DispatchKey::NestedTensor})){
+    // [Note: Nested Tensor Autograd] The Nested Tensor key is a functionality
+    // key and therefore getAutogradRelatedKeySetFromBackend will return the
+    // wrong autograd key For this specific impl we make sure to register the
+    // correct Autograd key
+    if (key_set.has_any(c10::DispatchKeySet{c10::DispatchKey::NestedTensor})) {
       key_set_ = key_set | inplace_or_view_ks | autograd_nested;
-    }
-    else{
+    } else {
       key_set_ = key_set | getAutogradRelatedKeySetFromBackend(k);
     }
   }
