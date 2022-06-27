@@ -307,7 +307,7 @@ class DynamicStaticDetector(DetectorBase):
 
         for fqn, module in prepared_fx_model.named_modules():
             # make sure module is supported
-            if self._get_is_supported(module, insert=True):
+            if self._is_supported(module, insert=True):
                 # if it's a supported type, we want to get node and add observer insert locations
                 targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
 
@@ -337,7 +337,7 @@ class DynamicStaticDetector(DetectorBase):
         r""" returns the string name of this detector"""
         return "dynamic_vs_static_detector"
 
-    def _get_is_supported(self, module: nn.Module, insert: bool = False) -> bool:
+    def _is_supported(self, module: nn.Module, insert: bool = False) -> bool:
         r"""Returns whether the given module is supported for observers
 
         Args
@@ -383,7 +383,7 @@ class DynamicStaticDetector(DetectorBase):
         # loop through all submodules included nested ones
         for fqn, module in model.named_modules():
             # if module is Linear has the ModelReportObserver attached to it
-            if self._get_is_supported(module):
+            if self._is_supported(module):
                 # get pre and post observers for the module
                 pre_obs = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
                 post_obs = getattr(module, self.DEFAULT_POST_OBSERVER_NAME)
@@ -586,7 +586,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         self.ratio_threshold: float = ratio_threshold
         self.ch_axis: int = ch_axis
 
-    def _get_is_supported(self, module: nn.Module, insert: bool = False) -> bool:
+    def _is_supported(self, module: nn.Module, insert: bool = False) -> bool:
         r"""Returns whether the given module is supported for observers
 
         Args
@@ -632,7 +632,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         for fqn, module in prepared_fx_model.named_modules():
             # check to see if module is of a supported type
-            if self._get_is_supported(module, insert=True):
+            if self._is_supported(module, insert=True):
                 # if it's a supported type, we want to get node and add observer insert locations
                 targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
 
@@ -672,7 +672,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         for fqn, module in model.named_modules():
             # if module is supported and it has a pre-observer
-            if self._get_is_supported(module):
+            if self._is_supported(module):
                 # get pre observer for the module
                 pre_obs = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
 
@@ -704,7 +704,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         for fqn, module in model.named_modules():
             # if module is supported and it has a pre-observer
-            if self._get_is_supported(module):
+            if self._is_supported(module):
                 # we don't need actual observer, just the module weights
                 # calculate min and max vals
                 min_val, max_val = torch.aminmax(module.weight, dim=self.ch_axis)
