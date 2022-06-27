@@ -55,6 +55,7 @@ __all__ = [
     "bitwise_not",
     "cbrt",
     "ceil",
+    "conj_physical",
     "digamma",
     "erf",
     "erf_inv",
@@ -121,6 +122,7 @@ __all__ = [
     "as_strided",
     "broadcast_in_dim",
     "collapse_view",
+    "conj",
     "expand_dims",
     "slice",
     "slice_in_dim",  # implemented using slice -- make this a ref?
@@ -607,6 +609,22 @@ ceil = _make_elementwise_unary_prim(
     impl_nvfuser=_ceil_nvfuser,  # type: ignore[name-defined]
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+def _conj_physical_meta(input: TensorLikeType):
+    if not input.dtype.is_complex:
+        raise RuntimeError("prims.conj_physical is only defined for complex dtypes")
+
+    strides = utils.compute_elementwise_output_strides(input)
+    return TensorMeta(input, strides=strides)
+
+
+conj_physical = _make_prim(
+    schema="conj_physical(Tensor self) -> Tensor",
+    meta=_conj_physical_meta,
+    impl_aten=torch._conj_physical,
+    doc="Returns the physical conjugation of a complex tensor",
+    return_type=RETURN_TYPE.NEW,
 )
 
 digamma = _make_elementwise_unary_prim(
@@ -1354,6 +1372,23 @@ collapse_view = _make_prim(
     doc=_collapse_view_doc,
 )
 
+
+def _conj_meta(a: TensorLikeType) -> TensorLikeType:
+    if not a.dtype.is_complex:
+        raise RuntimeError("Expected complex dtype in prims.conj")
+    return TensorMeta(a)
+
+_conj_doc = """
+Returns a conjugated view of the original tensor
+"""
+
+conj = _make_prim(
+    schema="conj(Tensor(a) a) -> Tensor(a)",
+    meta=_conj_meta,
+    impl_aten=torch.conj,
+    return_type=RETURN_TYPE.VIEW,
+    doc=_conj_doc,
+)
 
 def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeType:
     """
@@ -2484,12 +2519,12 @@ def _fft_r2c_meta(
     dim: DimsSequenceType,
     onesided: bool,
 ) -> TensorLikeType:
-    shape = input.shape()
+    shape = list(input.shape)
     if onesided:
         last_dim = dim[-1]
         shape[last_dim] = shape[last_dim] // 2 + 1
 
-    dtype = utils.to_complex_type(input.dtype)
+    dtype = utils.corresponding_complex_dtype(input.dtype)
     # TODO: Actual result strides may differ, is that okay?
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=input.device)
@@ -2511,7 +2546,7 @@ _fft_r2c_doc = """
 
 
 fft_r2c = _make_prim(
-    schema="fft_r2c(Tensor input, *, int[] dim, bool onesided) -> Tensor",
+    schema="fft_r2c(Tensor self, *, int[] dim, bool onesided) -> Tensor",
     meta=_fft_r2c_meta,
     impl_aten=_fft_r2c_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2525,7 +2560,7 @@ def _fft_c2c_meta(
     dim: DimsSequenceType,
     forward: bool,
 ) -> TensorLikeType:
-    shape = input.shape()
+    shape = input.shape
     # TODO: Actual result strides may differ, is that okay?
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(
@@ -2549,7 +2584,7 @@ _fft_c2c_doc = """
 
 
 fft_c2c = _make_prim(
-    schema="fft_c2c(Tensor input, *, int[] dim, bool forward) -> Tensor",
+    schema="fft_c2c(Tensor self, *, int[] dim, bool forward) -> Tensor",
     meta=_fft_c2c_meta,
     impl_aten=_fft_c2c_aten,
     return_type=RETURN_TYPE.NEW,
@@ -2563,9 +2598,9 @@ def _fft_c2r_meta(
     dim: DimsSequenceType,
     last_dim_size: int,
 ) -> TensorLikeType:
-    shape = input.shape()
+    shape = list(input.shape)
     shape[dim[-1]] = last_dim_size
-    dtype = utils.to_real_type(input.dtype)
+    dtype = utils.corresponding_real_dtype(input.dtype)
     # TODO: Actual result strides may differ, is that okay?
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=input.device)
@@ -2587,7 +2622,7 @@ _fft_c2r_doc = """
 
 
 fft_c2r = _make_prim(
-    schema="fft_c2r(Tensor input, *, int[] dim, int last_dim_size) -> Tensor",
+    schema="fft_c2r(Tensor self, *, int[] dim, int last_dim_size) -> Tensor",
     meta=_fft_c2r_meta,
     impl_aten=_fft_c2r_aten,
     return_type=RETURN_TYPE.NEW,
