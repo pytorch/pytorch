@@ -39,7 +39,7 @@ jobs:
         ]}
 
   linux-docs:
-    if: false
+    if: false # https://github.com/pytorch/pytorch/issues/80312
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
     needs: linux-focal-py3_7-gcc7-build
