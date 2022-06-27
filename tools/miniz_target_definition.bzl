@@ -5,13 +5,13 @@ def add_miniz_lib():
     cpp_library(
         name = "miniz",
         srcs = [
-            "third_party/miniz-2.0.8/fb/FollyCrcPlugin.cpp",
-            "third_party/miniz-2.0.8/fb/miniz-fb.c",
+            "third_party/miniz-2.1.0/fb/FollyCrcPlugin.cpp",
+            "third_party/miniz-2.1.0/fb/miniz-fb.c",
         ],
         headers = {
-            "caffe2/third_party/miniz-2.0.8/miniz.c": "third_party/miniz-2.0.8/miniz.c",
-            "miniz-fb.h": "third_party/miniz-2.0.8/fb/miniz-fb.h",
-            "miniz.h": "third_party/miniz-2.0.8/miniz.h",
+            "caffe2/third_party/miniz-2.1.0/miniz.c": "third_party/miniz-2.1.0/miniz.c",
+            "miniz-fb.h": "third_party/miniz-2.1.0/fb/miniz-fb.h",
+            "miniz.h": "third_party/miniz-2.1.0/miniz.h",
         },
         header_namespace = "",
         # -fexceptions is required, otherwise, when we use @mode/opt-clang-thinlto,
