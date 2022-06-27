@@ -167,6 +167,10 @@ void OptimizeGraph(
         graph,
         fromQualString("fb::sigrid_transforms_torch_bind"),
         fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
+    UseVariadicOp(
+      graph,
+      fromQualString("torcharrow::inference_wrapper_run_flat"),
+      fromQualString("torcharrow::variadic_inference_wrapper_run_flat"));
     // These fused ops only have out variants - we can't do the fusion when
     // out variants are disabled.
     FuseSignLog1P(graph);

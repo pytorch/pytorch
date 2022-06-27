@@ -847,8 +847,17 @@ bool shouldNotFuseListUnpackSpecialCase(const Node* node) {
           node->kind()) == sigrid_transforms_symbols.end()) {
     return false;
   }
+  const static std::array<c10::Symbol, 2> torcharrow_inference_op_symbols{
+      c10::Symbol::fromQualString(
+          "torcharrow::variadic_inference_wrapper_run_flat"),
+      c10::Symbol::fromQualString("torcharrow::inference_wrapper_run_flat")};
 
-
+  if (std::find(
+          torcharrow_inference_op_symbols.begin(),
+          torcharrow_inference_op_symbols.end(),
+          node->kind()) == torcharrow_inference_op_symbols.end()) {
+    return false;
+  }
 
   // To fuse with sigrid transforms, we must be able to statically determine
   // `instance` and `use_offsets` - these two together let us statically
@@ -874,6 +883,9 @@ void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph) {
       OP_PAIR(
           "torcharrow::inference_wrapper_run_flat",
           "static_runtime::fused_inference_wrapper_run_flat"),
+      OP_PAIR(
+          "torcharrow::variadic_inference_wrapper_run_flat",
+          "static_runtime::fused_variadic_inference_wrapper_run_flat"),
       OP_PAIR("fb::equally_split", "static_runtime::fused_equally_split"),
       OP_PAIR(
           "fb::sigrid_transforms", "static_runtime::fused_sigrid_transforms"),
