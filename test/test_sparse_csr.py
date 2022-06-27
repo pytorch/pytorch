@@ -192,7 +192,7 @@ class TestSparseCompressed(TestCase):
                 shape = shape[:basedim] + (shape[basedim + 1] * blocksize[1], shape[basedim] * blocksize[0]) + shape[basedim + 2:]
             elif layout is torch.sparse_bsr:
                 shape = shape[:basedim] + (shape[basedim] * blocksize[0], shape[basedim + 1] * blocksize[1]) + shape[basedim + 2:]
-            return shape        
+            return shape
 
         def values(lst, basedim=0, blocksize=(1, 1), device=device, dtype=dtype):
             # Below, we define values for non-blocked tensors. To
