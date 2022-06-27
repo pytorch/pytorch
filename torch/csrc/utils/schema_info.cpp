@@ -90,19 +90,30 @@ bool SchemaInfo::areAliasing(
            rhs.index >= 0),
       "Invalid index for schema.");
 
-  const c10::AliasInfo* lhsAliasInfo =
-      schema_.arguments()[lhs.index].alias_info();
-  const c10::AliasInfo* rhsAliasInfo =
-      schema_.arguments()[rhs.index].alias_info();
+  const c10::Argument lhsArg = schema_.arguments()[lhs.index];
+  const c10::Argument rhsArg = schema_.arguments()[rhs.index];
 
-  if ((lhsAliasInfo && lhsAliasInfo->isWildcardAfter()) ||
-      (rhsAliasInfo && rhsAliasInfo->isWildcardAfter())) {
-    return true;
+  if (lhsArg.alias_info() && lhsArg.alias_info()->isWildcardAfter() &&
+      rhsArg.alias_info() && rhsArg.alias_info()->isWildcardAfter()) {
+    if (lhsArg.type()->kind() == rhsArg.type()->kind()) {
+      return true;
+    } else {
+      for (const auto& type : lhsArg.type()->containedTypes()) {
+        if (type->kind() == rhsArg.type()->kind()) {
+          return true;
+        }
+      }
+      for (const auto& type : rhsArg.type()->containedTypes()) {
+        if (type->kind() == lhsArg.type()->kind()) {
+          return true;
+        }
+      }
+    }
   }
 
-  if (lhsAliasInfo && rhsAliasInfo) {
-    for (const auto& lhsSet : lhsAliasInfo->afterSets()) {
-      for (const auto& rhsSet : rhsAliasInfo->afterSets()) {
+  if (lhsArg.alias_info() && rhsArg.alias_info()) {
+    for (const auto& lhsSet : lhsArg.alias_info()->afterSets()) {
+      for (const auto& rhsSet : rhsArg.alias_info()->afterSets()) {
         if (lhsSet == rhsSet) {
           return true;
         }

@@ -62,5 +62,11 @@ TEST(SchemaInfoAreAliasingTest, InvalidArgument) {
       c10::Error);
 }
 
+TEST(SchemaInfoAreAliasingTest, Wildcard) {
+  SchemaInfo schema_info(
+      "aten::split.Tensor(Tensor(a -> *) self, int split_size, int dim=0) -> Tensor(a)[]");
+  ASSERT_TRUE(schema_info.areAliasing(
+      {SchemaArgType::input, 0}, {SchemaArgType::output, 0}));
+}
 } // namespace utils
 } // namespace torch
