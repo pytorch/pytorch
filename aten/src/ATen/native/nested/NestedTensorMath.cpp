@@ -691,6 +691,98 @@ Tensor clone_nested(
       get_buffer(self).clone(), get_nested_size_tensor(self).clone());
 }
 
+namespace {
+template <typename F>
+Tensor& unary_op_out(F op_out, const Tensor& self, Tensor& result) {
+  TORCH_INTERNAL_ASSERT(self.is_nested());
+  TORCH_INTERNAL_ASSERT(result.is_nested());
+  const Tensor & self_buffer = get_buffer(self);
+  Tensor result_buffer = get_buffer(result);
+  op_out(self_buffer, result_buffer);
+  return result;
+}
+
+template <typename F>
+inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
+  TORCH_INTERNAL_ASSERT(input.is_nested());
+  auto input_ptr = get_nested_tensor_impl(input);
+  const Tensor & input_buffer = input_ptr->get_buffer(),
+                 sizemat = input_ptr->get_nested_size_tensor();
+  Tensor output_buffer = op(input_buffer);
+  return wrap_buffer(output_buffer, sizemat.clone());
+}
+
+template <typename F, typename... Args>
+Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
+  TORCH_INTERNAL_ASSERT(self.is_nested());
+  const Tensor & self_buffer = get_buffer(self);
+  (self_buffer.*op_inplace)(std::forward<Args>(args)...);
+  return self;
+}
+} // namespace
+
+#define CREATE_UNARY_UFUNC_FUNCTIONAL(op_name)                 \
+  Tensor op_name##_nested(const Tensor& self) {            \
+    return get_result_tensor_for_unary_op(&at::op_name, self); \
+  }
+
+#define CREATE_UNARY_UFUNC_OUT(op_name)                                  \
+  Tensor& op_name##_nested_out(const Tensor& self, Tensor& result) { \
+    return unary_op_out(&at::op_name##_outf, self, result);              \
+  }
+
+#define CREATE_UNARY_UFUNC_INPLACE(op_name)             \
+  Tensor& op_name##_nested_(Tensor& self) {         \
+    return unary_op_inplace(self, &Tensor::op_name##_); \
+  }
+
+#define CREATE_UNARY_UFUNC(op_name)       \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name); \
+  CREATE_UNARY_UFUNC_OUT(op_name);        \
+  CREATE_UNARY_UFUNC_INPLACE(op_name);
+
+#define CREATE_UNARY_UFUNC_NO_OUT(op_name) \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);  \
+  CREATE_UNARY_UFUNC_INPLACE(op_name);
+
+#define CREATE_UNARY_UFUNC_NO_INPLACE(op_name) \
+  CREATE_UNARY_UFUNC_FUNCTIONAL(op_name);      \
+  CREATE_UNARY_UFUNC_OUT(op_name);
+
+// Exhaustive list of the unary ufuncs supported by nested tensor
+CREATE_UNARY_UFUNC(abs);
+CREATE_UNARY_UFUNC(asin);
+CREATE_UNARY_UFUNC(asinh);
+CREATE_UNARY_UFUNC(atan);
+CREATE_UNARY_UFUNC(atanh);
+CREATE_UNARY_UFUNC(ceil);
+CREATE_UNARY_UFUNC(conj_physical);
+CREATE_UNARY_UFUNC(erf);
+CREATE_UNARY_UFUNC(erfinv);
+CREATE_UNARY_UFUNC(expm1);
+CREATE_UNARY_UFUNC(floor);
+CREATE_UNARY_UFUNC(log1p);
+CREATE_UNARY_UFUNC(neg);
+CREATE_UNARY_UFUNC(rad2deg);
+CREATE_UNARY_UFUNC(sign);
+CREATE_UNARY_UFUNC(sin);
+CREATE_UNARY_UFUNC(sinh);
+CREATE_UNARY_UFUNC(sgn);
+CREATE_UNARY_UFUNC(sqrt);
+CREATE_UNARY_UFUNC(tan);
+CREATE_UNARY_UFUNC(tanh);
+CREATE_UNARY_UFUNC(trunc);
+
+// these currently do not have an inplace variant
+CREATE_UNARY_UFUNC_NO_INPLACE(angle);
+CREATE_UNARY_UFUNC_NO_INPLACE(isneginf);
+CREATE_UNARY_UFUNC_NO_INPLACE(isposinf);
+CREATE_UNARY_UFUNC_NO_INPLACE(signbit);
+
+// these do not have an inplace nor out variant
+CREATE_UNARY_UFUNC_FUNCTIONAL(isinf);
+CREATE_UNARY_UFUNC_FUNCTIONAL(isnan);
+
 at::Tensor NestedTensor_get_nested_size_tensor(const at::Tensor& self){
   return get_nested_size_tensor(self);
 }

@@ -4,11 +4,13 @@ import torch
 import torch.nn
 import unittest
 from torch.testing._internal.common_device_type import (
+    ops,
     dtypes,
     dtypesIfCUDA,
     instantiate_device_type_tests,
     skipMeta,
 )
+from torch.testing._internal.common_methods_invocations import nested_unary_ufuncs
 from torch.testing._internal.common_utils import TestCase, IS_FBCODE, run_tests, freeze_rng_state
 from torch import nested_tensor
 
@@ -531,6 +533,65 @@ class TestNestedTensorDeviceType(TestCase):
         with self.assertRaisesRegex(RuntimeError, msg):
             nt1.clone(memory_format=torch.channels_last)
 
+    @ops(nested_unary_ufuncs)
+    def test_nested_unary(self, device, dtype, op):
+        samples = op.sample_inputs(device, dtype)
+        tensors = []
+        expects = []
+        for sample in samples:
+            # every underlying tensor must have a same dimension; arbitrarily choose as 2
+            if sample.input.ndim == 2:
+                tensors.append(sample.input)
+                expects.append(op(sample.input))
+        nt = torch.nested_tensor(tensors)
+        expect = torch.nested_tensor(expects)
+        print(expect)
+        print(op(nt))
+        self.nt_equal(expect, op(nt))
+
+    @ops(nested_unary_ufuncs)
+    def test_nested_unary_out(self, device, dtype, op):
+        if not op.supports_out:
+            self.skipTest("Skipped! Out not supported")
+        samples = op.sample_inputs(device, dtype)
+        tensors = []
+        expects = []
+        for sample in samples:
+            # every underlying tensor must have a same dimension; arbitrarily choose as 2
+            if sample.input.ndim == 2:
+                tensors.append(sample.input)
+                expects.append(op(sample.input))
+        nt = torch.nested_tensor(tensors)
+        expect = torch.nested_tensor(expects)
+        actual = expect.clone()
+        op(nt, out=actual)
+        self.nt_equal(expect, actual)
+
+    @ops(nested_unary_ufuncs)
+    def test_nested_unary_inplace(self, device, dtype, op):
+        if op.inplace_variant is None:
+            self.skipTest("Skipped! Inplace variant not supported!")
+        samples = op.sample_inputs(device, dtype)
+        skip = False
+        for sample in samples:
+            if sample.input.is_complex() and op.name == "abs":
+                skip = True
+            if skip:
+                break
+        if skip:
+            self.skipTest("Skipped! Data type & inplace variant combination not supported!")
+        tensors = []
+        expects = []
+        for sample in samples:
+            # every underlying tensor must have a same dimension; arbitrarily choose as 2
+            if sample.input.ndim == 2:
+                tensors.append(sample.input)
+                expects.append(op(sample.input))
+        nt = torch.nested_tensor(tensors)
+        expect = torch.nested_tensor(expects)
+        op.inplace_variant(nt)
+        self.nt_equal(expect, nt)
+
     # cannot test torch.float16 because: RuntimeError: "bernoulli_scalar_cpu_" not implemented for 'Half'
     @dtypes(torch.float, torch.double)
     @torch.inference_mode()
@@ -788,7 +849,6 @@ class TestNestedTensorAutograd(TestCase):
             return c.to_padded_tensor(0)
         data = (a, b, c)
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
-
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
