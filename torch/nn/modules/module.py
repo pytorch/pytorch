@@ -53,7 +53,7 @@ class _WrappedHook:
         if self.with_module:
             module = self.module()
             if module is None:
-                raise RuntimeError("You are trying to call the hook of a dead object!")
+                raise RuntimeError("You are trying to call the hook of a dead Module!")
             return self.hook(module, *args, **kwargs)
         return self.hook(*args, **kwargs)
 
@@ -70,7 +70,7 @@ class _WrappedHook:
 
         if self.with_module:
             if state["module"] is None:
-                raise RuntimeError("You are trying to revive the hook of a dead object!")
+                raise RuntimeError("You are trying to revive the hook of a dead Module!")
             self.module = weakref.ref(state["module"])
 
 
