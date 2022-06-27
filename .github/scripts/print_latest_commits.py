@@ -1,9 +1,17 @@
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, Dict, List, NamedTuple
 from gitutils import _check_output
 
 import rockset  # type: ignore[import]
 import os
 import re
+import sys
+
+
+def eprint(msg: str) -> None:
+    print(msg, file=sys.stderr)
+
+class NotGreenException(Exception):
+    pass
 
 class WorkflowCheck(NamedTuple):
     workflowName: str
@@ -60,7 +68,7 @@ def get_commit_results(commit: str, results: Dict[str, Any]) -> List[Dict[str, A
             )._asdict())
     return workflow_checks
 
-def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
+def checkGreen(commit: str, results: Dict[str, Any]) -> bool:
     workflow_checks = get_commit_results(commit, results)
 
     regex = {
@@ -68,7 +76,6 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
         "trunk": False,
         "lint": False,
         "linux-binary": False,
-        "android-tests": False,
         "windows-binary": False,
     }
 
@@ -78,23 +85,26 @@ def isGreen(commit: str, results: Dict[str, Any]) -> Tuple[bool, str]:
         for required_check in regex:
             if re.match(required_check, workflowName, flags=re.IGNORECASE):
                 if conclusion not in ["success", "skipped"]:
-                    return (False, workflowName + " checks were not successful")
-                else:
-                    regex[required_check] = True
+                    eprint(f"{workflowName} checks were not successful")
+                    return False
+                regex[required_check] = True
         if workflowName in ["periodic", "docker-release-builds"] and conclusion not in ["success", "skipped"]:
-            return (False, workflowName + " checks were not successful")
+            eprint(f"{workflowName} checks were not successful")
+            return False
 
     missing_workflows = [x for x in regex.keys() if not regex[x]]
     if len(missing_workflows) > 0:
-        return (False, "missing required workflows: " + ", ".join(missing_workflows))
+        eprint(f"missing required workflows: {', '.join(missing_workflows)}")
+        return False
 
-    return (True, "")
+    return True
 
 def get_latest_green_commit(commits: List[str], results: Dict[str, Any]) -> Any:
     for commit in commits:
-        if isGreen(commit, results)[0]:
+        eprint(f"Checking commit {commit}")
+        if checkGreen(commit, results):
+            eprint("GREEN")
             return commit
-    return None
 
 def main() -> None:
     rs = rockset.Client(
