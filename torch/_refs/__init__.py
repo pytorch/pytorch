@@ -53,6 +53,7 @@ __all__ = [
     "bitwise_not",
     # "cbrt",  # No corresponding torch operation
     "ceil",
+    "conj_physical",
     "cos",
     "cosh",
     "digamma",
@@ -183,6 +184,7 @@ __all__ = [
     "cat",
     "chunk",
     "column_stack",
+    "conj",
     "dsplit",
     "dstack",
     "flatten",
@@ -381,6 +383,13 @@ def bitwise_not(a):
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
 def ceil(a):
     return prims.ceil(a)
+
+
+@out_wrapper
+def conj_physical(input: TensorLikeType):
+    if not input.dtype.is_complex:
+        return input
+    return prims.conj_physical(input)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
@@ -1756,6 +1765,14 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
         for x in tensors
     )
     return cat(aligned_tensors, 1)
+
+
+def conj(input: TensorLikeType) -> TensorLikeType:
+    if not input.dtype.is_complex:
+        return input
+    if input.is_sparse:
+        return prims.conj_physical(input)
+    return prims.conj(input)
 
 
 @out_wrapper
