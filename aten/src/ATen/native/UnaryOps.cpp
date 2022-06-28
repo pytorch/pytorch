@@ -80,6 +80,7 @@ CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_i0)
 CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_i1)
 CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_k0)
 CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_k1)
+CREATE_UNARY_FLOAT_META_FUNC(special_scaled_modified_bessel_k1)
 
 TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
@@ -208,6 +209,7 @@ CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_i0_out, special_modified_be
 CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_i1_out, special_modified_bessel_i1_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_k0_out, special_modified_bessel_k0_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_k1_out, special_modified_bessel_k1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k1_out, special_scaled_modified_bessel_k1_stub)
 
 TORCH_IMPL_FUNC(round_decimals_out)
 (const Tensor& self, int64_t decimals, const Tensor& result) {
@@ -890,6 +892,7 @@ DEFINE_DISPATCH(special_modified_bessel_i0_stub); // NOLINT(cppcoreguidelines-av
 DEFINE_DISPATCH(special_modified_bessel_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_modified_bessel_k0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(special_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_scaled_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 } // namespace native
 } // namespace at
