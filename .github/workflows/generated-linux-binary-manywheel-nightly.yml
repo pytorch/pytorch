@@ -94,24 +94,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cpu-build
@@ -200,24 +186,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -279,23 +251,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -352,24 +309,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda10_2-build
@@ -470,24 +413,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-cuda10_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -550,23 +479,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -623,24 +537,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_3-build
@@ -741,24 +641,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-cuda11_3-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -821,23 +707,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -894,24 +765,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-cuda11_6-build
@@ -1012,24 +869,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-cuda11_6-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1092,23 +935,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_7-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -1165,24 +993,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_0-build
@@ -1376,23 +1190,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_7-rocm5_1_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -1449,24 +1248,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_7-rocm5_1_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_7-rocm5_1_1-build
@@ -1660,23 +1445,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -1731,24 +1501,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cpu-build
@@ -1837,24 +1593,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1916,23 +1658,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_8-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -1989,24 +1716,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda10_2-build
@@ -2107,24 +1820,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-cuda10_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2187,23 +1886,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -2260,24 +1944,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_3-build
@@ -2378,24 +2048,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-cuda11_3-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2458,23 +2114,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_8-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -2531,24 +2172,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-cuda11_6-build
@@ -2649,24 +2276,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-cuda11_6-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2729,23 +2342,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_8-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -2802,24 +2400,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_0-build
@@ -3013,23 +2597,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_8-rocm5_1_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -3086,24 +2655,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_8-rocm5_1_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_8-rocm5_1_1-build
@@ -3297,23 +2852,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -3368,24 +2908,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cpu-build
@@ -3474,24 +3000,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3553,23 +3065,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_9-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -3626,24 +3123,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda10_2-build
@@ -3744,24 +3227,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-cuda10_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3824,23 +3293,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -3897,24 +3351,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_3-build
@@ -4015,24 +3455,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-cuda11_3-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4095,23 +3521,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_9-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -4168,24 +3579,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-cuda11_6-build
@@ -4286,24 +3683,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-cuda11_6-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4366,23 +3749,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_9-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -4439,24 +3807,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_0-build
@@ -4650,23 +4004,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_9-rocm5_1_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -4723,24 +4062,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_9-rocm5_1_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_9-rocm5_1_1-build
@@ -4934,23 +4259,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -5005,24 +4315,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-cpu-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cpu-build
@@ -5111,24 +4407,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-cpu-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -5190,23 +4472,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_10-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -5263,24 +4530,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-cuda10_2-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda10_2-build
@@ -5381,24 +4634,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-cuda10_2-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -5461,23 +4700,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -5534,24 +4758,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-cuda11_3-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_3-build
@@ -5652,24 +4862,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-cuda11_3-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -5732,23 +4928,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_10-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -5805,24 +4986,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-cuda11_6-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-cuda11_6-build
@@ -5923,24 +5090,10 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-cuda11_6-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -6003,23 +5156,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_10-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -6076,24 +5214,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-rocm5_0-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_0-build
@@ -6287,23 +5411,8 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
   manywheel-py3_10-rocm5_1_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: linux.4xlarge
@@ -6360,24 +5469,10 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
+        with:
+          pytorch-repo-directory: pytorch/
   manywheel-py3_10-rocm5_1_1-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: manywheel-py3_10-rocm5_1_1-build
@@ -6571,20 +5666,5 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      - name: Teardown EC2 Linux
+        uses: ./.github/actions/teardown-linux
