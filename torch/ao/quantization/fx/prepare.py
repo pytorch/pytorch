@@ -168,7 +168,7 @@ def _cleanup_args(model: GraphModule) -> GraphModule:
 def _normalize_args_for_model(
         model: GraphModule,
         prepare_custom_config: PrepareCustomConfig,
-        is_standalone_module: bool):
+        is_standalone_module: bool) -> Tuple[GraphModule, Dict[str, Tuple[str, type]]]:
     """ Normalize the arguments for nodes in a GraphModule to be keyword arguments,
     and then move all keyword arguments to be positional arguments
 
@@ -181,6 +181,11 @@ def _normalize_args_for_model(
         for a standalone module or not (TODO): should we remove this flag? since
         prepare custom config for standalone module and non-standalone module are not
         shared
+
+    Returns:
+        model (GraphModule): the model with normalized args
+        node_name_to_scope: the updated dictionary from node_name to the scope of
+        the node (module_name and type containing the node)
     """
     # record the preserved attributes in a dictionary so that it won't get lost
     # during NormalizeArgs and retracing with QuantizationTracer
@@ -206,7 +211,7 @@ def _normalize_args_for_model(
 
     model = _move_all_kwargs_to_args(model)
     model = _cleanup_args(model)
-    return model
+    return model, tracer.node_name_to_scope
 
 def is_activation_post_process_node(node: Node, modules: Dict[str, torch.nn.Module]) -> bool:
     return isinstance(node, torch.fx.Node) and node.op == "call_module" and \
@@ -1549,7 +1554,7 @@ def prepare(
     root_node_getter_mapping = \
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
-    model = _normalize_args_for_model(model, prepare_custom_config, is_standalone_module)
+    model, node_name_to_scope = _normalize_args_for_model(model, prepare_custom_config, is_standalone_module)
 
     update_qconfig_for_fusion(model, qconfig_mapping)
     update_qconfig_for_fusion(model, equalization_config)
