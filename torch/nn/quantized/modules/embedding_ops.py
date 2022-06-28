@@ -5,6 +5,8 @@ from torch._jit_internal import Optional, List  # noqa: F401
 from torch.nn.quantized.modules.utils import hide_packed_params_repr
 from torch.nn.quantized.modules.utils import _quantize_weight
 
+__all__ = ['EmbeddingPackedParams', 'Embedding', 'EmbeddingBag']
+
 class EmbeddingPackedParams(torch.nn.Module):
     _version = 1
 

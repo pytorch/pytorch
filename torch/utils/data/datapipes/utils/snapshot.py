@@ -31,8 +31,6 @@ def _simple_snapshot_graph(datapipe: IterDataPipe, n_iterations: int, rng=None) 
 
     apply_shuffle_seed(datapipe, rng)
 
-    # Fast-forward only when the DP has recently been restored. Is this necessary?
-    # if self._restored:
     remainder = n_iterations
     it = iter(datapipe)
     while remainder > 0:
@@ -40,9 +38,11 @@ def _simple_snapshot_graph(datapipe: IterDataPipe, n_iterations: int, rng=None) 
             next(it)
             remainder -= 1
         except StopIteration:
-            raise RuntimeError(f"Fast-forward {datapipe} by {n_iterations} iterations"
+            raise RuntimeError(f"Fast-forward {datapipe} by {n_iterations} iterations "
                                "exceeds the number of samples available.")
     datapipe._fast_forward_iterator = it
+    # While the DataPipe has `_fast_forward_iterator`, `next()` will get result from there instead of elsewhere.
+
     # This will prevent the DataPipe from resetting in the `iter()` call
     # If another DataPipe is consuming it, it won't have to start over again
     datapipe._restored = True
