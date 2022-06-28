@@ -634,10 +634,6 @@ Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
     bool adjoint);
-Tensor linalg_det_backward(
-    const Tensor& grad,
-    const Tensor& self,
-    const Tensor& det);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor& input,
     const c10::optional<Tensor>& gamma,
@@ -835,13 +831,12 @@ Tensor lu_unpack_backward(
     const int64_t m,
     const int64_t n);
 
-Tensor _det_lu_based_helper_backward(
-    const Tensor& det_grad,
+Tensor linalg_det_backward(
+    const Tensor& grad,
     const Tensor& det,
-    const Tensor& self,
-    const Tensor& lu,
-    const Tensor& pivs);
-
+    const Tensor& A,
+    const Tensor& LU,
+    const Tensor& pivots);
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,

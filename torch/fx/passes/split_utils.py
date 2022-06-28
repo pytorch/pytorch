@@ -7,6 +7,7 @@ from torch.fx.graph import map_arg
 from .tools_common import NodeList, NodeSet
 from torch.fx._compatibility import compatibility
 
+__all__ = ['getattr_recursive', 'setattr_recursive', 'Component', 'HolderModule', 'split_by_tags']
 
 @compatibility(is_backward_compatible=False)
 def getattr_recursive(obj, name):
