@@ -49,8 +49,8 @@ void _spdiags_kernel_cpu(
               auto* rows_start = row_index_write_ptr + out_offset;
               auto* cols_start = col_index_write_ptr + out_offset;
               auto* vals_start = values_write_ptr + out_offset;
-              int64_t const first_col = std::max<int64_t>(diag_offset, 0);
-              int64_t const first_row = first_col - diag_offset;
+              const int64_t first_col = std::max<int64_t>(diag_offset, 0);
+              const int64_t first_row = first_col - diag_offset;
               auto* data_read = diagonals[diag_index].data_ptr<scalar_t>() +
                   first_col * diagonals_read_stride;
               for (int64_t i = 0; i < n_out; ++i) {
