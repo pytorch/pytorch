@@ -2389,7 +2389,7 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
     const c10::TensorImpl* self) {
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
-
+  HANDLE_TH_ERRORS
   auto out = torchDispatchFromTensorImpl(
       self,
       "sym_size",
@@ -2404,9 +2404,11 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   if (out == Py_None) {
     return self->sym_sizes_default();
   }
-
   // We need to squeeze SymIntNodes and ints into `SymInts`
   // since it's a format `sym_sizes()` are stored in
+  TORCH_CHECK(
+      py::isinstance<py::tuple>(out) || py::isinstance<py::list>(out),
+      "Symshape must be a list or a tuple");
   py::list symints;
   for (auto it = out.begin(); it != out.end(); it++) {
     auto elm = *it;
@@ -2418,9 +2420,10 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
 
   auto result = values_from_buffer(self, symints);
   c10::SymInt* start = (c10::SymInt*)result[0];
-  t64_t len = result[1];
+  int64_t len = result[1];
 
   return c10::SymIntArrayRef(start, len);
+  END_HANDLE_TH_ERRORS_PYBIND
+}
 
-  // anonymous namespace
-    
+} // anonymous namespace
