@@ -3134,10 +3134,13 @@ class FullyShardedDataParallel(nn.Module):
                         if post_backward_hook_called:
                             m._assert_state(TrainingState_.BACKWARD_POST)
                         else:
-                            # post backward hook was not called, meaning param
-                            # did not have a gradient computed. It was either unused
-                            # in forward, or unused in loss computation so it did
-                            # not get gradient
+                            # no FSDP managed param's post_backward_hook
+                            # was called, meaning that no FSDP managed param
+                            # had a gradient computed. This means that module
+                            # was either unused in forward or module output
+                            # was unused in loss computation, so expected
+                            # state is either backward_pre or idle depending
+                            # on if pre-backward hook was run.
                             m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
                     else:
                         m._assert_state(TrainingState_.BACKWARD_PRE)
