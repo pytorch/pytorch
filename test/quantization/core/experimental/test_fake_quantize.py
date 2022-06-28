@@ -3,8 +3,8 @@
 import torch
 import unittest
 from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
 from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
-from torch.ao.quantization.experimental.apot_utils import float_to_reduced_precision
 
 class TestFakeQuantize(unittest.TestCase):
     r""" Tests fake quantize calculate_qparams() method
@@ -12,18 +12,17 @@ class TestFakeQuantize(unittest.TestCase):
          Uses hard-coded values: alpha=1.0, b=4, k=2.
     """
     def test_fake_calc_qparams(self):
+        apot_fake = APoTFakeQuantize(b=4, k=2)
+        apot_fake.activation_post_process.min_val = torch.tensor([0.0])
+        apot_fake.activation_post_process.max_val = torch.tensor([1.0])
+
+        alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(signed=False)
+
         observer = APoTObserver(b=4, k=2)
+        observer.min_val = torch.tensor([0.0])
+        observer.max_val = torch.tensor([1.0])
 
-        apot_fake = APoTFakeQuantize(observer)
-
-        min_val = torch.tensor([0.0])
-        max_val = torch.tensor([1.0])
-
-        alpha, gamma, quantization_levels, level_indices = apot_fake.calculate_qparams(signed=False,
-                                                                                       min_val=min_val,
-                                                                                       max_val=max_val)
-
-        qparams_expected = observer.calculate_qparams(signed=False, min_val=min_val, max_val=max_val)
+        qparams_expected = observer.calculate_qparams(signed=False)
 
         self.assertEqual(alpha, qparams_expected[0])
         self.assertTrue(torch.equal(gamma, qparams_expected[1]))
@@ -41,22 +40,37 @@ class TestFakeQuantize(unittest.TestCase):
         # between 0 -> 1000 to quantize -> dequantize
         X = 1000 * torch.rand(20)
 
-        min_val, max_val = torch.aminmax(X)
-
         observer = APoTObserver(b=4, k=2)
-        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False,
-                                                                                      min_val=min_val,
-                                                                                      max_val=max_val)
+        observer.forward(X)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
-        apot_fake = APoTFakeQuantize(observer)
-        apot_fake.observer_enabled[0] = 1
-        apot_fake.fake_quant_enabled[0] = 1
+        apot_fake = APoTFakeQuantize(b=4, k=2)
+        apot_fake.enable_observer()
+        apot_fake.enable_fake_quant()
 
         X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
 
-        X_expected = X.apply_(lambda x: float_to_reduced_precision(x, quantization_levels, level_indices))
+        # get X_expected by converting fp -> apot -> fp to simulate quantize -> dequantize
+        X_to_apot = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
+        X_expected = dequantize_APoT(X_to_apot)
 
         self.assertTrue(torch.equal(X_reduced_precision_fp, X_expected))
+
+    r""" Tests fake quantize forward() method
+         throws error when qparams are None
+    """
+    def test_forward_exception(self):
+        # generate a tensor of size 20 with random values
+        # between 0 -> 1000 to quantize -> dequantize
+        X = 1000 * torch.rand(20)
+
+        apot_fake = APoTFakeQuantize(b=4, k=2)
+        # disable observer so qparams not set, qparams are all None
+        apot_fake.disable_observer()
+        apot_fake.enable_fake_quant()
+
+        with self.assertRaises(Exception):
+            apot_fake.forward(torch.clone(X), False)
 
 if __name__ == '__main__':
     unittest.main()
