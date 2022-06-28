@@ -1289,12 +1289,28 @@ Arguments:
 
           .def(
               "send",
-              &::c10d::ProcessGroup::send,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+                 const std::vector<at::Tensor>& tensors,
+                 int64_t dstRank,
+                 int64_t tag) {
+                return ::c10d::ops::send(process_group, tensors, dstRank, tag);
+              },
+              py::arg("tensors"),
+              py::arg("dstRank"),
+              py::arg("tag"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
               "recv",
-              &::c10d::ProcessGroup::recv,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& process_group,
+                 const std::vector<at::Tensor>& tensors,
+                 int64_t srcRank,
+                 int64_t tag) {
+                return ::c10d::ops::recv(process_group, tensors, srcRank, tag);
+              },
+              py::arg("tensors"),
+              py::arg("srcRank"),
+              py::arg("tag"),
               py::call_guard<py::gil_scoped_release>())
 
           .def(
