@@ -14,6 +14,7 @@ from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.batchnorm import BatchNorm2d
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
+MAX_TENSOR_RANK = 5
 
 def register_inference_rule(call_target):
     def register(fn):
@@ -336,7 +337,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     c1 = Conj([input_dyn, output_dyn])
 
     c2 = []
-    for i in range(1, 5):
+    for i in range(1, MAX_TENSOR_RANK):
         new_dims_rhs_1, counter = gen_tensor_dims(i, counter)
         new_dims_rhs_2, counter = gen_tensor_dims(i, counter)
 
