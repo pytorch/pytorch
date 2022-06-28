@@ -95,7 +95,7 @@ TORCH_API void record_kernel_function_dtype(std::string name);
   case enum_type: {                                                          \
     AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                             \
     using scalar_t = scalar_type;                                            \
-    using underlying_t = typename scalar_t::underlying;                      \
+    using underlying_t C10_UNUSED = typename scalar_t::underlying;           \
     const auto& SCALAR_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND = enum_type; \
     const auto& UNDERLYING_TYPE C10_UNUSED_DISPATCH_CUDA_WORKAROUND =        \
         toUnderlying(enum_type);                                             \
