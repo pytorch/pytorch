@@ -3,6 +3,7 @@ import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
+from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.utils.common import (
     _deprecation_warning,
     _iter_deprecated_functional_names,
@@ -111,7 +112,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     repr_hook: Optional[Callable] = None
     _valid_iterator_id: Optional[int] = None
     _number_of_samples_yielded: int = 0
-    _restored: bool = False
+    _snapshot_state: _SnapshotState = _SnapshotState.Iterating
     _fast_forward_iterator: Optional[Iterator] = None
 
     def __getattr__(self, attribute_name):
