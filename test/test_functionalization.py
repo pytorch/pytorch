@@ -657,6 +657,23 @@ def forward(self, a_1):
     return add_tensor
     """)
 
+    def test_expand_symint(self):
+        # Once some existing SymInt bugs are ironed out, we should update
+        # this test to plumb FakeSymbolicTensors through it
+        def f(x):
+            return x.expand(x.size(0), x.size(1))
+
+        self.assert_functionalization(f, torch.ones(2, 2))
+        logs = self.get_logs(f, torch.ones(2, 2))
+        self.assertExpectedInline(logs, """\
+
+
+
+def forward(self, a_1):
+    expand_copy_sym_int = torch.ops.aten.expand_copy.SymInt(a_1, [2, 2]);  a_1 = None
+    return expand_copy_sym_int
+    """)
+
     def test_fill_(self):
         def f(x):
             y = x + x
