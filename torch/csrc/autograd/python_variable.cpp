@@ -2421,9 +2421,6 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
   t64_t len = result[1];
 
   return c10::SymIntArrayRef(start, len);
- 
 
-
-
-// anonymous namespace
-  
+  // anonymous namespace
+    
