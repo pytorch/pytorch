@@ -114,7 +114,7 @@ def embedding_inference_rule(n: Node, module_instance, symbols, constraints, cou
 
     c1 = Conj([input_dyn, output_dyn])
     c2 = []
-    for i in range(1, 5):
+    for i in range(1, MAX_TENSOR_RANK + 1):
         new_dims, counter = gen_tensor_dims(i, counter)
         nat_constraints = gen_nat_constraints(new_dims)
 
@@ -200,10 +200,9 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     # if the input is a tensor,
     # generate a getItem constraint which will be expanded based on the
     # tensor dimension.
-    c2 = [GetItem(1, n.args[1], get_item_output, get_item_arg),
-          GetItem(2, n.args[1], get_item_output, get_item_arg),
-          GetItem(3, n.args[1], get_item_output, get_item_arg),
-          GetItem(4, n.args[1], get_item_output, get_item_arg)]
+
+    c2 = [GetItem(i, n.args[1], get_item_output, get_item_arg) for i in range(MAX_TENSOR_RANK + 1)]
+
 
     # since the output is a dimension, we make sure it's a natural number
     # added as a conjunction to the disjuction of c2
@@ -271,7 +270,7 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
         c3 = BinConstraintT(e11, e22, op_consistency)
         return [c1, c2, c3], counter
     else:
-        # TODO generate add constraints for this case
+        # TODO generate add constraints for scalar addition
         return [], counter
 
 
@@ -297,16 +296,16 @@ def flatten_inference_rule(n: Node, symbols, constraints, counter):
         assert isinstance(n.args[2], int)
         end_dim = n.args[2]
 
-
     c1 = BinConstraintT(input, Dyn, op_eq)
     c2 = BinConstraintT(flattened, Dyn, op_eq)
     both_dyn = Conj([c1, c2])
 
-    const1, counter = generate_flatten_constraints(start_dim, end_dim, input, flattened, 1, counter)
-    const2, counter = generate_flatten_constraints(start_dim, end_dim, input, flattened, 2, counter)
-    const3, counter = generate_flatten_constraints(start_dim, end_dim, input, flattened, 3, counter)
-    const4, counter = generate_flatten_constraints(start_dim, end_dim, input, flattened, 4, counter)
-    return [Disj([both_dyn, const1, const2, const3, const4])], counter
+    const = []
+    for i in range(1, MAX_TENSOR_RANK + 1):
+        c, counter = generate_flatten_constraints(start_dim, end_dim, input, flattened, i, counter)
+        const.append(c)
+
+    return [Disj([both_dyn, *const])], counter
 
 @register_inference_rule(torch.nn.Dropout)
 @register_inference_rule(torch.nn.ReLU)
@@ -379,7 +378,7 @@ def reshape_inference_rule(n: Node, symbols, constraints, counter):
     t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])  # type: ignore[union-attr]
     c1 = BinConstraintT(my_reshape, t2_type, op_eq)  # type: ignore[union-attr]
     c2 = CanReshape(src_var, t2_type)
-    # c3 = BinConstraintT(src_var, 4, op_leq)
+
     return [c1, c2], counter
 
 
@@ -435,7 +434,7 @@ def conv2d_inference_rule(n: Node, module_instance, symbols, constraints, counte
     input_var = symbols[n.args[0]]
 
     # dim vars
-    [d1, d2, d3, d4], counter = gen_tensor_dims(4, counter)
+    [d1, d2, d3, d4], counter = gen_tensor_dims(MAX_TENSOR_RANK, counter)
 
     # c1 = Matching(input_var, TensorType([d1, d2, d3, d4]))
     c1 = BinConstraintT(input_var, TensorType([d1, d2, d3, d4]), op_matching)
@@ -463,7 +462,7 @@ def maxpool_inference_rule(n: Node, module_instance, symbols, constraints, count
     input_var = symbols[n.args[0]]
 
     # dim vars
-    [d1, d2, d3, d4], counter = gen_tensor_dims(4, counter)
+    [d1, d2, d3, d4], counter = gen_tensor_dims(MAX_TENSOR_RANK, counter)
 
     c1 = BinConstraintT(input_var, TensorType([d1, d2, d3, d4]), op_matching)
 
@@ -515,7 +514,7 @@ class ConstraintGenerator:
             x, counter = gen_tvar(counter)
             self.symbol_dict[n] = x
             c1 = BinConstraintT(n.type, x, op_precision)
-            c2 = BinConstraintT(x, 4, op_leq)
+            c2 = BinConstraintT(x, MAX_TENSOR_RANK, op_leq)
             return [c1, c2], counter
 
         elif n.op == 'call_function':
