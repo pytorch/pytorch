@@ -12,7 +12,7 @@ import torch
 from torch import Tensor
 import torch.cuda.comm
 
-__all__: List[str] = []
+__all__ = ['NoChunk', 'Batch', 'check', 'scatter', 'gather']
 
 
 Tensors = Sequence[Tensor]

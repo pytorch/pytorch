@@ -32,6 +32,7 @@ SharedParamInfo = Tuple[str, str, nn.Module, str, nn.Module, str]
 FLAT_PARAM = "flat_param"
 FPW_MODULE = "_fpw_module"
 
+__all__ = ['ParamInfo', 'ShardMetadata', 'FlatParameter', 'FlattenParamsWrapper']
 
 def _post_state_dict_hook(
     module: nn.Module, state_dict: Dict[str, Any], prefix: str, *args: Any
