@@ -221,6 +221,7 @@ from collections import defaultdict
 from setuptools.dist import Distribution
 import setuptools.command.build_ext
 import setuptools.command.install
+import setuptools.command.develop
 import setuptools.command.sdist
 import filecmp
 import shutil
@@ -698,6 +699,17 @@ class install(setuptools.command.install.install):
     def run(self):
         super().run()
 
+class develop(setuptools.command.develop.develop):
+    def run(self):
+        super().run()
+        # Copy hipify_torch to torch.utils for hipify_torch to exist as a submodule
+        orig_path = 'third_party/hipify_torch/hipify'
+        new_path = 'torch/utils/hipify'
+        if os.path.isdir(orig_path):
+            if os.path.exists(new_path):
+                # copytree fails if the tree exists already, so remove it.
+                shutil.rmtree(new_path)
+            shutil.copytree(orig_path, new_path)
 
 class clean(setuptools.Command):
     user_options = []
@@ -896,6 +908,7 @@ def configure_extension_build():
         'clean': clean,
         'install': install,
         'sdist': sdist,
+        'develop':develop,
     }
 
     entry_points = {
