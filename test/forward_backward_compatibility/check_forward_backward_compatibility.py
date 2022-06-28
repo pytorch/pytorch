@@ -55,6 +55,9 @@ ALLOW_LIST = [
     ("aten::_linalg_qr_helper", datetime.date(2022, 8, 1)),
     ("aten::linalg_lu_solve", datetime.date(2022, 8, 1)),
     ("aten::linalg_lu_solve.out", datetime.date(2022, 8, 1)),
+    ("aten::linalg_det", datetime.date(2022, 8, 1)),
+    ("aten::linalg_det.out", datetime.date(2022, 8, 1)),
+    ("aten::_det_lu_based_helper", datetime.date(2022, 8, 1)),
     ("aten::solve", datetime.date(9999, 1, 1)),
     ("aten::solve.solution", datetime.date(9999, 1, 1)),
     ("aten::_solve_helper", datetime.date(9999, 1, 1)),
@@ -88,6 +91,7 @@ ALLOW_LIST = [
     ("aten::segment_reduce", datetime.date(2022, 6, 30)),
     ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
     ("aten::empty.SymInt", datetime.date(9999, 1, 1)),
+    ("c10d::broadcast", datetime.date(2022, 6, 25)),
     # TODO: FIXME: prims shouldn't be checked
     ("prims::.*", datetime.date(9999, 1, 1)),
 ]
