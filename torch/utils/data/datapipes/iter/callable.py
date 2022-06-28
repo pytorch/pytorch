@@ -7,7 +7,7 @@ from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data._utils.collate import default_collate
 from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 
 __all__ = [
     "CollatorIterDataPipe",
@@ -68,7 +68,7 @@ class MapperIterDataPipe(IterDataPipe[T_co]):
         super().__init__()
         self.datapipe = datapipe
 
-        _check_lambda_fn(fn)
+        _check_unpickable_fn(fn)
         self.fn = fn  # type: ignore[assignment]
 
         self.input_col = input_col
@@ -208,7 +208,6 @@ class CollatorIterDataPipe(MapperIterDataPipe):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        collate_fn: Callable = default_collate,
         conversion: Optional[
             Union[
             Callable[..., Any],
@@ -217,10 +216,15 @@ class CollatorIterDataPipe(MapperIterDataPipe):
             # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`
             ]
         ] = default_collate,
+        collate_fn: Optional[Callable] = None,
     ) -> None:
-        if callable(conversion):
-            super().__init__(datapipe, fn=conversion)
-        else:
-            # TODO(VitalyFedyunin): Validate passed dictionary
-            collate_fn = functools.partial(_collate_helper, conversion)
+        if collate_fn is not None:
             super().__init__(datapipe, fn=collate_fn)
+        else:
+            if callable(conversion):
+                super().__init__(datapipe, fn=conversion)
+            else:
+                # TODO(VitalyFedyunin): Validate passed dictionary
+                collate_fn = functools.partial(_collate_helper, conversion)
+                super().__init__(datapipe, fn=collate_fn)
+            

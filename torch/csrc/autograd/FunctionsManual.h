@@ -421,6 +421,13 @@ Tensor binary_cross_entropy_double_backward_target(
     const Tensor& target,
     const c10::optional<Tensor>& weight,
     int64_t reduction);
+Tensor binary_cross_entropy_with_logits_backward(
+    const Tensor& grad,
+    const Tensor& input,
+    const Tensor& target,
+    const c10::optional<Tensor>& weight_opt,
+    const c10::optional<Tensor>& pos_weight_opt,
+    int64_t reduction);
 at::Tensor binary_cross_entropy_with_logits_target_backward(
     const at::Tensor& grad_output,
     const at::Tensor& self,
@@ -627,10 +634,6 @@ Tensor linalg_matrix_exp_differential(
     const Tensor& self,
     const Tensor& grad,
     bool adjoint);
-Tensor linalg_det_backward(
-    const Tensor& grad,
-    const Tensor& self,
-    const Tensor& det);
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor& input,
     const c10::optional<Tensor>& gamma,
@@ -828,13 +831,12 @@ Tensor lu_unpack_backward(
     const int64_t m,
     const int64_t n);
 
-Tensor _det_lu_based_helper_backward(
-    const Tensor& det_grad,
+Tensor linalg_det_backward(
+    const Tensor& grad,
     const Tensor& det,
-    const Tensor& self,
-    const Tensor& lu,
-    const Tensor& pivs);
-
+    const Tensor& A,
+    const Tensor& LU,
+    const Tensor& pivots);
 std::tuple<Tensor, Tensor> linalg_lstsq_backward(
     const Tensor& grad,
     const Tensor& A,
