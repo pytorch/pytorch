@@ -13,6 +13,10 @@ Functions
 -----------------------
 
 .. autofunction:: airy_ai
+.. autofunction:: complete_elliptic_integral_k_e
+.. autofunction:: complete_elliptic_integral_k_k
+.. autofunction:: complete_elliptic_integral_m_e
+.. autofunction:: complete_elliptic_integral_m_k
 .. autofunction:: digamma
 .. autofunction:: entr
 .. autofunction:: erf
@@ -29,9 +33,9 @@ Functions
 .. autofunction:: i0e
 .. autofunction:: i1
 .. autofunction:: i1e
+.. autofunction:: log1p
 .. autofunction:: log_ndtr
 .. autofunction:: log_softmax
-.. autofunction:: log1p
 .. autofunction:: logit
 .. autofunction:: logsumexp
 .. autofunction:: multigammaln
