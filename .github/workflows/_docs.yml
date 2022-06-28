@@ -64,6 +64,8 @@ jobs:
           echo "password ${GITHUB_PYTORCHBOT_TOKEN}" >> "${RUNNER_TEMP}/.netrc"
 
       - name: Build ${{ matrix.docs_type }} docs
+        # excluding cpp on PRs for now https://github.com/pytorch/pytorch/issues/80312
+        if: github.event_name != 'pull_request' || matrix.docs_type == 'python'
         env:
           WITH_PUSH: ${{ github.event_name == 'schedule' || startsWith(github.event.ref, 'refs/tags/v') }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
@@ -114,7 +116,8 @@ jobs:
 
       - name: Upload C++ Docs Preview
         uses: seemethere/upload-artifact-s3@v5
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' }}
+        # excluding cpp on PRs for now https://github.com/pytorch/pytorch/issues/80312
+        if: false
         with:
           retention-days: 14
           if-no-files-found: error
