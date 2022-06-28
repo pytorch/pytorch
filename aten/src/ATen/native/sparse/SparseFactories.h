@@ -49,7 +49,8 @@ Tensor spdiags_impl(
         Layout::SparseCsc,
         ", and ",
         Layout::SparseCsr,
-        ") are supported");
+        ") are supported, got ",
+        *layout);
   }
   TORCH_CHECK(
       offsets_1d.scalar_type() == at::kLong,
@@ -57,56 +58,23 @@ Tensor spdiags_impl(
       offsets_1d.scalar_type());
 
   TORCH_CHECK(
-      offsets_1d.unsqueeze(0)
-          .permute({1, 0})
+      offsets_1d.unsqueeze(1)
           .eq(offsets_1d)
           .sum(-1)
           .equal(at::ones_like(offsets_1d)),
       "spdiags(): Offset tensor contains duplicate values");
 
-  // We are going to introduce some temporaries to compute nnz_per_diag and do
-  // the final check at onece, we induce a block scope to allow these
-  // intermediates to be cleaned up before we continue
-  auto nnz_per_diag = at::empty_like(offsets_1d);
-  {
-    auto n_col_out = at::scalar_tensor(shape[1], offsets_1d.options());
-    auto n_row_out = at::scalar_tensor(shape[0], offsets_1d.options());
-    auto out_of_bounds_mask =
-        offsets_1d.le(n_row_out.neg()).logical_and_(offsets_1d.ge(n_col_out));
+  auto nnz_per_diag = at::where(
+      offsets_1d.le(0),
+      offsets_1d.add(shape[0]).clamp_max_(diagonals_2d.size(1)),
+      offsets_1d.add(-std::min<int64_t>(shape[1], diagonals_2d.size(1))).neg());
 
-    TORCH_CHECK(
-        out_of_bounds_mask.logical_not().all().item<bool>(),
-        "spdiags(): Detected the folowing diagonal offsets which are not supported by the output shape, ",
-        offsets.masked_select(out_of_bounds_mask),
-        ". Valid offsets are in the range [",
-        (-shape[0]) + 1,
-        ",",
-        shape[1] + 1,
-        ")");
-    auto min_cols = at::minimum(
-        n_col_out,
-        at::scalar_tensor(diagonals_2d.size(1), offsets_1d.options()));
-    auto zero = at::scalar_tensor(int64_t{0}, offsets_1d.options());
-    // Mask for offsets which are positive
-    auto offset_pos_mask = offsets_1d.ge(zero);
-    // Seed nnz per diag with the formula for negative offsets
-    nnz_per_diag =
-        at::minimum_out(nnz_per_diag, n_row_out.add(offsets_1d), min_cols);
-    // Compute the sizes for positive offsets
-    auto nnz_per_pos_offset_diag =
-        at::minimum(min_cols.sub(offsets_1d), n_row_out)
-            .masked_select(offset_pos_mask);
-    nnz_per_diag.index_put_({offset_pos_mask}, nnz_per_pos_offset_diag);
-    // Any negative offsets are clamped to zero
-    nnz_per_diag.clamp_min_(zero);
-  }
-  // auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
-  //  const auto nnz = nnz_per_diag_cumsum.select(0, -1).item<int64_t>();
-  //  Note the above fails when no diagonals are provided, this case is allowed
-  //  by scipy.
-  const auto nnz = nnz_per_diag.sum(-1).item<int64_t>();
+  auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
+  const auto nnz = diagonals_2d.size(0)
+      ? nnz_per_diag_cumsum.select(-1, -1).item<int64_t>()
+      : int64_t{0};
   // Offsets into nnz for each diagonal
-  auto result_mem_offsets = nnz_per_diag.cumsum(-1).sub_(nnz_per_diag);
+  auto result_mem_offsets = nnz_per_diag_cumsum.sub(nnz_per_diag);
   // coo tensor guts
   auto indices = at::empty({2, nnz}, offsets_1d.options());
   auto values = at::empty({nnz}, diagonals_2d.options());
@@ -115,8 +83,9 @@ Tensor spdiags_impl(
   const auto n_diag = offsets_1d.size(0);
   Tensor diag_index = at::arange(n_diag, offsets_1d.options());
   // cpu_kernel requires an output
-  auto dummy = at::empty({1}, offsets_1d.options());
+  auto dummy = at::empty({1}, offsets_1d.options()).resize_({0});
   auto iter = TensorIteratorConfig()
+                  .set_check_mem_overlap(false)
                   .add_output(dummy)
                   .add_input(diag_index)
                   .add_input(offsets_1d)
