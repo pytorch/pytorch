@@ -378,29 +378,6 @@ Tensor empty_like_quantized(
   }
 }
 
-Tensor empty_symint(
-  SymIntArrayRef size,
-  c10::optional<ScalarType> dtype_opt,
-  c10::optional<Layout> layout_opt,
-  c10::optional<Device> device_opt,
-  c10::optional<bool> pin_memory_opt,
-  c10::optional<c10::MemoryFormat> memory_format_opt
-) {
-
-    // CPU: empty_cpu
-    // CUDA: empty_cuda
-    // MPS: empty_mps
-    // Meta: empty_meta
-    // MkldnnCPU: empty_mkldnn
-    // SparseCPU, SparseCUDA: empty_sparse
-    // SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
-    // QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
-
-  // TODO: switch to asIntArrayRefUnchecked
-  return at::empty(
-      c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
-}
-
 Tensor new_empty(
     const Tensor& self,
     IntArrayRef size,
