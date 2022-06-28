@@ -92,7 +92,6 @@ def _apply_func_submodules(
     args: Tuple,
 ):
     if len(path) == 1:
-        print(full_path)
         func(module, path[0], *args)
     else:
         _apply_func_submodules(func, getattr(module, path[0]), path[1:], full_path, args)

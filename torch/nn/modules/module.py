@@ -1224,26 +1224,34 @@ class Module:
         pass
 
     def __getattr__(self, name: str) -> Union[Tensor, 'Module']:
+        #print(id(self), "getting attr", name)
+
+        # slots version
         if name in self._parameters:
             return self._parameters[name]
-        #if '_parameters' in self.__dict__:
-            #_parameters = self.__dict__['_parameters']
-            #if name in _parameters:
-                #return _parameters[name]
         if name in self._buffers:
             return self._buffers[name]
-        #if '_buffers' in self.__dict__:
-            #_buffers = self.__dict__['_buffers']
-            #if name in _buffers:
-                #return _buffers[name]
         if name in self._modules:
             return self._modules[name]
-        #if '_modules' in self.__dict__:
-            #modules = self.__dict__['_modules']
-            #if name in modules:
-            #    return modules[name]
         if name in self._dict:
             return self._dict[name]
+
+        # regular version
+        """
+        if '_parameters' in self.__dict__:
+            _parameters = self.__dict__['_parameters']
+            if name in _parameters:
+                return _parameters[name]
+        if '_buffers' in self.__dict__:
+            _buffers = self.__dict__['_buffers']
+            if name in _buffers:
+                return _buffers[name]
+        if '_modules' in self.__dict__:
+            modules = self.__dict__['_modules']
+            if name in modules:
+                return modules[name]
+        """
+
         raise AttributeError("'{}' object has no attribute '{}'".format(
             type(self).__name__, name))
 
@@ -1255,6 +1263,12 @@ class Module:
                         del d[name]
                     else:
                         d.discard(name)
+
+        #print(id(self), "setting attr", name, "to", id(value))
+
+        if name == "__class__":
+            super().__setattr__(name, value)
+            return
 
         params = self._parameters
         #params = self.__dict__.get('_parameters')
@@ -1307,7 +1321,8 @@ class Module:
         elif name in self._modules:
             del self._modules[name]
         else:
-            object.__delattr__(self, name)
+            del self._dict[name]
+            #object.__delattr__(self, name)
 
     def _register_state_dict_hook(self, hook):
         r"""These hooks will be called with arguments: `self`, `state_dict`,

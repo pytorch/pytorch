@@ -323,12 +323,10 @@ class ModuleDict(Module):
 
     @_copy_to_script_wrapper
     def __getitem__(self, key: str) -> Module:
-        print(id(self), key, self._modules.keys())
         return self._modules[key]
 
     def __setitem__(self, key: str, module: Module) -> None:
         self.add_module(key, module)
-        print(id(self), key, self._modules.keys())
 
     def __delitem__(self, key: str) -> None:
         del self._modules[key]
