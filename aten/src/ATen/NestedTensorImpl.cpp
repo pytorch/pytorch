@@ -66,12 +66,27 @@ inline at::Tensor construct_nested_stride_tensor(const at::Tensor& sizes) {
   return strides;
 }
 
+// [Note: Nested Tensor Autograd] The Nested Tensor key is a functionality
+// key and therefore getAutogradRelatedKeySetFromBackend will return the
+// wrong autograd key. For this specific impl we make sure to register the
+// correct Autograd key which is AutogradNestedTensor
+c10::DispatchKeySet generate_nested_key_set(at::Tensor buffer) {
+  c10::DispatchKeySet key_set =
+      (c10::DispatchKeySet(DispatchKey::NestedTensor) |
+       c10::DispatchKeySet(
+           buffer.is_cuda() ? BackendComponent::CUDABit
+                            : BackendComponent::CPUBit));
+
+  // Add AutogradNestedTensor specific keys
+  key_set = key_set | inplace_or_view_ks | autograd_nested;
+  return key_set;
+}
+
 NestedTensorImpl::NestedTensorImpl(
     at::Tensor buffer,
     at::Tensor nested_size_tensor)
     : TensorImpl(
-          (c10::DispatchKeySet(DispatchKey::NestedTensor) |
-           c10::DispatchKeySet(buffer.is_cuda() ? BackendComponent::CUDABit : BackendComponent::CPUBit)),
+          generate_nested_key_set(buffer),
           buffer.dtype(),
           buffer.device()),
       buffer_(std::move(buffer)),
