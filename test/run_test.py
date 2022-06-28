@@ -246,6 +246,7 @@ ROCM_BLOCKLIST = [
 
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
+    "test_cpp_extensions_open_device_registration",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
