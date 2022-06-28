@@ -1903,6 +1903,264 @@ const auto bessel_y1_string = bessel_j1_string + jiterator_stringify(
     } // bessel_y1_forward(T x)
 ); // bessel_y1_string
 
+const auto complete_elliptic_integral_k_e_string = jiterator_stringify(
+    template<typename T>
+    static inline C10_HOST_DEVICE T complete_elliptic_integral_k_e_forward(T x) {
+        static const T P[] = {
+                +1.53552577301013293365e-4,
+                +2.50888492163602060990e-3,
+                +8.68786816565889628429e-3,
+                +1.07350949056076193403e-2,
+                +7.77395492516787092951e-3,
+                +7.58395289413514708519e-3,
+                +1.15688436810574127319e-2,
+                +2.18317996015557253103e-2,
+                +5.68051945617860553470e-2,
+                +4.43147180560990850618e-1,
+                +1.00000000000000000299e+0,
+        };
+
+        static const T Q[] = {
+                +3.27954898576485872656e-5,
+                +1.00962792679356715133e-3,
+                +6.50609489976927491433e-3,
+                +1.68862163993311317300e-2,
+                +2.61769742454493659583e-2,
+                +3.34833904888224918614e-2,
+                +4.27180926518931511717e-2,
+                +5.85936634471101055642e-2,
+                +9.37499997197644278445e-2,
+                +2.49999999999888314361e-1,
+        };
+
+        x = T(1.0) - x;
+
+        if (x == T(0.0)) {
+            return T(1.0);
+        }
+
+        if (x < T(0.0)) {
+            return NAN;
+        }
+
+        if (x > T(1.0)) {
+            return complete_elliptic_integral_k_e_forward(T(1.0) - T(1.0) / x) * sqrt(x);
+        }
+
+        T p = 0.0;
+
+        for (uint8_t index = 0; index <= 10 + 0; index++) {
+            p = p * x + P[index];
+        }
+
+        T q = 0.0;
+
+        for (uint8_t index = 0; index <= 10 - 1; index++) {
+            q = q * x + Q[index];
+        }
+
+        return p - log(x) * (x * q);
+    } // complete_elliptic_integral_k_e_forward(T x)
+}; // complete_elliptic_integral_k_e_string
+
+const auto complete_elliptic_integral_k_k_string = jiterator_stringify(
+    template<typename T>
+    static inline C10_HOST_DEVICE T complete_elliptic_integral_k_k_forward(T x) {
+        static const T P[] = {
+                +1.37982864606273237150e-4,
+                +2.28025724005875567385e-3,
+                +7.97404013220415179367e-3,
+                +9.85821379021226008714e-3,
+                +6.87489687449949877925e-3,
+                +6.18901033637687613229e-3,
+                +8.79078273952743772254e-3,
+                +1.49380448916805252718e-2,
+                +3.08851465246711995998e-2,
+                +9.65735902811690126535e-2,
+                +1.38629436111989062502e+0,
+        };
+
+        static const T Q[] = {
+                +2.94078955048598507511e-5,
+                +9.14184723865917226571e-4,
+                +5.94058303753167793257e-3,
+                +1.54850516649762399335e-2,
+                +2.39089602715924892727e-2,
+                +3.01204715227604046988e-2,
+                +3.73774314173823228969e-2,
+                +4.88280347570998239232e-2,
+                +7.03124996963957469739e-2,
+                +1.24999999999870820058e-1,
+                +4.99999999999999999821e-1,
+        };
+
+        x = T(1.0) - x;
+
+        if (x < T(0.0)) {
+            return NAN;
+        }
+
+        if (x > T(1.0)) {
+            if (isinf(x)) {
+                return T(0.0);
+            }
+
+            return complete_elliptic_integral_m_k_forward(T(1.0) / x) / sqrt(x);
+        }
+
+        if (x > T(1.11022302462515654042e-16)) {
+            T p = 0.0;
+
+            for (uint8_t index = 0; index <= 10; index++) {
+                p = p * x + P[index];
+            }
+
+            T q = 0.0;
+
+            for (uint8_t index = 0; index <= 10; index++) {
+                q = q * x + Q[index];
+            }
+
+            return p - log(x) * q;
+        }
+
+        if (x == T(0.0)) {
+            return INF;
+        }
+
+        return T(1.3862943611198906188) - T(0.5) * log(x);
+    } // complete_elliptic_integral_k_k_forward(T x)
+}; // complete_elliptic_integral_k_k_string
+
+const auto complete_elliptic_integral_m_e_string = jiterator_stringify(
+    template<typename T>
+    static inline C10_HOST_DEVICE T complete_elliptic_integral_m_e_forward(T x) {
+        static const T P[] = {
+                +1.53552577301013293365e-4,
+                +2.50888492163602060990e-3,
+                +8.68786816565889628429e-3,
+                +1.07350949056076193403e-2,
+                +7.77395492516787092951e-3,
+                +7.58395289413514708519e-3,
+                +1.15688436810574127319e-2,
+                +2.18317996015557253103e-2,
+                +5.68051945617860553470e-2,
+                +4.43147180560990850618e-1,
+                +1.00000000000000000299e+0,
+        };
+
+        static const T Q[] = {
+                +3.27954898576485872656e-5,
+                +1.00962792679356715133e-3,
+                +6.50609489976927491433e-3,
+                +1.68862163993311317300e-2,
+                +2.61769742454493659583e-2,
+                +3.34833904888224918614e-2,
+                +4.27180926518931511717e-2,
+                +5.85936634471101055642e-2,
+                +9.37499997197644278445e-2,
+                +2.49999999999888314361e-1,
+        };
+
+        x = T(1.0) - x;
+
+        if (x == T(0.0)) {
+            return T(1.0);
+        }
+
+        if (x < T(0.0)) {
+            return NAN;
+        }
+
+        if (x > T(1.0)) {
+            return complete_elliptic_integral_m_e_forward(T(1.0) - T(1.0) / x) * sqrt(x);
+        }
+
+        T p = 0.0;
+
+        for (uint8_t index = 0; index <= 10 + 0; index++) {
+            p = p * x + P[index];
+        }
+
+        T q = 0.0;
+
+        for (uint8_t index = 0; index <= 10 - 1; index++) {
+            q = q * x + Q[index];
+        }
+
+        return p - log(x) * (x * q);
+    } // complete_elliptic_integral_m_e_forward(T x)
+}; // complete_elliptic_integral_m_e_string
+
+const auto complete_elliptic_integral_m_k_string = jiterator_stringify(
+    template<typename T>
+    static inline C10_HOST_DEVICE T complete_elliptic_integral_m_k_forward(T x) {
+        static const T P[] = {
+                +1.37982864606273237150e-4,
+                +2.28025724005875567385e-3,
+                +7.97404013220415179367e-3,
+                +9.85821379021226008714e-3,
+                +6.87489687449949877925e-3,
+                +6.18901033637687613229e-3,
+                +8.79078273952743772254e-3,
+                +1.49380448916805252718e-2,
+                +3.08851465246711995998e-2,
+                +9.65735902811690126535e-2,
+                +1.38629436111989062502e+0,
+        };
+
+        static const T Q[] = {
+                +2.94078955048598507511e-5,
+                +9.14184723865917226571e-4,
+                +5.94058303753167793257e-3,
+                +1.54850516649762399335e-2,
+                +2.39089602715924892727e-2,
+                +3.01204715227604046988e-2,
+                +3.73774314173823228969e-2,
+                +4.88280347570998239232e-2,
+                +7.03124996963957469739e-2,
+                +1.24999999999870820058e-1,
+                +4.99999999999999999821e-1,
+        };
+
+        x = T(1.0) - x;
+
+        if (x < T(0.0)) {
+            return NAN;
+        }
+
+        if (x > T(1.0)) {
+            if (isinf(x)) {
+                return T(0.0);
+            }
+
+            return complete_elliptic_integral_m_k_forward(T(1.0) / x) / sqrt(x);
+        }
+
+        if (x > T(1.11022302462515654042e-16)) {
+            T p = 0.0;
+
+            for (uint8_t index = 0; index <= 10; index++) {
+                p = p * x + P[index];
+            }
+
+            T q = 0.0;
+
+            for (uint8_t index = 0; index <= 10; index++) {
+                q = q * x + Q[index];
+            }
+
+            return p - log(x) * q;
+        }
+
+        if (x == T(0.0)) {
+            return INF;
+        }
+
+        return T(1.3862943611198906188) - T(0.5) * log(x);
+    } // complete_elliptic_integral_m_k_forward(T x)
+}; // complete_elliptic_integral_m_k_string
+
 const auto chebyshev_polynomial_t_string = jiterator_stringify(
     template<typename T>
     T chebyshev_polynomial_t_forward(T x, int64_t n) {
