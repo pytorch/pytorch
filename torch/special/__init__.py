@@ -12,6 +12,10 @@ __all__ = [
     'chebyshev_polynomial_u',
     'chebyshev_polynomial_v',
     'chebyshev_polynomial_w',
+    'complete_elliptic_integral_k_e',
+    'complete_elliptic_integral_k_k',
+    'complete_elliptic_integral_m_e',
+    'complete_elliptic_integral_m_k',
     'digamma',
     'entr',
     'erf',
@@ -47,11 +51,11 @@ __all__ = [
     'polygamma',
     'psi',
     'round',
+    'scaled_modified_bessel_k1',
     'shifted_chebyshev_polynomial_t',
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
-    'scaled_modified_bessel_k1',
     'sinc',
     'softmax',
     'spherical_bessel_j0',
@@ -879,6 +883,54 @@ airy_ai = _add_docstr(_special.special_airy_ai,
 airy_ai(input, *, out=None) -> Tensor
 
 Airy function :math:`\text{Ai}\left(\text{input}\right)`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+complete_elliptic_integral_k_e = _add_docstr(_special.special_complete_elliptic_integral_k_e,
+                                             r"""
+complete_elliptic_integral_k_e(input, *, out=None) -> Tensor
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+complete_elliptic_integral_k_k = _add_docstr(_special.special_complete_elliptic_integral_k_k,
+                                             r"""
+complete_elliptic_integral_k_k(input, *, out=None) -> Tensor
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+complete_elliptic_integral_m_e = _add_docstr(_special.special_complete_elliptic_integral_m_e,
+                                             r"""
+complete_elliptic_integral_m_e(input, *, out=None) -> Tensor
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+complete_elliptic_integral_m_k = _add_docstr(_special.special_complete_elliptic_integral_m_k,
+                                             r"""
+complete_elliptic_integral_m_k(input, *, out=None) -> Tensor
 
 """ + r"""
 Args:
