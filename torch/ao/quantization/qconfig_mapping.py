@@ -5,7 +5,11 @@ from typing import Any, Callable, Dict, Tuple, Union
 import torch
 
 from .fake_quantize import default_weight_fake_quant
-from .observer import default_weight_observer
+from .observer import (
+    default_fixed_qparams_range_0to1_observer,
+    default_fixed_qparams_range_neg1to1_observer,
+    default_weight_observer,
+)
 from .qconfig import (
     default_reuse_input_qconfig,
     get_default_qconfig,
@@ -13,7 +17,6 @@ from .qconfig import (
     QConfig,
     QConfigAny
 )
-from .observer import _FIXED_QPARAMS_OP_TO_OBSERVER
 
 
 __all__ = [
@@ -29,6 +32,22 @@ OBJECT_TYPE_DICT_KEY = "object_type"
 MODULE_NAME_REGEX_DICT_KEY = "module_name_regex"
 MODULE_NAME_DICT_KEY = "module_name"
 MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
+
+_FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
+    torch.nn.Hardsigmoid: default_fixed_qparams_range_0to1_observer,
+    torch.nn.functional.hardsigmoid: default_fixed_qparams_range_0to1_observer,
+    "hardsigmoid": default_fixed_qparams_range_0to1_observer,
+    "hardsigmoid_": default_fixed_qparams_range_0to1_observer,
+    torch.nn.Sigmoid: default_fixed_qparams_range_0to1_observer,
+    torch.sigmoid: default_fixed_qparams_range_0to1_observer,
+    "sigmoid": default_fixed_qparams_range_0to1_observer,
+    "sigmoid_": default_fixed_qparams_range_0to1_observer,
+    torch.nn.Softmax: default_fixed_qparams_range_0to1_observer,
+    torch.nn.Tanh: default_fixed_qparams_range_neg1to1_observer,
+    torch.tanh: default_fixed_qparams_range_neg1to1_observer,
+    "tanh": default_fixed_qparams_range_neg1to1_observer,
+    "tanh_": default_fixed_qparams_range_neg1to1_observer,
+}
 
 
 def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QConfigMapping:
@@ -81,6 +100,7 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QC
             fixed_qparams_qconfig = fixed_qparams_observer_to_qconfig[observer]
         else:
             fixed_qparams_qconfig = QConfig(activation=observer, weight=default_weight)
+            fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
         qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
 
     return qconfig_mapping

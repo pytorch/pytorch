@@ -14,7 +14,7 @@ from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
 )
-from ..observer import _FIXED_QPARAMS_OP_TO_OBSERVER
+from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 
 # ===================
 # |  DTYPE CONFIGS  |

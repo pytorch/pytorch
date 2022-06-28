@@ -15,18 +15,20 @@ from ..quantize import (
     propagate_qconfig_,
 )
 from ..observer import (
-    _FIXED_QPARAMS_OP_TO_OBSERVER,
     ObserverBase,
+    PlaceholderObserver,
 )
 from ..qconfig import (
-    float16_static_qconfig,
+    _partial_wrapper_equals,
     is_reuse_input_qconfig,
     QConfigAny,
 )
-from ..qconfig_mapping import QConfigMapping
+from ..qconfig_mapping import (
+    _FIXED_QPARAMS_OP_TO_OBSERVER,
+    QConfigMapping,
+)
 from ..qconfig_mapping_utils import (
     get_flattened_qconfig_dict,
-    get_object_type_qconfig,
     update_qconfig_for_qat,
 )
 from .qconfig_utils import (
@@ -1322,19 +1324,22 @@ def insert_observers_for_model(
 
     return results_node
 
-def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_mapping: QConfigMapping):
+def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, QConfigAny]):
     """
     Validate whether the correct observers are configured for fixed qparams ops in the model, if any.
     """
     # TODO: handle fp16 qconfigs properly
-    allowed_qconfigs = {
-        float16_static_qconfig,
-    }
+    allowed_observer_ctrs = [
+        PlaceholderObserver.with_args(dtype=torch.float16)
+    ]
     for node in model.graph.nodes:
-        if node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
-            qconfig = get_object_type_qconfig(qconfig_mapping, node.target, qconfig_mapping.global_qconfig)
-            if qconfig is not None and qconfig not in allowed_qconfigs and\
-                    qconfig.activation != _FIXED_QPARAMS_OP_TO_OBSERVER[node.target]:
+        if node.name in qconfig_map and node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
+            bad_observer = True
+            qconfig = qconfig_map[node.name]
+            for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[node.target]]:
+                if _partial_wrapper_equals(qconfig.activation, observer_ctr):
+                    bad_observer = False
+            if bad_observer:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
                                  "'%s'. Please use torch.ao.quantization.get_default_qconfig_mapping or "
                                  "torch.ao.quantization.get_default_qat_qconfig_mapping instead." % node.target)
@@ -1410,7 +1415,7 @@ def prepare(
         node_name_to_scope: Dict[str, Tuple[str, type]],
         example_inputs: Tuple[Any, ...],
         prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-        equalization_config: Union[QConfigMapping, Dict[str, Any], None] = None,
+        _equalization_config: Union[QConfigMapping, Dict[str, Any], None] = None,
         backend_config_dict: Optional[Dict[str, Any]] = None,
         is_standalone_module: bool = False) -> ObservedGraphModule:
     """ standalone_module means it a submodule that is not inlined in
@@ -1435,8 +1440,8 @@ def prepare(
     """
     if prepare_custom_config is None:
         prepare_custom_config = PrepareCustomConfig()
-    if equalization_config is None:
-        equalization_config = QConfigMapping()
+    if _equalization_config is None:
+        _equalization_config = QConfigMapping()
 
     if isinstance(qconfig_mapping, Dict):
         warnings.warn(
@@ -1444,11 +1449,11 @@ def prepare(
             "in a future version. Please pass in a QConfigMapping instead.")
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
 
-    if isinstance(equalization_config, Dict):
+    if isinstance(_equalization_config, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
             "be supported in a future version. Please pass in a QConfigMapping instead.")
-        equalization_config = QConfigMapping.from_dict(equalization_config)
+        _equalization_config = QConfigMapping.from_dict(_equalization_config)
 
     if isinstance(prepare_custom_config, Dict):
         warnings.warn(
@@ -1457,11 +1462,9 @@ def prepare(
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
     assert(isinstance(qconfig_mapping, QConfigMapping))
-    assert(isinstance(equalization_config, QConfigMapping))
-
-    _validate_fixed_qparams_qconfigs(model, qconfig_mapping)
+    assert(isinstance(_equalization_config, QConfigMapping))
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
-    equalization_config = copy.deepcopy(equalization_config)
+    _equalization_config = copy.deepcopy(_equalization_config)
 
     # mapping from a tuple of nodes in reverse order to uninitialized
     #   QuantizeHandler subclass. For example,
@@ -1502,7 +1505,7 @@ def prepare(
         get_fusion_pattern_to_root_node_getter(backend_config_dict)
 
     update_qconfig_for_fusion(model, qconfig_mapping)
-    update_qconfig_for_fusion(model, equalization_config)
+    update_qconfig_for_fusion(model, _equalization_config)
     flattened_qconfig_dict = get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
@@ -1523,8 +1526,9 @@ def prepare(
 
     # fill qconfig_map, a map from node name to qconfig, used in find_matches
     equalization_qconfig_map = generate_qconfig_map(
-        model, modules, model.graph, equalization_config, node_name_to_scope)
+        model, modules, model.graph, _equalization_config, node_name_to_scope)
     qconfig_map = generate_qconfig_map(model, modules, model.graph, qconfig_mapping, node_name_to_scope)
+    _validate_fixed_qparams_qconfigs(model, qconfig_map)
 
     # match the patterns that will get quantized
     standalone_module_names = list(prepare_custom_config.standalone_module_names.keys())

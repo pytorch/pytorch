@@ -8,7 +8,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, List, Tuple, Optional, Dict
 
 import torch
 import torch.nn as nn
@@ -1546,19 +1546,3 @@ default_reuse_input_observer = ReuseInputObserver
 Default observer for operators like reshape that reuses the observer of input to
 the operator
 """
-
-_FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
-    torch.nn.Hardsigmoid: default_fixed_qparams_range_0to1_observer,
-    torch.nn.functional.hardsigmoid: default_fixed_qparams_range_0to1_observer,
-    "hardsigmoid": default_fixed_qparams_range_0to1_observer,
-    "hardsigmoid_": default_fixed_qparams_range_0to1_observer,
-    torch.nn.Sigmoid: default_fixed_qparams_range_0to1_observer,
-    torch.sigmoid: default_fixed_qparams_range_0to1_observer,
-    "sigmoid": default_fixed_qparams_range_0to1_observer,
-    "sigmoid_": default_fixed_qparams_range_0to1_observer,
-    torch.nn.Softmax: default_fixed_qparams_range_0to1_observer,
-    torch.nn.Tanh: default_fixed_qparams_range_neg1to1_observer,
-    torch.tanh: default_fixed_qparams_range_neg1to1_observer,
-    "tanh": default_fixed_qparams_range_neg1to1_observer,
-    "tanh_": default_fixed_qparams_range_neg1to1_observer,
-}
