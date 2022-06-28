@@ -16,10 +16,6 @@ on:
         type: boolean
         default: false
         description: If set, push the docs to the docs website.
-      matrix:
-        required: true
-        type: string
-        description: Which docs to build (e.g. '[cpp, python]')
 
     secrets:
       GH_PYTORCHBOT_TOKEN:
@@ -33,7 +29,7 @@ jobs:
     runs-on: [self-hosted, linux.2xlarge]
     strategy:
       matrix:
-        docs_type: ${{ fromJSON(inputs.matrix) }}
+        docs_type: [cpp, python]
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch

@@ -45,7 +45,6 @@ jobs:
     with:
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.linux-focal-py3_7-gcc7-build.outputs.docker-image }}
-      matrix: '[python]'
 
   linux-focal-py3_7-gcc7-no-ops:
     name: linux-focal-py3.7-gcc7-no-ops
