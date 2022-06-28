@@ -221,9 +221,8 @@ Tensor context_run(
   const vTensor& packed_v_weight = convert(packed_context.get(0).toTensor());
   const vTensor& packed_v_bias = convert(packed_context.get(1).toTensor());
   const Tensor& unpacked_weight = unpacked_context.get(0).toTensor();
-  const c10::IValue unpacked_bias_ivalue = unpacked_context.get(1);
   const c10::optional<Tensor>& unpacked_bias
-   = unpacked_bias_ivalue.isTensor() ? unpacked_bias_ivalue.toTensor() : (c10::optional<Tensor>&) c10::nullopt;
+   = unpacked_context.get(1).isTensor() ? unpacked_context.get(1).toTensor() : c10::optional<Tensor>();
 
   TORCH_CHECK(
       usable(input, unpacked_weight, unpacked_bias),
@@ -479,7 +478,7 @@ LinearOpContext::State LinearOpContext::unpack() const {
   const c10::impl::GenericList unpacked_ = std::get<1>(vulkan_context_.get_state());
   const Tensor unpacked_weight = unpacked_.get(0).toTensor();
   const c10::optional<Tensor> unpacked_bias
-   = unpacked_.get(1).isTensor() ? unpacked_.get(1).toTensor() : (c10::optional<Tensor>&) c10::nullopt;
+   = unpacked_.get(1).isTensor() ? unpacked_.get(1).toTensor() : c10::optional<Tensor>();
   return LinearOpContext::State{
     unpacked_weight,
     unpacked_bias

@@ -5,6 +5,7 @@ from .. import functional as F
 from torch import Tensor
 from ..common_types import _size_any_t
 
+__all__ = ['Fold', 'Unfold']
 
 class Fold(Module):
     r"""Combines an array of sliding local blocks into a large containing
