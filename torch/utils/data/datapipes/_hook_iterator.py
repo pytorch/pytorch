@@ -214,10 +214,11 @@ def hook_iterator(namespace, profile_name):
         def wrap_iter(*args, **kwargs):
             iter_ret = func(*args, **kwargs)
             datapipe = args[0]
-            # TODO: Check if I need to add fast-forward iterator related logic here...
-            #       Probably something related to skipping `_set_valid_iterator_id` and `reset`
-            #       It depends on what the return is
-            #       Maybe `if datapipe._fast_forward_iterator:` return `iter_ret = datapipe._fast_forward_iterator`
+            if datapipe._fast_forward_iterator:
+                iter_ret = datapipe._fast_forward_iterator
+                datapipe._fast_forward_iterator = None
+                datapipe._restored = False
+                return iter_ret
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             return IteratorDecorator(iter_ret, datapipe, iterator_id, '__next__' in namespace)
 
