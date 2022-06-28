@@ -3,7 +3,7 @@ printf "\nCreating .buckconfig\n"
 cp .buckconfig.oss .buckconfig
 
 PROXY=""
-if [ $1 == "devserver" ]; then
+if [ "$1" == "devserver" ]; then
    echo -e '\n[download]\n   proxy_host=fwdproxy\n   proxy_port=8080\n   proxy_type=HTTP\n' >> .buckconfig
    PROXY="$(fwdproxy-config curl)"
    printf "using proxy $PROXY\n\n"
