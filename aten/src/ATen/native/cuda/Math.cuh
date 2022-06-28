@@ -2994,6 +2994,21 @@ const auto shifted_chebyshev_polynomial_w_string = jiterator_stringify(
     } // shifted_chebyshev_polynomial_w_forward(T x, T n)
 ); // shifted_chebyshev_polynomial_w_string
 
+const auto spherical_bessel_j0_string = jiterator_stringify(
+    template<typename T>
+    T spherical_bessel_j0_forward(T x) {
+        if (isinf(x)) {
+            return T(0.0);
+        }
+
+        if (abs(x) < T(0.5)) {
+            return T(1.0) + x * x * (T(-1.0) / T(6.0) + x * x * (T(1.0) / T(120.0) + x * x * (T(-1.0) / T(5040.0) + x * x * (T(1.0) / T(362880.0) + x * x * (T(-1.0) / T(39916800.0) + x * x * (T(1.0) / T(6227020800.0)))))));
+        }
+
+        return sin(x) / x;
+    } // T spherical_bessel_j0_forward(T x)
+); // spherical_bessel_j0_string
+
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 
 template <typename scalar_t>

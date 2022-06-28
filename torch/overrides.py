@@ -1042,6 +1042,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.shifted_chebyshev_polynomial_w: lambda input, n, out=None: -1,
         torch.special.sinc: lambda input: -1,
         torch.special.softmax: lambda input, dim, dtype=None: -1,
+        torch.special.spherical_bessel_j0: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
         torch.special.xlogy: lambda input, other, out=None: -1,
         torch.special.zeta: lambda self, other, out=None: -1,
