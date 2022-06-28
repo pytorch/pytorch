@@ -62,6 +62,8 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
             secondaryCastTensor = castMPSTensor(mpsGraph, newCachedGraph->secondaryTensor, common_dtype);
           }
           newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
+          // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to int32 tensor
+          // Output tensor should have been promoted but it remains an int32 tensor
           if (output.scalar_type() != common_dtype) {
             newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, output.scalar_type());
           }

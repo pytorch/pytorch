@@ -47,6 +47,8 @@ class TORCH_API SchemaInfo {
   bool areAliasing(const SchemaArgument& lhs, const SchemaArgument& rhs) const;
 
  private:
+  std::vector<c10::Argument> getCorrectList(SchemaArgType type) const;
+
   c10::FunctionSchema schema_;
 };
 } // namespace utils
