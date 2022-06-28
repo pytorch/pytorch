@@ -1,6 +1,17 @@
 import inspect
 import functools
+from enum import Enum
+
 import torch.autograd
+
+
+class _SnapshotState(Enum):
+    r"""
+    `Deserialized` -
+    """
+    Deserialized = 1
+    Restored = 2
+    Iterating = 3
 
 
 def _simplify_obj_name(obj) -> str:
@@ -216,7 +227,7 @@ def hook_iterator(namespace, profile_name):
             if datapipe._fast_forward_iterator:
                 iter_ret = datapipe._fast_forward_iterator
                 datapipe._fast_forward_iterator = None
-                datapipe._restored = False
+                datapipe._snapshot_state = _SnapshotState.Iterating
                 return iter_ret
             iterator_id = _set_datapipe_valid_iterator_id(datapipe)  # This ID is tied to each created iterator
             return IteratorDecorator(iter_ret, datapipe, iterator_id, '__next__' in namespace)
