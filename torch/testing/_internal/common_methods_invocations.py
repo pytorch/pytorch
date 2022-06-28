@@ -8470,15 +8470,16 @@ def sample_inputs_tril_triu(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(make_arg(shape), args=args)
 
 
-def sample_inputs_clone(op_info, device, dtype, requires_grad, **kwargs):
+def sample_inputs_clone_contiguous(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     yield SampleInput(make_arg((S, M, S)))
     yield SampleInput(make_arg(()))
 
-def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
-    # NOTE: the default memory format for clone is torch.preserve_format
-    yield from sample_inputs_clone(op, device, dtype, requires_grad, **kwargs)
+def reference_inputs_clone_contiguous(op, device, dtype, requires_grad, **kwargs):
+    # NOTE: the default memory format for clone is torch.preserve_format, for contiguous it's torch.contiguous_format
+    # This exploits that default to test torch.preserve_format for clone, without causing an error when testing contiguous
+    yield from sample_inputs_clone_contiguous(op, device, dtype, requires_grad, **kwargs)
 
     shapes = (
         (3, 5, 6),
@@ -8514,37 +8515,6 @@ def reference_inputs_clone(op, device, dtype, requires_grad, **kwargs):
     for shape, strides, offset in strided_cases:
         yield SampleInput(make_arg(500,).as_strided(shape, strides, offset))
         yield SampleInput(make_arg(500,).as_strided(shape, strides, offset), kwargs={'memory_format': torch.contiguous_format})
-
-    # channels last 2D
-    yield SampleInput(make_arg((2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last})
-    a = make_arg((2, 2, 2, 2)).permute(0, 3, 1, 2)
-    yield SampleInput(a, kwargs={'memory_format': torch.channels_last})
-
-    # channels last 3D
-    yield SampleInput(make_arg((2, 2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last_3d})
-    a = make_arg((2, 2, 2, 2, 2)).permute(0, 4, 1, 2, 3)
-    yield SampleInput(a, kwargs={'memory_format': torch.channels_last_3d})
-
-
-def sample_inputs_contiguous(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-
-    yield SampleInput(make_arg((S, S)))
-
-def reference_inputs_contiguous(op, device, dtype, requires_grad, **kwargs):
-    yield from sample_inputs_contiguous(op, device, dtype, requires_grad, **kwargs)
-
-    make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
-
-    # contiguous
-    yield SampleInput(make_arg((2, 2)))
-
-    # permuted
-    a = make_arg((2, 2)).permute(1, 0)
-    yield SampleInput(a)
-
-    # noncontiguous in memory
-    yield SampleInput(make_arg((6, 6), noncontiguous=True))
 
     # channels last 2D
     yield SampleInput(make_arg((2, 2, 2, 2)), kwargs={'memory_format': torch.channels_last})
@@ -11163,8 +11133,8 @@ op_db: List[OpInfo] = [
     OpInfo('clone',
            ref=np.copy,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
-           sample_inputs_func=sample_inputs_clone,
-           reference_inputs_func=reference_inputs_clone,
+           sample_inputs_func=sample_inputs_clone_contiguous,
+           reference_inputs_func=reference_inputs_clone_contiguous,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
@@ -11176,8 +11146,8 @@ op_db: List[OpInfo] = [
     OpInfo('contiguous',
            op=lambda x, *args, **kwargs: x.contiguous(*args, **kwargs),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
-           sample_inputs_func=sample_inputs_contiguous,
-           reference_inputs_func=reference_inputs_contiguous,
+           sample_inputs_func=sample_inputs_clone_contiguous,
+           reference_inputs_func=reference_inputs_clone_contiguous,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            autodiff_fusible_nodes=['aten::contiguous'],
@@ -20841,10 +20811,6 @@ python_ref_db = [
         "_refs.contiguous",
         torch_opinfo_name="contiguous",
         supports_nvfuser=False,
-        skips=(
-            # RuntimeError: Tracing expected 2 arguments but got 1 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     PythonRefInfo(
         "_refs.dsplit",
@@ -20864,10 +20830,6 @@ python_ref_db = [
         "_refs.expand",
         torch_opinfo_name="expand",
         supports_nvfuser=False,
-        skips=(
-            # RuntimeError: Tracing expected 1 arguments but got 2 concrete arguments
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     PythonRefInfo(
         "_refs.flatten",

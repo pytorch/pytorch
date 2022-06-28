@@ -1261,21 +1261,15 @@ def make_channels_last_2d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
         lambda: "Only tensors of rank 4 can use the channels_last memory format",
     )
 
-    multiplier = shape[1]
-    strides = []
-    for idx in (-1, -2, 0):
-        l = shape[idx]
-        if l != 0:
-            strides.append(multiplier)
-        else:
-            strides.append(multiplier)
+    multiplier = 1
+    strides = [0] * 4
+    for idx in (1, -1, -2, 0):
         # NOTE: intentionally divergence from make_contiguous_strides_for
         # This is consistent with eager
-        multiplier = l * multiplier
+        strides[idx] = multiplier
+        multiplier *= shape[idx]
 
-    strides.insert(2, 1)
-    result = tuple(reversed(strides))
-    return result
+    return tuple(strides)
 
 
 def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
@@ -1284,21 +1278,15 @@ def make_channels_last_3d_strides_for(shape: ShapeType) -> Tuple[int, ...]:
         lambda: "Only tensors of rank 5 can use the channels_last_3d memory format",
     )
 
-    multiplier = shape[1]
-    strides = []
-    for idx in (-1, -2, -3, 0):
-        l = shape[idx]
-        if l != 0:
-            strides.append(multiplier)
-        else:
-            strides.append(multiplier)
+    multiplier = 1
+    strides = [0] * 5
+    for idx in (1, -1, -2, -3, 0):
         # NOTE: intentionally divergence from make_contiguous_strides_for
         # This is consistent with eager
-        multiplier = l * multiplier
+        strides[idx] = multiplier
+        multiplier *= shape[idx]
 
-    strides.insert(3, 1)
-    result = tuple(reversed(strides))
-    return result
+    return tuple(strides)
 
 
 def compute_reduction_output_shape(
