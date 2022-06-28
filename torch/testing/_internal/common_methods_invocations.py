@@ -11125,6 +11125,8 @@ op_db: List[OpInfo] = [
     OpInfo('cholesky_inverse',
            dtypes=floating_and_complex_types(),
            backward_dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
            check_batched_gradgrad=True,
@@ -11304,6 +11306,8 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('copysign',
                     dtypes=all_types_and(torch.bool, torch.half, torch.bfloat16),
                     promotes_int_to_float=True,
+                    # https://github.com/pytorch/pytorch/issues/80411
+                    gradcheck_fast_mode=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True),
     OpInfo('corrcoef',
@@ -11650,6 +11654,8 @@ op_db: List[OpInfo] = [
                     ref=np.fmod,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                    # https://github.com/pytorch/pytorch/issues/80411
+                    gradcheck_fast_mode=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=None,
@@ -11720,6 +11726,8 @@ op_db: List[OpInfo] = [
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and_complex_and(
                          torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11734,6 +11742,8 @@ op_db: List[OpInfo] = [
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and_complex_and(
                          torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11750,6 +11760,8 @@ op_db: List[OpInfo] = [
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and_complex_and(
                          torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11766,6 +11778,8 @@ op_db: List[OpInfo] = [
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and_complex_and(
                          torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11780,6 +11794,8 @@ op_db: List[OpInfo] = [
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and_complex_and(
                          torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_gradgrad=False,
@@ -11799,6 +11815,8 @@ op_db: List[OpInfo] = [
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and_complex_and(
                          torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half, torch.complex32)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_gradgrad=False,
@@ -11817,6 +11835,8 @@ op_db: List[OpInfo] = [
                      # rocFFT doesn't support Half/Complex Half Precision FFT
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -11831,6 +11851,8 @@ op_db: List[OpInfo] = [
                      # rocFFT doesn't support Half/Complex Half Precision FFT
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -11846,6 +11868,8 @@ op_db: List[OpInfo] = [
                      # rocFFT doesn't support Half/Complex Half Precision FFT
                      # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
                      dtypesIfCUDA=all_types_and(torch.bool, *() if (TEST_WITH_ROCM or not SM53OrLater) else (torch.half,)),
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      check_batched_grad=False,
@@ -11857,6 +11881,8 @@ op_db: List[OpInfo] = [
                      aten_name='fft_ifft',
                      ref=np.fft.ifft,
                      ndimensional=SpectralFuncType.OneD,
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11870,6 +11896,8 @@ op_db: List[OpInfo] = [
                      aten_name='fft_ifft2',
                      ref=np.fft.ifft2,
                      ndimensional=SpectralFuncType.TwoD,
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11888,6 +11916,8 @@ op_db: List[OpInfo] = [
                      aten_name='fft_ifftn',
                      ref=np.fft.ifftn,
                      ndimensional=SpectralFuncType.ND,
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11921,6 +11951,8 @@ op_db: List[OpInfo] = [
                      aten_name='fft_ihfft2',
                      ref=scipy.fft.ihfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.TwoD,
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11942,6 +11974,8 @@ op_db: List[OpInfo] = [
                      aten_name='fft_ihfftn',
                      ref=scipy.fft.ihfftn if has_scipy_fft else None,
                      ndimensional=SpectralFuncType.ND,
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11965,6 +11999,8 @@ op_db: List[OpInfo] = [
                      aten_name='fft_irfft',
                      ref=np.fft.irfft,
                      ndimensional=SpectralFuncType.OneD,
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11979,6 +12015,8 @@ op_db: List[OpInfo] = [
                      aten_name='fft_irfft2',
                      ref=np.fft.irfft2,
                      ndimensional=SpectralFuncType.TwoD,
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -11998,6 +12036,8 @@ op_db: List[OpInfo] = [
                      aten_name='fft_irfftn',
                      ref=np.fft.irfftn,
                      ndimensional=SpectralFuncType.ND,
+                     # https://github.com/pytorch/pytorch/issues/80411
+                     gradcheck_fast_mode=True,
                      supports_forward_ad=True,
                      supports_fwgrad_bwgrad=True,
                      # See https://github.com/pytorch/pytorch/pull/78358
@@ -12506,6 +12546,8 @@ op_db: List[OpInfo] = [
            op=torch.linalg.householder_product,
            aliases=('orgqr', ),
            dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            # TODO: backward uses in-place operations that vmap doesn't like
            check_batched_grad=False,
            check_batched_gradgrad=False,
@@ -12590,6 +12632,8 @@ op_db: List[OpInfo] = [
            aliases=('matrix_power',),
            aten_name='linalg_matrix_power',
            dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12852,6 +12896,8 @@ op_db: List[OpInfo] = [
            aten_name='linalg_lu_factor',
            op=torch.linalg.lu_factor,
            dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
@@ -12860,6 +12906,8 @@ op_db: List[OpInfo] = [
            aten_name='linalg_lu_factor_ex',
            op=torch.linalg.lu_factor_ex,
            dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
@@ -15197,6 +15245,8 @@ op_db: List[OpInfo] = [
                     ref=np.float_power,
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool),
                     promotes_int_to_float=True,
+                    # https://github.com/pytorch/pytorch/issues/80411
+                    gradcheck_fast_mode=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_one_python_scalar=True,
@@ -15590,6 +15640,8 @@ op_db: List[OpInfo] = [
                     op=torch.Tensor.__rmod__,
                     dtypes=floating_types_and(torch.bfloat16, torch.half,),
                     dtypesIfCUDA=all_types_and(torch.bfloat16, torch.half),
+                    # https://github.com/pytorch/pytorch/issues/80411
+                    gradcheck_fast_mode=True,
                     supports_out=False,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -17292,6 +17344,8 @@ op_db: List[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.complex32),
            sample_inputs_func=sample_inputs_cat_concat,
            reference_inputs_func=reference_inputs_cat,
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_autodiffed=True,
@@ -18817,6 +18871,8 @@ op_db: List[OpInfo] = [
         method_variant=None,
         identity=1,
         nan_policy='propagate',
+        # https://github.com/pytorch/pytorch/issues/80411
+        gradcheck_fast_mode=True,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
