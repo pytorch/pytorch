@@ -138,9 +138,21 @@ class TestNestedTensor(TestCase):
     def test_numel(self):
         for constructor in _iter_constructors():
             a1 = constructor([])
-            self.assertRaisesRegex(
-                RuntimeError, "numel is disabled", lambda: a1.numel(),
-            )
+            self.assertEqual(a1.numel(), 0)
+            a1 = constructor([torch.tensor(3.0), torch.tensor(4.0)])
+            self.assertEqual(a1.numel(), 2)
+            a1 = constructor([torch.randn(2, 2, 2)])
+            self.assertEqual(a1.numel(), 8)
+            a1 = constructor([torch.randn([1, 2, 3]), torch.randn(3, 2, 1)])
+            self.assertEqual(a1.numel(), 12)
+            a1 = constructor([torch.randn([1, 1, 3]), torch.randn(3, 2, 4)])
+            self.assertEqual(a1.numel(), 27)
+            a1 = constructor([torch.randn([5, 5, 5]), torch.randn(6, 6, 6)])
+            self.assertEqual(a1.numel(), 341)
+
+            # Interesting edge case
+            a1 = constructor([torch.randn([1, 2, 3]), torch.randn(1, 2, 0)])
+            self.assertEqual(a1.numel(), 6)
 
     @torch.inference_mode()
     def test_size(self):
@@ -734,6 +746,50 @@ class TestNestedTensorDeviceType(TestCase):
         expect = nt0.to_padded_tensor(0.0).bmm(nt1.to_padded_tensor(0.0))
         self.assertEqual(actual.to_padded_tensor(0.0), expect)
 
+    @dtypes(torch.float, torch.double)
+    def test_linear(self, device, dtype):
+        a = torch.randn(1, 2, device=device, dtype=dtype)
+        b = torch.randn(2, 2, device=device, dtype=dtype)
+        c = torch.randn(3, 2, device=device, dtype=dtype)
+        nt = torch.nested_tensor([a, b, c])
+
+        weight = torch.randn(2, 2, device=device, dtype=dtype)
+        bias = torch.randn(2, device=device, dtype=dtype)
+        # success case
+        torch.functional.F.linear(nt, weight, bias)
+
+        # invalid nested tensor dimension
+        msg = r'Linear requires nested_tensor.dim == 3 and dense_matrix.dim == 2. Nested tensor dim: 2. Dense tensor dim: 2'
+        nt1 = torch.nested_tensor([torch.randn(1, device=device, dtype=dtype),
+                                  torch.randn(2, device=device, dtype=dtype)])
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.functional.F.linear(nt1, weight, bias)
+
+        # invalid weight shape
+        msg = r'Linear requires nested_tensor.dim == 3 and dense_matrix.dim == 2. Nested tensor dim: 3. Dense tensor dim: 3'
+        weight1 = torch.randn(2, 2, 3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.functional.F.linear(nt, weight1, bias)
+
+        # inconsistent last dim of nested tensor
+        msg = r"all tensors in NestedTensor must have the same trailing dim"
+        nt2 = torch.nested_tensor([torch.randn(1, 2, device=device, dtype=dtype),
+                                  torch.randn(2, 3, device=device, dtype=dtype)])
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.functional.F.linear(nt2, weight, bias)
+
+        # Mismatch of nested tensor last dim and weight dimension
+        weight2 = torch.randn(2, 4, device=device, dtype=dtype)
+        msg = r"Shape mismatch for NestedTensor Linear: Expected input's \(a nested tensor\) 'last_dim'" \
+            r" to equal 'weight.size\(1\), but got: last_dim = 2, and weight.size\(1\) = 4"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.functional.F.linear(nt, weight2, bias)
+
+        # Nested tensor input and nested weight
+        nt_weight = nt.clone()
+        msg = r"Linear does not support nested weight when input is a nested tensor."
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.functional.F.linear(nt, nt_weight, bias)
 class TestNestedTensorAutograd(TestCase):
     def nt_equal(self, nt1, nt2):
         self.assertEqual(nt1.dtype, nt2.dtype)
@@ -849,6 +905,73 @@ class TestNestedTensorAutograd(TestCase):
             return c.to_padded_tensor(0)
         data = (a, b, c)
         assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_size_dim(self):
+        a = torch.nested_tensor([])
+        self.assertEqual(a.size(0), 0)
+
+        a = torch.nested_tensor([torch.tensor(1)])
+        self.assertEqual(a.size(0), 1)
+
+        a = torch.nested_tensor([torch.tensor(1), torch.tensor(2)])
+        self.assertEqual(a.size(0), 2)
+
+        a = torch.nested_tensor([torch.rand(1, 2),
+                                 torch.rand(1, 8)])
+        self.assertEqual(a.size(0), 2)
+        self.assertEqual(a.size(1), 1)
+        self.assertRaisesRegex(
+            RuntimeError, "Given dimension 2 is irregular and does not have a size", lambda: a.size(2))
+
+        a = torch.nested_tensor([torch.rand(3, 4),
+                                 torch.rand(5, 4)])
+        self.assertEqual(a.size(0), 2)
+        self.assertRaisesRegex(
+            RuntimeError, "Given dimension 1 is irregular and does not have a size", lambda: a.size(1))
+        self.assertEqual(a.size(2), 4)
+
+    def test_nested_tensor_linear(self):
+
+        a = torch.randn(1, 2, requires_grad=True, dtype=torch.float64)
+        b = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        c = torch.randn(3, 2, requires_grad=True, dtype=torch.float64)
+
+        weight = torch.randn(2, 2, requires_grad=True, dtype=torch.float64)
+        bias = torch.randn(2, requires_grad=True, dtype=torch.float64)
+
+        def grad_test_func(a, b, c, weight, bias=None):
+            nt = torch.nested_tensor([a, b, c])
+            # This implicitly tests to_padded_tensor grads
+            d = torch.functional.F.linear(nt, weight, bias)
+            return d.to_padded_tensor(0)
+        data = (a, b, c, weight, bias)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+        # Test linear with no bias added
+        data = (a, b, c, weight)
+        assert torch.autograd.gradcheck(grad_test_func, inputs=data)
+
+    def test_nested_tensor_linear_backward(self):
+        a = torch.randn(1, 2, requires_grad=False)
+        b = torch.randn(2, 2, requires_grad=False)
+        c = torch.randn(3, 2, requires_grad=False)
+
+        weight = torch.randn(2, 2, requires_grad=True)
+        bias = torch.randn(2, requires_grad=True)
+        nt = torch.nested_tensor([a, b, c])
+
+        out = torch.functional.F.linear(nt, weight, bias)
+
+        out.backward(out.clone())
+
+        assert weight.grad is not None
+        assert bias.grad is not None
+
+        assert a.grad is None
+        assert b.grad is None
+        assert c.grad is None
+
+
 
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
 
