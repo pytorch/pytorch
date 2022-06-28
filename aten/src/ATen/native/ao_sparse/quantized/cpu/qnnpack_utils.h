@@ -17,7 +17,6 @@ namespace sparse {
 struct TORCH_API PackedLinearWeightQnnp
     : public LinearPackedParamsBase {
   PackedLinearWeightQnnp(const at::Tensor& weight, const c10::optional<at::Tensor>& bias, const int64_t out_features_block_size /* block sparsity size across output_features */, const int64_t in_features_block_size /* block sparsity size across input_features */);
-  at::Tensor orig_weight_;
   c10::optional<at::Tensor> orig_bias_;
   // Seperate copy of bias exist so that we can fill in zeros when
   // optional bias does not exist. This is to compy with qnnpack operator that
@@ -32,6 +31,8 @@ struct TORCH_API PackedLinearWeightQnnp
   std::vector<float> requantization_scales_;
   std::unique_ptr<pytorch_qnnp_operator, QnnpackOperatorDeleter>
       sparse_linear_op_{nullptr};
+  int64_t output_channels_;
+  int64_t input_channels_;
 
   at::Tensor apply(
       const at::Tensor& input,
