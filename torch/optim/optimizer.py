@@ -91,7 +91,11 @@ class Optimizer(object):
                                    self.__class__.__name__ +
                                    " but this instance was constructed with capturable=False.")
 
-            if (not self._warned_capturable_if_run_uncaptured) and self.defaults['capturable'] and (not capturing):
+            if (
+                (not getattr(self, "_warned_capturable_if_run_uncaptured", False))
+                and self.defaults["capturable"]
+                and (not capturing)
+            ):
                 print("Warning: This instance was constructed with capturable=True, but step() " +
                       "is running without CUDA graph capture. If you never intend to graph-capture this " +
                       "instance, capturable=True can impair performance, and you should set capturable=False.")
