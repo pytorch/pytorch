@@ -12,13 +12,67 @@ from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
 __all__ = [
-    "ensure_map_fn_works",
+    "validate_input_col",
     "StreamWrapper",
     "get_file_binaries_from_pathnames",
     "get_file_pathnames_from_root",
     "match_masks",
     "validate_pathname_binary_tuple",
 ]
+
+
+def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]]):
+    """
+    Checks that function used in a map style datapipe works with the input column
+
+    Args:
+        fn: The function to check.
+        input_col: The input column to check.
+    Returns:
+        None.
+    Raises:
+        TypeError: If the function is not compatible with the input column.
+    """
+    sig = inspect.signature(fn)
+    if isinstance(input_col, (list, tuple)):
+        input_col_size = len(input_col)
+    else:
+        input_col_size = 1
+
+    var_pos_args = [p for p in sig.parameters.values() if
+                          p.kind == inspect.Parameter.VAR_POSITIONAL]
+
+    fn_name = "(unknown)"
+    if hasattr(fn, "__name__"):
+        fn_name = fn.__name__
+
+    if len(sig.parameters) > input_col_size:
+        non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
+        var_pos_args = [p for p in non_default_params if p.kind == inspect.Parameter.VAR_POSITIONAL]
+
+        if len(non_default_params) > input_col_size:
+
+            raise ValueError(
+                f"The function {fn_name} takes {len(non_default_params)} "
+                f"non-default parameters, but {input_col_size} are required."
+            )
+
+        non_default_kw_only = [p for p in non_default_params if p.kind == inspect.Parameter.KEYWORD_ONLY]
+
+        if len(non_default_kw_only) > 0:
+            raise ValueError(
+                f"The function {fn_name} takes {len(non_default_kw_only)} "
+                f"non-default keyword-only parameters, which is not allowed."
+            )
+
+    if len(sig.parameters) < input_col_size:
+        if len(var_pos_args) > 0:
+            # *args present means that this check isn't useful
+            return
+        raise ValueError(
+            f"The function {fn_name} takes {len(sig.parameters)} "
+            f"parameters, but {input_col_size} are required."
+        )
 
 
 def _is_local_fn(fn):
