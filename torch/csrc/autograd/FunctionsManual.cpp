@@ -1341,47 +1341,32 @@ Tensor repeat_backward(
     // tensor. Then, sum up gradients over repeated tensors along 'dim', and
     // reduce shape from 'repeat * dimsize/repeat' to 'dimsize/repeat'
     // ('input_dimsize'). Example:
-    //        Size(3, 2)                                             Size(6, 2)
-    //                                                             [[v1_0,
-    //                                                             v1_1],
-    //                                                              [v1_2,
-    //                                                              v1_3],
-    //        [[v0, v1],                   repeat(2, 1)             [v1_4,
-    //        v1_5],
-    //         [v2, v3],                  ------------->            [v2_0,
-    //         v2_1], [v4, v5]] [v2_2, v2_3],
-    //                                                              [v2_4,
-    //                                                              v2_5]]
+    //        Size(3, 2)                                      Size(6, 2)
+    //                                                      [[v1_0, v1_1],
+    //                                                       [v1_2, v1_3],
+    //        [[v0, v1],               repeat(2, 1)          [v1_4, v1_5],
+    //         [v2, v3],              ------------->         [v2_0, v2_1],
+    //         [v4, v5]]                                     [v2_2, v2_3],
+    //                                                       [v2_4, v2_5]]
     //
-    //    input grad (3, 2)            reshape (2, 3, 2)         output grad (6,
-    //    2)
-    //                                  [[[g1_0, g1_1],            [[g1_0,
-    //                                  g1_1],
-    //                                    [g1_2, g1_3],             [g1_2,
-    //                                    g1_3],
-    // [[g1_0+g2_0, g1_1+g2_1],           [g1_4, g1_5]],            [g1_4,
-    // g1_5],
-    //  [g1_0+g2_0, g1_1+g2_1],                                     [g2_0,
-    //  g2_1], [g1_0+g2_0, g1_1+g2_1]]          [[g2_0, g2_1], [g2_2, g2_3],
-    //                                    [g2_2, g2_3],             [g2_4,
-    //                                    g2_5]] [g2_4, g2_5]]]
+    //    input grad (3, 2)      reshape (2, 3, 2)         output grad (6, 2)
+    //                            [[[g1_0, g1_1],            [[g1_0, g1_1],
+    //                              [g1_2, g1_3],             [g1_2, g1_3],
+    // [[g1_0+g2_0, g1_1+g2_1],     [g1_4, g1_5]],            [g1_4, g1_5],
+    //  [g1_2+g2_2, g1_3+g2_3],     [g2_0, g2_1],            [[g2_0, g2_1],
+    //  [g1_4+g2_4, g1_5+g2_5]]     [g2_2, g2_3],             [g2_2, g2_3],
+    //                              [g2_4, g2_5]]             [g2_4, g2_5]]]
+    //
     // If gradient tensor is reshaped to [..., dimsize/repeat, repeat, ...] and
     // then sum over 'dim+1'. The gradient for input is not correctly aligned
     // with input. Example:
-    //     input grad (3, 2)            reshape (3, 2, 2)        output grad (6,
-    //     2)
-    //                                  [[[g1_0, g1_1],
-    //                                    [g1_2, g1_3]],           [[g1_0,
-    //                                    g1_1],
-    //                                                              [g1_2,
-    //                                                              g1_3],
-    // [[g1_0+g1_2, g1_1+g1_3],          [[g1_4, g1_5],             [g1_4,
-    // g1_5],
-    //  [g1_4+g2_0, g1_5+g2_1],           [g2_0, g2_1]],            [g2_0,
-    //  g2_1], [g2_2+g2_4, g2_3+g2_5]] [g2_2, g2_3],
-    //                                   [[g2_2, g2_3],             [g2_4,
-    //                                   g2_5]]
-    //                                    [g2_4, g2_5]]]
+    //  input grad (3, 2)        reshape (3, 2, 2)        output grad (6, 2)
+    //                           [[[g1_0, g1_1],           [[g1_0, g1_1],
+    //                             [g1_2, g1_3]],           [g1_2, g1_3],
+    // [[g1_0+g1_2, g1_1+g1_3],   [[g1_4, g1_5],            [g1_4, g1_5],
+    //  [g1_4+g2_0, g1_5+g2_1],    [g2_0, g2_1]],           [g2_0, g2_1],
+    //  [g2_2+g2_4, g2_3+g2_5]]   [[g2_2, g2_3],            [g2_2, g2_3],
+    //                             [g2_4, g2_5]]]           [g2_4, g2_5]]
     if (repeat != 1) {
       grad_size.push_back(repeat);
       sum_dims.push_back(grad_size.size() - 1);
@@ -4050,134 +4035,55 @@ Tensor linalg_matrix_exp_differential(
       self, grad, at::linalg_matrix_exp, /* adjoint */ adjoint);
 }
 
-Tensor det_backward(const Tensor& grad, const Tensor& self, const Tensor& det) {
-  if (self.numel() == 0) {
-    return at::empty_like(self);
-  }
-
-  auto det_backward_nonsingular =
-      [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
-    // Derived from Jacobi's formula for partial derivative, which can be found
-    // at https://en.wikipedia.org/wiki/Jacobi%27s_formula
-    // i.e. if A is the input matrix, then
-    // A_grad = A^{-H} (grad * det.conj()) I, where
-    // A^{-H} = (A^{-1}).T.conj()
-
-    // create a matrix d := (grad * det.conj())  I
-    auto d = at::zeros_like(self);
-    d.diagonal(0, -2, -1).copy_((grad * det.conj()).unsqueeze(-1));
-    return at::linalg_solve(self.mH(), d);
-  };
-
-  auto det_backward_singular =
-      [&](const Tensor& grad, const Tensor& self, const Tensor& det) -> Tensor {
-    // Derived from the gradient formula that would be used if `self`'s
-    // determinant is calculated using SVD, like so:
-    //    u, s, vh = svd(self)
-    //    det(self) = det(u) * prod(s) * det(vh)
-    //
-    // This formula should be correct even if `self` is nonsingular.
-    Tensor u, s, vh;
-    std::tie(u, s, vh) = at::linalg_svd(self);
-    auto u_det = at::linalg_det(u);
-    auto s_prod = s.prod(-1);
-    auto vh_det = at::linalg_det(vh);
-
-    auto u_det_grad = grad * (vh_det * s_prod).conj();
-    auto u_grad = det_backward_nonsingular(u_det_grad, u, u_det);
-
-    auto s_prod_grad =
-        handle_r_to_c(s_prod.scalar_type(), grad * (u_det * vh_det).conj());
-    auto s_grad = prod_backward(s_prod_grad, s, s_prod, -1, false);
-
-    auto vh_det_grad = grad * (u_det * s_prod).conj();
-    auto vh_grad = det_backward_nonsingular(vh_det_grad, vh, vh_det);
-
-    return svd_backward(u_grad, s_grad, vh_grad, u, s, vh);
-  };
-
-  auto eps = at::native::_get_epsilon(c10::toRealValueType(self.scalar_type()));
-  auto singular_det_cutoff = eps * at::linalg_matrix_norm(self);
-
-  if (self.dim() == 2) {
-    if (det.abs().lt(singular_det_cutoff).item<bool>()) {
-      return det_backward_singular(grad, self, det);
-    } else {
-      return det_backward_nonsingular(grad, self, det);
-    }
-  } else {
-    auto nonzero_det_mask = det.abs().ge(singular_det_cutoff);
-    if (nonzero_det_mask.all().item<bool>()) {
-      return det_backward_nonsingular(grad, self, det);
-    }
-
-    auto zero_det_mask = nonzero_det_mask.logical_not();
-    if (zero_det_mask.all().item<bool>()) {
-      return det_backward_singular(grad, self, det);
-    }
-
-    Tensor self_grad = self.new_empty(self.sizes(), self.options());
-
-    auto nonzero_det_list =
-        at::native::toListOfOptionalTensors(nonzero_det_mask);
-    self_grad.index_put_(
-        /*indices=*/nonzero_det_list,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*value=*/
-        det_backward_nonsingular(
-            grad.index(nonzero_det_list),
-            self.index(nonzero_det_list),
-            det.index(nonzero_det_list)));
-
-    auto zero_det_list = at::native::toListOfOptionalTensors(zero_det_mask);
-    self_grad.index_put_(
-        /*indices=*/zero_det_list,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*value=*/
-        det_backward_singular(
-            grad.index(zero_det_list),
-            self.index(zero_det_list),
-            det.index(zero_det_list)));
-
-    return self_grad;
-  }
-}
-
-// The backward for this function is just a specialized version of
-// lu.backward, which is implemented in /torch/_autograd_functions.py
-Tensor _det_lu_based_helper_backward(
-    const Tensor& det_grad,
+Tensor linalg_det_backward(
+    const Tensor& grad,
     const Tensor& det,
-    const Tensor& self,
-    const Tensor& lu,
-    const Tensor& pivs) {
-  if (!self.numel()) {
-    return at::zeros_like(self, at::MemoryFormat::Contiguous);
-  }
-  if (!det_grad.defined()) {
-    return Tensor();
+    const Tensor& A,
+    const Tensor& LU,
+    const Tensor& pivots) {
+  at::NoTF32Guard disable_tf32;
+  if (!grad.defined()) {
+    return {};
   }
 
-  // run det_backward only if backward is run on _det_lu_based_helper_backward.
-  // _det_lu_based_helper_backward is more stable for forward det computing
-  // functions, but it fails with double backward gradient checks
-  // (gradgradcheck). det_backward, on the other hand, is less stable (due to
-  // restrictions on svd_backward, namely, svd_backward requries distinct
-  // singular values which are sufficiently different from each other), yet, if
-  // its computation is stable, so is its double backward. Hence, if only single
-  // backward is run, we use _det_lu_based_helper_backward, for the double
-  // backward case we use det_backward. The latter approach could produce
-  // unstable gradients, therefore we DO NOT recommend double backpropagation
-  // through det computing functions.
-  if (at::GradMode::is_enabled()) {
-    return det_backward(det_grad, self, det);
-  }
+  // The gradient G is the matrix solving
+  // A.mH G = det(A).conj() * grad * I
+  auto d_diag = grad * det.conj();
+  auto d = at::diag_embed(d_diag.unsqueeze(-1).expand(pivots.sizes()));
 
-  // we use a sequence of kernels to avoid memory copies and checks,
-  // as in the implementation of this function we are 100% sure that
-  // `lu` and `pivs` are coming from a LAPACK routine.
-  return at::_det_lu_based_helper_backward_helper(
-      det_grad, det, self, lu, pivs);
+  if (!at::GradMode::is_enabled()) {
+    // The formula is given by the solution of AX = det.conj() * det * I when A
+    // is invertible det is C^1, so if it's not invertible, we can wiggle the LU
+    // decomposition a bit and use the resulting matrix as a decent
+    // approximation
+    auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
+    auto LU_ =
+        LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
+    return at::linalg_lu_solve(LU_, pivots, d, /*left=*/true, /*adjoint=*/true);
+  } else {
+    // TODO When the user wants higher derivatives, the trick above just does
+    // not cut it The proper way of doing this is doing `auto mask = det == 0.;`
+    // and then if any determinant is zero, use an SVD decomposition to compute
+    // the derivative in those inputs (not all inputs). The derivative may be
+    // then computed explicitly by noting that the gradient of the derivative of
+    // the determinant is given in terms of the adjugate of a matrix. Then, the
+    // adjugate of a singular matrix may be computed as per
+    // https://nhigham.com/2020/06/16/what-is-the-adjugate-of-a-matrix/
+    // The code may be implemented as follows:
+    //
+    // Tensor U, S, Vh;
+    // std::tie(U, S, Vh) = at::linalg_svd(A);
+    // auto alpha = (at::linalg_det(U) * at::linalg_det(Vh)).conj() * grad;
+    // auto D = prod_safe_zeros_backward(alpha.unsqueeze(-1), S, S.dim() - 1);
+    // return (U * D.unsqueeze(-2)).matmul(Vh);
+    //
+    // The issue with this code is that the derivative given by autograd of
+    // prod_safe_zeros_backward is not the second derivative of the product.
+    // It is not clear to me how to implement the second derivative of the
+    // product efficently. Note that this is also currently a problem when we
+    // compute higher derivatives of `x.prod()` and `x` has more than one zero.
+    return at::linalg_solve(A.mH(), d);
+  }
 }
 
 Tensor logdet_backward(
