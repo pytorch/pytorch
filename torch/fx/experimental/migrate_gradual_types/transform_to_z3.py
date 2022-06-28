@@ -149,54 +149,6 @@ try:
             if dimension.c in dimension_dict:
                 return D(z3.Int(dimension_dict[dimension.c]), z3.Int(dimension.c)), counter
             else:
-                raise NotImplementedError('Operation not yet implemented')
-
-
-    def transform_var(tensor, counter, dimension_dict):
-        """
-        Transforms tensor variables to a format understood by z3
-        :param tensor: Tensor variable or a tensor type potentially with variable dimensions
-        :return: Transformed variable to a z3 format
-        """
-        if isinstance(tensor, TensorType):
-            res = []
-            for t in tensor.__args__:
-                transformed, counter = transform_dimension(t, counter, dimension_dict)
-                res.append(transformed)
-
-            assert len(res) <= 4
-            if len(tensor.__args__) == 1:
-                return tensor_type.tensor1(res[0]), counter
-            elif len(tensor.__args__) == 2:
-                return tensor_type.tensor2(res[0], res[1]), counter
-            elif len(tensor.__args__) == 3:
-                return tensor_type.tensor3(res[0], res[1], res[2]), counter
-            elif len(tensor.__args__) == 4:
-                return tensor_type.tensor4(res[0], res[1], res[2], res[3]), counter
-
-        elif tensor == Dyn:
-            return z3_dyn, counter
-
-        elif isinstance(tensor, TVar):
-            return z3.Const(tensor.tvar, tensor_type), counter
-
-    def transform_dimension(dimension, counter, dimension_dict):
-        """
-        Takes a dimension variable or a number and transforms it to a tuple
-        according to our scheme
-        :param dimension: the dimension to be transformed
-        :return: A tuple and the current counter
-        """
-
-        if dimension == Dyn:
-            counter += 1
-            return D(0, z3.Int(counter)), counter
-        elif isinstance(dimension, int):
-            return D(1, dimension), counter
-        elif isinstance(dimension, DVar):
-            if dimension.c in dimension_dict:
-                return D(z3.Int(dimension_dict[dimension.c]), z3.Int(dimension.c)), counter
-            else:
                 counter += 1
                 dimension_dict[dimension.c] = counter
                 return D(z3.Int(counter), z3.Int(dimension.c)), counter

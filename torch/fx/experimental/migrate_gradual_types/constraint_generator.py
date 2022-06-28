@@ -34,7 +34,7 @@ def generate_flatten_constraints(start_dim, end_dim, input, flattened, n, counte
     return Conj([c1, c2, *nat_constraints]), counter
 
 
-# TODO where are the docs for this??
+# TODO
 @register_inference_rule("long")
 def long_inference_rule(n: Node, symbols, constraints, counter):
     """
@@ -71,7 +71,7 @@ def get_attr_inference_rule(n: Node, symbols, constraints, counter):
 
     return [], counter
 
-# TODO: what constraints to generate for this?
+# TODO:
 @register_inference_rule("expand")
 def expand_inference_rule(n: Node, symbols, constraints, counter):
     """
@@ -79,7 +79,7 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
     return [], counter
 
 
-# TODO: what constraints to generate for this?
+# TODO:
 @register_inference_rule("to")
 def to_inference_rule(n: Node, symbols, constraints, counter):
     """
@@ -87,7 +87,7 @@ def to_inference_rule(n: Node, symbols, constraints, counter):
     return [], counter
 
 
-# TODO: what constraints to generate for this?
+# TODO:
 @register_inference_rule("masked_fill_")
 def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
     """
@@ -117,7 +117,7 @@ def embedding_inference_rule(n: Node, module_instance, symbols, constraints, cou
         new_dims, counter = gen_tensor_dims(i, counter)
         nat_constraints = gen_nat_constraints(new_dims)
 
-        # we consider all tensor sizes and add
+        # we consider all tensor sizes and append embedding_dim to the end of the output dimension in all cases
         c_tensor_i = Conj([BinConstraintT(embedding_input, TensorType(new_dims), op_eq),
                            BinConstraintT(embedding_output, TensorType(new_dims + [embedding_dim]), op_eq)] +
                           nat_constraints)
@@ -126,7 +126,7 @@ def embedding_inference_rule(n: Node, module_instance, symbols, constraints, cou
     return [Disj([c1, Disj(c2)])], counter
 
 
-# TODO: what constraints to generate for this?
+# TODO
 @register_inference_rule("view")
 def view_inference_rule(n: Node, symbols, constraints, counter):
     """
