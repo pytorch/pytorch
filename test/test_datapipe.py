@@ -2878,8 +2878,9 @@ class TestIterDataPipeGraphFastForward(TestCase):
         self.assertEqual(n_iter, datapipe._number_of_samples_yielded)
         self.assertEqual(n_iter, deserialized_graph._number_of_samples_yielded)
 
-        # TODO: 'wrap_setstate' is not triggered such that `deserialized_graph._restored == False`
-        deserialized_graph._restored = True  # TODO: Remove once done
+
+        # # TODO: 'wrap_setstate' is not triggered such that `deserialized_graph._restored == False`
+        # deserialized_graph._restored = True  # TODO: Remove once done
         rng_for_deserialized = torch.Generator()
         rng_for_deserialized.set_state(initial_rng_state)
         _simple_snapshot_graph(deserialized_graph, n_iter, rng=rng_for_deserialized)

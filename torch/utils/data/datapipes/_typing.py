@@ -371,9 +371,12 @@ class _IterDataPipeMeta(_DataPipeMeta):
                 Set `_restored` to True during `__setstate__`, such that the next `reset()` call during
                 iterator creation will not actually reset the state of the DataPipe.
                 """
-                datapipe = args[0]
-                datapipe._restored = True
-                return setstate_func(*args, **kwargs)
+                try:
+                    return setstate_func(*args, **kwargs)
+                finally:
+                    # This needs happen after because the state being passed in may have `datapipe._restored = False`.
+                    datapipe = args[0]
+                    datapipe._restored = True
 
             namespace['__setstate__'] = wrap_setstate
 
