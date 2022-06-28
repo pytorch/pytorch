@@ -949,7 +949,7 @@ chebyshev_polynomial_t = _add_docstr(_special.special_chebyshev_polynomial_t,
                                      r"""
 chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the first kind :math:`T_{n}(\text{input})`.
+Chebyshev polynomial of the first kind :math:`T_{n}\left(\text{input}\right).
 
 """ + r"""
 Args:
@@ -964,7 +964,7 @@ chebyshev_polynomial_u = _add_docstr(_special.special_chebyshev_polynomial_u,
                                      r"""
 chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the second kind :math:`U_{n}(\text{input})`.
+Chebyshev polynomial of the second kind :math:`U_{n}\left(\text{input}\right)`.
 
 """ + r"""
 Args:
@@ -979,7 +979,7 @@ chebyshev_polynomial_v = _add_docstr(_special.special_chebyshev_polynomial_v,
                                      r"""
 chebyshev_polynomial_v(input, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the third kind :math:`V_{n}^{\ast}(\text{input})`.
+Chebyshev polynomial of the third kind :math:`V_{n}\left(\text{input}\right)`.
 
 """ + r"""
 Args:
@@ -994,7 +994,7 @@ chebyshev_polynomial_w = _add_docstr(_special.special_chebyshev_polynomial_w,
                                      r"""
 chebyshev_polynomial_w(input, n, *, out=None) -> Tensor
 
-Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
+Chebyshev polynomial of the fourth kind :math:`W_{n}\left(\text{input}\right)`.
 
 """ + r"""
 Args:
@@ -1034,7 +1034,7 @@ hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
                                    r"""
 hermite_polynomial_h(input, n, *, out=None) -> Tensor
 
-Physicist’s Hermite polynomial :math:`H_{n}(\text{input})`.
+Physicist’s Hermite polynomial :math:`H_{n}\left(\text{input}\right)`.
 
 """ + r"""
 Args:
@@ -1049,7 +1049,7 @@ hermite_polynomial_he = _add_docstr(_special.special_hermite_polynomial_he,
                                     r"""
 hermite_polynomial_he(input, n, *, out=None) -> Tensor
 
-Probabilist’s Hermite polynomial :math:`He_{n}(\text{input})`.
+Probabilist’s Hermite polynomial :math:`He_{n}\left(\text{input}\right)`.
 
 """ + r"""
 Args:
@@ -1064,7 +1064,7 @@ laguerre_polynomial_l = _add_docstr(_special.special_laguerre_polynomial_l,
                                     r"""
 laguerre_polynomial_l(input, n, *, out=None) -> Tensor
 
-Laguerre polynomial :math:`L_{n}(\text{input})`.
+Laguerre polynomial :math:`L_{n}\left(\text{input}\right)`.
 
 """ + r"""
 Args:
@@ -1079,7 +1079,7 @@ legendre_polynomial_p = _add_docstr(_special.special_legendre_polynomial_p,
                                     r"""
 legendre_polynomial_p(input, n, *, out=None) -> Tensor
 
-Legendre polynomial :math:`P_{n}(\text{input})`.
+Legendre polynomial :math:`P_{n}\left(\text{input}\right)`.
 
 """ + r"""
 Args:
