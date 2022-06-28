@@ -252,18 +252,27 @@ def meta_conv(
         output_padding: Optional[Union[List[int], int]] = None,
     ):
         ret_shape = []
-        if isinstance(kernel_size, int):
-            kernel_size = [kernel_size] * len(dims)
         if isinstance(stride, int):
             stride = [stride] * len(dims)
+        elif len(stride) == 1:
+            stride = [stride[0]] * len(dims)
+
         if isinstance(padding, int):
             padding = [padding] * len(dims)
         elif len(padding) == 1:
             padding = [padding[0]] * len(dims)
+
         if isinstance(dilation, int):
             dilation = [dilation] * len(dims)
-        if isinstance(output_padding, int):
-            output_padding = [output_padding] * len(dims)
+        elif len(dilation) == 1:
+            dilation = [dilation[0]] * len(dims)
+
+        if output_padding:
+            if isinstance(output_padding, int):
+                output_padding = [output_padding] * len(dims)
+            elif len(output_padding) == 1:
+                output_padding = [output_padding[0]] * len(dims)
+
         for i in range(len(dims)):
             # If output_padding is present, we are dealing with a transposed convolution
             if output_padding:
