@@ -13,7 +13,6 @@
 #include <torch/csrc/lazy/core/tensor.h>
 #include <torch/csrc/lazy/core/util.h>
 #include <torch/csrc/lazy/generated/LazyIr.h>
-#include <torch/csrc/lazy/ts_backend/ops/batch_norm_ops.h>
 #include <torch/csrc/lazy/ts_backend/ops/random_ops.h>
 #include <algorithm>
 #include <functional>
@@ -48,27 +47,6 @@ std::vector<int64_t> GetExpandDimensions(
     }
   }
   return dimensions;
-}
-
-// Returns a 1-D shape for batch norm weight or bias based on the input shape.
-torch::lazy::Shape BatchNormFeaturesShape(
-    const torch::lazy::LazyTensorPtr& input) {
-  CHECK(input);
-  auto input_shape = input->shape().Get();
-  return torch::lazy::Shape(input_shape.scalar_type(), input_shape.sizes()[1]);
-}
-
-// Returns the IR for the given input or the provided default value broadcasted
-// to the default shape, if the input is undefined.
-torch::lazy::Value GetIrValueOrDefault(
-    const torch::lazy::LazyTensorPtr& input,
-    const at::Scalar& default_value,
-    const torch::lazy::Shape& default_shape,
-    const torch::lazy::BackendDevice& device) {
-  return input
-      ? input->GetIrValue()
-      : torch::lazy::LazyGraphExecutor::Get()->GetIrValueForExpandedScalar(
-            default_value, default_shape, device);
 }
 
 torch::lazy::ViewInfo CreateAsStridedViewInfo(
@@ -163,105 +141,6 @@ torch::lazy::LazyTensorPtr narrow(
   view_info.indices[dim] =
       torch::lazy::GetCanonicalPosition(input_shape.Get().sizes(), dim, start);
   return input->CreateViewTensor(std::move(view_info));
-}
-
-std::tuple<
-    torch::lazy::LazyTensorPtr,
-    torch::lazy::LazyTensorPtr,
-    torch::lazy::LazyTensorPtr>
-ts_native_batch_norm(
-    const torch::lazy::LazyTensorPtr& input,
-    const torch::lazy::LazyTensorPtr& weight,
-    const torch::lazy::LazyTensorPtr& bias,
-    torch::lazy::LazyTensorPtr& running_mean,
-    torch::lazy::LazyTensorPtr& running_var,
-    bool training,
-    double momentum,
-    double eps) {
-  torch::lazy::Shape features_shape = BatchNormFeaturesShape(input);
-  torch::lazy::Value weight_value =
-      GetIrValueOrDefault(weight, 1, features_shape, input->GetDevice());
-  torch::lazy::Value bias_value =
-      GetIrValueOrDefault(bias, 0, features_shape, input->GetDevice());
-  torch::lazy::Value running_mean_value =
-      GetIrValueOrDefault(running_mean, 0, features_shape, input->GetDevice());
-  torch::lazy::Value running_var_value =
-      GetIrValueOrDefault(running_var, 0, features_shape, input->GetDevice());
-  torch::lazy::NodePtr node = ReuseOrMakeNode<TSNativeBatchNormForward>(
-      input->GetIrValue(),
-      weight_value,
-      bias_value,
-      running_mean_value,
-      running_var_value,
-      training,
-      momentum,
-      eps);
-  torch::lazy::LazyTensorPtr output = torch::lazy::LazyTensor::Create(
-      torch::lazy::Value(node, 0), input->GetDevice());
-  torch::lazy::LazyTensorPtr running_mean_output =
-      torch::lazy::LazyTensor::Create(
-          torch::lazy::Value(node, 1), input->GetDevice());
-  torch::lazy::LazyTensorPtr running_var_output =
-      torch::lazy::LazyTensor::Create(
-          torch::lazy::Value(node, 2), input->GetDevice());
-  return std::make_tuple(
-      std::move(output),
-      std::move(running_mean_output),
-      std::move(running_var_output));
-}
-
-std::tuple<
-    torch::lazy::LazyTensorPtr,
-    torch::lazy::LazyTensorPtr,
-    torch::lazy::LazyTensorPtr>
-ts_native_batch_norm_backward(
-    const torch::lazy::LazyTensorPtr& grad_out,
-    const torch::lazy::LazyTensorPtr& input,
-    const torch::lazy::LazyTensorPtr& weight,
-    const torch::lazy::LazyTensorPtr& running_mean,
-    const torch::lazy::LazyTensorPtr& running_var,
-    const torch::lazy::LazyTensorPtr& save_mean,
-    const torch::lazy::LazyTensorPtr& save_invstd,
-    bool training,
-    double eps,
-    c10::ArrayRef<bool> output_mask) {
-  torch::lazy::Shape features_shape = BatchNormFeaturesShape(input);
-  torch::lazy::Value weight_value =
-      GetIrValueOrDefault(weight, 1, features_shape, input->GetDevice());
-  torch::lazy::NodePtr node;
-  if (!running_mean && !running_var) {
-    node = ReuseOrMakeNode<TSNativeBatchNormBackward>(
-        grad_out->GetIrValue(),
-        input->GetIrValue(),
-        weight_value,
-        save_mean->GetIrValue(),
-        save_invstd->GetIrValue(),
-        training,
-        eps,
-        std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
-  } else {
-    CHECK(running_mean);
-    CHECK(running_var);
-    node = ReuseOrMakeNode<TSNativeBatchNormBackward>(
-        grad_out->GetIrValue(),
-        input->GetIrValue(),
-        weight_value,
-        running_mean->GetIrValue(),
-        running_var->GetIrValue(),
-        save_mean->GetIrValue(),
-        save_invstd->GetIrValue(),
-        training,
-        eps,
-        std::array<bool, 3>{output_mask[0], output_mask[1], output_mask[2]});
-  }
-  torch::lazy::LazyTensorPtr grad_input = torch::lazy::LazyTensor::Create(
-      torch::lazy::Value(node, 0), input->GetDevice());
-  torch::lazy::LazyTensorPtr grad_weight = torch::lazy::LazyTensor::Create(
-      torch::lazy::Value(node, 1), input->GetDevice());
-  torch::lazy::LazyTensorPtr grad_bias = torch::lazy::LazyTensor::Create(
-      torch::lazy::Value(node, 2), input->GetDevice());
-  return std::make_tuple(
-      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 torch::lazy::LazyTensorPtr permute(

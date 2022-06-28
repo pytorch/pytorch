@@ -894,6 +894,25 @@ inline Tensor& chebyshev_polynomial_w_out(
   return torch::special_chebyshev_polynomial_w_out(output, x, n);
 }
 
+/// Gamma function.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.gamma.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::gamma(x);
+/// ```
+inline Tensor gamma(const Tensor& x) {
+  return torch::special_gamma(x);
+}
+
+inline Tensor& gamma_out(Tensor& y, const Tensor& x) {
+  return torch::special_gamma_out(y, x);
+}
+
 /// Physicist’s Hermite polynomial.
 ///
 /// See
@@ -1362,5 +1381,24 @@ inline Tensor& shifted_chebyshev_polynomial_w_out(
   return torch::special_shifted_chebyshev_polynomial_w_out(output, x, n);
 }
 
+/// Spherical Bessel function of the first kind of order 0.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_j0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_j0(x);
+/// ```
+inline Tensor spherical_bessel_j0(const Tensor& x) {
+  return torch::special_spherical_bessel_j0(x);
+}
+
+inline Tensor& spherical_bessel_j0_out(Tensor& y, const Tensor& x) {
+  return torch::special_spherical_bessel_j0_out(y, x);
+}
 } // namespace special
 } // namespace torch
