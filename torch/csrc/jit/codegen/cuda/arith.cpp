@@ -733,7 +733,7 @@ TensorView* binaryOp(
   }                                                                     \
   TensorView* op_name(Val* v1, TensorView* v2) {                        \
     return binaryOp(                                                    \
-        BinaryOpType::op_type, v2, v2, TypePromotion::float_op_config); \
+        BinaryOpType::op_type, v1, v2, TypePromotion::float_op_config); \
   }                                                                     \
   TensorView* op_name(TensorView* v1, TensorView* v2) {                 \
     return binaryOp(                                                    \

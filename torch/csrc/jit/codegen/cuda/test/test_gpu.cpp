@@ -23354,6 +23354,30 @@ TEST_F(NVFuserTest, FusionContigPredicate_CUDA) {
   testValidate(fe.kernel(), cg_outputs, {t0}, {ref}, __LINE__, __FILE__);
 }
 
+// Repro of https://github.com/csarofeen/pytorch/issues/1777
+TEST_F(NVFuserTest, FusionDivScalarLhs_CUDA) {
+  // tv1 = 2.0 / tv0
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  TensorView* tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+  TensorView* tv1 = div(IrBuilder::create<Double>(2.0), tv0);
+  fusion.addOutput(tv1);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+  auto t0 = at::randn({3, 3}, options);
+  // There's no overload div(Scalar, Tensor) in ATen
+  auto aten_output = at::div(
+      at::native::wrapped_scalar_tensor(at::Scalar(2.0), options.device()), t0);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {t0});
+  auto cg_outputs = fe.runFusion({t0});
+
+  testValidate(&fusion, cg_outputs, {t0}, {aten_output}, __LINE__, __FILE__);
+}
+
 // Repro of an issue of the reduction scheduler with a broadcast
 // domain concretized to multiple domains that are not proven to have
 // the same extent
