@@ -56,6 +56,8 @@ class TORCH_API SchemaInfo {
       const std::unordered_map<std::string, at::IValue>& values);
 
  private:
+  std::vector<c10::Argument> getCorrectList(SchemaArgType type) const;
+
   c10::FunctionSchema schema_;
   std::unordered_map<std::string, at::IValue> value_map_;
 };
