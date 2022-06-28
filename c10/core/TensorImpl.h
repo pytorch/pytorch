@@ -20,6 +20,7 @@
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
+#include <iostream>
 
 #include <algorithm>
 #include <atomic>
@@ -689,6 +690,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   virtual int64_t dim_custom() const;
   virtual int64_t numel_custom() const;
+  virtual Layout layout_custom() const;
 
   // These are factored into separate functions in case subclasses
   // want to use them
@@ -976,6 +978,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // strided case first.
     // This keyset must also be kept in sync with the logic in
     // is_sparse() / is_sparse_csr() / is_mkldnn()
+    std::cout << "in layout!\n";
+    if (C10_UNLIKELY(custom_layout_)) {
+      std::cout << "custom layout!\n";
+      return layout_custom();
+    }
+
     constexpr auto sparse_and_sparsecsr_and_mkldnn_ks =
         c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks;
     if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
@@ -988,7 +996,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // better performance. However, when tensor's layout depends,
       // say, on tensor attributes, one must use this execution path
       // where the corresponding tensor impl class overwrites virtual
-      // layout_impl() method.
+      // layout_custom() method.
       //
       // TODO: implement layout() as native function/method so that
       // __torch_dispatch__ users will be able to redefine the
@@ -2347,6 +2355,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     custom_device_ = custom_device;
   }
 
+  void set_custom_layout(bool custom_layout) {
+    custom_layout_ = custom_layout;
+  }
+
  protected:
   Storage storage_;
 
@@ -2466,6 +2478,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     reserved_ = false;
     sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
     custom_device_ = false;
+    custom_layout_ = false;
     storage_access_should_throw_ = false;
     has_symbolic_sizes_strides_ = false;
   }
@@ -2535,6 +2548,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Call _custom() virtual method for device()
   bool custom_device_ : 1;
+
+  // Call _custom() virtual method for layout()
+  bool custom_layout_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but

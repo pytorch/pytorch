@@ -148,14 +148,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
           push(stack, a.mH());
         },
         aliasAnalysisFromSchema()),
-    OperatorGeneratorArgs(
-        TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> int"),
-        [](Stack& stack) {
-          at::Tensor a;
-          pop(stack, a);
-          push(stack, a.layout());
-        },
-        aliasAnalysisFromSchema()),
 
     // only used internally in range() translation
     OperatorGeneratorArgs(
@@ -448,7 +440,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-        // note the compiler knows to type TupleIndex more accurately than it
+      // note the compiler knows to type TupleIndex more accurately than it
         // is listed here.
         TORCH_SELECTIVE_SCHEMA("prim::TupleIndex(Any tup, int i) -> Any"),
         tupleIndex,
@@ -459,7 +451,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
-            "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)"),
+          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)"),
         noop,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
@@ -469,6 +461,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::dtype(Tensor a) -> int"),
         dtype,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::layout(Tensor a) -> Layout"),
+        layout,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::__not__(bool self) -> bool"),

@@ -62,6 +62,12 @@ static c10::IntArrayRef noop_sizes_fn(const PyInterpreter*, const TensorImpl*) {
       "attempted to call `sizes` on Tensor with nontrivial PyObject after corresponding interpreter died");
 }
 
+static c10::Layout noop_layout_fn(const PyInterpreter*, const TensorImpl*) {
+  TORCH_INTERNAL_ASSERT(
+      0,
+      "attempted to call `layout` on Tensor with nontrivial PyObject after corresponding interpreter died");
+}
+
 void PyInterpreter::disarm() noexcept {
   name_fn_ = &noop_name_fn;
   decref_fn_ = &noop_decref_fn;
@@ -72,6 +78,7 @@ void PyInterpreter::disarm() noexcept {
   dim_fn_ = &noop_dim_fn;
   strides_fn_ = &noop_strides_fn;
   sizes_fn_ = &noop_sizes_fn;
+  layout_fn_ = &noop_layout_fn;
 }
 
 } // namespace impl

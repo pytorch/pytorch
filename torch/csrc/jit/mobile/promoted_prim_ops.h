@@ -23,6 +23,8 @@ void device(Stack& stack);
 
 void dtype(Stack& stack);
 
+void layout(Stack& stack);
+
 void toPrimDType(Stack& stack);
 
 void dim(Stack& stack);

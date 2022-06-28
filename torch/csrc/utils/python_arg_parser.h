@@ -67,6 +67,7 @@
 #include <ATen/core/Tensor.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 #include <c10/core/SymbolicIntNode.h>
 #include <array>
@@ -671,10 +672,26 @@ inline c10::optional<at::ScalarType> PythonArgs::scalartypeOptional(int i) {
   return scalartype(i);
 }
 
+inline at::Layout toLayout(PyObject* obj) {
+  std::cout << "toLayout\n";
+  if (THPLayout_Check(obj)) {
+    std::cout << "passes the THPLayout check\n";
+    const auto layout = reinterpret_cast<THPLayout*>(obj);
+    std::cout << "value " << layout->layout << "\n";
+    return layout->layout;
+  }
+  std::cout << "failed the THPLayout check\n";
+  const auto layout = THPUtils_unpackLong(obj);
+  TORCH_CHECK(layout >= 0, "Layout must not be negative");
+  std::cout << "value " << static_cast<at::Layout>(layout) << "\n";
+  return static_cast<at::Layout>(layout);
+}
+
 inline at::Layout PythonArgs::layout(int i) {
+  std::cout << "PythonArgs::Layout\n";
   if (!args[i])
     return signature.params[i].default_layout;
-  return reinterpret_cast<THPLayout*>(args[i])->layout;
+  return toLayout(args[i]);
 }
 
 inline at::Layout PythonArgs::layoutWithDefault(

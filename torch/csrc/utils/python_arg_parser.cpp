@@ -14,6 +14,7 @@
 #include <ATen/TracerMode.h>
 #include <c10/util/irange.h>
 
+#include <iostream>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -265,6 +266,8 @@ auto handle_torch_function_no_python_arg_parser(
     PyObject* torch_api_function,
     const char* module_name,
     TorchFunctionName torch_function_name) -> PyObject* {
+  std::cout << "** func name " << func_name << "\n";
+  std::cout << "** module name " << module_name << "\n";
   const char* torch_function_name_str = nullptr;
   switch (torch_function_name) {
     case TorchFunctionName::TorchFunction:
@@ -294,6 +297,7 @@ auto handle_torch_function_no_python_arg_parser(
       ? at::impl::PythonTorchFunctionTLS::get_mode()
       : at::impl::TorchDispatchModeTLS::get_state();
   if (maybe_mode) {
+    std::cout << "in maybe mode\n";
     mode_obj = maybe_mode->ptr(getPyInterpreter());
     TORCH_INTERNAL_ASSERT(py_types.ptr() != nullptr);
     TORCH_INTERNAL_ASSERT(args != nullptr);
@@ -331,11 +335,20 @@ auto handle_torch_function_no_python_arg_parser(
     }
   }
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
+    std::cout << "ret.ptr == nullptr || NotImplemented\n";
+    if (ret.ptr() == nullptr) {
+      std::cout << "it's a null ptr\n";
+    } else{
+      std::cout << "its NotImplemented\n";
+    }
     for (auto& arg : overloaded_args) {
+      std::cout << "arg is " << arg.ptr() << "\n";
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
+      std::cout << "arg step 1\n";
       py::object torch_function =
           PyObject_FastGetAttrString(arg.ptr(), torch_function_name_str);
 
+      std::cout << "arg step 2\n";
       // See https://github.com/pytorch/pytorch/issues/63767
       if (PyObject_FastGetAttrString(torch_function.ptr(), "__self__")
               .is(arg) &&
@@ -347,6 +360,13 @@ auto handle_torch_function_no_python_arg_parser(
             "and will be an error in future, please define it as a classmethod.");
       }
 
+      std::cout << "arg step 3\n";
+      std::cout << "torch_function name" << torch_function_name_str << "\n";
+      std::cout << "torch_function" << torch_function << "\n";
+      std::cout << "torch_api_function" << torch_api_function << "\n";
+      std::cout << "py_types.ptr" << py_types.ptr() << "\n";
+      std::cout << "args" << args << "\n";
+      std::cout << "kwargs" << kwargs << "\n";
       ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
           torch_function.ptr(),
           torch_api_function,
@@ -354,19 +374,29 @@ auto handle_torch_function_no_python_arg_parser(
           args,
           kwargs,
           NULL));
+      if (ret.ptr() == nullptr) {
+        std::cout << "second check - it's a null ptr\n";
+      } else{
+        std::cout << "second check - it's NotImplemented\n";
+      }
+      std::cout << "arg step 4\n";
       if (ret.ptr() != Py_NotImplemented) {
+        std::cout << "Breaking out because not == NotImplemented\n";
         // Return the reference to the result. This also covers the case where
         // ret is NULL and __torch_function__/__torch_dispatch raised an
         // exception, which we throw below
         break;
       }
+      std::cout << "arg step 5\n";
     }
   }
   if (ret.ptr() == nullptr) {
     // if an exception occurred in a user's implementation of
     // __torch_function__, throw it
+    std::cout << "ret.ptr == nullptr\n";
     throw python_error();
   } else if (ret.ptr() == Py_NotImplemented) {
+    std::cout << "ret.ptr == NotImplemented\n";
     // all __torch_function__ implementations in overloaded_args
     // returned NotImplemented, so we raise a TypeError.
     std::stringstream ss;
@@ -379,7 +409,9 @@ auto handle_torch_function_no_python_arg_parser(
       }
     }
     ss << "]";
+    std::cout << "ss str: " << ss.str() << "\n";
     if (mode_obj) {
+      std::cout << "in mode\n";
       // Note [Paranoid check mode is same]
       // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
       // If a user forcibly changes the mode in a non-lexical way
@@ -391,9 +423,14 @@ auto handle_torch_function_no_python_arg_parser(
          << py::repr(mode_obj);
     }
     const std::string& tmp = ss.str();
+    std::cout << "tmp str " << tmp << "\n"; 
+    std::cout << "tmp str2 " << tmp.c_str() << "\n"; 
     PyErr_SetString(PyExc_TypeError, tmp.c_str());
+    std::cout << "right before python_error\n";
     throw python_error();
+    std::cout << "right AFTER python_error\n";
   }
+  std::cout << "the end\n";
   return ret.release().ptr();
 }
 

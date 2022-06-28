@@ -1557,20 +1557,20 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
             err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
             e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
-            with self.assertRaisesRegex(TypeError, err_msg):
-                e.is_contiguous()
-            with self.assertRaisesRegex(TypeError, err_msg):
-                e.contiguous()
+            # with self.assertRaisesRegex(TypeError, err_msg):
+            e.is_contiguous()
+            # with self.assertRaisesRegex(TypeError, err_msg):
+            #     e.contiguous()
 
-            e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
-            self.assertEqual(e.is_contiguous(), True)
-            e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
+            # e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
+            # self.assertEqual(e.is_contiguous(), True)
+            # e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
 
-            err_msg = "no implementation found for"
-            e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
-            self.assertEqual(e.is_contiguous(), False)
-            with self.assertRaisesRegex(TypeError, err_msg):
-                e.contiguous()
+            # err_msg = "no implementation found for"
+            # e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
+            # self.assertEqual(e.is_contiguous(), False)
+            # with self.assertRaisesRegex(TypeError, err_msg):
+            #     e.contiguous()
 
     def test_device_slowpath(self):
         for use_wrapper_subclass in [True]:
@@ -1581,6 +1581,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
+                    print ("dispatch for device, i think", func)
                     return NotImplemented
 
             class ExampleTensor2(torch.Tensor):
@@ -1606,18 +1607,18 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                     return NotImplemented
 
             err_msg = "no implementation found for 'torch.ops.prim.device'"
-            with self.assertRaisesRegex(TypeError, err_msg):
-                e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
-                e.device()
+            # with self.assertRaisesRegex(TypeError, err_msg):
+            e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
+            e.device()
 
-            ten = torch.rand([1])
-            e = ExampleTensor2(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
-            self.assertEqual(e.device.type, 'meta')
-            self.assertEqual(ten.type_as(e).device.type, 'meta')
+            # ten = torch.rand([1])
+            # e = ExampleTensor2(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
+            # self.assertEqual(e.device.type, 'meta')
+            # self.assertEqual(ten.type_as(e).device.type, 'meta')
 
-            e = ExampleTensor3(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
-            self.assertEqual(e.device.type, 'meta')
-            self.assertEqual(ten.type_as(e).device.type, 'meta')
+            # e = ExampleTensor3(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
+            # self.assertEqual(e.device.type, 'meta')
+            # self.assertEqual(ten.type_as(e).device.type, 'meta')
 
     def test_dim_slowpath(self):
         data = torch.randn(3, 3)
@@ -1759,6 +1760,55 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
             e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
             self.assertEqual(e.size(), (4, 2))
+
+    def test_layout_slow_path(self):
+        for use_wrapper_subclass in [True, False]:
+            # data = torch.randn(6, 2)
+
+            class LayoutNotImplemented(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    print ("dispatch..", func, func.overloadpacket, func.overloadpacket == torch.ops.prim.layout)
+                    return NotImplemented
+
+            class LayoutCustomReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.prim.layout:
+                        return torch.sparse_csr
+                    return NotImplemented
+
+            class LayoutDefaultReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_layout=True)
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.prim.layout:
+                        return data.layout
+                    return NotImplemented
+
+            print ("wrapper?", use_wrapper_subclass)
+            err_msg = "no implementation found for 'torch.ops.prim.layout'"
+            e = LayoutNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
+            # with self.assertRaisesRegex(TypeError, err_msg):
+            #     print ("aboutta")
+            e.layout
+
+            # e = LayoutCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
+            # self.assertEqual(e.layout, torch.sparse_csr)
+
+            # e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
+            # self.assertEqual(e.layout, torch.strided)
 
 if __name__ == '__main__':
     run_tests()
