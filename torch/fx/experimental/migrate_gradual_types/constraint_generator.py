@@ -12,6 +12,7 @@ from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.batchnorm import BatchNorm2d
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
+MAX_TENSOR_RANK = 5
 
 def register_inference_rule(call_target):
     def register(fn):
@@ -54,13 +55,6 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
     c1 = TGreatestUpperBound(my_add, e11, e22)
     c2 = ApplyBroadcasting(e11, e22, e1, e2)
     c3 = BinConstraintT(e11, e22, op_consistency)
-    # c4 = BinConstraintT(my_add, 2, op_leq)
-    # c5 = BinConstraintT(e1, 2, op_leq)
-    # c6 = BinConstraintT(e2, 2, op_leq)
-    # c7 = BinConstraintT(e11, 2, op_leq)
-    # c8 = BinConstraintT(e22, 2, op_leq)
-
-    # print([c1, c2, c3])
 
     # store constraints
     return [c1, c2, c3], counter
@@ -128,7 +122,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     c1 = Conj([input_dyn, output_dyn])
 
     c2 = []
-    for i in range(1, 5):
+    for i in range(1, MAX_TENSOR_RANK):
         new_dims_rhs_1, counter = gen_tensor_dims(i, counter)
         new_dims_rhs_2, counter = gen_tensor_dims(i, counter)
 
