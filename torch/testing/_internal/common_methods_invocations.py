@@ -10639,7 +10639,10 @@ op_db: List[OpInfo] = [
                         # clamp_max supports two tensor input with bool, but not a bool scalar
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                         # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='cuda'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
@@ -10657,7 +10660,10 @@ op_db: List[OpInfo] = [
                         # clamp_min supports two tensor input with bool, but not a bool scalar
                         DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                         # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='cuda'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
