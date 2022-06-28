@@ -5,7 +5,7 @@ from typing import Any, Callable, Iterator, List, Optional, Sized, Tuple, TypeVa
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from torch.utils.data.datapipes.utils.common import _check_lambda_fn
+from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 
 __all__ = [
     "ConcaterIterDataPipe",
@@ -336,7 +336,7 @@ class DemultiplexerIterDataPipe(IterDataPipe):
         if num_instances < 1:
             raise ValueError(f"Expected `num_instaces` larger than 0, but {num_instances} is found")
 
-        _check_lambda_fn(classifier_fn)
+        _check_unpickable_fn(classifier_fn)
 
         # When num_instances == 1, demux can be replaced by filter,
         # but keep it as Demultiplexer for the sake of consistency

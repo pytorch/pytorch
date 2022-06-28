@@ -187,27 +187,9 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
     def __del__(self):
         self._buffer.clear()
 
-    # # TODO: This is poor man's fast forward, we should save cache and resume iteration instead.
-    # def fast_forward(self, n_iterations: int) -> None:
-    #     # Fast-forward only when the DP has recently been restored. Is this necessary?
-    #     # if self._restored:
-    #     remainder = n_iterations
-    #     # self._seed = 0  # TODO: remove this once we figure out how _seed can persist
-    #     print("Creating iterator for fast-forward")
-    #     it = iter(self)
-    #     print("About to fast-forward")
-    #     while remainder > 0:
-    #         try:
-    #             next(it)
-    #             remainder -= 1
-    #         except StopIteration:
-    #             raise RuntimeError(f"Fast-forward {self} by {n_iterations} iterations"
-    #                                "exceeds the number of samples available.")
-    #     print("Fast-forward has been completed")
-    #     self._fast_forward_iterator = it
 
     def save_snapshot(self):
-        # TODO: Need to save the buffer
+        # TODO: Need to save the buffer for more efficient snapshotting
         pass
 
     def restore_snapshot(self, snapshot=None):
