@@ -1572,6 +1572,14 @@ class FullyShardedDataParallel(nn.Module):
             # ``optim.step()`` is done before we all-gather parameters.
             self._wait_for_previous_optim_step()
 
+            # Set a flag on every FlatParameter to track whether its post
+            # backward hook has been called, mainly for validation purpose
+            # in wait_for_post_backward.
+            if self._exec_order_data.is_first_iter:
+                for m in self.fsdp_modules(self):
+                    for p in m.params:
+                        p._post_backward_called = False
+
     @torch.no_grad()
     def _init_param_attributes(self, p: Parameter) -> None:
         """
@@ -2830,6 +2838,11 @@ class FullyShardedDataParallel(nn.Module):
         alignment is created by :func:`_shard_parameters`, which ensures that
         the local optimizer only sees the relevant parameter shard.
         """
+        p_assert(
+            hasattr(param, '_post_backward_called'),
+            "Expected flag _post_backward_called to exist on param."
+        )
+        param._post_backward_called = True
         with torch.autograd.profiler.record_function("FullyShardedDataParallel._post_backward_hook"):
             # First hook callback will see PRE state. If we have multiple params,
             # then subsequent hook callbacks will see POST state.
@@ -3089,24 +3102,43 @@ class FullyShardedDataParallel(nn.Module):
                         p.grad = p._saved_grad_shard  # type: ignore[attr-defined]
                     else:
                         p_assert(
-                            not p._is_sharded, "All sharded parameters should "
+                            not p._is_sharded or not p._post_backward_called,
+                            "All sharded parameters that received gradient should "
                             "use `_saved_grad_shard`"
                         )
                     if hasattr(p, "_saved_grad_shard"):
                         delattr(p, "_saved_grad_shard")
 
+                    p_assert(
+                        hasattr(p, '_post_backward_called'),
+                        "Expected flag _post_backward_called to be set on param."
+                    )
+                    # Reset _post_backward_called in preparation for the next iteration.
+                    p._post_backward_called = False
+
         # Update root and nested FSDP's hooks and flags.
         for m in self.modules():  # includes self
             if isinstance(m, FullyShardedDataParallel):
-                _finalize_params(m)
-                m._pre_backward_hook_has_run = False
                 if any(p.requires_grad for p in m.parameters()):
                     # Check if the module has params and if any of them has
                     # the `requires_grad` field set. If `requires_grad=False` for
                     # all the params, the post_backward hook will not fire and the
                     # state will remain in `TrainingState_.BACKWARD_PRE`.
-                    if any([p.requires_grad for p in m.params]):
-                        m._assert_state(TrainingState_.BACKWARD_POST)
+                    managed_param_requires_grad = any(p.requires_grad for p in m.params)
+                    if managed_param_requires_grad:
+                        p_assert(
+                            all(hasattr(p, '_post_backward_called') for p in m.params),
+                            "Expected all params to have flag _post_backward_called set!"
+                        )
+                        post_backward_hook_called = any(p._post_backward_called for p in m.params)
+                        if post_backward_hook_called:
+                            m._assert_state(TrainingState_.BACKWARD_POST)
+                        else:
+                            # post backward hook was not called, meaning param
+                            # did not have a gradient computed. It was either unused
+                            # in forward, or unused in loss computation so it did
+                            # not get gradient
+                            m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
                     else:
                         m._assert_state(TrainingState_.BACKWARD_PRE)
                 else:
@@ -3118,6 +3150,9 @@ class FullyShardedDataParallel(nn.Module):
                     # 2. output tensors are `requires_grad==False`. In this case,
                     # pre-backward hook is not registered, so it is in IDLE state.
                     m._assert_state([TrainingState_.BACKWARD_PRE, TrainingState_.IDLE])
+
+                _finalize_params(m)
+                m._pre_backward_hook_has_run = False
                 m.training_state = TrainingState_.IDLE
 
                 if m._is_root:
@@ -4059,6 +4094,7 @@ def p_assert(cond: Any, s: Any) -> None:
     to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
+        traceback.print_stack()
         raise AssertionError
 
 def _calc_grad_norm(parameters: List[torch.nn.Parameter], p: float) -> torch.Tensor:
