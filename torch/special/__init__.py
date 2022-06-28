@@ -21,7 +21,6 @@ __all__ = [
     'exp2',
     'expit',
     'expm1',
-    'gamma',
     'gammainc',
     'gammaincc',
     'gammaln',
@@ -1027,31 +1026,6 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 Args:
     {input}
     n (Tensor): Degree of the polynomial.
-
-Keyword args:
-    {out}
-""".format(**common_args))
-
-gamma = _add_docstr(_special.special_gamma,
-                    r"""
-gamma(input, *, out=None) -> Tensor
-
-Gamma function :math:`\Gamma\left(\text{input}\right)` defined as the
-convergent improper integral:
-
-.. math::
-    \int_{0}^{\infty}x^{z - 1}e^{-x}dx
-
-The gamma function is often referred to as the generalized factorial function
-since :math:`\Gamma\left(n + 1\right) = n!` for natural numbers
-:math:`n \in \mathbb{N}`. It satisfies the recurrence relation
-:math:`\Gamma\left(z + 1\right) = z \Gamma\left(z\right)` for complex
-:math:`z \in \mathbb{C}`, which, combined with the fact that
-:math:`\Gamma\left(1\right) = 1`, implies the above identity for :math:`z = n`.
-
-""" + r"""
-Args:
-    {input}
 
 Keyword args:
     {out}

@@ -122,10 +122,10 @@ C10 = "//c10:c10" if IS_OSS else "//xplat/caffe2/c10:c10"
 
 # a dictionary maps third party library name to fbsource and oss target
 THIRD_PARTY_LIBS = {
-    "FP16": ["//third-party/FP16:FP16", "//third_party:FP16"],
-    "FXdiv": ["//third-party/FXdiv:FXdiv", "//third_party:FXdiv"],
+    "FP16": ["//xplat/third-party/FP16:FP16", "//third_party:FP16"],
+    "FXdiv": ["//xplat/third-party/FXdiv:FXdiv", "//third_party:FXdiv"],
     "XNNPACK": ["//xplat/third-party/XNNPACK:XNNPACK", "//third_party:XNNPACK"],
-    "clog": ["//third-party/clog:clog", "//third_party:clog"],
+    "clog": ["//xplat/third-party/clog:clog", "//third_party:clog"],
     "cpuinfo": ["//third-party/cpuinfo:cpuinfo", "//third_party:cpuinfo"],
     "flatbuffers-api": ["//third-party/flatbuffers:flatbuffers-api", "//third_party:flatbuffers-api"],
     "flatc": ["//third-party/flatbuffers:flatc", "//third_party:flatc"],
@@ -134,8 +134,8 @@ THIRD_PARTY_LIBS = {
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
     "psimd": ["//third-party/psimd:psimd", "//third_party:psimd"],
-    "pthreadpool": ["//third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
-    "pthreadpool_header": ["//third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
+    "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
+    "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
     "pyyaml": ["//third-party/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
