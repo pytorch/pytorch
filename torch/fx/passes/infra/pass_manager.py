@@ -1,8 +1,27 @@
 import inspect
+from functools import wraps
 from typing import Callable, Dict, List, Set
 
+from torch.nn import Module
 
-from torch.fx import GraphModule
+def inplace_wrapper(fn: Callable) -> Callable:
+    """
+    Convenience wrapper for passes which modify an object inplace. This
+    wrapper makes them return the modified object instead.
+
+    Args:
+        fn (Callable[Object, Any])
+
+    Returns:
+        wrapped_fn (Callable[Object, Object])
+    """
+
+    @wraps(fn)
+    def wrapped_fn(gm):
+        fn(gm)
+        return gm
+
+    return wrapped_fn
 
 
 def _validate_pass_schedule_constraint(
@@ -110,7 +129,7 @@ class PassManager:
             after each pass
     """
 
-    passes: List[Callable[[GraphModule], None]] = []
+    passes: List[Callable[[Module], Module]] = []
     constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
@@ -176,10 +195,10 @@ class PassManager:
 
         setattr(self, "check", check)  # noqa: B010
 
-    def check(self, graph_module: GraphModule) -> None:
+    def check(self, graph_module: Module) -> None:
         pass
 
-    def __call__(self, graph_module: GraphModule) -> None:
+    def __call__(self, graph_module: Module) -> Module:
         """
         Runs a list of passes in the order based on `self.passes` on the given
         graph module. Each time a pass is run, checks and linting will be run on
@@ -192,8 +211,7 @@ class PassManager:
         # Order the passes based on the constraints
         self.solve_constraints()
 
-        # Lint and check graph invariants
-        graph_module.graph.lint()
+        # Check graph invariants
         self.check(graph_module)
 
         # Run the set of passes `steps` number of times or until the graph stops
@@ -203,15 +221,14 @@ class PassManager:
 
             # Run the set of passes on the graph module
             for fn in self.passes:
-                fn(graph_module)
+                graph_module = fn(graph_module)
 
                 if self.run_checks_after_each_pass:
-                    # Lint and check graph invariants
-                    graph_module.graph.lint()
+                    # Check graph invariants
                     self.check(graph_module)
-
-            graph_module.recompile()
 
             # If the graph no longer changes, then we can stop running these passes
             if orig_graph_module_code == graph_module.code:
                 break
+
+        return graph_module

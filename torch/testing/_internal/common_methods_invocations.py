@@ -20037,8 +20037,18 @@ python_ref_db = [
         torch_opinfo_name="asin",
     ),
     ElementwiseUnaryPythonRefInfo(
+        "_refs.asinh",
+        torch_opinfo_name="asinh",
+        supports_nvfuser=False,
+    ),
+    ElementwiseUnaryPythonRefInfo(
         "_refs.atan",
         torch_opinfo_name="atan",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.atanh",
+        torch_opinfo_name="atanh",
+        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
