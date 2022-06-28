@@ -6,6 +6,7 @@ import torch
 
 from .fake_quantize import default_weight_fake_quant
 from .observer import (
+    _PartialWrapper,
     default_fixed_qparams_range_0to1_observer,
     default_fixed_qparams_range_neg1to1_observer,
     default_weight_observer,

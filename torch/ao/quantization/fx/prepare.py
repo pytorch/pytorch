@@ -1333,11 +1333,11 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
         PlaceholderObserver.with_args(dtype=torch.float16)
     ]
     for node in model.graph.nodes:
-        if node.name in qconfig_map and node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
+        if node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
             bad_observer = True
-            qconfig = qconfig_map[node.name]
+            qconfig = qconfig_map.get(node.name, None)
             for observer_ctr in allowed_observer_ctrs + [_FIXED_QPARAMS_OP_TO_OBSERVER[node.target]]:
-                if _partial_wrapper_equals(qconfig.activation, observer_ctr):
+                if qconfig is None or _partial_wrapper_equals(qconfig.activation, observer_ctr):
                     bad_observer = False
             if bad_observer:
                 raise ValueError("QConfigMapping must specify fixed qparams observer for fixed qparams op "
