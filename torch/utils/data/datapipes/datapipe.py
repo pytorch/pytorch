@@ -155,6 +155,12 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             return IterDataPipe.getstate_hook(self)
         return self.__dict__
 
+    def __setstate__(self, state):
+        """
+        This method definition is necessary so that the hook function in `_typing.py` can work.
+        """
+        self.__dict__ = state
+
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
             try:
