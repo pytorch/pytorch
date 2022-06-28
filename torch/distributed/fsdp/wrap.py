@@ -297,22 +297,22 @@ class ParamExecOrderWrapPolicy:
     (also called non-recursive wrapping policy).
 
     The policy contains multiple wraps. Each wrap contains original parameters that will be executed together,
-    and the wrap transfers these parameters into one FlattenParameter. In both forward and the backward passes,
+    and the wrap transfers these parameters into one ``FlattenParameter``. In both forward and the backward passes,
     the sharded parameters in each wrap will be gathered just before these parameters are used in the passes.
     These parameters will then be reshaded once they have been used.
 
-    TODO (linjianma): For now, the parameters contained in each wrap of ParamExecOrderWrapPolicy
-    are the parameters in each wrap of the init_policy (a recursive wrapping policy).
+    TODO (linjianma): For now, the parameters contained in each wrap of ``ParamExecOrderWrapPolicy``
+    are the parameters in each wrap of the ``init_policy`` (a recursive wrapping policy).
     Later we will wrap parameters based on bucket size.
 
     Args:
         init_policy (Callable):
             The initial recursive wrapping policy used to guide the wrapping of this policy. In the first
-            forward and backward iteration, init_policy is used. Parameter execution order is also recorded
-            in the first iteration. Starting from second iteration, ParamExecOrderWrapPolicy will be used.
+            forward and backward iteration, ``init_policy`` is used. Parameter execution order is also recorded
+            in the first iteration. Starting from second iteration, ``ParamExecOrderWrapPolicy`` will be used.
 
-            The default always_wrap_policy might not be the best choice for every model. For example, for
-            transformer based models, setting transformer_auto_wrap_policy as the init_policy will guarantee
+            The default ``always_wrap_policy`` might not be the best choice for every model. For example, for
+            transformer based models, setting ``transformer_auto_wrap_policy`` as the ``init_policy`` will guarantee
             wrapping each transformer layer into one FSDP unit, and can be easily combined with checkpointing
             within each transformer layer.
 
