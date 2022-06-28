@@ -140,16 +140,16 @@ def _collate_helper(conversion, item):
     for name in conversion.keys():
         if name not in columns_name:
             raise Exception("Conversion keys missmatch")
-    
+
     for name in columns_name:
         if name in conversion:
             if not callable(conversion[name]):
                 raise Exception('Collate (DF)DataPipe requires callable as dict values')
             collation_fn = conversion[name]
         else:
-            #TODO(VitalyFedyunin): Add default collation into df_wrapper
+            # TODO(VitalyFedyunin): Add default collation into df_wrapper
             try:
-                import torcharrow.pytorch as tap
+                import torcharrow.pytorch as tap  # type: ignore[import]
                 collation_fn = tap.rec.Default()
             except Exception:
                 raise Exception("unable to import default collation function from the TorchArrrow")
@@ -159,7 +159,8 @@ def _collate_helper(conversion, item):
         tuple_values.append(value)
 
     # TODO(VitalyFedyunin): We can dynamically extract types from the tuple_values here
-    tpl_cls = namedtuple("CollateResult", tuple_names)  # type: ignore
+    # TODO(VitalyFedyunin): Instead of ignoring mypy error, make sure tuple_names is not empty
+    tpl_cls = namedtuple("CollateResult", tuple_names)  # type: ignore[misc]
     tuple = tpl_cls(*tuple_values)
     return tuple
 
@@ -215,7 +216,7 @@ class CollatorIterDataPipe(MapperIterDataPipe):
             Dict[Union[str, Any], Union[Callable, Any]],
             # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`
             ]
-        ] = _utils.collate.default_collate,
+        ] = default_collate,
     ) -> None:
         if callable(conversion):
             super().__init__(datapipe, fn=conversion)

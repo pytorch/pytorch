@@ -27,11 +27,14 @@ __all__ = [
     "get_val",
 ]
 
+
 def disable_capture():
     CaptureControl.disabled = True
 
+
 class CaptureControl():
     disabled = False
+
 
 class DataFrameTracedOps(DFIterDataPipe):
     def __init__(self, source_datapipe, output_var):
@@ -47,13 +50,14 @@ class DataFrameTracedOps(DFIterDataPipe):
 DATAPIPES_OPS = ['_dataframes_as_tuples', 'groupby', '_dataframes_filter', 'map', 'to_datapipe',
                  'shuffle', 'concat', 'batch', '_dataframes_per_row', '_dataframes_concat', '_dataframes_shuffle']
 
-UNIMPLEMENTED_ATTR = ['__deepcopy__', '__setstate__']
+UNIMPLEMENTED_ATTR = ['__deepcopy__', '__setstate__', 'is_shardable', 'apply_sharding']
+
 
 class Capture(object):
     # TODO: All operations are shared across entire InitialCapture, need to figure out what if we join two captures
     # ctx: Dict[str, List[Any]]
 
-    def __init__(self, schema_df = None):
+    def __init__(self, schema_df=None):
         self.ctx = {'operations': [], 'variables': [], 'schema_df': schema_df}
 
     def __str__(self):
@@ -116,7 +120,7 @@ class Capture(object):
         t = CaptureVariableAssign(variable=var, value=res, ctx=self.ctx)
         self.ctx['operations'].append(t)
         return var
-    
+
     def _is_context_empty(self):
         return len(self.ctx['operations']) == 0 and len(self.ctx['variables']) == 0
 
@@ -135,9 +139,9 @@ class Capture(object):
         # print('after execute' , value.columns)
         return value.columns
 
-
     # TODO(VitalyFedyunin): Add tests
-    # TODO(VitalyFedyunin): Need to join context if one of them are empty because we used capture 
+    # TODO(VitalyFedyunin): Need to join context if one of them are empty because we used capture
+
     def __call__(self, *args, **kwargs):
         # TODO: Check if args or kwargs have more than one different context
         if self._is_context_empty():
@@ -148,7 +152,7 @@ class Capture(object):
                     self.ctx = arg.ctx
                     break
             if self._is_context_empty():
-                for k,v in kwargs.items:
+                for k, v in kwargs.items():
                     if isinstance(k, Capture) and not k._is_context_empty():
                         self.ctx = k.ctx
                         break
@@ -162,6 +166,7 @@ class Capture(object):
         self.ctx['operations'].append(t)
         return var
 
+
 class CaptureF(Capture):
 
     # kwargs: Dict = {}
@@ -173,9 +178,10 @@ class CaptureF(Capture):
             self.ctx = ctx
         self.kwargs = kwargs
 
+
 class CaptureA(CaptureF):
     def __str__(self):
-        return '{name}'.format(name = self.kwargs['name'])
+        return '{name}'.format(name=self.kwargs['name'])
 
     def execute(self):
         value = self.kwargs['real_attribute']
@@ -185,18 +191,20 @@ class CaptureA(CaptureF):
 class CaptureLikeMock():
     def __init__(self, name):
         import unittest.mock as mock
-        get_target, attribute = mock._get_target(name)
+        # TODO(VitalyFedyunin): Do not use provate function here, copy own implementation instead.
+        get_target, attribute = mock._get_target(name)  # type: ignore[attr-defined]
         self.get_target = get_target
         self.attribute = attribute
         self.name = name
 
     def __enter__(self):
         self.save = getattr(self.get_target(), self.attribute)
-        capt = CaptureA(name = self.name, real_attribute = self.save)
+        capt = CaptureA(name=self.name, real_attribute=self.save)
         setattr(self.get_target(), self.attribute, capt)
 
     def __exit__(self, *exc_info):
         setattr(self.get_target(), self.attribute, self.save)
+
 
 class CaptureCall(Capture):
 
@@ -209,7 +217,7 @@ class CaptureCall(Capture):
         self.callable = callable
 
     def __str__(self):
-        return "{callable}({args},{kwargs})".format(callable = self.callable, **self.kwargs)
+        return "{callable}({args},{kwargs})".format(callable=self.callable, **self.kwargs)
 
     def execute(self):
 
@@ -228,7 +236,7 @@ class CaptureVariableAssign(CaptureF):
     def __str__(self):
         variable = self.kwargs['variable']
         value = self.kwargs['value']
-        return "{variable} = {value}".format(variable=variable, value = value)
+        return "{variable} = {value}".format(variable=variable, value=value)
 
     def execute(self):
         self.kwargs['variable'].calculated_value = self.kwargs['value'].execute()
@@ -374,7 +382,7 @@ def get_val(capture):
 
 class CaptureInitial(CaptureVariable):
 
-    def __init__(self, schema_df = None):
+    def __init__(self, schema_df=None):
         new_ctx: Dict[str, List[Any]] = {'operations': [], 'variables': [], 'schema_df': schema_df}
         super().__init__(None, new_ctx)
         self.name = 'input_%s' % self.name
@@ -434,15 +442,17 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):
     source_datapipe = None
 
+    # TODO(VitalyFedyunin): Must implement all special functions of datapipes
+
     def set_shuffle_settings(self, *args, **kwargs):
         pass
 
-    def __init__(self, source_datapipe, schema_df = None):
+    def is_shardable(self):
+        return False
+
+    def __init__(self, source_datapipe, schema_df=None):
         self.source_datapipe = source_datapipe
         if schema_df is None:
             schema_df = next(iter(self.source_datapipe))
             # print(type(schema_df))
-        super().__init__(schema_df = schema_df)
-        
-
-
+        super().__init__(schema_df=schema_df)

@@ -34,8 +34,8 @@ class PerRowDataFramesPipe(DFIterDataPipe):
 
     def __iter__(self):
         for df in self.source_datapipe:
-            # for i in range(len(df.index)): # pands
-            for i in range(len(df)): # torcharrow
+            # TODO(VitalyFedyunin): Replacing with TorchArrow only API, as we are dropping pandas as followup
+            for i in range(len(df)):
                 yield df[i:i + 1]
 
 

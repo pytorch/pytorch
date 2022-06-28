@@ -48,15 +48,17 @@ def _list_connected_datapipes(scan_obj, only_datapipe, cache):
     datapipe_classes: Tuple[Type[DataPipe]] = (IterDataPipe, MapDataPipe)  # type: ignore[assignment]
 
     try:
-        IterDataPipe.set_reduce_ex_hook(reduce_hook)
-        if exclude_primitive:
-            IterDataPipe.set_getstate_hook(getstate_hook)
-        p.dump(scan_obj)
-    except AttributeError:  # unpickable DataPipesGraph
-        pass  # TODO(VitalyFedyunin): We need to tight this requirement after migrating from old DataLoader
-    except pickle.PicklingError as e:
-        print('Error while attempting to pickle DataPipe', scan_obj)
-        raise e
+        for cls in datapipe_classes:
+            cls.set_reduce_ex_hook(reduce_hook)
+            if only_datapipe:
+                cls.set_getstate_hook(getstate_hook)
+        try:
+            p.dump(scan_obj)
+        except (pickle.PickleError, AttributeError, TypeError):
+            if DILL_AVAILABLE:
+                d.dump(scan_obj)
+            else:
+                raise
     finally:
         for cls in datapipe_classes:
             cls.set_reduce_ex_hook(None)
