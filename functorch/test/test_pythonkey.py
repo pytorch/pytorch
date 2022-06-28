@@ -501,7 +501,7 @@ class TestPartitioning(TestCase):
         self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
 
         ins, outs = get_ins_outs(fw_graph)
-        self.assertEqual(outs[1].target, torch.ops.aten.mm)
+        self.assertEqual(outs[1].target, torch.ops.aten.mm.default)
 
 
 class TestContiguous(TestCase):
