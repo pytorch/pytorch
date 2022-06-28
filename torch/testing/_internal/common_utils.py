@@ -698,7 +698,6 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
-        print(torch.cuda.device_count())
         if test_filename in USE_PYTEST:
             pytest_report_path = test_report_path.replace('python-unittest', 'python-pytest')
             os.makedirs(pytest_report_path, exist_ok=True)
@@ -708,7 +707,7 @@ def run_tests(argv=UNITTEST_ARGS):
                 subprocess.run([sys.executable, "-m", "pip", "install", "pytest-xdist"])
             os.environ["NO_COLOR"] = "1"
             pytest_report_path = os.path.join(pytest_report_path, test_filename)
-            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-n=2', '-vv', '-s',
+            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-n=1', '-vv', '-s',
                                     f'--junitxml={pytest_report_path}.xml'])
             sanitize_pytest_xml(f'{pytest_report_path}.xml')
             unittest_success = unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
