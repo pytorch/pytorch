@@ -9,6 +9,8 @@ from torch.ao.sparsity.experimental.data_sparsifier.lightning.callbacks.data_spa
 )
 from torch.ao.sparsity.experimental.data_sparsifier.lightning.callbacks._data_sparstity_utils import _get_valid_name
 from torch.ao.sparsity.experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
+from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import run_tests
 import warnings
 import math
 from torch.nn.utils.parametrize import is_parametrized
@@ -58,17 +60,9 @@ class StepSLScheduler(sparsity.BaseDataScheduler):
         return {name: config[self.schedule_param] * self.gamma for name, config in data_groups.items()}
 
 
-class TestPostTrainingDataNormSparsifierCallback:
-    def _get_callback(self, sparsifier_args):
-        callback = PostTrainingDataSparsity(data_sparsifier_type=sparsity.DataNormSparsifier, data_sparsifier_args=sparsifier_args)
-        return callback
-
-    def _get_pl_module(self):
-        pl_module = DummyLightningModule(100, [128, 256, 16])
-        return pl_module
-
-    def check_on_validation_start(self, pl_module, callback, sparsifier_args):
-        callback.on_validation_start(42, pl_module)  # 42 is a dummy value as trainer not used
+class _PostTrainingCallbackTestCase(TestCase):
+    def _check_on_fit_end(self, pl_module, callback, sparsifier_args):
+        callback.on_fit_end(42, pl_module)  # 42 is a dummy value as trainer not used
 
         # check sparsifier config
         for key, value in sparsifier_args.items():
@@ -93,31 +87,29 @@ class TestPostTrainingDataNormSparsifierCallback:
             sparsified_data = callback.data_sparsifier.get_data(name=valid_name, return_original=False)
             assert torch.all(sparsified_data[sparsified_data != 0] == param[sparsified_data != 0])
 
-    def run_all_checks(self, sparsifier_args):
-        pl_module = self._get_pl_module()
-        callback = self._get_callback(sparsifier_args)
-
-        self.check_on_validation_start(pl_module, callback, sparsifier_args)
+    def run_all_checks(self, pl_module, callback, sparsifier_args):
+        self._check_on_fit_end(pl_module, callback, sparsifier_args)
 
 
-class TestTrainingAwareDataNormSparsifierCallback:
+class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
+    def test_post_training_callback(self):
+        sparsifier_args = {
+            'sparsity_level': 0.5,
+            'sparse_block_shape': (1, 4),
+            'zeros_per_block': 4
+        }
+        callback = PostTrainingDataSparsity(data_sparsifier_type=sparsity.DataNormSparsifier,
+                                            data_sparsifier_args=sparsifier_args)
+        pl_module = DummyLightningModule(100, [128, 256, 16])
+
+        self.run_all_checks(pl_module, callback, sparsifier_args)
+
+
+class _TrainingAwareCallbackTestCase(TestCase):
     """Class to test in-training version of lightning callback
     Simulates model training and makes sure that each hook is doing what is expected
     """
-    def _get_callback(self, sparsifier_args, scheduler_args):
-        callback = TrainingAwareDataSparsity(
-            data_sparsifier_type=sparsity.DataNormSparsifier,
-            data_sparsifier_args=sparsifier_args,
-            data_scheduler_type=StepSLScheduler,
-            data_scheduler_args=scheduler_args
-        )
-        return callback
-
-    def _get_pl_module(self):
-        pl_module = DummyLightningModule(100, [128, 256, 16])
-        return pl_module
-
-    def check_on_train_start(self, pl_module, callback, sparsifier_args, scheduler_args):
+    def _check_on_train_start(self, pl_module, callback, sparsifier_args, scheduler_args):
 
         callback.on_train_start(42, pl_module)  # 42 is a dummy value
 
@@ -137,7 +129,8 @@ class TestTrainingAwareDataNormSparsifierCallback:
         for _, param in pl_module.model.named_parameters():
             param.data = param + 1
 
-    def check_on_train_epoch_start(self, pl_module, callback):
+    def _check_on_train_epoch_start(self, pl_module, callback):
+        # check if each component of state dict is being loaded correctly
         callback.on_train_epoch_start(42, pl_module)
         if callback.data_sparsifier_state_dict is None:
             return
@@ -169,7 +162,7 @@ class TestTrainingAwareDataNormSparsifierCallback:
             assert key in data_grp1
             assert value == data_grp1[key]
 
-    def check_on_train_epoch_end(self, pl_module, callback):
+    def _check_on_train_epoch_end(self, pl_module, callback):
         callback.on_train_epoch_end(42, pl_module)
         data_scheduler = callback.data_scheduler
         base_sl = data_scheduler.base_param
@@ -177,16 +170,16 @@ class TestTrainingAwareDataNormSparsifierCallback:
         for name, _ in pl_module.model.named_parameters():
             valid_name = _get_valid_name(name)
             mask = callback.data_sparsifier.get_mask(name=valid_name)
-            assert (1.0 - mask.float().mean()) > 0
+            assert (1.0 - mask.float().mean()) > 0  # some sparsity level achieved
 
             last_sl = data_scheduler.get_last_param()
             last_epoch = data_scheduler.last_epoch
-
+            # check sparsity levels
             log_last_sl = math.log(last_sl[valid_name])
             log_actual_sl = math.log(base_sl[valid_name] * (data_scheduler.gamma ** last_epoch))
             assert log_last_sl == log_actual_sl
 
-    def check_on_train_end(self, pl_module, callback):
+    def _check_on_train_end(self, pl_module, callback):
         callback.on_train_end(42, pl_module)
 
         # check that the masks have been squashed
@@ -194,32 +187,39 @@ class TestTrainingAwareDataNormSparsifierCallback:
             valid_name = _get_valid_name(name)
             assert not is_parametrized(callback.data_sparsifier._continer, valid_name)
 
-    def run_all_checks(self, sparsifier_args, scheduler_args):
-        pl_module = self._get_pl_module()
-        callback = self._get_callback(sparsifier_args, scheduler_args)
-
-        self.check_on_train_start(pl_module, callback, sparsifier_args, scheduler_args)
+    def run_all_checks(self, pl_module, callback, sparsifier_args, scheduler_args):
+        # simulate the training process and check all steps
+        self._check_on_train_start(pl_module, callback, sparsifier_args, scheduler_args)
 
         num_epochs = 5
         for _ in range(0, num_epochs):
-            self.check_on_train_epoch_start(pl_module, callback)
+            self._check_on_train_epoch_start(pl_module, callback)
             self._simulate_update_param_model(pl_module)
-            self.check_on_train_epoch_end(pl_module, callback)
+            self._check_on_train_epoch_end(pl_module, callback)
+
+
+class TestTrainingAwareCallback(_TrainingAwareCallbackTestCase):
+    def test_train_aware_callback(self):
+        sparsifier_args = {
+            'sparsity_level': 0.5,
+            'sparse_block_shape': (1, 4),
+            'zeros_per_block': 4
+        }
+        scheduler_args = {
+            'gamma': 2,
+            'step_size': 1
+        }
+
+        callback = TrainingAwareDataSparsity(
+            data_sparsifier_type=sparsity.DataNormSparsifier,
+            data_sparsifier_args=sparsifier_args,
+            data_scheduler_type=StepSLScheduler,
+            data_scheduler_args=scheduler_args
+        )
+
+        pl_module = DummyLightningModule(100, [128, 256, 16])
+        self.run_all_checks(pl_module, callback, sparsifier_args, scheduler_args)
 
 
 if __name__ == "__main__":
-    callback_tester = TestPostTrainingDataNormSparsifierCallback()
-    sparsifier_args = {
-        'sparsity_level': 0.5,
-        'sparse_block_shape': (1, 4),
-        'zeros_per_block': 4
-    }
-    callback_tester.run_all_checks(sparsifier_args)
-
-    callback_tester_ta = TestTrainingAwareDataNormSparsifierCallback()
-    scheduler_args = {
-        'gamma': 2,
-        'step_size': 1
-    }
-
-    callback_tester_ta.run_all_checks(sparsifier_args, scheduler_args)
+    run_tests()
