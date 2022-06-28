@@ -55,7 +55,6 @@ UNIMPLEMENTED_ATTR = ['__deepcopy__', '__setstate__', 'is_shardable', 'apply_sha
 
 class Capture(object):
     # TODO: All operations are shared across entire InitialCapture, need to figure out what if we join two captures
-    # ctx: Dict[str, List[Any]]
 
     def __init__(self, schema_df=None):
         self.ctx = {'operations': [], 'variables': [], 'schema_df': schema_df}
@@ -129,14 +128,11 @@ class Capture(object):
         self.ctx['variables'][0].calculated_value = dataframe
         for op in self.ctx['operations']:
             op.execute()
-        # return self.calculated_value
 
     @property
     def columns(self):
-        # self.ctx['variables'][0].calculated_value = self.ctx['schema_df']
         self.apply_ops_2(self.ctx['schema_df'])
         value = self.execute()
-        # print('after execute' , value.columns)
         return value.columns
 
     # TODO(VitalyFedyunin): Add tests
@@ -145,7 +141,6 @@ class Capture(object):
     def __call__(self, *args, **kwargs):
         # TODO: Check if args or kwargs have more than one different context
         if self._is_context_empty():
-            # my_context_empty = True
             # TODO: Allow CaptureA to take context from mock
             for arg in args:
                 if isinstance(arg, Capture) and not arg._is_context_empty():
@@ -168,9 +163,6 @@ class Capture(object):
 
 
 class CaptureF(Capture):
-
-    # kwargs: Dict = {}
-
     def __init__(self, ctx=None, **kwargs):
         if ctx is None:
             self.ctx = {'operations': [], 'variables': []}
@@ -270,9 +262,6 @@ class CaptureVariable(Capture):
 
 
 class CaptureGetItem(Capture):
-    # left: Capture
-    # key: Any
-
     def __init__(self, left, key, ctx):
         self.ctx = ctx
         self.left = left
@@ -287,10 +276,6 @@ class CaptureGetItem(Capture):
 
 
 class CaptureSetItem(Capture):
-    # left: Capture
-    # key: Any
-    # value: Capture
-
     def __init__(self, left, key, value, ctx):
         self.ctx = ctx
         self.left = left
@@ -307,9 +292,6 @@ class CaptureSetItem(Capture):
 
 
 class CaptureAdd(Capture):
-    # left = None
-    # right = None
-
     def __init__(self, left, right, ctx):
         self.ctx = ctx
         self.left = left
@@ -323,9 +305,6 @@ class CaptureAdd(Capture):
 
 
 class CaptureMul(Capture):
-    # left = None
-    # right = None
-
     def __init__(self, left, right, ctx):
         self.ctx = ctx
         self.left = left
@@ -339,9 +318,6 @@ class CaptureMul(Capture):
 
 
 class CaptureSub(Capture):
-    # left = None
-    # right = None
-
     def __init__(self, left, right, ctx):
         self.ctx = ctx
         self.left = left
@@ -355,9 +331,6 @@ class CaptureSub(Capture):
 
 
 class CaptureGetAttr(Capture):
-    # source = None
-    # name: str
-
     def __init__(self, src, name, ctx):
         self.ctx = ctx
         self.src = src
@@ -381,7 +354,6 @@ def get_val(capture):
 
 
 class CaptureInitial(CaptureVariable):
-
     def __init__(self, schema_df=None):
         new_ctx: Dict[str, List[Any]] = {'operations': [], 'variables': [], 'schema_df': schema_df}
         super().__init__(None, new_ctx)
@@ -454,5 +426,4 @@ class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):
         self.source_datapipe = source_datapipe
         if schema_df is None:
             schema_df = next(iter(self.source_datapipe))
-            # print(type(schema_df))
         super().__init__(schema_df=schema_df)
