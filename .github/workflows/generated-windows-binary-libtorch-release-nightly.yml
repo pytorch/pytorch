@@ -88,13 +88,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -190,13 +189,12 @@ jobs:
         with:
           name: libtorch-cpu-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -360,13 +358,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -462,13 +459,12 @@ jobs:
         with:
           name: libtorch-cpu-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -632,13 +628,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -734,13 +729,12 @@ jobs:
         with:
           name: libtorch-cpu-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -904,13 +898,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1006,13 +999,12 @@ jobs:
         with:
           name: libtorch-cpu-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1177,13 +1169,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1280,13 +1271,12 @@ jobs:
         with:
           name: libtorch-cuda11_3-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1452,13 +1442,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1555,13 +1544,12 @@ jobs:
         with:
           name: libtorch-cuda11_3-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1727,13 +1715,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1830,13 +1817,12 @@ jobs:
         with:
           name: libtorch-cuda11_3-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2002,13 +1988,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2105,13 +2090,12 @@ jobs:
         with:
           name: libtorch-cuda11_3-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2277,13 +2261,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2380,13 +2363,12 @@ jobs:
         with:
           name: libtorch-cuda11_6-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2552,13 +2534,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2655,13 +2636,12 @@ jobs:
         with:
           name: libtorch-cuda11_6-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2827,13 +2807,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2930,13 +2909,12 @@ jobs:
         with:
           name: libtorch-cuda11_6-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3102,13 +3080,12 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3205,13 +3182,12 @@ jobs:
         with:
           name: libtorch-cuda11_6-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
