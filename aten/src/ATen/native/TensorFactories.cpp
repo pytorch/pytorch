@@ -381,6 +381,16 @@ Tensor empty_symint(
   c10::optional<bool> pin_memory_opt,
   c10::optional<c10::MemoryFormat> memory_format_opt
 ) {
+
+    // CPU: empty_cpu
+    // CUDA: empty_cuda
+    // MPS: empty_mps
+    // Meta: empty_meta
+    // MkldnnCPU: empty_mkldnn
+    // SparseCPU, SparseCUDA: empty_sparse
+    // SparseCsrCPU, SparseCsrCUDA: empty_sparse_compressed
+    // QuantizedCPU, QuantizedCUDA: empty_unknown_quantized
+
   // TODO: switch to asIntArrayRefUnchecked
   return at::empty(
       c10::asIntArrayRefSlow(size), dtype_opt, layout_opt, device_opt, pin_memory_opt, memory_format_opt);
