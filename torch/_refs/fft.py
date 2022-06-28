@@ -17,7 +17,7 @@ import math
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
 
 
-def apply_norm(x: TensorLike, norm: str, signal_numel: int, forward: bool):
+def apply_norm(x: TensorLike, norm: NormType, signal_numel: int, forward: bool):
     if norm == "ortho":
         return prims.mul(x, 1 / math.sqrt(signal_numel))
 
@@ -80,18 +80,42 @@ def resize_fft_input(
     return refs.constant_pad_nd(x, pad_amount) if must_copy else x
 
 def _fft_r2c(func_name: str, input: TensorLikeType, n: Optional[int],
-             int dim, norm: Optional[str], forward: bool, onesided: bool):
-    if not input.is_complex:
-        raise RuntimeError(f"{func_name} expects a real input tensor, but got {input.dtype}")
+             int dim, norm: NormType, forward: bool, onesided: bool):
+    if not input.is_floating_point:
+        raise RuntimeError(f"{func_name} expects a floating point input tensor, but got {input.dtype}")
     input = promote_tensor_fft(input)
+    dims = (dim,)
 
     if n is not None:
-        input = resize_fft_input(input, (dim,), (n,))
-    else:
-        n = input.shape[dim]
+        input = resize_fft_input(input, dims, (n,))
 
-    n = n if n is not None else input.shape[dim]
+    ret = prims.fft_r2c(input, dim=dims, onesided=onesided)
+    ret = apply_norm(ret, norm, input.shape[dim], forward)
+    return ret if forward else refs.conj(ret)
 
-    ret = prims.fft_r2c(input, dim=dim, onesided=onesided)
+def _fft_c2c(func_name: str, input: TensorLikeType, n: Optional[int],
+             int dim, norm: NormType, forward: bool):
+    if not input.dtype.is_complex:
+        raise RuntimeError(f"{func_name} expects a complex input tensor, but got {input.dtype}")
+    dims = (dim,)
 
-    return ret if forward else prims.conj(ret)
+    if n is not None:
+        input = resize_fft_input(input, dims, (n,))
+
+    ret = prims.fft_c2c(input, dim=dims, forward=forward)
+    return apply_norm(ret, norm, input.shape[dim], forward)
+
+class _ShapeAndDims(NamedTuple):
+    shape: List[int]
+    dims: List[int]
+
+def _canonicalize_fft_shape_and_dim_args(input: TensorLikeType, shape:
+                                         Optional[ShapeType], dim: Optional[DimsType]) -> _ShapeAndDims:
+    input_dim = input.ndim
+    input_sizes = input.shape
+
+    ret_shape = []
+    ret_dims = []
+
+    if dim is not None:
+        ret_dims =
