@@ -4869,6 +4869,7 @@
   variants: function, method
   dispatch:
     CPU, QuantizedCPU, CUDA, QuantizedCUDA: flip
+    MPS: flip_mps
 
 - func: fliplr(Tensor self) -> Tensor
   variants: function, method
