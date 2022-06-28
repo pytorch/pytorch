@@ -179,8 +179,8 @@ template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters() {
   // Resets parameter data pointer so that they can use faster code paths.
   //
-  // Right now, this works only if the module is on the GPU and cuDNN is
-  // enabled. Otherwise, it's a no-op.
+  // Right now, this works only if the module is on the GPU, otherwise,
+  // it's a no-op.
 
   // Short-circuits if flat_weights_ is only partially instantiated
   if (flat_weights_.size() != flat_weights_names_.size()) {
@@ -193,8 +193,7 @@ void RNNImplBase<Derived>::flatten_parameters() {
   auto first_fw = flat_weights_[0];
   auto dtype = first_fw.dtype();
   for (const auto& fw : flat_weights_) {
-    if (!(fw.dtype() == dtype) || !fw.is_cuda() ||
-        !torch::cudnn_is_acceptable(fw)) {
+    if (!(fw.dtype() == dtype) || !(fw.is_cuda() || fw.is_hip())) {
       return;
     }
   }
