@@ -80,6 +80,13 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
     return selector_->allowCasP(from, to);
   };
 
+  auto allowSibling = [this](TensorView* from, TensorView* to) {
+    if (selector_ == nullptr) {
+      return true;
+    }
+    return selector_->allowSibling(from, to);
+  };
+
   while (!candidates.empty()) {
     const auto next_hop_info = candidates.back();
     const auto& next_hop = next_hop_info.next_hop;
@@ -90,6 +97,21 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
       path_.push_back(next_hop);
     }
     replayed.emplace(next_hop.to);
+
+    for (auto sibling_tv : ir_utils::siblingTvsOf(next_hop.to)) {
+      if (replayed.count(sibling_tv) ||
+          !allowSibling(next_hop.to, sibling_tv)) {
+        continue;
+      }
+      insertNextHop(
+          {.next_hop =
+               {.type = NextHopType::SIBLING,
+                .from = next_hop.to,
+                .to = sibling_tv},
+           .info_from = next_hop_info.info_to,
+           .info_to = computeInfoSibling(
+               next_hop.to, sibling_tv, next_hop_info.info_to)});
+    }
 
     for (auto consumer_tv : ir_utils::consumerTvsOf(next_hop.to)) {
       if (replayed.count(consumer_tv) || !allowCasP(next_hop.to, consumer_tv)) {
@@ -127,6 +149,9 @@ void MaxInfoSpanningTree::traverse(Propagator* propagator) {
   }
   for (const auto& next_hop : path_) {
     switch (next_hop.type) {
+      case NextHopType::SIBLING:
+        propagator->propagateTvSibling(next_hop.from, next_hop.to);
+        break;
       case NextHopType::C_AS_P:
         propagator->propagateTvCasP(next_hop.from, next_hop.to);
         break;
@@ -378,6 +403,17 @@ MaxRootDomainInfoSpanningTree::getReferenceRootIDInfo(
     }
   }
   return std::make_shared<RootDomainInfo>(std::move(result));
+}
+
+// Given the preserved reference root ID info of a tensor, compute
+// the corresponding info in its sibling. Since info has nothing to do with
+// replay state, so sibling info is always identical by definition.
+std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree::
+    computeInfoSibling(
+        TensorView* from,
+        TensorView* to,
+        std::shared_ptr<Information> from_info) const {
+  return from_info;
 }
 
 } // namespace cuda

@@ -23639,6 +23639,46 @@ TEST_F(NVFuserTest, FusionReproNoncontigBroadcast_CUDA) {
       executor_cache.fusion(), cg_outputs, {t0, t1}, {t2}, __LINE__, __FILE__);
 }
 
+namespace {
+
+// check that the resulting sibling are identical
+void checkSiblingConsistency(TensorView* replay, TensorView* target) {
+  auto replay_root = replay->getRootDomain();
+  auto replay_dom = replay->domain()->domain();
+  auto target_root = target->getRootDomain();
+  auto target_dom = target->domain()->domain();
+  std::unordered_map<IterDomain*, IterDomain*> target2replay_map;
+  TORCH_CHECK(replay_root.size() == target_root.size());
+  target2replay_map.reserve(replay_root.size());
+  std::transform(
+      target_root.begin(),
+      target_root.end(),
+      replay_root.begin(),
+      std::inserter(target2replay_map, target2replay_map.begin()),
+      [](auto a, auto b) { return std::make_pair(a, b); });
+  BestEffortReplay replay_(replay_dom, target_dom, target2replay_map);
+  auto r = replay_.getReplay();
+  for (int64_t i = 0; i < replay_dom.size(); i++) {
+    auto target_id = target_dom[i];
+    auto replay_it = r.find(target_id);
+    TORCH_CHECK(replay_it != r.end());
+    TORCH_CHECK(
+        replay_it->second == replay_dom[i],
+        "IterDomain mismatch when checking ",
+        replay,
+        " and ",
+        target,
+        " at ",
+        i,
+        ", got ",
+        replay_it->second,
+        " and ",
+        replay_dom[i]);
+  }
+};
+
+} // namespace
+
 TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
   // https://github.com/csarofeen/pytorch/issues/1760
   Fusion fusion;
@@ -23665,41 +23705,6 @@ TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
   TransformPropagator propagator(tvs2.var_sum);
   MaxRootDomainInfoSpanningTree(tvs2.var_sum).traverse(&propagator);
 
-  // check that the resulting tensors in tvs2 are identical
-  auto checkSiblingConsistency = [](TensorView* replay, TensorView* target) {
-    auto replay_root = replay->getRootDomain();
-    auto replay_dom = replay->domain()->domain();
-    auto target_root = target->getRootDomain();
-    auto target_dom = target->domain()->domain();
-    std::unordered_map<IterDomain*, IterDomain*> target2replay_map;
-    TORCH_CHECK(replay_root.size() == target_root.size());
-    target2replay_map.reserve(replay_root.size());
-    std::transform(
-        target_root.begin(),
-        target_root.end(),
-        replay_root.begin(),
-        std::inserter(target2replay_map, target2replay_map.begin()),
-        [](auto a, auto b) { return std::make_pair(a, b); });
-    BestEffortReplay replay_(replay_dom, target_dom, target2replay_map);
-    auto r = replay_.getReplay();
-    for (int64_t i = 0; i < replay_dom.size(); i++) {
-      auto target_id = target_dom[i];
-      auto replay_it = r.find(target_id);
-      TORCH_CHECK(replay_it != r.end());
-      TORCH_CHECK(
-          replay_it->second == replay_dom[i],
-          "IterDomain mismatch when checking ",
-          replay,
-          " and ",
-          target,
-          " at ",
-          i,
-          ", got ",
-          replay_it->second,
-          " and ",
-          replay_dom[i]);
-    }
-  };
   std::vector<TensorView*> siblings[] = {
       {tvs.avg, tvs.var_sum, tvs.n}, {tvs2.avg, tvs2.var_sum, tvs2.n}};
   for (auto tensors : siblings) {
@@ -23709,6 +23714,71 @@ TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
       }
     }
   }
+}
+
+TEST_F(NVFuserTest, FusionTransformPropagateSelectorSibling_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  auto tv0 = makeSymbolicTensor(2);
+  fusion.addInput(tv0);
+
+  auto tvs = Welford(tv0, {1});
+  fusion.addOutput(tvs.var_sum);
+
+  tvs.avg->split(1, 1);
+  tvs.avg->split(1, 2);
+  tvs.avg->split(1, 3);
+  tvs.var_sum->split(1, 1);
+  tvs.var_sum->split(1, 2);
+  tvs.var_sum->split(1, 3);
+  tvs.n->split(1, 1);
+  tvs.n->split(1, 2);
+  tvs.n->split(1, 3);
+
+  auto tvs2 = tvs.rFactor({1, 4});
+
+  struct DisableTv0 : public MaxInfoSpanningTree::Selector {
+    TensorView* tv0;
+    virtual bool allowPasC(TensorView* from, TensorView* to) override {
+      return from != tv0 && to != tv0;
+    };
+    virtual bool allowCasP(TensorView* from, TensorView* to) override {
+      return from != tv0 && to != tv0;
+    };
+    virtual bool allowSibling(TensorView* from, TensorView* to) override {
+      return true;
+    }
+    DisableTv0(TensorView* tv0) : tv0(tv0) {}
+  } selector1(tv0);
+
+  struct DisableTv0AndSibling : public DisableTv0 {
+    virtual bool allowSibling(TensorView* from, TensorView* to) override {
+      return false;
+    }
+    using DisableTv0::DisableTv0;
+  } selector2(tv0);
+
+  TransformPropagator propagator(tvs2.var_sum);
+  MaxRootDomainInfoSpanningTree good_path(tvs2.var_sum, &selector1);
+  MaxRootDomainInfoSpanningTree bad_path(tvs2.var_sum, &selector2);
+
+  auto check = [&]() {
+    std::vector<TensorView*> siblings[] = {
+        {tvs.avg, tvs.var_sum, tvs.n}, {tvs2.avg, tvs2.var_sum, tvs2.n}};
+    for (auto tensors : siblings) {
+      for (auto t1 : tensors) {
+        for (auto t2 : tensors) {
+          checkSiblingConsistency(t1, t2);
+        }
+      }
+    }
+  };
+
+  bad_path.traverse(&propagator);
+  ASSERT_ANY_THROW(check());
+  good_path.traverse(&propagator);
+  check();
 }
 
 TEST_F(NVFuserTest, FusionTransformPropagatePosition_CUDA) {
@@ -23808,7 +23878,7 @@ TEST_F(NVFuserTest, FusionIssue1770Repro_CUDA) {
       __FILE__);
 }
 
-TEST_F(NVFuserTest, FusionTransormPropagatorSelector_CUDA) {
+TEST_F(NVFuserTest, FusionTransformPropagatorSelector) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -23835,6 +23905,9 @@ TEST_F(NVFuserTest, FusionTransormPropagatorSelector_CUDA) {
     }
     virtual bool allowCasP(TensorView* from, TensorView* to) override {
       return to == tv3;
+    }
+    virtual bool allowSibling(TensorView* from, TensorView* to) override {
+      return false;
     }
     Selector(TensorView* tv0, TensorView* tv3) : tv0(tv0), tv3(tv3) {}
   } selector(tv0, tv3);
@@ -23895,6 +23968,11 @@ TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
     }
     virtual void propagateTvCasP(TensorView* from, TensorView* to) override {
       ss << "propagateTvCasP" << std::endl;
+      ss << "from: " << from->name() << std::endl;
+      ss << "to: " << to->name() << std::endl;
+    }
+    virtual void propagateTvSibling(TensorView* from, TensorView* to) override {
+      ss << "propagateTvSibling" << std::endl;
       ss << "from: " << from->name() << std::endl;
       ss << "to: " << to->name() << std::endl;
     }

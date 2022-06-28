@@ -155,9 +155,7 @@ TensorDomain* TransformReplay::fullSelfReplay(
     size_t i = 0;
     for (auto id : self->getRootDomain()) {
       TORCH_INTERNAL_ASSERT(
-          new_self_root->getRootDomain()[i]->getParallelType() ==
-                  id->getParallelType() &&
-              new_self_root->getRootDomain()[i]->isReduction() ==
+          new_self_root->getRootDomain()[i]->isReduction() ==
                   id->isReduction() &&
               new_self_root->getRootDomain()[i]->isRFactorProduct() ==
                   id->isRFactorProduct() &&
@@ -658,6 +656,13 @@ void TransformPropagator::propagateTvCasP(TensorView* from, TensorView* to) {
   auto replay = TransformReplay::replayCasP(to, from, pos);
   to->setDomain(replay.first);
   replayed_pos_[to] = replay.second;
+}
+
+void TransformPropagator::propagateTvSibling(TensorView* from, TensorView* to) {
+  int pos = replayed_pos_.at(from);
+  auto replay = TransformReplay::fullSelfReplay(to->domain(), from->domain());
+  to->setDomain(replay);
+  replayed_pos_[to] = pos;
 }
 
 TransformPropagator::TransformPropagator(TensorView* from, int64_t pos) {

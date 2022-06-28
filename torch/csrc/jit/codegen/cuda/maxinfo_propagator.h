@@ -29,8 +29,9 @@ namespace cuda {
  * MaxInfoSpanningTree::Information and implement `operator<` which is used to
  * tell which path contains more information, and `operator bool` which is used
  * to tell if there is any information stored. You also need to implement
- * computeInfoPasC and computeInfoCasP, which are the functions that compute
- * information of the `to` tensor from the information of the `from` tensor.
+ * computeInfoPasC, computeInfoCasP, and computeInfoSibling, which are the
+ * functions that compute information of the `to` tensor from the information of
+ * the `from` tensor.
  */
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_CUDA_CU_API MaxInfoSpanningTree {
@@ -40,12 +41,14 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
   struct Selector {
     virtual bool allowPasC(TensorView* from, TensorView* to) = 0;
     virtual bool allowCasP(TensorView* from, TensorView* to) = 0;
+    virtual bool allowSibling(TensorView* from, TensorView* to) = 0;
   };
 
   // This is the interface to implement the actual propagation
   struct Propagator {
     virtual void propagateTvPasC(TensorView* from, TensorView* to) = 0;
     virtual void propagateTvCasP(TensorView* from, TensorView* to) = 0;
+    virtual void propagateTvSibling(TensorView* from, TensorView* to) = 0;
   };
 
   // This is the interface that specifies the structure of information used to
@@ -71,6 +74,7 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
 
  private:
   enum class NextHopType {
+    SIBLING,
     C_AS_P,
     P_AS_C,
   };
@@ -106,6 +110,10 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
       TensorView* to,
       std::shared_ptr<Information> from_info) const = 0;
   virtual std::shared_ptr<Information> computeInfoCasP(
+      TensorView* from,
+      TensorView* to,
+      std::shared_ptr<Information> from_info) const = 0;
+  virtual std::shared_ptr<Information> computeInfoSibling(
       TensorView* from,
       TensorView* to,
       std::shared_ptr<Information> from_info) const = 0;
@@ -187,6 +195,10 @@ class TORCH_CUDA_CU_API MaxRootDomainInfoSpanningTree
       TensorView* to,
       std::shared_ptr<Information> from_info) const override;
   virtual std::shared_ptr<Information> computeInfoCasP(
+      TensorView* from,
+      TensorView* to,
+      std::shared_ptr<Information> from_info) const override;
+  virtual std::shared_ptr<Information> computeInfoSibling(
       TensorView* from,
       TensorView* to,
       std::shared_ptr<Information> from_info) const override;

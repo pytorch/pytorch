@@ -163,6 +163,7 @@ class TORCH_CUDA_CU_API TransformPropagator
  public:
   virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
   virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
+  virtual void propagateTvSibling(TensorView* from, TensorView* to) override;
   TransformPropagator(TensorView* from, int64_t pos = -1);
 };
 
