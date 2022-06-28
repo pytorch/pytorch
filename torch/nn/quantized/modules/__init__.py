@@ -5,7 +5,7 @@ Note::
     Please, use `torch.ao.nn.quantized` instead.
 """
 
-from torch.ao.nn.quantized.modules.activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax
+from torch.ao.nn.quantized.modules.activation import ReLU6, Hardswish, ELU, LeakyReLU, Sigmoid, Softmax, MultiheadAttention
 from torch.ao.nn.quantized.modules.batchnorm import BatchNorm2d, BatchNorm3d
 from torch.ao.nn.quantized.modules.conv import Conv1d, Conv2d, Conv3d
 from torch.ao.nn.quantized.modules.conv import ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
@@ -14,6 +14,7 @@ from torch.ao.nn.quantized.modules.embedding_ops import Embedding, EmbeddingBag
 from torch.ao.nn.quantized.modules.functional_modules import FloatFunctional, FXFloatFunctional, QFunctional
 from torch.ao.nn.quantized.modules.linear import Linear
 from torch.ao.nn.quantized.modules.normalization import LayerNorm, GroupNorm, InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
+from torch.ao.nn.quantized.modules.rnn import LSTM
 
 from torch.ao.nn.quantized.modules import MaxPool2d
 from torch.ao.nn.quantized.modules import Quantize, DeQuantize
@@ -52,7 +53,9 @@ __all__ = [
     'LayerNorm',
     'LeakyReLU',
     'Linear',
+    'LSTM',
     'MaxPool2d',
+    'MultiheadAttention',
     'Quantize',
     'ReLU6',
     'Sigmoid',
