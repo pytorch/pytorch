@@ -186,11 +186,3 @@ class ShufflerIterDataPipe(IterDataPipe[T_co]):
 
     def __del__(self):
         self._buffer.clear()
-
-
-    def save_snapshot(self):
-        # TODO: Need to save the buffer for more efficient snapshotting
-        pass
-
-    def restore_snapshot(self, snapshot=None):
-        pass
