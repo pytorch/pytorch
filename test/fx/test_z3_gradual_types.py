@@ -1,11 +1,11 @@
 # Owner(s): ["oncall: fx"]
 
 import unittest
+from torch.fx import GraphModule
 from torch.fx import GraphModule, symbolic_trace
-from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT, DVar, TVar, ApplyBroadcasting, T
+from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT, DVar, TVar, T
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
-from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint, \
-    transform_apply_broadcasting
+from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint
 from torch.fx.experimental.migrate_gradual_types.operation import op_precision, op_matching, op_consistency
 from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints
 from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, D
@@ -1109,10 +1109,10 @@ class TestInternalConstraints(unittest.TestCase):
         transformed, count = transform_constraint(transformed, count)
         assert len(transformed.disjuncts) == 5
 
-    def test_apply_broadcasting(self):
-        c1 = ApplyBroadcasting(TVar(1), TVar(2), TVar(3), TVar(4))
-        transformed, count = transform_apply_broadcasting(c1, 5)
-        assert len(transformed.conjucts) == 41
+    # def test_apply_broadcasting(self):
+    #     c1 = ApplyBroadcasting(TVar(1), TVar(2), TVar(3), TVar(4))
+    #     transformed, count = transform_apply_broadcasting(c1, 5)
+    #     assert len(transformed.conjucts) == 41
 
 @skipIfNoTorchVision
 class TestResNet(unittest.TestCase):
