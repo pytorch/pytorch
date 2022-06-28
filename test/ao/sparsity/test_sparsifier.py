@@ -360,7 +360,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
     def test_step(self):
         model = Model()
         sparsifier = NearlyDiagonalSparsifier(nearliness=1)
-        sparsifier.prepare(model, config=[model.linear])
+        sparsifier.prepare(model, config=[{'tensor_fqn': 'linear.weight'}])
 
         for g in sparsifier.groups:
             # Before step
@@ -429,7 +429,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
             width, height = layer.weight.shape
             model.add_module(layer_name, layer)
             config = {
-                'module_fqn': layer_name,
+                'tensor_fqn': layer_name + ".weight",
                 'nearliness': nearliness
             }
 
