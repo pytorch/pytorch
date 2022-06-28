@@ -15,11 +15,6 @@ BUILD_DIR="build"
 BUILD_RENAMED_DIR="build_renamed"
 BUILD_BIN_DIR="$BUILD_DIR"/bin
 
-# GHA has test config defined for the test job, so we need to add them.
-if [[ -n "${TEST_CONFIG}" ]]; then
-    BUILD_ENVIRONMENT="${BUILD_ENVIRONMENT}-${TEST_CONFIG}"
-fi
-
 # Get fully qualified path using realpath
 if [[ "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   CUSTOM_TEST_ARTIFACT_BUILD_DIR=$(realpath "${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}")
@@ -38,16 +33,16 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
-if [[ $TEST_CONFIG == 'default' ]]; then
+if [[ "$TEST_CONFIG" == 'default' ]]; then
   export CUDA_VISIBLE_DEVICES=0
   export HIP_VISIBLE_DEVICES=0
 fi
 
-if [[ $TEST_CONFIG == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+if [[ "$TEST_CONFIG" == 'distributed' ]] && [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export HIP_VISIBLE_DEVICES=0,1
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-slow-* || $TEST_CONFIG == 'slow' ]]; then
+if [[ "$TEST_CONFIG" == 'slow' ]]; then
   export PYTORCH_TEST_WITH_SLOW=1
   export PYTORCH_TEST_SKIP_FAST=1
 fi
@@ -67,10 +62,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   export BUILD_SPLIT_CUDA=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *crossref* ]]; then
+if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
+# TODO: this condition is never true, need to fix this.
 if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
   # skip expensive checks when on PR and CI_MASTER flag is not set
   export PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK=1
@@ -153,11 +149,13 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX-* || $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
+if [[ $TEST_CONFIG == 'nogpu_NO_AVX' ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX2-* || $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
+elif [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
-elif [[ "${BUILD_ENVIRONMENT}" == *-NO_AVX512-* || $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
+
+# TODO: this condition is never (we have no NO_AVX512 config), need to fix this.
+elif [[ $TEST_CONFIG == 'nogpu_NO_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
@@ -277,7 +275,7 @@ test_libtorch() {
     fi
 
     # Run Lazy Tensor cpp tests
-    if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$TEST_CONFIG" != *nogpu* ]]; then
       LTC_TS_CUDA=1 "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
     else
       "$TORCH_BIN_DIR"/test_lazy  --gtest_output=xml:$TEST_REPORTS_DIR/test_lazy.xml
@@ -289,6 +287,8 @@ test_libtorch() {
     # Exclude IMethodTest that relies on torch::deploy, which will instead be ran in test_deploy.
     OMP_NUM_THREADS=2 TORCH_CPP_TEST_MNIST_PATH="test/cpp/api/mnist" "$TORCH_BIN_DIR"/test_api --gtest_filter='-IMethodTest.*' --gtest_output=xml:$TEST_REPORTS_DIR/test_api.xml
     "$TORCH_BIN_DIR"/test_tensorexpr --gtest_output=xml:$TEST_REPORTS_DIR/test_tensorexpr.xml
+
+    # TODO: this condition is never (BUILD_ENVIRONMENT doesn't start with pytorch-), need to fix this.
     if [[ "${BUILD_ENVIRONMENT}" == pytorch-linux-xenial-py3* ]]; then
       if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* ]]; then
         # TODO: Consider to run static_runtime_test from $TORCH_BIN_DIR (may need modify build script)
@@ -424,6 +424,10 @@ test_torch_function_benchmark() {
 }
 
 build_xla() {
+  # xla test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+
   XLA_DIR=xla
   USE_CACHE=0
   clone_pytorch_xla
@@ -438,6 +442,10 @@ build_xla() {
 }
 
 test_xla() {
+  # xla test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+
   clone_pytorch_xla
   # shellcheck disable=SC1091
   source "./xla/.circleci/common.sh"
@@ -488,6 +496,10 @@ test_forward_backward_compatibility() {
 test_bazel() {
   set -e
 
+  # bazel test needs sccache setup.
+  # shellcheck source=./common-build.sh
+  source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
+
   get_bazel
 
    # Test //c10/... without Google flags and logging libraries. The
@@ -500,7 +512,7 @@ test_bazel() {
 }
 
 test_benchmarks() {
-  if [[ "$BUILD_ENVIRONMENT" == *cuda* && "$BUILD_ENVIRONMENT" != *nogpu* && $TEST_CONFIG != *nogpu* ]]; then
+  if [[ "$BUILD_ENVIRONMENT" == *cuda* && $TEST_CONFIG != *nogpu* ]]; then
     pip_install --user "pytest-benchmark==3.2.3"
     pip_install --user "requests"
     BENCHMARK_DATA="benchmarks/.data"
@@ -564,10 +576,10 @@ if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-baze
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
 fi
-if [[ "${BUILD_ENVIRONMENT}" == *deploy* ]]; then
+if [[ "${TEST_CONFIG}" == *deploy* ]]; then
   install_torchdynamo
   test_torch_deploy
-elif [[ "${BUILD_ENVIRONMENT}" == *backward* ]]; then
+elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
@@ -575,12 +587,12 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchdynamo
   build_xla
   test_xla
-elif [[ "${BUILD_ENVIRONMENT}" == *jit_legacy-test || "${JOB_BASE_NAME}" == *jit_legacy-test || $TEST_CONFIG == 'jit_legacy' ]]; then
+elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
 elif [[ "${BUILD_ENVIRONMENT}" == *libtorch* ]]; then
   # TODO: run some C++ tests
   echo "no-op at the moment"
-elif [[ "${BUILD_ENVIRONMENT}" == *distributed* || "${JOB_BASE_NAME}" == *distributed* ]]; then
+elif [[ "$TEST_CONFIG" == distributed ]]; then
   install_torchdynamo
   test_distributed
   # Only run RPC C++ tests on the first shard
