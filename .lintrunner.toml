@@ -587,6 +587,9 @@ include_patterns = [
     'aten/**',
     'torch/csrc/**',
 ]
+exclude_patterns = [
+    'c10/util/CallOnce.h',
+]
 command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
