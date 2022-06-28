@@ -66,6 +66,7 @@ jobs:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
           force_push: true
+          push-ghcr-image: true
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image

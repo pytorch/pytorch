@@ -20,6 +20,9 @@ inputs:
   force_push:
     description: If set to any value, always run the push
     required: false
+  push-ghcr-image:
+    description: If set to any value, push docker image to the ghcr.io.
+    required: false
 
 outputs:
   docker-image:
@@ -98,6 +101,7 @@ runs:
         DOCKER_SKIP_S3_UPLOAD: "1"
         DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || 'false' }}
         DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
+        PUSH_GHCR_IMAGE: ${{ inputs.push-ghcr-image }}
       working-directory: .circleci/docker
       shell: bash
       run: |

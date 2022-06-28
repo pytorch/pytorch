@@ -51,7 +51,7 @@ fi
 if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
   docker push "${image}:${tag}"
 
-  if [ "${BUILD_TYPE}" = "release" ]; then
+  if [ "${PUSH_GHCR_IMAGE:-}" ]; then
     # Push docker image to the ghcr.io
     echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
     docker tag "${image}:${tag}" "${ghcr_image}:${tag}"
