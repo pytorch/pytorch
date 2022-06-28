@@ -7,7 +7,10 @@ import torch.autograd
 
 class _SnapshotState(Enum):
     r"""
-    `Deserialized` -
+    These are the snapshotting-related states that IterDataPipes can be in.
+    `Deserialized` - allows you to restore a snapshot and create an iterator without reset
+    `Restored` - cannot restore again, allows you to create an iterator without resetting the DataPipe
+    `Iterating` - cannot restore, will reset if you create a new iterator
     """
     Deserialized = 1
     Restored = 2
@@ -179,7 +182,7 @@ def hook_iterator(namespace, profile_name):
                         _check_iterator_valid(datapipe, iterator_id)
                         response = gen.send(request)
             except StopIteration as e:
-                return e.value  # noqa: B901
+                return
             except Exception as e:
                 # TODO: Simplify the traceback message to skip over `response = gen.send(None)`
                 #       Part of https://github.com/pytorch/data/issues/284
