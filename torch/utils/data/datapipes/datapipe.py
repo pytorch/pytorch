@@ -155,6 +155,12 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
             return IterDataPipe.getstate_hook(self)
         return self.__dict__
 
+    def __setstate__(self, state):
+        """
+        This method definition is necessary so that the hook function in `_typing.py` can work.
+        """
+        self.__dict__ = state
+
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
             try:
@@ -193,13 +199,6 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         depending on their functionalities, they may want to override this method with implementations that
         may clear the buffers and reset pointers of the DataPipe.
         The `reset` method is always called when `__iter__` is called as part of `hook_iterator`.
-        """
-        pass
-
-    def fast_forward(self, n_iterations: int) -> None:
-        r"""
-        Reset the DataPipe (which invalidates all iterators), then fast forward the state of `IterDataPipe`
-        by the given number of iterations relative to its initialized state.
         """
         pass
 

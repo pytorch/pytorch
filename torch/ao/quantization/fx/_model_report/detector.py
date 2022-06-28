@@ -306,12 +306,8 @@ class DynamicStaticDetector(DetectorBase):
         obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
 
         for fqn, module in prepared_fx_model.named_modules():
-            # check to see if module is of a supported type
-            is_supported_type: bool = (
-                sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
-            )
-
-            if is_supported_type:
+            # make sure module is supported
+            if self._is_supported(module, insert=True):
                 # if it's a supported type, we want to get node and add observer insert locations
                 targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
 
@@ -320,7 +316,7 @@ class DynamicStaticDetector(DetectorBase):
 
                 obs_fqn_to_info[pre_obs_fqn] = {
                     "target_node": targeted_node,
-                    "insert_observer": obs_ctr,
+                    "insert_observer": obs_ctr(),
                     "insert_post": False,
                     "observer_args": targeted_node.args
                 }
@@ -330,7 +326,7 @@ class DynamicStaticDetector(DetectorBase):
 
                 obs_fqn_to_info[post_obs_fqn] = {
                     "target_node": targeted_node,
-                    "insert_observer": obs_ctr,
+                    "insert_observer": obs_ctr(),
                     "insert_post": True,
                     "observer_args": (targeted_node,)
                 }
@@ -340,6 +336,26 @@ class DynamicStaticDetector(DetectorBase):
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
         return "dynamic_vs_static_detector"
+
+    def _is_supported(self, module: nn.Module, insert: bool = False) -> bool:
+        r"""Returns whether the given module is supported for observers
+
+        Args
+            module: The module to check and ensure is supported
+            insert: True if this is check for observer insertion, false if for report gen
+
+        Returns True if the module is supported by observer, False otherwise
+        """
+        # check to see if module is of a supported type
+        is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+
+        # this is check for observer insertion
+        if insert:
+            return is_supported_type
+        else:
+            # this is for report gen and we also need to check if it contains observers
+            has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME) and hasattr(module, self.DEFAULT_POST_OBSERVER_NAME)
+            return is_supported_type and has_obs
 
     def _generate_dict_info(self, model: GraphModule) -> Dict[str, Any]:
         r"""
@@ -366,16 +382,8 @@ class DynamicStaticDetector(DetectorBase):
 
         # loop through all submodules included nested ones
         for fqn, module in model.named_modules():
-
-            # check to see if module is of a supported type
-            is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
-
             # if module is Linear has the ModelReportObserver attached to it
-            if (
-                is_supported_type
-                and hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
-                and hasattr(module, self.DEFAULT_POST_OBSERVER_NAME)
-            ):
+            if self._is_supported(module):
                 # get pre and post observers for the module
                 pre_obs = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
                 post_obs = getattr(module, self.DEFAULT_POST_OBSERVER_NAME)
@@ -441,12 +449,16 @@ class DynamicStaticDetector(DetectorBase):
 
         dynamic_vs_static_string = "Dynamic vs. Static Quantization suggestions: \n"
 
+        modules_added: bool = False  # check to make sure at least 1 module added.
+
         # This for loop goes through the information collected in module_dynamic_static_info and:
         #   Populates the string based report with the information from module_dynamic_static_info
         #   Compiles the complete report by appending relavent formatted strings
 
         for module_fqn in module_dynamic_static_info.keys():
 
+            # there is at least 1 module for suggestion
+            modules_added = True
             module_info = module_dynamic_static_info[module_fqn]
             suggestion_string_template = "For module {} it is suggested to use {} quantization because {}.\n"
 
@@ -500,6 +512,9 @@ class DynamicStaticDetector(DetectorBase):
             # append to overall suggestion
             dynamic_vs_static_string += module_suggestion_string
 
+        if not modules_added:
+            dynamic_vs_static_string += "No applicable layers for suggestions. Only linear valid.\n"
+
         # return the string as well as the dictionary of information
         return (dynamic_vs_static_string, module_dynamic_static_info)
 
@@ -522,13 +537,18 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     Args:
         ratio_threshold (float): The threshold for s_c to determine if input-weight equalization is sugggested
-        channel (int, optional): The channel being observed to determine input weight equalization
+            Should be between 0 and 1 (both non-inclusive)
+        ch_axis (int, optional): The channel axis being observed to determine input weight equalization
             Default: 1
 
-    :attr:`ratio_threshold`: The threshold for s_c to determine if input-weight equalization is sugggested
-    :attr:`channel`: The channel being observed to determine input weight equalization
-    :attr:`SUPPORTED_MODULES`: This specifies the modules that are supported for input-weight equalization
-    :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
+    * :attr:`ratio_threshold`: The threshold for s_c to determine if input-weight equalization is sugggested
+        Should be between 0 and 1
+
+    * :attr:`ch_axis`: The channel axis being observed to determine input weight equalization
+
+    * :attr:`SUPPORTED_MODULES`: This specifies the modules that are supported for input-weight equalization
+
+    * :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
     """
 
     SUPPORTED_MODULES: Set[Callable] = set(
@@ -537,12 +557,54 @@ class InputWeightEqualizationDetector(DetectorBase):
 
     # names for the pre and post observers that are inserted
     DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
+    DEFAULT_POST_OBSERVER_NAME: str = "model_report_post_observer"
 
-    def __init__(self, ratio_threshold: float, channel: int = 1):
+    # string names for keys of info dictionaries
+    PER_CHANNEL_MAX_KEY = "per_channel_max"
+    PER_CHANNEL_MIN_KEY = "per_channel_min"
+    GLOBAL_MAX_KEY = "global_max"
+    GLOBAL_MIN_KEY = "global_min"
+
+    # keys for return dict of recommendations
+    RECOMMENDED_KEY = "input_weight_equalization_recommended"
+    COMP_METRIC_KEY = "channel_comparison_metrics"
+    THRESHOLD_KEY = "threshold"
+    CHANNEL_KEY = "channel_axis_selected"
+    INPUT_INFO_KEY = "input_range_info"
+    WEIGHT_INFO_KEY = "weight_range_info"
+
+    # default weight and info strings
+    WEIGHT_STR = "weight"
+    INPUT_STR = "input"
+
+    def __init__(self, ratio_threshold: float, ch_axis: int = 1):
+        # ensure passed in inputs are valid
+        if ratio_threshold <= 0 or ratio_threshold >= 1:
+            raise ValueError("Make sure threshold is > 0 and < 1")
 
         # intialize attributes based on args
         self.ratio_threshold: float = ratio_threshold
-        self.channel: int = channel
+        self.ch_axis: int = ch_axis
+
+    def _is_supported(self, module: nn.Module, insert: bool = False) -> bool:
+        r"""Returns whether the given module is supported for observers
+
+        Args
+            module: The module to check and ensure is supported
+            insert: True if this is check for observer insertion, false if for report gen
+
+        Returns True if the module is supported by observer, False otherwise
+        """
+        # check to see if module is of a supported type
+        is_supported_type = sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
+
+        # this is check for observer insertion
+        if insert:
+            return is_supported_type
+        else:
+            # this is for report gen and we also need to check if it contains observers
+            has_obs = hasattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
+            return is_supported_type and has_obs
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
@@ -570,13 +632,8 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         for fqn, module in prepared_fx_model.named_modules():
             # check to see if module is of a supported type
-            is_supported_type: bool = (
-                sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
-            )
-
-            if is_supported_type:
+            if self._is_supported(module, insert=True):
                 # if it's a supported type, we want to get node and add observer insert locations
-
                 targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
 
                 # add entry for pre-observer
@@ -584,7 +641,7 @@ class InputWeightEqualizationDetector(DetectorBase):
 
                 obs_fqn_to_info[pre_obs_fqn] = {
                     "target_node": targeted_node,
-                    "insert_observer": obs_ctr,
+                    "insert_observer": obs_ctr(ch_axis=self.ch_axis),
                     "insert_post": False,
                     "observer_args": targeted_node.args,
                 }
@@ -594,6 +651,191 @@ class InputWeightEqualizationDetector(DetectorBase):
     def get_detector_name(self) -> str:
         r"""Returns the name of this detector"""
         return "input_weight_equalization_detector"
+
+    def _extract_input_info(self, model: GraphModule) -> Dict[str, Dict]:
+        r"""
+        Takes in a callibrated GraphModule and then finds the relevant observers.
+        It then extracts the input information for each observer returns it
+
+        Args
+            model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
+
+        Returns a dict mapping relavent module fqns (str) to a dict with keys:
+            "per_channel_max" : maps to the per_channel max values
+            "per_channel_min" : maps to the per_channel min values
+            "global_max" : maps to the global max recorded
+            "global_min" : maps to the global min recorded
+        """
+
+        # return dictionary mapping observer fqns to desired info
+        input_info: Dict[str, Dict] = {}
+
+        for fqn, module in model.named_modules():
+            # if module is supported and it has a pre-observer
+            if self._is_supported(module):
+                # get pre observer for the module
+                pre_obs = getattr(module, self.DEFAULT_PRE_OBSERVER_NAME)
+
+                input_info[fqn] = {
+                    self.PER_CHANNEL_MAX_KEY: pre_obs.max_val,
+                    self.PER_CHANNEL_MIN_KEY: pre_obs.min_val,
+                    self.GLOBAL_MAX_KEY: max(pre_obs.max_val),
+                    self.GLOBAL_MIN_KEY: min(pre_obs.min_val),
+                }
+
+        return input_info
+
+    def _extract_weight_info(self, model: GraphModule) -> Dict[str, Dict]:
+        r"""
+        Takes in a callibrated GraphModule and then finds the relavent observers.
+        It then extracts the weight information for each layer an observer is attached to.
+
+        Args
+            model (GraphModule): The prepared and calibrated GraphModule with inserted ModelReportObservers
+
+        Returns a dict mapping module fqns (str) to a dict with keys:
+            "per_channel_max" : maps to the per_channel max values
+            "per_channel_min" : maps to the per_channel min values
+            "global_max" : maps to the global max recorded
+            "global_min" : maps to the global min recorded
+        """
+        # return dictionary mapping observer fqns to desired info
+        weight_info: Dict[str, Dict] = {}
+
+        for fqn, module in model.named_modules():
+            # if module is supported and it has a pre-observer
+            if self._is_supported(module):
+                # we don't need actual observer, just the module weights
+                # calculate min and max vals
+                min_val, max_val = torch.aminmax(module.weight, dim=self.ch_axis)
+
+                # flatten entries since conv can have multiple dimensions
+                min_val = torch.flatten(min_val)
+                max_val = torch.flatten(max_val)
+
+                weight_info[fqn] = {
+                    self.PER_CHANNEL_MAX_KEY: max_val,
+                    self.PER_CHANNEL_MIN_KEY: min_val,
+                    self.GLOBAL_MAX_KEY: max(max_val),
+                    self.GLOBAL_MIN_KEY: min(min_val),
+                }
+
+        return weight_info
+
+    def _calculate_range_ratio(self, info_dict: Dict, info_str: str, module_fqn: str) -> torch.Tensor:
+        r"""
+        Takes in an info dict and calculates the s_c matrix.
+
+        Args:
+            info_dict (dict): A dictionary of either input or weight range info
+            info_str (str): A str describing whether currently looking at weight or input info
+                Either "weight" or "input"
+            module_fqn (str): The fqn of the module we are looking at
+
+        Returns a tensor of values, where each value is the s_c stat for a different channel
+        """
+        # calculate the ratios of the info
+        per_channel_range = info_dict[self.PER_CHANNEL_MAX_KEY] - info_dict[self.PER_CHANNEL_MIN_KEY]
+        global_range = info_dict[self.GLOBAL_MAX_KEY] - info_dict[self.GLOBAL_MIN_KEY]
+
+        if global_range == 0:
+            range_zero_explanation = "We recommend removing this channel as it doesn't provide any useful information."
+            raise ValueError(
+                "The range of the {} data for module {} is 0, which means you have a constant value channel. {}".format(
+                    info_str, module_fqn, range_zero_explanation
+                )
+            )
+
+        ratio = per_channel_range / global_range
+
+        return ratio
+
+    def _generate_comparision_values(self, input_info: Dict, weight_info: Dict) -> Dict[str, torch.Tensor]:
+        r"""
+        Takes in the information on the min and max values of the inputs and weights and:
+            Calculates the comp stat for each channel: s_c = sqrt(w_c/W)/sqrt(i_c/I)
+
+        Args:
+            input_info (dict): A dict mapping each observer to input range information
+            weight_info (dict): A dict mapping each observer to weight range information
+
+        Returns a dict mapping relavent observer fqns (str) to a 1-D tensor.
+            Each value is a different s_c value for a different channel
+        """
+        # create return dictionary for each observer
+        module_fqn_to_channel: Dict[str, torch.Tensor] = {}
+
+        # for each module (both passed in dicts should have same keys)
+        for module_fqn in input_info:
+
+            # raise error if not in weight info
+            if module_fqn not in weight_info:
+                raise KeyError("Unable to find weight range stats for module {}".format(module_fqn))
+
+            # calculate the ratios of the weight info and input info
+            weight_ratio = self._calculate_range_ratio(weight_info[module_fqn], self.WEIGHT_STR, module_fqn)
+            input_ratio = self._calculate_range_ratio(input_info[module_fqn], self.INPUT_STR, module_fqn)
+
+            # calculate the s metric per channel
+            s = torch.sqrt(weight_ratio) / torch.sqrt(input_ratio)
+
+            # add to dictionary
+            module_fqn_to_channel[module_fqn] = s
+
+        # return compiled observer ratios
+        return module_fqn_to_channel
+
+    def _generate_dict_info(self, input_info: Dict, weight_info: Dict, comp_stats: Dict) -> Dict[str, Dict]:
+        r"""
+        Helper function for generate_detector_report that does the generation of the dictionary.
+        This process is done as specified in generate_detector_report documentation
+
+        Args:
+            input_info (dict): A dict mapping each module to input range information
+            weight_info (dict): A dict mapping each module to weight range information
+            comp_stats (dict): A dict mapping each module to its corresponding comp stat
+
+        Returns a dictionary mapping each module with relavent ModelReportObservers around them to:
+            whether input weight equalization is recommended
+            their s_c metric compared to the threshold
+            the threshold used to make the recommendation
+            the channel used for recording data
+            the input channel range info
+            the weight channel range info
+        """
+        # store modules input weight equalization info
+        input_weight_equalization_info: Dict[str, Dict] = {}
+
+        # for each module we add seperate set of suggestions
+        for module_fqn in input_info:
+
+            # get relavent info for this module
+            mod_input_info: Dict = input_info[module_fqn]
+            mod_weight_info: Dict = weight_info[module_fqn]
+            mod_comp_stat: Dict = comp_stats[module_fqn]
+
+            # decide if each channel should have input weight equalization or not
+            channel_rec_vals: list = []
+
+            for val in mod_comp_stat:
+                float_rep: float = val.item()
+
+                # decide if recommending input weight equalization
+                recommended: bool = float_rep >= self.ratio_threshold and float_rep <= 1 / self.ratio_threshold
+                channel_rec_vals.append(recommended)
+
+            # build the return dict input
+            input_weight_equalization_info[module_fqn] = {
+                self.RECOMMENDED_KEY: channel_rec_vals,
+                self.COMP_METRIC_KEY: mod_comp_stat,
+                self.THRESHOLD_KEY: self.ratio_threshold,
+                self.CHANNEL_KEY: self.ch_axis,
+                self.INPUT_INFO_KEY: mod_input_info,
+                self.WEIGHT_INFO_KEY: mod_weight_info,
+            }
+
+        # return our compiled info for each module
+        return input_weight_equalization_info
 
     def generate_detector_report(self, model: GraphModule) -> Tuple[str, Dict[str, Any]]:
         r"""
@@ -609,12 +851,64 @@ class InputWeightEqualizationDetector(DetectorBase):
 
         Returns a tuple with two elements:
             String report of of whether input weight equalization is recommended for certain modules
-            Dictionary mapping modules of interst to:
+            Dictionary mapping modules of interest to:
                 whether input weight equalization is recommended
                 their s_c metric compared to the threshold
                 the threshold used to make the recommendation
                 the channel used for recording data
-                the input channel range ratio
-                the weight channel range ratio
+                the input channel range info
+                the weight channel range info
         """
-        pass
+
+        # find the range of inputs
+        input_values: Dict[str, Dict] = self._extract_input_info(model)
+
+        # find the range of weights
+        weight_values: Dict[str, Dict] = self._extract_weight_info(model)
+
+        # calculate per_channel comparision statistic s_c
+        comp_stats: Dict[str, torch.Tensor] = self._generate_comparision_values(input_values, weight_values)
+
+        # generate the return dictionary
+        input_weight_equalization_info: Dict[str, Dict] = self._generate_dict_info(input_values, weight_values, comp_stats)
+
+        # now we can generate report based on this information
+        input_weight_string = "Input-Weight Equalization suggestions: \n"
+
+        # some strings to be formatted depending on module we are adding
+        module_suggestion_str = "For Module {} looked at with axis {} we suggest: \n"
+        channel_suggestion_str = "\tFor channel {}, we suggest {} input weight equalization because {}\n"
+        use_str = "to use"
+        no_use_str = "to not use"
+        input_weight_benefit_str = "we expect significant reduction in quantization error."
+        input_weight_non_benefit_reasoning = "the scales of the input vs. weight with regards to their ranges."
+        input_weight_non_benefit_str = "we don't expect much improvement from input-weight equalization based on {}"
+
+        # added module check
+        added_module: bool = False
+
+        # compile the suggestion string
+        for module_fqn in input_weight_equalization_info:
+            # we added at least 1 module
+            added_module = True
+            # add the module level description
+            input_weight_string += module_suggestion_str.format(module_fqn, self.ch_axis)
+
+            mod_info: Dict[str, Any] = input_weight_equalization_info[module_fqn]
+
+            # look at each individual channel and add a suggestion
+            for index, channel_suggested in enumerate(mod_info[self.RECOMMENDED_KEY]):
+                if channel_suggested:
+                    channel_str = channel_suggestion_str.format(index, use_str, input_weight_benefit_str)
+                    input_weight_string += channel_str
+                else:
+                    non_benefit_str = input_weight_non_benefit_str.format(input_weight_non_benefit_reasoning)
+                    channel_str = channel_suggestion_str.format(index, no_use_str, non_benefit_str)
+                    input_weight_string += channel_str
+
+        # if no modules looked at, amend return string
+        if not added_module:
+            input_weight_string += "No applicable layers for suggestions. Only linear and conv valid.\n"
+
+        # return a tuple with the string explanation and the compiled dict info
+        return (input_weight_string, input_weight_equalization_info)
