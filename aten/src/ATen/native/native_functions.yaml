@@ -435,11 +435,15 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: acos.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: acos_nested
 
 - func: acos_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: acos.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: acos_nested_
 
 - func: acos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -448,6 +452,7 @@
   dispatch:
     CPU, CUDA: acos_out
     MPS: acos_out_mps
+    NestedTensorCPU, NestedTensorCUDA: acos_nested_out
 
 # arccos, alias of acos
 - func: arccos(Tensor self) -> Tensor
@@ -1479,11 +1484,15 @@
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: cos.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: cos_nested
 
 - func: cos_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: cos.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: cos_nested_
 
 - func: cos.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1492,16 +1501,21 @@
   dispatch:
     CPU, CUDA: cos_out
     MPS: cos_out_mps
+    NestedTensorCPU, NestedTensorCUDA: cos_nested_out
 
 - func: cosh(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: cosh.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: cosh_nested
 
 - func: cosh_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: function, method
   structured_delegate: cosh.out
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: cosh_nested_
 
 - func: cosh.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -1510,6 +1524,7 @@
   dispatch:
     CPU, CUDA: cosh_out
     MPS: cosh_out_mps
+    NestedTensorCPU, NestedTensorCUDA: cosh_nested_out
 
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, float margin=0.0, int reduction=Mean) -> Tensor
 
@@ -2113,11 +2128,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: erfc.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: erfc_nested
 
 - func: erfc_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: erfc.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: erfc_nested_
 
 - func: erfc.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2125,16 +2144,21 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: erfc_out
+    NestedTensorCPU, NestedTensorCUDA: erfc_nested_out
 
 - func: exp(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: exp_nested
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: exp_nested_
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2143,6 +2167,7 @@
   dispatch:
     CPU, CUDA: exp_out
     MPS: exp_out_mps
+    NestedTensorCPU, NestedTensorCUDA: exp_nested_out
 
 - func: exp2(Tensor self) -> Tensor
   structured_delegate: exp2.out
@@ -2332,11 +2357,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: frac.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: frac_nested
 
 - func: frac_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: frac.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: frac_nested_
 
 - func: frac.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2344,6 +2373,7 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: frac_out
+    NestedTensorCPU, NestedTensorCUDA: frac_nested_out
 
 - func: full.names(int[] size, Scalar fill_value, *, Dimname[]? names, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   device_check: NoCheck
@@ -2841,11 +2871,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: log.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: log_nested
 
 - func: log_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: log.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: log_nested_
 
 - func: log.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2854,16 +2888,21 @@
   dispatch:
     CPU, CUDA: log_out
     MPS: log_out_mps
+    NestedTensorCPU, NestedTensorCUDA: log_nested_out
 
 - func: log10(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: log10.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: log10_nested
 
 - func: log10_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: log10.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: log10_nested_
 
 - func: log10.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2872,6 +2911,7 @@
   dispatch:
     CPU, CUDA: log10_out
     MPS: log10_out_mps
+    NestedTensorCPU, NestedTensorCUDA: log10_nested_out
 
 - func: log1p(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -2906,11 +2946,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: log2.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: log2_nested
 
 - func: log2_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: log2.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: log2_nested_
 
 - func: log2.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -2919,6 +2963,7 @@
   dispatch:
     CPU, CUDA: log2_out
     MPS: log2_out_mps
+    NestedTensorCPU, NestedTensorCUDA: log2_nested_out
 
 - func: logaddexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   structured: True
@@ -3840,11 +3885,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: reciprocal.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: reciprocal_nested
 
 - func: reciprocal_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: reciprocal.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: reciprocal_nested_
 
 - func: reciprocal.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -3853,6 +3902,7 @@
   dispatch:
     CPU, CUDA: reciprocal_out
     MPS: reciprocal_out_mps
+    NestedTensorCPU, NestedTensorCUDA: reciprocal_nested_out
 
 - func: neg(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -4104,11 +4154,15 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: rsqrt.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: rsqrt_nested
 
 - func: rsqrt_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: rsqrt.out
   variants: function, method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: rsqrt_nested_
 
 - func: rsqrt.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4117,6 +4171,7 @@
   dispatch:
     CPU, CUDA: rsqrt_out
     MPS: rsqrt_out_mps
+    NestedTensorCPU, NestedTensorCUDA: rsqrt_nested_out
 
 - func: select.Dimname(Tensor(a) self, Dimname dim, int index) -> Tensor(a)
   variants: function, method
@@ -4214,6 +4269,7 @@
   dispatch:
     QuantizedCPU: sigmoid_quantized_cpu
     MkldnnCPU: mkldnn_sigmoid
+    NestedTensorCPU, NestedTensorCUDA: sigmoid_nested
 
 - func: sigmoid_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4221,6 +4277,7 @@
   variants: function, method
   dispatch:
     MkldnnCPU: mkldnn_sigmoid_
+    NestedTensorCPU, NestedTensorCUDA: sigmoid_nested_
 
 - func: sigmoid.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -4229,6 +4286,7 @@
   dispatch:
     CPU, CUDA: sigmoid_out
     MPS: sigmoid_out_mps
+    NestedTensorCPU, NestedTensorCUDA: sigmoid_nested_out
 
 - func: logit(Tensor self, float? eps=None) -> Tensor
   variants: function, method
@@ -6970,6 +7028,8 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: digamma.out
   variants: method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: digamma_nested_
 
 - func: lerp_.Scalar(Tensor(a!) self, Tensor end, Scalar weight) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -7785,16 +7845,21 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: lgamma_out
+    NestedTensorCPU, NestedTensorCUDA: lgamma_nested_out
 
 - func: lgamma_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: lgamma.out
   variants: method
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: lgamma_nested_
 
 - func: lgamma(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: lgamma.out
   variants: method, function
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: lgamma_nested
 
 - func: digamma.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
@@ -7802,11 +7867,14 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA: digamma_out
+    NestedTensorCPU, NestedTensorCUDA: digamma_nested_out
 
 - func: digamma(Tensor self) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: digamma.out
   variants: method, function
+  dispatch:
+    NestedTensorCPU, NestedTensorCUDA: digamma_nested
 
 - func: polygamma.out(int n, Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator

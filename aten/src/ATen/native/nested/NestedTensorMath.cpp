@@ -751,19 +751,33 @@ Tensor& unary_op_inplace(Tensor& self, const F& op_inplace, Args&&... args) {
 
 // Exhaustive list of the unary ufuncs supported by nested tensor
 CREATE_UNARY_UFUNC(abs);
+CREATE_UNARY_UFUNC(acos);
 CREATE_UNARY_UFUNC(asin);
 CREATE_UNARY_UFUNC(asinh);
 CREATE_UNARY_UFUNC(atan);
 CREATE_UNARY_UFUNC(atanh);
 CREATE_UNARY_UFUNC(ceil);
+CREATE_UNARY_UFUNC(cos);
+CREATE_UNARY_UFUNC(cosh);
 CREATE_UNARY_UFUNC(conj_physical);
+CREATE_UNARY_UFUNC(digamma);
 CREATE_UNARY_UFUNC(erf);
+CREATE_UNARY_UFUNC(erfc);
 CREATE_UNARY_UFUNC(erfinv);
+CREATE_UNARY_UFUNC(exp);
 CREATE_UNARY_UFUNC(expm1);
 CREATE_UNARY_UFUNC(floor);
+CREATE_UNARY_UFUNC(frac);
+CREATE_UNARY_UFUNC(lgamma);
+CREATE_UNARY_UFUNC(log);
+CREATE_UNARY_UFUNC(log10);
 CREATE_UNARY_UFUNC(log1p);
+CREATE_UNARY_UFUNC(log2);
 CREATE_UNARY_UFUNC(neg);
 CREATE_UNARY_UFUNC(rad2deg);
+CREATE_UNARY_UFUNC(reciprocal);
+CREATE_UNARY_UFUNC(rsqrt);
+CREATE_UNARY_UFUNC(sigmoid);
 CREATE_UNARY_UFUNC(sign);
 CREATE_UNARY_UFUNC(sin);
 CREATE_UNARY_UFUNC(sinh);
