@@ -279,9 +279,7 @@ The :attr:`offsets` controls which diagonals are set.
 - If :attr:`offsets[i]` > 0, it is above the main diagonal
 
 The number of rows in :attr:`diagonals` must match the length of :attr:`offsets`,
-and an offset may not be repeated. Each individual offset must also be supported by :attr:`shape`.
-In general if the :attr:`shape` tuple is `(rows, cols)` an individual offset values `off_i` must satisfy
-`-rows < off_i < cols`.
+and an offset may not be repeated.
 
 Args:
     diagonals (Tensor): Matrix storing diagonals row-wise
@@ -296,8 +294,8 @@ Examples:
 
 Set the main and first two lower diagonals of a matrix::
 
-    >>> a = torch.arange(9).reshape(3, 3)
-    >>> a
+    >>> diags = torch.arange(9).reshape(3, 3)
+    >>> diags
     tensor([[0, 1, 2],
             [3, 4, 5],
             [6, 7, 8])
@@ -315,15 +313,15 @@ Set the main and first two lower diagonals of a matrix::
 
 Change the output layout::
 
-    >>> a = torch.arange(9).reshape(3, 3)
-    >>> a
+    >>> diags = torch.arange(9).reshape(3, 3)
+    >>> diags
     tensor([[0, 1, 2],[3, 4, 5], [6, 7, 8])
     >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3,3), layout=torch.sparse_csr)
     >>> s
-    tensor(indices=tensor([[0, 1, 2, 1, 2, 2],
-                           [0, 1, 2, 0, 1, 0]]),
-           values=tensor([0, 1, 2, 3, 4, 6]),
-           size=(3, 3), nnz=6, layout=torch.sparse_coo)
+    tensor(crow_indices=tensor([0, 1, 3, 6]),
+           col_indices=tensor([0, 0, 1, 0, 1, 2]),
+           values=tensor([0, 3, 1, 6, 4, 2]), size=(3, 3), nnz=6,
+           layout=torch.sparse_csr)
     >>> s.to_dense()
     tensor([[0, 0, 0],
             [3, 1, 0],
@@ -331,8 +329,8 @@ Change the output layout::
 
 Set partial diagonals of a large output::
 
-    >>> a = torch.tensor([[1, 2], [3, 4]])
-    >>> torch.sparse.spdiags(a, [0, -1], (10, 10)).to_dense()
+    >>> diags = torch.tensor([[1, 2], [3, 4]])
+    >>> torch.sparse.spdiags(diags, [0, -1], (10, 10)).to_dense()
     tensor([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [3, 2, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 4, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -354,8 +352,8 @@ Set partial diagonals of a large output::
 
 Specifying a positive offset::
 
-    >>> a = torch.tensor([[1,2,3],[1,2,3],[1,2,3]])
-    >>> torch.sparse.spdiags(a, torch.tensor([0, 1, 2]), (5, 5)).to_dense()
+    >>> diags = torch.tensor([[1, 2, 3],[1, 2, 3],[1, 2, 3]])
+    >>> torch.sparse.spdiags(diags, torch.tensor([0, 1, 2]), (5, 5)).to_dense()
     tensor([[1, 2, 3, 0, 0],
             [0, 2, 3, 0, 0],
             [0, 0, 3, 0, 0],
