@@ -10629,15 +10629,12 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('clamp_max',
                     ref=_clamp_max_numpy,
-                    dtypes=all_types_and(torch.bfloat16),
-                    dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16, torch.float16),
+                    dtypes=all_types_and(torch.bool, torch,float16, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_rhs_python_scalar=False,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
-                        # clamp_max supports two tensor input with bool, but not a bool scalar
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                         # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
@@ -10650,15 +10647,12 @@ op_db: List[OpInfo] = [
                     )),
     BinaryUfuncInfo('clamp_min',
                     ref=_clamp_min_numpy,
-                    dtypes=all_types_and(torch.bfloat16),
-                    dtypesIfCUDA=all_types_and(torch.half, torch.bfloat16, torch.float16),
+                    dtypes=all_types_and(torch.bool, torch,float16, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_rhs_python_scalar=False,
                     supports_fwgrad_bwgrad=True,
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
-                        # clamp_min supports two tensor input with bool, but not a bool scalar
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                         # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
                         DecorateInfo(unittest.expectedFailure,
                                      'TestBinaryUfuncs',
