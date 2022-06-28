@@ -30,7 +30,6 @@ class _OptimizerHookState(object):
             )
 
 
-# TODO: Add an example to use such a wrapper.
 def _hook_then_optimizer(
     hook: Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]],
     optimizer_state: _OptimizerHookState,
