@@ -46,6 +46,12 @@ alltoall(const c10::intrusive_ptr<ProcessGroup> &process_group,
 TORCH_API c10::intrusive_ptr<ProcessGroup::Work>
 barrier(const c10::intrusive_ptr<ProcessGroup>& process_group,
         const BarrierOptions& opts = {});
+TORCH_API c10::intrusive_ptr<ProcessGroup::Work>
+send(const c10::intrusive_ptr<ProcessGroup>& process_group,
+     at::TensorList tensors, int64_t dstRank, int64_t tag);
+TORCH_API c10::intrusive_ptr<ProcessGroup::Work>
+recv(const c10::intrusive_ptr<ProcessGroup>& process_group,
+     at::TensorList tensors, int64_t srcRank, int64_t tag);
 
 } // namespace ops
 } // namespace c10d

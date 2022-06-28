@@ -40,15 +40,14 @@ class PostTrainingDataSparsity(_DataSparsity):
             Note: data_list arg should be ignored
 
     Hooks implemented:
-        on_validation_start()
+        on_fit_end()
             1. copies the model and attaches it to the sparsifier
             2. sparsier step() is called
             3. squashes the mask()
     """
 
-    def on_validation_start(self, trainer, pl_module) -> None:
-        copied_model = deepcopy(pl_module.model).eval()  # do we really need to put in cpu?
-        self.sparsified = copied_model
+    def on_fit_end(self, trainer, pl_module) -> None:
+        self.sparsified = deepcopy(pl_module.model).eval()
         self.data_sparsifier = _create_data_sparsifier(self.data_sparsifier_args, self.data_sparsifier_type)
 
         _attach_model_to_data_sparsifier(self.sparsified, self.data_sparsifier)
@@ -58,5 +57,3 @@ class PostTrainingDataSparsity(_DataSparsity):
         self.data_sparsifier.squash_mask()  # currently squashes params for all mask
 
         _log_sparsified_level(self.sparsified, self.data_sparsifier)
-
-# Nothing to do on_validation_end()
