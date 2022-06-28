@@ -10,7 +10,7 @@ from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
 import math
 
-from typing import List, Optional
+from typing import List, Optional, Union
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
@@ -246,12 +246,20 @@ def meta_conv(
     def calc_conv_nd_return_shape(
         dims,
         kernel_size: torch.Size,
-        stride: List[int],
-        padding: List[int],
-        dilation: List[int],
-        output_padding: Optional[List[int]] = None,
+        stride: Union[List[int], int],
+        padding: Union[List[int], int],
+        dilation: Union[List[int], int],
+        output_padding: Optional[Union[List[int], int]] = None,
     ):
         ret_shape = []
+        if isinstance(stride, int):
+            stride = [stride] * len(dims)
+        if isinstance(padding, int):
+            padding = [padding] * len(dims)
+        if isinstance(dilation, int):
+            dilation = [dilation] * len(dims)
+        if isinstance(output_padding, int):
+            output_padding = [output_padding] * len(dims)
         for i in range(len(dims)):
             # If output_padding is present, we are dealing with a transposed convolution
             if output_padding:
