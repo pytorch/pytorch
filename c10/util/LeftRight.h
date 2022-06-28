@@ -1,4 +1,5 @@
 #include <c10/macros/Macros.h>
+#include <c10/util/C++17.h>
 #include <c10/util/Synchronized.h>
 #include <array>
 #include <atomic>
@@ -6,7 +7,6 @@
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
-#include <type_traits>
 
 namespace c10 {
 
@@ -79,12 +79,7 @@ class LeftRight final {
   }
 
   template <typename F>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-  auto read(F&& readFunc) const ->
-      typename std::invoke_result<F(const T&)>::type {
-#else
-  auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
-#endif
+  auto read(F&& readFunc) const -> typename c10::invoke_result_t<F, const T&> {
     detail::IncrementRAII _increment_counter(
         &_counters[_foregroundCounterIndex.load()]);
 
@@ -95,11 +90,7 @@ class LeftRight final {
   // the old or the new state, depending on if the first or the second call to
   // writeFunc threw.
   template <typename F>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-  auto write(F&& writeFunc) -> typename std::invoke_result<F(T&)>::type {
-#else
-  auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
-#endif
+  auto write(F&& writeFunc) -> typename c10::invoke_result_t<F, T&> {
     std::unique_lock<std::mutex> lock(_writeMutex);
 
     return _write(writeFunc);
@@ -107,11 +98,7 @@ class LeftRight final {
 
  private:
   template <class F>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-  auto _write(const F& writeFunc) -> typename std::invoke_result<F(T&)>::type {
-#else
-  auto _write(const F& writeFunc) -> typename std::result_of<F(T&)>::type {
-#endif
+  auto _write(const F& writeFunc) -> typename c10::invoke_result_t<F, T&> {
     /*
      * Assume, A is in background and B in foreground. In simplified terms, we
      * want to do the following:
@@ -177,15 +164,9 @@ class LeftRight final {
   }
 
   template <class F>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
   auto _callWriteFuncOnBackgroundInstance(
       const F& writeFunc,
-      uint8_t localDataIndex) -> typename std::invoke_result<F(T&)>::type {
-#else
-  auto _callWriteFuncOnBackgroundInstance(
-      const F& writeFunc,
-      uint8_t localDataIndex) -> typename std::result_of<F(T&)>::type {
-#endif
+      uint8_t localDataIndex) -> typename c10::invoke_result_t<F, T&> {
     try {
       return writeFunc(_data[localDataIndex ^ 1]);
     } catch (...) {
@@ -225,22 +206,13 @@ class RWSafeLeftRightWrapper final {
   RWSafeLeftRightWrapper& operator=(RWSafeLeftRightWrapper&&) noexcept = delete;
 
   template <typename F>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-  auto read(F&& readFunc) const ->
-      typename std::invoke_result<F(const T&)>::type {
-#else
-  auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
-#endif
+  auto read(F&& readFunc) const -> typename c10::invoke_result_t<F, const T&> {
     return data_.withLock(
         [&readFunc](T const& data) { return readFunc(data); });
   }
 
   template <typename F>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-  auto write(F&& writeFunc) -> typename std::invoke_result<F(T&)>::type {
-#else
-  auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
-#endif
+  auto write(F&& writeFunc) -> typename c10::invoke_result_t<F, T&> {
     return data_.withLock([&writeFunc](T& data) { return writeFunc(data); });
   }
 

@@ -22,7 +22,6 @@
 #include <sstream>
 #include <system_error>
 #include <thread>
-#include <type_traits>
 
 #include <c10/util/Exception.h>
 
@@ -70,11 +69,7 @@ namespace c10d {
 namespace {
 
 template <typename F>
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
-typename std::invoke_result<F()>::type syscall(F fn) {
-#else
-typename std::result_of<F()>::type syscall(F fn) {
-#endif
+typename c10::invoke_result_t<F> syscall(F fn) {
   while (true) {
     auto rv = fn();
     if (rv == -1) {

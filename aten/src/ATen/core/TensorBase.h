@@ -1,7 +1,5 @@
 #pragma once
 
-#include <type_traits>
-
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -723,17 +721,10 @@ class TORCH_API TensorBase {
   // Hooks
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#if defined(__cpp_lib_is_invocable) && __cpp_lib_is_invocable >= 201703L
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<std::invoke_result<T&(TensorBase)>::type>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, TensorBase>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<std::invoke_result<T&(TensorBase)>::type, TensorBase>::value, unsigned>;
-#else
-  template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::result_of<T&(TensorBase)>::type>::value, unsigned>;
-  template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::result_of<T&(TensorBase)>::type, TensorBase>::value, unsigned>;
-#endif
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>::value, unsigned>;
 
   /// Registers a backward hook.
   ///
