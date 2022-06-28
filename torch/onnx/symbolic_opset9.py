@@ -3054,27 +3054,71 @@ def tanhshrink(g, self):
 
 @symbolic_helper.parse_args("v", "f")
 def hardshrink(g, self, lambd):
-    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = symbolic_helper.ScalarType.FLOAT
+    else:
+        dtype = symbolic_helper.scalar_type_to_onnx.index(
+            symbolic_helper.cast_pytorch_to_onnx[dtype]
+        )
+    lambd_op = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        ),
+    )
     cond = logical_or(g, gt(g, self, lambd_op), lt(g, self, neg(g, lambd_op)))
-    return g.op("Where", cond, self, g.op("Constant", value_t=torch.FloatTensor([0])))
+    return g.op(
+        "Where",
+        cond,
+        self,
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
+    )
 
 
 @symbolic_helper.parse_args("v", "f")
 def softshrink(g, self, lambd):
-    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = symbolic_helper.ScalarType.FLOAT
+    else:
+        dtype = symbolic_helper.scalar_type_to_onnx.index(
+            symbolic_helper.cast_pytorch_to_onnx[dtype]
+        )
+    lambd_op = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        ),
+    )
     gt_cond = gt(g, self, lambd_op)
     gt_out = g.op(
         "Where",
         gt_cond,
         sub(g, self, lambd_op),
-        g.op("Constant", value_t=torch.FloatTensor([0])),
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
     )
     lt_cond = lt(g, self, neg(g, lambd_op))
     lt_out = g.op(
         "Where",
         lt_cond,
         add(g, self, lambd_op),
-        g.op("Constant", value_t=torch.FloatTensor([0])),
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
     )
     return add(g, gt_out, lt_out)
 
