@@ -181,18 +181,18 @@ Atomic##NAME##IntegerImpl<int16_t, sizeof(int16_t)>()(address,                  
                                                                                                                        \
 static inline __device__ void gpuAtomic##NAME(int32_t *address, int32_t val) {                                         \
 Atomic##NAME##IntegerImpl<int32_t, sizeof(int32_t)>()(address,                                                         \
-                                                      val,                                                            \
-                                                      [](int32_t a, int32_t b) {                                      \
-                                                          return OP;                                           \
-                                                      });                                                             \
+                                                      val,                                                             \
+                                                      [](int32_t a, int32_t b) {                                       \
+                                                          return OP;                                                   \
+                                                      });                                                              \
 }                                                                                                                      \
                                                                                                                        \
 static inline __device__ void gpuAtomic##NAME(int64_t *address, int64_t val) {                                         \
 Atomic##NAME##IntegerImpl<int64_t, sizeof(int64_t)>()(address,                                                         \
-                                                      val,                                                            \
-                                                      [](int64_t a, int64_t b) {                                      \
-                                                          return OP;                                             \
-                                                      });                                                             \
+                                                      val,                                                             \
+                                                      [](int64_t a, int64_t b) {                                       \
+                                                          return OP;                                                   \
+                                                      });                                                              \
 }                                                                                                                      \
 
 ATOMIC_INTEGER_IMPL(Add)
