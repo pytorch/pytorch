@@ -83,7 +83,7 @@ jobs:
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
-      !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository="makslevental/builder", branch="disable-tests-static") }}
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
         run: |
