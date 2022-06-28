@@ -1131,7 +1131,7 @@ endif()
     ${TORCH_SRC_DIR}/csrc)
 
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/miniz-2.0.8)
+    ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
