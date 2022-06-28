@@ -1,8 +1,27 @@
 import inspect
-from typing import Callable, List
+from functools import wraps
+from typing import Callable, Dict, List, Set
 
+from torch.nn import Module
 
-from torch.fx import GraphModule
+def inplace_wrapper(fn: Callable) -> Callable:
+    """
+    Convenience wrapper for passes which modify an object inplace. This
+    wrapper makes them return the modified object instead.
+
+    Args:
+        fn (Callable[Object, Any])
+
+    Returns:
+        wrapped_fn (Callable[Object, Object])
+    """
+
+    @wraps(fn)
+    def wrapped_fn(gm):
+        fn(gm)
+        return gm
+
+    return wrapped_fn
 
 
 def _validate_pass_schedule_constraint(
@@ -18,6 +37,47 @@ def _validate_pass_schedule_constraint(
                 f" list."
             )
 
+def topological_sort_passes(
+    passes: List[Callable], constraints: List[Callable]
+) -> List[Callable]:
+    if len(constraints) == 0:
+        return passes
+
+    # Construct a graph
+    graph: Dict[Callable, Set[Callable]] = {}
+    visited: Dict[Callable, bool] = {}
+    for p in passes:
+        graph[p] = set()
+        visited[p] = False
+
+    for i, a in enumerate(passes):
+        for j, b in enumerate(passes):
+            if i == j:
+                continue
+
+            for constraint in constraints:
+                if not constraint(a, b):
+                    if b in graph[a]:
+                        graph[a].remove(b)
+                    graph[b].add(a)
+
+    # Topologically sort the graph
+    def topological_sort_util(graph, p, visited, res):
+        visited[p] = True
+
+        for dep in graph[p]:
+            if not visited[dep]:
+                topological_sort_util(graph, dep, visited, res)
+
+        res.append(p)
+
+    res: List[Callable] = []
+    for p in passes:
+        if not visited[p]:
+            topological_sort_util(graph, p, visited, res)
+
+    res.reverse()
+    return res
 
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
     """
@@ -69,8 +129,8 @@ class PassManager:
             after each pass
     """
 
-    passes: List[Callable] = []
-    constraints: List[Callable] = []
+    passes: List[Callable[[Module], Module]] = []
+    constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
 
@@ -115,6 +175,13 @@ class PassManager:
             _validate_pass_schedule_constraint(constraint, self.passes)
         self._validated = True
 
+    def solve_constraints(self):
+        """
+        Finds a valid traversal order based on the given constraints and orders
+        the passes based on this order.
+        """
+        self.passes = topological_sort_passes(self.passes, self.constraints)
+
     def add_checks(self, check: Callable) -> None:
         """
         Adds a function which takes runs various checks on a given graph module.
@@ -128,10 +195,10 @@ class PassManager:
 
         setattr(self, "check", check)  # noqa: B010
 
-    def check(self, graph_module: GraphModule) -> None:
+    def check(self, graph_module: Module) -> None:
         pass
 
-    def __call__(self, graph_module: GraphModule) -> None:
+    def __call__(self, graph_module: Module) -> Module:
         """
         Runs a list of passes in the order based on `self.passes` on the given
         graph module. Each time a pass is run, checks and linting will be run on
@@ -141,11 +208,10 @@ class PassManager:
         The list of passes will be run until the graph stops changing, or until
         `steps` number of times.
         """
-        # Check constraints
-        self.validate_constraints()
+        # Order the passes based on the constraints
+        self.solve_constraints()
 
-        # Lint and check graph invariants
-        graph_module.graph.lint()
+        # Check graph invariants
         self.check(graph_module)
 
         # Run the set of passes `steps` number of times or until the graph stops
@@ -155,15 +221,14 @@ class PassManager:
 
             # Run the set of passes on the graph module
             for fn in self.passes:
-                fn(graph_module)
+                graph_module = fn(graph_module)
 
                 if self.run_checks_after_each_pass:
-                    # Lint and check graph invariants
-                    graph_module.graph.lint()
+                    # Check graph invariants
                     self.check(graph_module)
-
-            graph_module.recompile()
 
             # If the graph no longer changes, then we can stop running these passes
             if orig_graph_module_code == graph_module.code:
                 break
+
+        return graph_module
