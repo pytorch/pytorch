@@ -88,29 +88,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -201,29 +190,18 @@ jobs:
         with:
           name: libtorch-cpu-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -264,24 +242,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -398,29 +360,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -511,29 +462,18 @@ jobs:
         with:
           name: libtorch-cpu-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -574,24 +514,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -708,29 +632,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -821,29 +734,18 @@ jobs:
         with:
           name: libtorch-cpu-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -884,24 +786,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1018,29 +904,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1131,29 +1006,18 @@ jobs:
         with:
           name: libtorch-cpu-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1194,24 +1058,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1329,29 +1177,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1443,29 +1280,18 @@ jobs:
         with:
           name: libtorch-cuda11_3-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1507,24 +1333,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1642,29 +1452,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1756,29 +1555,18 @@ jobs:
         with:
           name: libtorch-cuda11_3-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -1820,24 +1608,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1955,29 +1727,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2069,29 +1830,18 @@ jobs:
         with:
           name: libtorch-cuda11_3-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2133,24 +1883,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2268,29 +2002,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2382,29 +2105,18 @@ jobs:
         with:
           name: libtorch-cuda11_3-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2446,24 +2158,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2581,29 +2277,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2695,29 +2380,18 @@ jobs:
         with:
           name: libtorch-cuda11_6-shared-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -2759,24 +2433,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2894,29 +2552,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3008,29 +2655,18 @@ jobs:
         with:
           name: libtorch-cuda11_6-shared-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3072,24 +2708,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3207,29 +2827,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3321,29 +2930,18 @@ jobs:
         with:
           name: libtorch-cuda11_6-static-with-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3385,24 +2983,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3520,29 +3102,18 @@ jobs:
           echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
           echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
           echo "WIN_PACKAGE_WORK_DIR=${RUNNER_TEMP}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3634,29 +3205,18 @@ jobs:
         with:
           name: libtorch-cuda11_6-static-without-deps-release
           path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Populate binary env
         shell: bash
         run: |
@@ -3698,24 +3258,8 @@ jobs:
       # without this value pip does not get installed for some reason
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
