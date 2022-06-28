@@ -19456,7 +19456,6 @@ op_db: List[OpInfo] = [
             torch.float16, torch.bfloat16, torch.int8, torch.int16, torch.int32, torch.int64
         ),
         supports_out=False,
-        check_batched_grad=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
     ),
