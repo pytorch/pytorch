@@ -1,9 +1,9 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <c10/util/CallOnce.h>
 
 #include <atomic>
 #include <cstdint>
