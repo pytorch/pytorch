@@ -36,11 +36,7 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
   const bool is_self_scalar = self.dim() == 0;
   const bool is_other_scalar = other.dim() == 0;
 
-  if (self.numel() > other.numel()){
-    output.resize_(self.sizes());
-  } else {
-    output.resize_(other.sizes());
-  }
+  output.resize_(at::infer_size(self.sizes(), other.sizes()));
 
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
