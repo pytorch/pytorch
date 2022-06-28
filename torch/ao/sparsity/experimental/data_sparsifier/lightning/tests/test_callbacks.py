@@ -6,6 +6,8 @@ from typing import List
 from torch.ao.sparsity.experimental.data_sparsifier.lightning.callbacks.data_sparsity import PostTrainingDataSparsity
 from torch.ao.sparsity.experimental.data_sparsifier.lightning.callbacks._data_sparstity_utils import _get_valid_name
 from torch.ao.sparsity.experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
+from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import run_tests
 
 
 class DummyModel(nn.Module):
@@ -31,17 +33,9 @@ class DummyLightningModule(pl.LightningModule):
         pass
 
 
-class TestPostTrainingDataNormSparsifierCallback:
-    def _get_callback(self, sparsifier_args):
-        callback = PostTrainingDataSparsity(data_sparsifier_type=sparsity.DataNormSparsifier, data_sparsifier_args=sparsifier_args)
-        return callback
-
-    def _get_pl_module(self):
-        pl_module = DummyLightningModule(100, [128, 256, 16])
-        return pl_module
-
-    def check_on_validation_start(self, pl_module, callback, sparsifier_args):
-        callback.on_validation_start(42, pl_module)  # 42 is a dummy value as trainer not used
+class _PostTrainingCallbackTestCase(TestCase):
+    def _check_on_fit_end(self, pl_module, callback, sparsifier_args):
+        callback.on_fit_end(42, pl_module)  # 42 is a dummy value as trainer not used
 
         # check sparsifier config
         for key, value in sparsifier_args.items():
@@ -66,19 +60,23 @@ class TestPostTrainingDataNormSparsifierCallback:
             sparsified_data = callback.data_sparsifier.get_data(name=valid_name, return_original=False)
             assert torch.all(sparsified_data[sparsified_data != 0] == param[sparsified_data != 0])
 
-    def run_all_checks(self, sparsifier_args):
-        pl_module = self._get_pl_module()
-        callback = self._get_callback(sparsifier_args)
+    def run_all_checks(self, pl_module, callback, sparsifier_args):
+        self._check_on_fit_end(pl_module, callback, sparsifier_args)
 
-        self.check_on_validation_start(pl_module, callback, sparsifier_args)
 
+class TestPostTrainingCallback(_PostTrainingCallbackTestCase):
+    def test_post_training_callback(self):
+        sparsifier_args = {
+            'sparsity_level': 0.5,
+            'sparse_block_shape': (1, 4),
+            'zeros_per_block': 4
+        }
+        callback = PostTrainingDataSparsity(data_sparsifier_type=sparsity.DataNormSparsifier,
+                                            data_sparsifier_args=sparsifier_args)
+        pl_module = DummyLightningModule(100, [128, 256, 16])
+
+        self.run_all_checks(pl_module, callback, sparsifier_args)
 
 
 if __name__ == "__main__":
-    callback_tester = TestPostTrainingDataNormSparsifierCallback()
-    sparsifier_args = {
-        'sparsity_level': 0.5,
-        'sparse_block_shape': (1, 4),
-        'zeros_per_block': 4
-    }
-    callback_tester.run_all_checks(sparsifier_args)
+    run_tests()
