@@ -6282,14 +6282,17 @@ def sample_inputs_nn_pad(op_info, device, dtype, requires_grad, mode, **kwargs):
                 yield SampleInput(make_inp(shape), args=(pad, mode, pad_value))
 
 
-def sample_inputs_constant_pad_nd(*args, **kwargs):
-    nn_samples = sample_inputs_nn_pad(*args, **kwargs, mode='constant')
+def sample_inputs_constant_pad_nd(op_info, device, dtype, *args, **kwargs):
+    nn_samples = sample_inputs_nn_pad(op_info, device, dtype, *args,
+                                      mode='constant', **kwargs)
+    from torch._prims.utils import dtype_to_type
+    scalar_type = dtype_to_type(dtype)
 
     def drop_mode_argument(input, pad, mode=None, value=None):
         if value is None:
             return SampleInput(input, args=(pad,))
         else:
-            return SampleInput(input, args=(pad, value))
+            return SampleInput(input, args=(pad, scalar_type(value)))
 
     for sample in nn_samples:
         yield drop_mode_argument(sample.input, *sample.args, **sample.kwargs)
