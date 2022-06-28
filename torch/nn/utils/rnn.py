@@ -9,6 +9,8 @@ from ..._jit_internal import Optional
 from typing import List, Tuple, Union, Iterable
 
 
+__all__ = ['PackedSequence', 'invert_permutation', 'pack_padded_sequence', 'pad_packed_sequence', 'pad_sequence',
+           'unpad_sequence', 'pack_sequence', 'unpack_sequence']
 
 PackedSequence_ = namedtuple('PackedSequence_',
                              ['data', 'batch_sizes', 'sorted_indices', 'unsorted_indices'])
