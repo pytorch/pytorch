@@ -102,7 +102,7 @@ jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -150,11 +150,9 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -318,7 +316,7 @@ jobs:
   libtorch-cpu-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -366,11 +364,9 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -534,7 +530,7 @@ jobs:
   libtorch-cpu-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -582,11 +578,9 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -750,7 +744,7 @@ jobs:
   libtorch-cpu-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -798,11 +792,9 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -968,7 +960,7 @@ jobs:
   libtorch-cuda10_2-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -1016,23 +1008,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -1199,7 +1179,7 @@ jobs:
   libtorch-cuda10_2-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-without-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -1247,23 +1227,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -1430,7 +1398,7 @@ jobs:
   libtorch-cuda10_2-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -1478,23 +1446,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -1661,7 +1617,7 @@ jobs:
   libtorch-cuda10_2-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-without-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -1709,23 +1665,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -1892,7 +1836,7 @@ jobs:
   libtorch-cuda11_3-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -1940,23 +1884,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -2123,7 +2055,7 @@ jobs:
   libtorch-cuda11_3-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -2171,23 +2103,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -2354,7 +2274,7 @@ jobs:
   libtorch-cuda11_3-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -2402,23 +2322,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -2585,7 +2493,7 @@ jobs:
   libtorch-cuda11_3-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -2633,23 +2541,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -2816,7 +2712,7 @@ jobs:
   libtorch-cuda11_6-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -2864,23 +2760,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -3047,7 +2931,7 @@ jobs:
   libtorch-cuda11_6-shared-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-without-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -3095,23 +2979,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -3278,7 +3150,7 @@ jobs:
   libtorch-cuda11_6-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -3326,23 +3198,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -3509,7 +3369,7 @@ jobs:
   libtorch-cuda11_6-static-without-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-without-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge.nvidia.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -3557,23 +3417,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+      - uses: ./.github/actions/install-nvidia-driver
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -3740,7 +3588,7 @@ jobs:
   libtorch-rocm5_0-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-shared-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -3754,43 +3602,8 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -3819,15 +3632,10 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -3998,7 +3806,7 @@ jobs:
   libtorch-rocm5_0-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-static-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -4012,43 +3820,8 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -4077,15 +3850,10 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -4256,7 +4024,7 @@ jobs:
   libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_1_1-shared-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -4270,43 +4038,8 @@ jobs:
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -4335,15 +4068,10 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x
@@ -4514,7 +4242,7 @@ jobs:
   libtorch-rocm5_1_1-static-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_1_1-static-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.rocm.gpu
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -4528,43 +4256,8 @@ jobs:
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: cxx11-abi
     steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
       - uses: seemethere/download-artifact-s3@v4
         name: Download Build Artifacts
         with:
@@ -4593,15 +4286,10 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x

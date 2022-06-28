@@ -46,15 +46,8 @@ jobs:
           docker-image: ${{ inputs.docker-image }}
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        uses: ./.github/actions/install-nvidia-driver
         if: contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu')
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
 
       - name: Download build artifacts
         uses: ./.github/actions/download-build-artifacts

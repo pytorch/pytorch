@@ -2,6 +2,12 @@ name: Setup ROCm host
 
 description: Set up ROCm host for CI
 
+inputs:
+  solo-runner:
+    description: 'Whether or not this runner shares the host with another runner'
+    type: boolean
+    default: false
+
 runs:
   using: composite
   steps:
@@ -52,7 +58,8 @@ runs:
         env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
         env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
 
-    - name: ROCm set GPU_FLAG
+    - name: ROCm set GPU_FLAG - dual runners
+      if: !inputs.solo-runner
       shell: bash
       run: |
         # Examine the runner name. If it ends with "-2", this is the second runner on the host.
@@ -63,3 +70,9 @@ runs:
             # select the first two GPUs on the host
             echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri/renderD128 --device=/dev/dri/renderD129 --group-add video --group-add daemon" >> "${GITHUB_ENV}"
         fi
+
+    - name: ROCm set GPU_FLAG - solo runner
+      if: inputs.solo-runner
+      shell: bash
+      run: |
+        echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"

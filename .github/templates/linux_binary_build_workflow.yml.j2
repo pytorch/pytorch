@@ -77,7 +77,13 @@ jobs:
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+{%- if config["gpu_arch_type"] == "rocm" %}
+    runs-on: linux.rocm.gpu
+{%- elif config["gpu_arch_type"] == "cuda" %}
+    runs-on: linux.4xlarge.nvidia.gpu
+{%- else %}
+    runs-on: linux.4xlarge
+{%- endif %}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
@@ -93,27 +99,13 @@ jobs:
           path: "${{ runner.temp }}/artifacts/"
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
-{%- if config["gpu_arch_type"] == "rocm" %}
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-{%- elif config["gpu_arch_type"] == "cuda" %}
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
+{%- if config["gpu_arch_type"] == "cuda" %}
+      - uses: ./.github/actions/install-nvidia-driver
 {%- endif %}
       - name: Pull Docker image
-        run: |
-          !{{ common.add_retry_to_env() }}
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x

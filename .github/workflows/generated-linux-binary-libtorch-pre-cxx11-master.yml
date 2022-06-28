@@ -97,7 +97,7 @@ jobs:
   libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
-    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
+    runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
       PACKAGE_TYPE: libtorch
@@ -145,11 +145,9 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
+        uses: ./.github/actions/pull-docker-image
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
       - name: Test PyTorch binary
         run: |
           set -x

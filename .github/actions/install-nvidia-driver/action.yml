@@ -1,0 +1,22 @@
+name: Get workflow job id
+
+description: Get the ID of the workflow job that is currently running.
+
+inputs:
+  pytorch-repo-directory:
+    description: Path to root of pytorch repo
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+      name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+      working-directory: ${{ inputs.pytorch-repo-directory }}
+      with:
+        timeout_minutes: 10
+        max_attempts: 3
+        command: |
+          set -ex
+          bash .github/scripts/install_nvidia_utils_linux.sh
+          echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
