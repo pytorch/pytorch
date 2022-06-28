@@ -14,18 +14,12 @@ runs:
     - name: Setup Linux
       uses: ./.github/actions/setup-linux
     - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
+        uses: ./.github/actions/chown-workspace
+    - name: Clean workspace
       run: |
         rm -rf "${GITHUB_WORKSPACE}"
         mkdir "${GITHUB_WORKSPACE}"
-    - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-      uses: seemethere/add-github-ssh-key@v1
+    - name: "Enable SSH (Click me for login details)"
+      uses: ./.github/actions/setup-ssh/action.yml
       with:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        github-secret: ${{ secrets.GITHUB_TOKEN }}
