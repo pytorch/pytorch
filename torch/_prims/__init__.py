@@ -601,7 +601,10 @@ bitwise_not = _make_elementwise_unary_prim(
 
 
 def _cbrt_aten(a: torch.Tensor):
-    return pow(a, (1 / 3))
+    if a.is_complex():
+        return pow(a, (1 / 3))
+    else:
+        return torch.where(a >= 0, pow(a, (1 / 3)), -pow(-a, 1 / 3))
 
 
 cbrt = _make_elementwise_unary_prim(
