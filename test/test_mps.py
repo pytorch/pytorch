@@ -4145,9 +4145,6 @@ class TestNLLLoss(TestCase):
     # Test normal
     def test_normal(self):
         def helper(shape, mean=0.0, std=1.0):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
             mps_out = torch.normal(mean, std, shape, device='mps')
 
             mean_array = np.ones(shape)
@@ -4160,6 +4157,7 @@ class TestNLLLoss(TestCase):
             cpu_std_tensor = torch.tensor(std_array, device='cpu', dtype=torch.float, requires_grad=False)
             std_tensor = cpu_std_tensor.detach().clone().to('mps')
 
+            # test out
             mps_out = torch.zeros(shape, device='mps')
             torch.normal(mean_tensor, std, out=mps_out)
 
@@ -4169,14 +4167,22 @@ class TestNLLLoss(TestCase):
             mps_out = torch.zeros(shape, device='mps')
             torch.normal(mean_tensor, std_tensor, out=mps_out)
 
+            # test without out
+            mps_out = torch.normal(mean_tensor, std)
+            self.assertEqual(mps_out.size(), mean_tensor.size())
+
+            mps_out = torch.normal(mean, std_tensor)
+            self.assertEqual(mps_out.size(), std_tensor.size())
+
+            inferred_shape = torch.broadcast_shapes(mean_tensor.size(), std_tensor.size())
+            mps_out = torch.normal(mean_tensor, std_tensor)
+            self.assertEqual(mps_out.size(), inferred_shape)
+
         helper((2, 3, 4, 5, 6))
         helper((100, 100), 2.5, 1.2)
 
     def test_bernoulli(self):
         def helper(shape, prob=0.5):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
             prob_array = np.ones(shape)
             prob_array *= prob
             cpu_prob_tensor = torch.tensor(prob_array, device='cpu', dtype=torch.float, requires_grad=False)

@@ -8909,6 +8909,11 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(a, args=(c, b))
 
+    # Python scalars type promotion
+    for scalar in (0, 0.0, 0j, False):
+        yield SampleInput(scalar, args=(c, b))
+        yield SampleInput(a, args=(c, scalar))
+
 
 def error_inputs_where(op_info, device, **kwargs):
     shape = (S,)
@@ -16622,7 +16627,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_index,
            error_inputs_func=error_inputs_index_select,
            supports_forward_ad=True,
@@ -16630,7 +16635,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19381,7 +19386,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "repeat_interleave",
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
@@ -19680,34 +19685,6 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
         supports_one_python_scalar=True,
-        supports_autograd=False,
-    ),
-    UnaryUfuncInfo(
-        'special.gamma',
-        decorators=(
-            toleranceOverride(
-                {
-                    torch.float32: tol(atol=1e-03, rtol=1.3e-05),
-                    torch.float64: tol(atol=1e-05, rtol=1.3e-05)
-                }
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.gamma if TEST_SCIPY else _NOTHING,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                'TestUnaryUfuncs',
-                'test_reference_numerics_large',
-                dtypes=[torch.float32, torch.float64],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                'TestUnaryUfuncs',
-                'test_reference_numerics_small',
-                dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64],
-            ),
-        ),
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
@@ -20110,7 +20087,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.atanh",
         torch_opinfo_name="atanh",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
@@ -20219,14 +20195,13 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        # nvFuser test for float32 fails with AssertionError: Dtypes torch.float64 and torch.float32 are not equal!
-        # The test with int dtype passes
+        # When keepdim=False logsumexp function uses squeeze operation
+        # that is not yet exposed in nvFuser's Python API.
         supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.log_softmax",
         torch_opinfo_name="log_softmax",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
