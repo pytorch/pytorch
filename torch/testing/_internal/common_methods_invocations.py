@@ -20682,6 +20682,21 @@ python_ref_db = [
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
+        "_refs.rsub",
+        torch_opinfo_name="rsub",
+        # https://github.com/pytorch/pytorch/issues/76944
+        skips=(
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+            # Reference result was farther (nan) from the precise computation than
+            # the torch result was (nan)!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.chalf,), device_type='cpu'),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
         "_refs.sub",
         torch_opinfo_name="sub",
         # https://github.com/pytorch/pytorch/issues/76944
