@@ -319,6 +319,7 @@ def _make_prim(
     meta: Callable,
     impl_aten: Callable,
     impl_nvfuser: Optional[Callable] = None,
+    impl_vjp: Optional[Callable] = None,
     doc: str,
 ):
     """
@@ -339,23 +340,49 @@ def _make_prim(
     # argument that provides an implementation for backward here.)  Because we
     # don't have derivative formulas, we must setup a custom autograd function
     # that raises an error if backwards is invoked
-    class BackwardsNotSupported(torch.autograd.Function):
+    class Prim(torch.autograd.Function):
         @staticmethod
         def forward(ctx, args_spec, *flat_args):
             args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
             g = torch._C._AutoDispatchBelowAutograd()
             try:
-                return _prim(*args, **kwargs)
+                out = _prim(*args, **kwargs)
             finally:
                 del g
 
+            out_packed = (out,) if isinstance(out, Tensor) else out
+            ctx.nout = len(out_packed)
+
+            # TODO: use save for backward to save the args
+            # Only tensors can be saved for backward
+            # args_tensors = tuple(t for t in args if isinstance(t, Tensor))
+            # ctx.nargs = len(args_tensors)
+            # ctx.save_for_backward(*out_packed, *args_tensors)
+
+            ctx.args = args
+            ctx.save_for_backward(*out_packed)
+            return out
+
         @staticmethod
-        def backward(ctx, *args):
-            raise RuntimeError("backwards not supported on prim")
+        def backward(ctx, *bw_args):
+            if impl_vjp is None:
+                raise RuntimeError(f"backwards not supported on prim {name}")
+
+            # TODO: use save for backward to save the args
+            # fw_args = ctx.saved_tensors[ctx.nout : ctx.nout + ctx.nargs]
+            fw_args = ctx.args
+            fw_out = ctx.saved_tensors[:ctx.nout]
+
+            vjp_result = impl_vjp(*bw_args, *fw_out, *fw_args)
+            vjp_result = (vjp_result,) if isinstance(vjp_result, Tensor) else vjp_result
+
+            # Replace the output with None for each non-tensor argument
+            vjp_result = tuple(None if not isinstance(a, Tensor) else t for a, t in zip(fw_args, vjp_result))
+            return None, *vjp_result
 
     def _autograd_impl(*args, **kwargs):
         flat_args, args_spec = tree_flatten((args, kwargs))
-        return BackwardsNotSupported.apply(args_spec, *flat_args)
+        return Prim.apply(args_spec, *flat_args)
 
     name = schema.split("(")[0]
     prim_impl.impl(name, _prim_impl)
@@ -497,6 +524,7 @@ abs = _make_elementwise_unary_prim(
     "abs",
     impl_aten=torch.abs,
     impl_nvfuser=_abs_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, sign(self)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
 )
@@ -505,6 +533,7 @@ acos = _make_elementwise_unary_prim(
     "acos",
     impl_aten=torch.acos,
     impl_nvfuser=_acos_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, neg(rsqrt(sub(1, pow(self, 2))))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -512,6 +541,7 @@ acos = _make_elementwise_unary_prim(
 acosh = _make_elementwise_unary_prim(
     "acosh",
     impl_aten=torch.acosh,
+    impl_vjp=lambda grad, result, self: mul(grad, rsqrt(sub(pow(self, 2), 1))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -520,6 +550,7 @@ asin = _make_elementwise_unary_prim(
     "asin",
     impl_aten=torch.asin,
     impl_nvfuser=_asin_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, rsqrt(sub(1, pow(self, 2)))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -527,6 +558,7 @@ asin = _make_elementwise_unary_prim(
 asinh = _make_elementwise_unary_prim(
     "asinh",
     impl_aten=torch.asinh,
+    impl_vjp=lambda grad, result, self: mul(grad, rsqrt(add(1, pow(self, 2)))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -535,6 +567,7 @@ atan = _make_elementwise_unary_prim(
     "atan",
     impl_aten=torch.atan,
     impl_nvfuser=_atan_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, reciprocal(add(1, pow(self, 2)))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -543,6 +576,7 @@ atanh = _make_elementwise_unary_prim(
     "atanh",
     impl_aten=torch.atanh,
     impl_nvfuser=_atanh_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, reciprocal(sub(1, pow(self, 2)))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -551,6 +585,7 @@ cos = _make_elementwise_unary_prim(
     "cos",
     impl_aten=torch.cos,
     impl_nvfuser=_cos_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, neg(sin(self))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -559,6 +594,7 @@ cosh = _make_elementwise_unary_prim(
     "cosh",
     impl_aten=torch.cosh,
     impl_nvfuser=_cosh_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, sinh(self)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -566,6 +602,7 @@ cosh = _make_elementwise_unary_prim(
 bessel_i0 = _make_elementwise_unary_prim(
     "bessel_i0",
     impl_aten=torch.i0,
+    impl_vjp=lambda grad, result, self: mul(grad, bessel_i1(self)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -573,6 +610,7 @@ bessel_i0 = _make_elementwise_unary_prim(
 bessel_i0e = _make_elementwise_unary_prim(
     "bessel_i0e",
     impl_aten=torch.special.i0e,
+    impl_vjp=lambda grad, result, self: mul(grad, sub(bessel_i1e(self), mul(sign(self), result))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -580,6 +618,7 @@ bessel_i0e = _make_elementwise_unary_prim(
 bessel_i1 = _make_elementwise_unary_prim(
     "bessel_i1",
     impl_aten=torch.special.i1,
+    impl_vjp=lambda grad, result, self: mul(grad, bessel_i0(self)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -607,6 +646,7 @@ def _cbrt_aten(a: torch.Tensor):
 cbrt = _make_elementwise_unary_prim(
     "cbrt",
     impl_aten=_cbrt_aten,
+    impl_vjp=lambda grad, result, self: mul(grad, pow(self, -2 / 3)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -615,6 +655,7 @@ ceil = _make_elementwise_unary_prim(
     "ceil",
     impl_aten=torch.ceil,
     impl_nvfuser=_ceil_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, 0),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -622,6 +663,7 @@ ceil = _make_elementwise_unary_prim(
 digamma = _make_elementwise_unary_prim(
     "digamma",
     impl_aten=torch.digamma,
+    impl_vjp=lambda grad, result, self: mul(grad, zeta(2, self)),  # zeta(2, x) = polygamma(1, x) = trigamma(x)
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -630,6 +672,7 @@ erf = _make_elementwise_unary_prim(
     "erf",
     impl_aten=torch.erf,
     impl_nvfuser=_erf_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, mul(2 / math.sqrt(math.pi), exp(neg(pow(self, 2))))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -637,6 +680,7 @@ erf = _make_elementwise_unary_prim(
 erf_inv = _make_elementwise_unary_prim(
     "erf_inv",
     impl_aten=torch.special.erfinv,
+    impl_vjp=lambda grad, result, self: mul(grad, mul(math.sqrt(math.pi) / 2, exp(pow(result, 2)))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -645,6 +689,7 @@ erfc = _make_elementwise_unary_prim(
     "erfc",
     impl_aten=torch.special.erfc,
     impl_nvfuser=_erfc_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, mul(-2 / math.sqrt(math.pi), exp(neg(pow(self, 2))))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -653,6 +698,7 @@ exp = _make_elementwise_unary_prim(
     "exp",
     impl_aten=torch.exp,
     impl_nvfuser=_exp_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, result),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -661,6 +707,7 @@ expm1 = _make_elementwise_unary_prim(
     "expm1",
     impl_aten=torch.special.expm1,
     impl_nvfuser=_expm1_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, add(result, 1)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -668,6 +715,7 @@ expm1 = _make_elementwise_unary_prim(
 exp2 = _make_elementwise_unary_prim(
     "exp2",
     impl_aten=torch.special.exp2,
+    impl_vjp=lambda grad, result, self: mul(grad, mul(result, result)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -700,6 +748,7 @@ floor = _make_elementwise_unary_prim(
     "floor",
     impl_aten=torch.floor,
     impl_nvfuser=_floor_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, 0),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -723,6 +772,7 @@ lgamma = _make_elementwise_unary_prim(
     "lgamma",
     impl_aten=torch.lgamma,
     impl_nvfuser=_lgamma_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, digamma(self)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -731,6 +781,7 @@ log = _make_elementwise_unary_prim(
     "log",
     impl_aten=torch.log,
     impl_nvfuser=_log_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: div(grad, self),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -739,6 +790,7 @@ log1p = _make_elementwise_unary_prim(
     "log1p",
     impl_aten=torch.log1p,
     impl_nvfuser=_log1p_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: div(grad, add(self, 1)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -747,6 +799,7 @@ log2 = _make_elementwise_unary_prim(
     "log2",
     impl_aten=torch.log2,
     impl_nvfuser=_log2_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: div(grad, mul(self, math.log(2))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -755,6 +808,7 @@ log10 = _make_elementwise_unary_prim(
     "log10",
     impl_aten=torch.log10,
     impl_nvfuser=_log10_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: div(grad, mul(self, math.log(10))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -763,6 +817,7 @@ reciprocal = _make_elementwise_unary_prim(
     "reciprocal",
     impl_aten=torch.reciprocal,
     impl_nvfuser=_reciprocal_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, neg(pow(result, 2))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -771,6 +826,7 @@ neg = _make_elementwise_unary_prim(
     "neg",
     impl_aten=torch.neg,
     impl_nvfuser=_neg_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: neg(grad),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -779,6 +835,7 @@ round = _make_elementwise_unary_prim(
     "round",
     impl_aten=torch.round,
     impl_nvfuser=_round_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, 0),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -787,6 +844,7 @@ rsqrt = _make_elementwise_unary_prim(
     "rsqrt",
     impl_aten=torch.rsqrt,
     impl_nvfuser=_rsqrt_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, mul(-0.5, div(result, self))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -794,6 +852,7 @@ rsqrt = _make_elementwise_unary_prim(
 sign = _make_elementwise_unary_prim(
     "sign",
     impl_aten=torch.sign,
+    impl_vjp=lambda grad, result, self: mul(grad, 0),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -809,6 +868,7 @@ sin = _make_elementwise_unary_prim(
     "sin",
     impl_aten=torch.sin,
     impl_nvfuser=_sin_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, cos(self)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -817,6 +877,7 @@ sinh = _make_elementwise_unary_prim(
     "sinh",
     impl_aten=torch.sinh,
     impl_nvfuser=_sinh_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, cosh(self)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -825,6 +886,7 @@ sqrt = _make_elementwise_unary_prim(
     "sqrt",
     impl_aten=torch.sqrt,
     impl_nvfuser=_sqrt_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, div(0.5, result)),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -833,6 +895,7 @@ tan = _make_elementwise_unary_prim(
     "tan",
     impl_aten=torch.tan,
     impl_nvfuser=_tan_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, add(1, pow(result, 2))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -841,6 +904,7 @@ tanh = _make_elementwise_unary_prim(
     "tanh",
     impl_aten=torch.tanh,
     impl_nvfuser=_tanh_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self: mul(grad, sub(1, pow(result, 2))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -854,6 +918,7 @@ trunc = _make_elementwise_unary_prim(
     "trunc",
     impl_aten=torch.trunc,
     impl_nvfuser=_trunc_nvfuser,
+    impl_vjp=lambda grad, result, self: mul(grad, 0),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -866,6 +931,7 @@ add = _make_elementwise_binary_prim(
     name="add",
     impl_aten=torch.add,
     impl_nvfuser=_add_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self, other: (grad, grad),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -874,6 +940,7 @@ atan2 = _make_elementwise_binary_prim(
     name="atan2",
     impl_aten=torch.atan2,
     impl_nvfuser=_atan2_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self, other: (mul(grad, div(other, add(pow(self, 2), pow(other, 2)))), mul(grad, div(neg(self), add(pow(self, 2), pow(other, 2))))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
@@ -920,6 +987,7 @@ div = _make_elementwise_binary_prim(
     "div",
     impl_aten=_div_aten,
     impl_nvfuser=_div_nvfuser,  # type: ignore[name-defined]
+    impl_vjp=lambda grad, result, self, other: (div(grad, other), mul(mul(neg(grad), self), pow(other, -2))),
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
