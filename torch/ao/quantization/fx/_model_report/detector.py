@@ -1,4 +1,4 @@
-from typing import Any, Dict, Set, Tuple
+from typing import Any, Dict, Set, Tuple, Callable
 
 import torch
 import torch.nn as nn
@@ -31,9 +31,8 @@ class DetectorBase(ABC):
         Args
             model (nn.Module or subclass): model to find observer insertion points
 
-        Returns a Tuple of two elements:
-            Set[str] of observer fqns denoting where to insert observers
-            ObserverBase (or subclass): the class (not an instance) of the observer to insert
+        Returns a Dict mapping from unique observer fqns (where we want to insert them) to a Dict.
+            This dict maps string keys to detector specific information
         """
         pass
 
@@ -41,6 +40,41 @@ class DetectorBase(ABC):
     def get_detector_name(self) -> str:
         r""" Returns the name of the current detector """
         pass
+
+    def _get_targeting_node(self, prepared_fx_model: GraphModule, target_fqn: str) -> torch.fx.node.Node:
+        r"""
+        Takes in a GraphModule and the target_fqn and finds the node whose target is this fqn.
+
+        If it's not found, it means it is most likely inside a fused layer
+            We just go one layer up in terms of the fqn we are searching for until we find parent node
+            If we get to empty string, then we know that it doesn't exist
+
+        The reason for the recursion is that if the model that we are looking for got fused,
+        we will have module fqn as e.g. x.linear.0 but the graph will only have a node for the fused module,
+        which would have fqn as x.linear so they will not match.
+        To handle this, if we don't match, we then take off the last bit of the fqn e.g. x.linear.0 -> x.linear,
+        or more generally foo.bar.baz -> foo.bar and search again, this will allow us to locate the correct module
+        even in cases with fusion
+
+        Args:
+            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
+            target_fqn (str): The fqn of the layer we are trying to target
+
+        Returns the node object we are trying to add observers around
+        """
+        for node in prepared_fx_model.graph.nodes:
+            # if the node's target is our target, return it
+            if node.target == target_fqn:
+                return node
+
+        # getting here means node not found
+        # if no "." we are already at base and failed
+        parent_fqn_sep_index = target_fqn.rfind(".")
+        if parent_fqn_sep_index == -1:
+            raise ValueError("passed in target_fqn not found in graph's targets.")
+        else:
+            # recursively call it with parent fqn
+            return self._get_targeting_node(prepared_fx_model, target_fqn[:parent_fqn_sep_index])
 
     @abstractmethod
     def generate_detector_report(self, model) -> Tuple[str, Dict[str, Any]]:
@@ -273,7 +307,9 @@ class DynamicStaticDetector(DetectorBase):
 
         for fqn, module in prepared_fx_model.named_modules():
             # check to see if module is of a supported type
-            is_supported_type = sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+            is_supported_type: bool = (
+                sum(list(map(lambda x: isinstance(module, x), self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED))) > 0
+            )
 
             if is_supported_type:
                 # if it's a supported type, we want to get node and add observer insert locations
@@ -300,24 +336,6 @@ class DynamicStaticDetector(DetectorBase):
                 }
 
         return obs_fqn_to_info
-
-
-    def _get_targeting_node(self, prepared_fx_model: GraphModule, target_fqn: str) -> torch.fx.node.Node:
-        r"""
-        Takes in a GraphModule and the target_fqn and finds the node object that targets this fqn
-
-        Args:
-            prepared_fx_model (GraphModule):  The prepared Fx GraphModule
-            target_fqn (str): The fqn of the layer we are trying to target
-
-        Returns the node object we are trying to add observers around
-        """
-        for node in prepared_fx_model.graph.nodes:
-            # if the node's target is our target, return it
-            if node.target == target_fqn:
-                return node
-
-        raise ValueError("passed in target_fqn not found in graph's targets.")
 
     def get_detector_name(self) -> str:
         r""" returns the string name of this detector"""
@@ -506,10 +524,25 @@ class InputWeightEqualizationDetector(DetectorBase):
         ratio_threshold (float): The threshold for s_c to determine if input-weight equalization is sugggested
         channel (int, optional): The channel being observed to determine input weight equalization
             Default: 1
+
+    :attr:`ratio_threshold`: The threshold for s_c to determine if input-weight equalization is sugggested
+    :attr:`channel`: The channel being observed to determine input weight equalization
+    :attr:`SUPPORTED_MODULES`: This specifies the modules that are supported for input-weight equalization
+    :attr:`DEFAULT_PRE_OBSERVER_NAME`: The name of the pre-observer to be inserted for this detector
     """
 
-    def __init__(self):
-        pass
+    SUPPORTED_MODULES: Set[Callable] = set(
+        [nn.Linear, nn.Conv1d, nn.Conv2d, nn.Conv3d, nnqat.Linear, nnqat.Conv1d, nnqat.Conv2d, nnqat.Conv3d]
+    )
+
+    # names for the pre and post observers that are inserted
+    DEFAULT_PRE_OBSERVER_NAME: str = "model_report_pre_observer"
+
+    def __init__(self, ratio_threshold: float, channel: int = 1):
+
+        # intialize attributes based on args
+        self.ratio_threshold: float = ratio_threshold
+        self.channel: int = channel
 
     def determine_observer_insert_points(self, prepared_fx_model: GraphModule) -> Dict[str, Dict[str, Any]]:
         r"""Determines where observers need to be inserted for the Input Weight Equalization Detector.
@@ -529,8 +562,37 @@ class InputWeightEqualizationDetector(DetectorBase):
             key "observer_args" -> The arguments that are meant to be passed into the observer
         """
 
+        # observer for this detector is ModelReportObserver
+        obs_ctr = ModelReportObserver
+
+        # return dict
+        obs_fqn_to_info: Dict[str, Dict[str, Any]] = {}
+
+        for fqn, module in prepared_fx_model.named_modules():
+            # check to see if module is of a supported type
+            is_supported_type: bool = (
+                sum(list(map(lambda x: type(module) is x, self.SUPPORTED_MODULES))) > 0
+            )
+
+            if is_supported_type:
+                # if it's a supported type, we want to get node and add observer insert locations
+
+                targeted_node = self._get_targeting_node(prepared_fx_model, fqn)
+
+                # add entry for pre-observer
+                pre_obs_fqn = fqn + "." + self.DEFAULT_PRE_OBSERVER_NAME
+
+                obs_fqn_to_info[pre_obs_fqn] = {
+                    "target_node": targeted_node,
+                    "insert_observer": obs_ctr,
+                    "insert_post": False,
+                    "observer_args": targeted_node.args,
+                }
+
+        return obs_fqn_to_info
+
     def get_detector_name(self) -> str:
-        r""" Returns the name of this detector """
+        r"""Returns the name of this detector"""
         return "input_weight_equalization_detector"
 
     def generate_detector_report(self, model: GraphModule) -> Tuple[str, Dict[str, Any]]:
