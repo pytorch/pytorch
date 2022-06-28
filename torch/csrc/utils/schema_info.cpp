@@ -55,27 +55,30 @@ bool SchemaInfo::isMutating(c10::string_view name) const {
   return isMutating(*index);
 }
 
+std::vector<c10::Argument> SchemaInfo::getCorrectList(
+    SchemaArgType type) const {
+  if (type == SchemaArgType::input) {
+    return schema_.arguments();
+  } else {
+    return schema_.returns();
+  }
+}
+
 bool SchemaInfo::areAliasing(
     const SchemaArgument& lhs,
     const SchemaArgument& rhs) const {
   TORCH_INTERNAL_ASSERT(
-      (lhs.type == input && lhs.index < schema_.arguments().size() &&
-       lhs.index >= 0) ||
-          (lhs.type == output && lhs.index < schema_.returns().size() &&
-           lhs.index >= 0),
+      (lhs.index < getCorrectList(lhs.type).size() && lhs.index >= 0),
       "Invalid index for schema.");
   TORCH_INTERNAL_ASSERT(
-      (rhs.type == input && rhs.index < schema_.arguments().size() &&
-       rhs.index >= 0) ||
-          (rhs.type == output && rhs.index < schema_.returns().size() &&
-           rhs.index >= 0),
+      (rhs.index < getCorrectList(rhs.type).size() && rhs.index >= 0),
       "Invalid index for schema.");
 
-  const c10::Argument lhsArg = schema_.arguments()[lhs.index];
-  const c10::Argument rhsArg = schema_.arguments()[rhs.index];
+  const c10::Argument lhsArg = getCorrectList(lhs.type)[lhs.index];
+  const c10::Argument rhsArg = getCorrectList(rhs.type)[rhs.index];
 
-  if (lhsArg.alias_info() && lhsArg.alias_info()->isWildcardAfter() &&
-      rhsArg.alias_info() && rhsArg.alias_info()->isWildcardAfter()) {
+  if ((lhsArg.alias_info() && lhsArg.alias_info()->isWildcardAfter()) ||
+      (rhsArg.alias_info() && rhsArg.alias_info()->isWildcardAfter())) {
     if (lhsArg.type()->kind() == rhsArg.type()->kind()) {
       return true;
     } else {

@@ -3,6 +3,7 @@
 
 namespace torch {
 namespace utils {
+namespace {
 
 TEST(SchemaInfoIsMutableTest, Basic) {
   SchemaInfo schema_info(
@@ -11,6 +12,8 @@ TEST(SchemaInfoIsMutableTest, Basic) {
   ASSERT_TRUE(schema_info.isMutating("self"));
   ASSERT_FALSE(schema_info.isMutating(1));
   ASSERT_FALSE(schema_info.isMutating("other"));
+  ASSERT_FALSE(schema_info.isMutating(2));
+  ASSERT_FALSE(schema_info.isMutating("alpha"));
 }
 
 TEST(SchemaInfoIsMutableTest, InvalidArgument) {
@@ -18,6 +21,7 @@ TEST(SchemaInfoIsMutableTest, InvalidArgument) {
       "aten::sub_.Tensor(Tensor(a!) self, Tensor other, *, Scalar alpha=1) -> (Tensor(a!))");
   ASSERT_THROW(schema_info.isMutating(-1), c10::Error);
   ASSERT_THROW(schema_info.isMutating(4), c10::Error);
+  ASSERT_THROW(schema_info.isMutating("named_argument"), c10::Error);
 }
 
 TEST(SchemaInfoAreAliasingTest, Basic) {
@@ -59,5 +63,6 @@ TEST(SchemaInfoIsDeterministicTest, Basic) {
   ASSERT_TRUE(deterministic_schema_info.isDeterministic());
   ASSERT_FALSE(nondeterministic_schema_info.isDeterministic());
 }
+} // namespace
 } // namespace utils
 } // namespace torch
