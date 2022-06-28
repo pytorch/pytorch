@@ -526,6 +526,10 @@ using the ``NCCL`` backend.
 ``AVG`` is only available with the ``NCCL`` backend,
 and only for NCCL versions 2.10 or later.
 
+``PREMUL_SUM`` multiplies inputs by a given scalar locally before reduction.
+``PREMUL_SUM`` is only available with the ``NCCL`` backend,
+and only available for NCCL versions 2.11 or later.
+
 Additionally, ``MAX``, ``MIN`` and ``PRODUCT`` are not supported for complex tensors.
 
 The values of this class can be accessed as attributes, e.g., ``ReduceOp.SUM``.
@@ -547,6 +551,17 @@ They are used in specifying strategies for reduction collectives, e.g.,
     .value("BXOR", ::c10d::ReduceOp::Kind::BXOR)
     .value("PREMUL_SUM", ::c10d::ReduceOp::Kind::PREMUL_SUM)
     .export_values();
+
+  // NOTE(crcrpar): Goal of implicit conversion between ``::C10d::ReduceOp::Kind`` and ``::c10d::ReduceOp``.
+  // It's to enable the following.
+  // i.e.
+  // ```python
+  // opts = c10d.AllreduceOptions()
+  // opts.reduceOp = c10d.ReduceOp.SUM  # Because this PR changes `ReduceOp` to struct.
+  // opts.reduceOp = c10d.ReduceOp(c10d.ReduceOp.SUM)
+  // ```
+  // Ref: [Implicit conversions](https://pybind11.readthedocs.io/en/stable/advanced/classes.html#implicit-conversions)
+  py::implicitly_convertible<::c10d::ReduceOp::Kind, ::c10d::ReduceOp>();
 
   module
       .def(

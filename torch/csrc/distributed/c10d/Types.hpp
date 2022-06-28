@@ -15,17 +15,17 @@ struct _SupplementBase {
 // Supplementary data specific to NCCL PREMUL_SUM
 // The point of use in ProcessGroupNCCL knows how to unpack it.
 struct NCCLPreMulSumSupplement : _SupplementBase {
-  double double_factor;
+  double double_factor{0.0};
   std::vector<at::Tensor> tensor_factors;
-  NCCLPreMulSumSupplement(double f) : double_factor(f) {}
-  NCCLPreMulSumSupplement(const std::vector<at::Tensor>& f) : tensor_factors(f) {}
+  NCCLPreMulSumSupplement(double f) : double_factor{f} {}
+  NCCLPreMulSumSupplement(std::vector<at::Tensor> f) : tensor_factors{std::move(f)} {}
 };
 
 // Other ReduceOps that need different supplementary data can also
 // derive from _SupplementBase.
 
 struct ReduceOp {
-  enum Kind {
+  enum Kind : uint8_t {
     SUM = 0,
     AVG = 1,
     PRODUCT = 2,
@@ -41,8 +41,26 @@ struct ReduceOp {
   ReduceOp() {}
 
   ReduceOp(Kind op) : op_(op) {
-    TORCH_INTERNAL_ASSERT(op_ != PREMUL_SUM,
-                          "PREMUL_SUM requires a scale factor tensor or scalar argument");
+    TORCH_INTERNAL_ASSERT(
+      op_ != PREMUL_SUM, "PREMUL_SUM requires a scale factor tensor or scalar argument");
+  }
+
+  ReduceOp(Kind op, std::shared_ptr<_SupplementBase> optional_supplement) {
+    if (optional_supplement.get()) {
+      op_ = op;
+    } else {
+#ifdef USE_NCCL
+#if defined(NCCL_MAJOR) && (NCCL_MAJOR == 2) && (NCCL_MAJOR * 100 + NCCL_MINOR) >= 211
+      TORCH_INTERNAL_ASSERT(op == PREMUL_SUM, "Only PREMUL_SUM supports supplement");
+      op_ = ReduceOp::PREMUL_SUM;
+      supplement_ = optional_supplement;
+#else
+      AT_ERROR("Invalid");
+#endif
+#else
+      AT_ERROR("Invalid");
+#endif  // USE_NCCL
+    }
   }
 
   // The heap resource supplement_, if it exists, is managed by a shared_ptr,
