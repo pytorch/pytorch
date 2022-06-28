@@ -3,7 +3,7 @@ import fnmatch
 import warnings
 
 from io import IOBase
-from typing import Any, Dict, Iterable, List, Set, Tuple, Union, Optional
+from typing import Any, Dict, Iterable, List, Tuple, Union, Optional
 
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
@@ -180,7 +180,7 @@ class StreamWrapper:
     DataPipe operation like `FileOpener`. StreamWrapper would guarantee
     the wrapped file handler is closed when it's out of scope.
     '''
-    session_streams: Set[Any] = set()
+    session_streams: Dict[Any, int] = {}
 
     def __init__(self, file_obj, parent_stream=None, name=None):
         self.file_obj = file_obj
@@ -193,7 +193,7 @@ class StreamWrapper:
                 raise RuntimeError('Parent steam should be StreamWrapper, {} was given'.format(type(parent_stream)))
             parent_stream.child_counter += 1
             self.parent_stream = parent_stream
-        StreamWrapper.session_streams.update(self)
+        StreamWrapper.session_streams[self] = 1
 
     @classmethod
     def close_streams(cls, v, depth=0):
@@ -218,7 +218,7 @@ class StreamWrapper:
         return getattr(file_obj, name)
 
     def close(self, *args, **kwargs):
-        StreamWrapper.session_streams.remove(self)
+        del StreamWrapper.session_streams[self]
         if self.parent_stream is not None:
             self.parent_stream.child_counter -= 1
             if not self.parent_stream.child_counter and self.parent_stream.close_on_last_child:
