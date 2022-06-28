@@ -186,7 +186,7 @@ void checkDimSize(
   ExpressionEvaluator const_eval(tv->fusion());
   for (auto axis_index : c10::irange(axis.size())) {
     TORCH_INTERNAL_ASSERT(
-        ((axis[axis_index] + tv->nDims()) >= 0) &&
+        ((axis[axis_index] + static_cast<int>(tv->nDims())) >= 0) &&
             (axis[axis_index] < (int)tv->nDims()),
         "CheckDimSize: axis position out of bound ",
         axis[axis_index],

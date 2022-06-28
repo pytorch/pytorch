@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <torch/types.h>
 
 namespace torch {
 namespace special {
@@ -34,7 +35,10 @@ inline Tensor gammainc(const Tensor& self, const Tensor& other) {
   return torch::special_gammainc(self, other);
 }
 
-inline Tensor& gammainc_out(Tensor& result, const Tensor& self, const Tensor& other) {
+inline Tensor& gammainc_out(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other) {
   return torch::special_gammainc_out(result, self, other);
 }
 
@@ -51,7 +55,10 @@ inline Tensor gammaincc(const Tensor& self, const Tensor& other) {
   return torch::special_gammaincc(self, other);
 }
 
-inline Tensor& gammaincc_out(Tensor& result, const Tensor& self, const Tensor& other) {
+inline Tensor& gammaincc_out(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other) {
   return torch::special_gammaincc_out(result, self, other);
 }
 
@@ -199,8 +206,9 @@ inline Tensor& erfinv_out(Tensor& result, const Tensor& self) {
   return torch::special_erfinv_out(result, self);
 }
 
-/// Computes the log of summed exponentials of each row of input in the given dimension dim
-/// See https://pytorch.org/docs/master/special.html#torch.special.logsumexp.
+/// Computes the log of summed exponentials of each row of input in the given
+/// dimension dim See
+/// https://pytorch.org/docs/master/special.html#torch.special.logsumexp.
 ///
 /// Example:
 /// ```
@@ -211,13 +219,18 @@ inline Tensor logsumexp(const Tensor& self, IntArrayRef dims, bool keepdim) {
   return torch::special_logsumexp(self, dims, keepdim);
 }
 
-inline Tensor& logsumexp_out(Tensor& result, const Tensor& self, IntArrayRef dims, bool keepdim) {
+inline Tensor& logsumexp_out(
+    Tensor& result,
+    const Tensor& self,
+    IntArrayRef dims,
+    bool keepdim) {
   return torch::special_logsumexp_out(result, self, dims, keepdim);
 }
 
-/// Computes the argument, x, for which the area under the Gaussian probability density
-/// function (integrated from minus infinity to x) is equal to input, elementwise.
-/// See https://pytorch.org/docs/master/special.html#torch.special.ndtri
+/// Computes the argument, x, for which the area under the Gaussian probability
+/// density function (integrated from minus infinity to x) is equal to input,
+/// elementwise. See
+/// https://pytorch.org/docs/master/special.html#torch.special.ndtri
 ///
 /// Example:
 /// ```
@@ -232,9 +245,9 @@ inline Tensor& ndtri_out(Tensor& result, const Tensor& self) {
   return torch::special_ndtri_out(result, self);
 }
 
-/// Computes the log of area under the standard Gaussian probability density function,
-/// integrated from minus infinity to :attr:`input`, elementwise
-/// See https://pytorch.org/docs/master/special.html#torch.special.log_ndtr
+/// Computes the log of area under the standard Gaussian probability density
+/// function, integrated from minus infinity to :attr:`input`, elementwise See
+/// https://pytorch.org/docs/master/special.html#torch.special.log_ndtr
 ///
 /// Example:
 /// ```
@@ -265,8 +278,9 @@ inline Tensor& logit_out(Tensor& result, const Tensor& self) {
   return torch::special_logit_out(result, self);
 }
 
-/// Computes the expit (also known as the logistic sigmoid function) of input, elementwise
-/// See https://pytorch.org/docs/master/special.html#torch.special.expit.
+/// Computes the expit (also known as the logistic sigmoid function) of input,
+/// elementwise See
+/// https://pytorch.org/docs/master/special.html#torch.special.expit.
 ///
 /// Example:
 /// ```
@@ -334,15 +348,24 @@ inline Tensor xlogy(const Tensor& self, const Scalar& other) {
   return torch::special_xlogy(self, other);
 }
 
-inline Tensor& xlogy_out(Tensor& result, const Tensor& self, const Tensor& other) {
+inline Tensor& xlogy_out(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other) {
   return torch::special_xlogy_out(result, self, other);
 }
 
-inline Tensor& xlogy_out(Tensor& result, const Scalar& self, const Tensor& other) {
+inline Tensor& xlogy_out(
+    Tensor& result,
+    const Scalar& self,
+    const Tensor& other) {
   return torch::special_xlogy_out(result, self, other);
 }
 
-inline Tensor& xlogy_out(Tensor& result, const Tensor& self, const Scalar& other) {
+inline Tensor& xlogy_out(
+    Tensor& result,
+    const Tensor& self,
+    const Scalar& other) {
   return torch::special_xlogy_out(result, self, other);
 }
 
@@ -367,15 +390,24 @@ inline Tensor xlog1py(const Tensor& self, const Scalar& other) {
   return torch::special_xlog1py(self, other);
 }
 
-inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Tensor& other) {
+inline Tensor& xlog1py_out(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other) {
   return torch::special_xlog1py_out(result, self, other);
 }
 
-inline Tensor& xlog1py_out(Tensor& result, const Scalar& self, const Tensor& other) {
+inline Tensor& xlog1py_out(
+    Tensor& result,
+    const Scalar& self,
+    const Tensor& other) {
   return torch::special_xlog1py_out(result, self, other);
 }
 
-inline Tensor& xlog1py_out(Tensor& result, const Tensor& self, const Scalar& other) {
+inline Tensor& xlog1py_out(
+    Tensor& result,
+    const Tensor& self,
+    const Scalar& other) {
   return torch::special_xlog1py_out(result, self, other);
 }
 
@@ -400,20 +432,30 @@ inline Tensor zeta(const Tensor& self, const Scalar& other) {
   return torch::special_zeta(self, other);
 }
 
-inline Tensor& zeta_out(Tensor& result, const Tensor& self, const Tensor& other) {
+inline Tensor& zeta_out(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& other) {
   return torch::special_zeta_out(result, self, other);
 }
 
-inline Tensor& zeta_out(Tensor& result, const Scalar& self, const Tensor& other) {
+inline Tensor& zeta_out(
+    Tensor& result,
+    const Scalar& self,
+    const Tensor& other) {
   return torch::special_zeta_out(result, self, other);
 }
 
-inline Tensor& zeta_out(Tensor& result, const Tensor& self, const Scalar& other) {
+inline Tensor& zeta_out(
+    Tensor& result,
+    const Tensor& self,
+    const Scalar& other) {
   return torch::special_zeta_out(result, self, other);
 }
 
-/// Computes the zeroth order modified Bessel function of the first kind of input, elementwise
-/// See https://pytorch.org/docs/master/special.html#torch.special.i0
+/// Computes the zeroth order modified Bessel function of the first kind of
+/// input, elementwise See
+/// https://pytorch.org/docs/master/special.html#torch.special.i0
 ///
 /// Example:
 /// ```
@@ -445,8 +487,9 @@ inline Tensor& ndtr_out(Tensor& result, const Tensor& self) {
   return torch::special_ndtr_out(result, self);
 }
 
-/// Computes the exponentially scaled zeroth order modified Bessel function of the first kind
-/// See https://pytorch.org/docs/master/special.html#torch.special.i0e.
+/// Computes the exponentially scaled zeroth order modified Bessel function of
+/// the first kind See
+/// https://pytorch.org/docs/master/special.html#torch.special.i0e.
 ///
 /// Example:
 /// ```
@@ -477,8 +520,9 @@ inline Tensor& i1_out(Tensor& result, const Tensor& self) {
   return torch::special_i1_out(result, self);
 }
 
-/// Computes the exponentially scaled first order modified Bessel function of the first kind
-/// See https://pytorch.org/docs/master/special.html#torch.special.i1e.
+/// Computes the exponentially scaled first order modified Bessel function of
+/// the first kind See
+/// https://pytorch.org/docs/master/special.html#torch.special.i1e.
 ///
 /// Example:
 /// ```
@@ -549,7 +593,10 @@ inline Tensor& log1p_out(Tensor& result, const Tensor& self) {
 /// auto t = torch::randn(128, 128, dtype=kDouble);
 /// torch::special::log_softmax(t, 0);
 /// ```
-inline Tensor log_softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+inline Tensor log_softmax(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<ScalarType> dtype) {
   return torch::special_log_softmax(self, dim, dtype);
 }
 
@@ -561,8 +608,30 @@ inline Tensor log_softmax(const Tensor& self, int64_t dim, c10::optional<ScalarT
 /// auto t = torch::randn(128, 128, dtype=kDouble);
 /// torch::special::softmax(t, 0);
 /// ```
-inline Tensor softmax(const Tensor& self, int64_t dim, c10::optional<ScalarType> dtype) {
+inline Tensor softmax(
+    const Tensor& self,
+    int64_t dim,
+    c10::optional<ScalarType> dtype) {
   return torch::special_softmax(self, dim, dtype);
+}
+
+/// Airy function Ai.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_ai.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::airy_ai(x);
+/// ```
+inline Tensor airy_ai(const Tensor& x) {
+  return torch::special_airy_ai(x);
+}
+
+inline Tensor& airy_ai_out(Tensor& y, const Tensor& x) {
+  return torch::special_airy_ai_out(y, x);
 }
 
 /// Bessel function of the first kind of order 0.
@@ -643,7 +712,8 @@ inline Tensor& bessel_y1_out(Tensor& result, const Tensor& self) {
 
 /// Chebyshev polynomial of the first kind.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_t.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_t.
 ///
 /// Example:
 ///
@@ -665,21 +735,31 @@ inline Tensor chebyshev_polynomial_t(const Tensor& x, const Scalar& n) {
   return torch::special_chebyshev_polynomial_t(x, n);
 }
 
-inline Tensor& chebyshev_polynomial_t_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& chebyshev_polynomial_t_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_chebyshev_polynomial_t_out(output, x, n);
 }
 
-inline Tensor& chebyshev_polynomial_t_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& chebyshev_polynomial_t_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_chebyshev_polynomial_t_out(output, x, n);
 }
 
-inline Tensor& chebyshev_polynomial_t_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& chebyshev_polynomial_t_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_chebyshev_polynomial_t_out(output, x, n);
 }
 
 /// Chebyshev polynomial of the second kind.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_u.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_u.
 ///
 /// Example:
 ///
@@ -701,21 +781,31 @@ inline Tensor chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
   return torch::special_chebyshev_polynomial_u(x, n);
 }
 
-inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& chebyshev_polynomial_u_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_chebyshev_polynomial_u_out(output, x, n);
 }
 
-inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& chebyshev_polynomial_u_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_chebyshev_polynomial_u_out(output, x, n);
 }
 
-inline Tensor& chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& chebyshev_polynomial_u_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_chebyshev_polynomial_u_out(output, x, n);
 }
 
 /// Chebyshev polynomial of the third kind.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_v.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_v.
 ///
 /// Example:
 ///
@@ -737,21 +827,31 @@ inline Tensor chebyshev_polynomial_v(const Tensor& x, const Scalar& n) {
   return torch::special_chebyshev_polynomial_v(x, n);
 }
 
-inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& chebyshev_polynomial_v_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_chebyshev_polynomial_v_out(output, x, n);
 }
 
-inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& chebyshev_polynomial_v_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_chebyshev_polynomial_v_out(output, x, n);
 }
 
-inline Tensor& chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& chebyshev_polynomial_v_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_chebyshev_polynomial_v_out(output, x, n);
 }
 
 /// Chebyshev polynomial of the fourth kind.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_w.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.chebyshev_polynomial_w.
 ///
 /// Example:
 ///
@@ -773,21 +873,31 @@ inline Tensor chebyshev_polynomial_w(const Tensor& x, const Scalar& n) {
   return torch::special_chebyshev_polynomial_w(x, n);
 }
 
-inline Tensor& chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& chebyshev_polynomial_w_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_chebyshev_polynomial_w_out(output, x, n);
 }
 
-inline Tensor& chebyshev_polynomial_w_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& chebyshev_polynomial_w_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_chebyshev_polynomial_w_out(output, x, n);
 }
 
-inline Tensor& chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& chebyshev_polynomial_w_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_chebyshev_polynomial_w_out(output, x, n);
 }
 
 /// Physicist’s Hermite polynomial.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_h.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_h.
 ///
 /// Example:
 ///
@@ -809,21 +919,31 @@ inline Tensor hermite_polynomial_h(const Tensor& x, const Scalar& n) {
   return torch::special_hermite_polynomial_h(x, n);
 }
 
-inline Tensor& hermite_polynomial_h_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& hermite_polynomial_h_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_hermite_polynomial_h_out(output, x, n);
 }
 
-inline Tensor& hermite_polynomial_h_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& hermite_polynomial_h_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_hermite_polynomial_h_out(output, x, n);
 }
 
-inline Tensor& hermite_polynomial_h_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& hermite_polynomial_h_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_hermite_polynomial_h_out(output, x, n);
 }
 
 /// Probabilist’s Hermite polynomial.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_he.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.hermite_polynomial_he.
 ///
 /// Example:
 ///
@@ -845,21 +965,31 @@ inline Tensor hermite_polynomial_he(const Tensor& x, const Scalar& n) {
   return torch::special_hermite_polynomial_he(x, n);
 }
 
-inline Tensor& hermite_polynomial_he_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& hermite_polynomial_he_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_hermite_polynomial_he_out(output, x, n);
 }
 
-inline Tensor& hermite_polynomial_he_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& hermite_polynomial_he_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_hermite_polynomial_he_out(output, x, n);
 }
 
-inline Tensor& hermite_polynomial_he_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& hermite_polynomial_he_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_hermite_polynomial_he_out(output, x, n);
 }
 
 /// Laguerre polynomial.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.laguerre_polynomial_l.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.laguerre_polynomial_l.
 ///
 /// Example:
 ///
@@ -881,21 +1011,31 @@ inline Tensor laguerre_polynomial_l(const Tensor& x, const Scalar& n) {
   return torch::special_laguerre_polynomial_l(x, n);
 }
 
-inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& laguerre_polynomial_l_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_laguerre_polynomial_l_out(output, x, n);
 }
 
-inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& laguerre_polynomial_l_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_laguerre_polynomial_l_out(output, x, n);
 }
 
-inline Tensor& laguerre_polynomial_l_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& laguerre_polynomial_l_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_laguerre_polynomial_l_out(output, x, n);
 }
 
 /// Legendre polynomial.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.legendre_polynomial_p.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.legendre_polynomial_p.
 ///
 /// Example:
 ///
@@ -917,21 +1057,31 @@ inline Tensor legendre_polynomial_p(const Tensor& x, const Scalar& n) {
   return torch::special_legendre_polynomial_p(x, n);
 }
 
-inline Tensor& legendre_polynomial_p_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& legendre_polynomial_p_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_legendre_polynomial_p_out(output, x, n);
 }
 
-inline Tensor& legendre_polynomial_p_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& legendre_polynomial_p_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_legendre_polynomial_p_out(output, x, n);
 }
 
-inline Tensor& legendre_polynomial_p_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& legendre_polynomial_p_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_legendre_polynomial_p_out(output, x, n);
 }
 
 /// Modified Bessel function of the first kind of order 0.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i0.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i0.
 ///
 /// Example:
 ///
@@ -950,7 +1100,8 @@ inline Tensor& modified_bessel_i0_out(Tensor& result, const Tensor& self) {
 
 /// Modified Bessel function of the first kind of order 1.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i1.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_i1.
 ///
 /// Example:
 ///
@@ -969,7 +1120,8 @@ inline Tensor& modified_bessel_i1_out(Tensor& result, const Tensor& self) {
 
 /// Modified Bessel function of the second kind of order 0.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k0.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k0.
 ///
 /// Example:
 ///
@@ -988,7 +1140,8 @@ inline Tensor& modified_bessel_k0_out(Tensor& result, const Tensor& self) {
 
 /// Modified Bessel function of the second kind of order 1.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k1.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.modified_bessel_k1.
 ///
 /// Example:
 ///
@@ -1005,9 +1158,30 @@ inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
   return torch::special_modified_bessel_k1_out(result, self);
 }
 
+/// Scaled modified Bessel function of the second kind of order 1.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_k1(x);
+/// ```
+inline Tensor scaled_modified_bessel_k1(const Tensor& x) {
+  return torch::special_scaled_modified_bessel_k1(x);
+}
+
+inline Tensor& scaled_modified_bessel_k1_out(Tensor& y, const Tensor& x) {
+  return torch::special_scaled_modified_bessel_k1_out(y, x);
+}
+
 /// Shifted Chebyshev polynomial of the first kind.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_t.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_t.
 ///
 /// Example:
 ///
@@ -1029,21 +1203,31 @@ inline Tensor shifted_chebyshev_polynomial_t(const Tensor& x, const Scalar& n) {
   return torch::special_shifted_chebyshev_polynomial_t(x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_t_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& shifted_chebyshev_polynomial_t_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_shifted_chebyshev_polynomial_t_out(output, x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_t_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& shifted_chebyshev_polynomial_t_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_shifted_chebyshev_polynomial_t_out(output, x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_t_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& shifted_chebyshev_polynomial_t_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_shifted_chebyshev_polynomial_t_out(output, x, n);
 }
 
 /// Shifted Chebyshev polynomial of the second kind.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_u.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_u.
 ///
 /// Example:
 ///
@@ -1065,21 +1249,31 @@ inline Tensor shifted_chebyshev_polynomial_u(const Tensor& x, const Scalar& n) {
   return torch::special_shifted_chebyshev_polynomial_u(x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& shifted_chebyshev_polynomial_u_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_shifted_chebyshev_polynomial_u_out(output, x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_u_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& shifted_chebyshev_polynomial_u_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_shifted_chebyshev_polynomial_u_out(output, x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_u_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& shifted_chebyshev_polynomial_u_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_shifted_chebyshev_polynomial_u_out(output, x, n);
 }
 
 /// Shifted Chebyshev polynomial of the third kind.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_v.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_v.
 ///
 /// Example:
 ///
@@ -1101,21 +1295,31 @@ inline Tensor shifted_chebyshev_polynomial_v(const Tensor& x, const Scalar& n) {
   return torch::special_shifted_chebyshev_polynomial_v(x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& shifted_chebyshev_polynomial_v_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_shifted_chebyshev_polynomial_v_out(output, x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_v_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& shifted_chebyshev_polynomial_v_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_shifted_chebyshev_polynomial_v_out(output, x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_v_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& shifted_chebyshev_polynomial_v_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_shifted_chebyshev_polynomial_v_out(output, x, n);
 }
 
 /// Shifted Chebyshev polynomial of the fourth kind.
 ///
-/// See https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_w.
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.shifted_chebyshev_polynomial_w.
 ///
 /// Example:
 ///
@@ -1137,16 +1341,45 @@ inline Tensor shifted_chebyshev_polynomial_w(const Tensor& x, const Scalar& n) {
   return torch::special_shifted_chebyshev_polynomial_w(x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const Tensor& n) {
+inline Tensor& shifted_chebyshev_polynomial_w_out(
+    Tensor& output,
+    const Tensor& x,
+    const Tensor& n) {
   return torch::special_shifted_chebyshev_polynomial_w_out(output, x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_w_out(Tensor& output, const Scalar& x, const Tensor& n) {
+inline Tensor& shifted_chebyshev_polynomial_w_out(
+    Tensor& output,
+    const Scalar& x,
+    const Tensor& n) {
   return torch::special_shifted_chebyshev_polynomial_w_out(output, x, n);
 }
 
-inline Tensor& shifted_chebyshev_polynomial_w_out(Tensor& output, const Tensor& x, const Scalar& n) {
+inline Tensor& shifted_chebyshev_polynomial_w_out(
+    Tensor& output,
+    const Tensor& x,
+    const Scalar& n) {
   return torch::special_shifted_chebyshev_polynomial_w_out(output, x, n);
 }
 
-}} // torch::special
+/// Spherical Bessel function of the first kind of order 0.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_j0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_j0(x);
+/// ```
+inline Tensor spherical_bessel_j0(const Tensor& x) {
+  return torch::special_spherical_bessel_j0(x);
+}
+
+inline Tensor& spherical_bessel_j0_out(Tensor& y, const Tensor& x) {
+  return torch::special_spherical_bessel_j0_out(y, x);
+}
+} // namespace special
+} // namespace torch

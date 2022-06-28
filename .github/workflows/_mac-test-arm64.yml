@@ -11,7 +11,6 @@ on:
 
 jobs:
   run_mps_test:
-    if: ${{ false }}
     name: "Run MPS tests"
     runs-on: macos12.3-m1
     steps:
@@ -54,5 +53,9 @@ jobs:
           # shellcheck disable=SC1090
           . ~/miniconda3/etc/profile.d/conda.sh
           set -ex
+          # TODO(https://github.com/pytorch/pytorch/issues/79293)
+          # This step currently fails if we actually run as if we're in CI.
+          unset CI
+
           conda run --cwd test -p "${ENV_NAME}" python3 test_mps.py -v
           conda env remove -p "${ENV_NAME}"

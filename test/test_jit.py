@@ -39,8 +39,7 @@ from jit.test_python_ir import TestPythonIr  # noqa: F401
 from jit.test_functional_blocks import TestFunctionalBlocks  # noqa: F401
 from jit.test_remove_mutation import TestRemoveMutation  # noqa: F401
 from jit.test_torchbind import TestTorchbind  # noqa: F401
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
-from jit.test_onnx_export import TestONNXExport  # noqa: F401
+from jit.test_module_interface import TestModuleInterface  # noqa: F401  # noqa: F401
 from jit.test_with import TestWith  # noqa: F401
 from jit.test_enum import TestEnum  # noqa: F401
 from jit.test_string_formatting import TestStringFormatting  # noqa: F401
@@ -605,6 +604,19 @@ class TestJit(JitTestCase):
         # Since _add_relu_ with out=a does inplace mutation ensure
         # a_copy is modified
         torch.testing.assert_close(orig_res, a_copy)
+
+    def test_repeat_interleave_script(self):
+        def fn(input: torch.Tensor, repeats: torch.Tensor) -> torch.Tensor:
+            output = input.repeat_interleave(repeats)
+            return output
+        fn_scripted = torch.jit.script(fn)
+
+        input = torch.tensor([5, 7], dtype=torch.int64)
+        repeats = torch.tensor([3, 6], dtype=torch.int64)
+
+        output = fn(input, repeats)
+        output_scripted = fn_scripted(input, repeats)
+        self.assertEqual(output_scripted, output)
 
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.LEGACY, "Simple executor doesn't have shape information")
     def test_peephole_optimize_shape_ops(self):
@@ -16095,6 +16107,16 @@ dedent """
 
         inp = torch.ones(1)
         self.checkModule(MyModule(), inp)
+
+    def test_index_with_tuple(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super(MyModule, self).__init__()
+
+            def forward(self, x):
+                return x[(1,)]
+
+        self.checkModule(MyModule(), (torch.ones(2, 3),))
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {

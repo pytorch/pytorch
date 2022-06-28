@@ -46,12 +46,12 @@ class TestComposability(TestCase):
 
         sparse_config = [
             {
-                "module": model[5],
+                "tensor_fqn": '5.weight',
                 "sparsity_level": 0.7,
                 "sparse_block_shape": (1, 4),
                 "zeros_per_block": 4,
             },
-            model[0],
+            {"tensor_fqn": "0.weight"},
         ]
         return model, sparsifier, sparse_config
 
@@ -198,9 +198,21 @@ class TestComposability(TestCase):
         (
             mod,
             sparsifier,
-            sparse_config,
+            _,
         ) = self._get_model_and_sparsifier_and_sparse_config()
         tq.fuse_modules(mod, [["5", "6"]], inplace=True)
+
+        # its absolutely broken by fusion but will still work if you put the correct fqn in
+        sparse_config = [
+            {
+                "tensor_fqn": "5.0.weight",
+                "sparsity_level": 0.7,
+                "sparse_block_shape": (1, 4),
+                "zeros_per_block": 4,
+            },
+            {"tensor_fqn": ".0.weight"},
+        ]
+
         sparsifier.prepare(mod, config=sparse_config)
         mod[5].qconfig = tq.get_default_qconfig("fbgemm")
         tq.prepare(mod, inplace=True)
@@ -272,12 +284,12 @@ class TestComposability(TestCase):
         # need to setup sparse_config on new modules
         sparse_config = [
             {
-                "module": mod[5],
+                "tensor_fqn": "5.weight",
                 "sparsity_level": 0.7,
                 "sparse_block_shape": (1, 4),
                 "zeros_per_block": 4,
             },
-            mod[0],
+            {"tensor_fqn": ".0.weight"},
         ]
         sparsifier.prepare(mod, config=sparse_config)
 

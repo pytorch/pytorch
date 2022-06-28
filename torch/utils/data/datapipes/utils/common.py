@@ -1,9 +1,11 @@
-import os
 import fnmatch
+import inspect
+import os
 import warnings
 
 from io import IOBase
-from typing import Dict, Iterable, List, Tuple, Union, Optional
+from functools import partial
+from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union
 
 from torch.utils.data._utils.serialization import DILL_AVAILABLE
 
@@ -16,13 +18,48 @@ __all__ = [
 ]
 
 
-def _check_lambda_fn(fn):
-    # Partial object has no attribute '__name__', but can be pickled
-    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+def _is_local_fn(fn):
+    # Functions or Methods
+    if hasattr(fn, "__code__"):
+        return fn.__code__.co_flags & inspect.CO_NESTED
+    # Callable Objects
+    else:
+        if hasattr(fn, "__qualname__"):
+            return "<locals>" in fn.__qualname__
+        fn_type = type(fn)
+        if hasattr(fn_type, "__qualname__"):
+            return "<locals>" in fn_type.__qualname__
+    return False
+
+
+def _check_unpickable_fn(fn: Callable):
+    """
+    Checks function is pickable or not. If it is a lambda or local function, a UserWarning
+    will be raised. If it's not a callable function, a TypeError will be raised.
+    """
+    if not callable(fn):
+        raise TypeError(f"A callable function is expected, but {type(fn)} is provided.")
+
+    # Extract function from partial object
+    # Nested partial function is automatically expanded as a single partial object
+    if isinstance(fn, partial):
+        fn = fn.func
+
+    # Local function
+    if _is_local_fn(fn) and not DILL_AVAILABLE:
         warnings.warn(
-            "Lambda function is not supported for pickle, please use "
+            "Local function is not supported by pickle, please use "
             "regular python function or functools.partial instead."
         )
+        return
+
+    # Lambda function
+    if hasattr(fn, "__name__") and fn.__name__ == "<lambda>" and not DILL_AVAILABLE:
+        warnings.warn(
+            "Lambda function is not supported by pickle, please use "
+            "regular python function or functools.partial instead."
+        )
+        return
 
 
 def match_masks(name : str, masks : Union[str, List[str]]) -> bool:
@@ -107,15 +144,15 @@ def validate_pathname_binary_tuple(data: Tuple[str, IOBase]):
 # Deprecated function names and its corresponding DataPipe type and kwargs for the `_deprecation_warning` function
 _iter_deprecated_functional_names: Dict[str, Dict] = {"open_file_by_fsspec":
                                                       {"old_class_name": "FSSpecFileOpener",
-                                                       "deprecation_version": "1.12",
-                                                       "removal_version": "1.14",
+                                                       "deprecation_version": "0.4.0",
+                                                       "removal_version": "0.6.0",
                                                        "old_functional_name": "open_file_by_fsspec",
                                                        "new_functional_name": "open_files_by_fsspec",
                                                        "deprecate_functional_name_only": True},
                                                       "open_file_by_iopath":
                                                       {"old_class_name": "IoPathFileOpener",
-                                                       "deprecation_version": "1.12",
-                                                       "removal_version": "1.14",
+                                                       "deprecation_version": "0.4.0",
+                                                       "removal_version": "0.6.0",
                                                        "old_functional_name": "open_file_by_iopath",
                                                        "new_functional_name": "open_files_by_iopath",
                                                        "deprecate_functional_name_only": True}}

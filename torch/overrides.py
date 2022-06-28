@@ -34,7 +34,7 @@ from torch._C import (
     _has_torch_function, _has_torch_function_unary,
     _has_torch_function_variadic, _add_docstr, _set_torch_function_mode, _get_torch_function_mode)
 
-from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init
+from torch.utils._mode_utils import _enable_mode, _push_mode, _ModeInfo, _wrap_init, _restore_mode
 
 __all__ = [
     "get_ignored_functions",
@@ -47,6 +47,7 @@ __all__ = [
     "is_tensor_method_or_property",
     "wrap_torch_function",
     "enable_reentrant_dispatch",
+    "get_buffer",
 ]
 
 @functools.lru_cache(None)
@@ -279,6 +280,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._addmm_activation,
         Tensor._nested_tensor_layer_norm,
         Tensor.to_padded_tensor,
+        Tensor.sym_size
     }
 
 
@@ -751,6 +753,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.ctc_loss: (lambda log_probs, targets, input_lengths, target_lengths, blank=0,
                                        reduction='mean', zero_infinity=False: -1),
         torch.nn.functional.dropout: lambda input, p=0.5, training=True, inplace=False: -1,
+        torch.nn.functional.dropout1d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.dropout2d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.dropout3d: lambda input, p=0.5, training=True, inplace=False: -1,
         torch.nn.functional.elu: lambda input, alpha=1.0, inplace=False: -1,
@@ -946,7 +949,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.scatter_add: lambda input, dim, index, src: -1,
         torch.scatter_reduce: lambda input, dim, index, src, reduce, include_self=True: -1,
         torch.searchsorted: lambda sorted_sequence, input, out_int32=False, right=False, out=None: -1,
-        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, axis=0, unsafe=False: -1,
+        torch.segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
@@ -963,7 +966,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.smm: lambda input, mat2: -1,
         torch.spmm: lambda input, mat2: -1,
         torch.softmax: lambda input, dim, dtype=None: -1,
-        torch.linalg.solve: lambda input, other, out=None: -1,
+        torch.linalg.solve: lambda A, B, left=True, out=None: -1,
         torch.sort: lambda input, dim=-1, descending=False, *, stable=False, out=None: -1,
         torch.split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,
@@ -987,6 +990,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.symeig: lambda input, eigenvectors=False, upper=True, out=None: -1,
         torch.swapaxes: lambda input, dim0, dim1: -1,
         torch.swapdims: lambda input, axis0, axis1: -1,
+        torch.special.airy_ai: lambda input: -1,
         torch.special.bessel_j0: lambda input: -1,
         torch.special.bessel_j1: lambda input: -1,
         torch.special.bessel_y0: lambda input: -1,
@@ -1030,12 +1034,14 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.polygamma: lambda input, n, out=None: -1,
         torch.special.psi: lambda input: -1,
         torch.special.round: lambda input: -1,
+        torch.special.scaled_modified_bessel_k1: lambda input: -1,
         torch.special.shifted_chebyshev_polynomial_t: lambda input, n, out=None: -1,
         torch.special.shifted_chebyshev_polynomial_u: lambda input, n, out=None: -1,
         torch.special.shifted_chebyshev_polynomial_v: lambda input, n, out=None: -1,
         torch.special.shifted_chebyshev_polynomial_w: lambda input, n, out=None: -1,
         torch.special.sinc: lambda input: -1,
         torch.special.softmax: lambda input, dim, dtype=None: -1,
+        torch.special.spherical_bessel_j0: lambda input: -1,
         torch.special.xlog1py: lambda input, other, out=None: -1,
         torch.special.xlogy: lambda input, other, out=None: -1,
         torch.special.zeta: lambda self, other, out=None: -1,
@@ -1266,6 +1272,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.narrow_copy: lambda self, dimension, start, length: -1,
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
+        Tensor._nested_tensor_size: lambda self: -1,
         Tensor.normal_: lambda self: -1,
         Tensor.numpy: lambda self: -1,
         Tensor.permute: lambda self, dim: -1,
@@ -1840,14 +1847,23 @@ class TorchFunctionMode(metaclass=TorchFunctionModeMeta):
         raise NotImplementedError()
 
     def __enter__(self):
-        if hasattr(self, "inner"):
-            raise RuntimeError(f"{self} has already been used as a mode, please create and use a fresh version")
         old = _get_torch_function_mode()
-        self.inner = old
+        if hasattr(self, "inner"):
+            raise RuntimeError(f"{self} has already been used as a mode. Please use a fresh version or use restore")
+        else:
+            self.inner = old
+            if old is None:
+                self.ancestors = set()
+            else:
+                self.ancestors = self.inner.ancestors.union({self.inner})
         _set_torch_function_mode(self)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _set_torch_function_mode(self.inner)
+
+    @contextlib.contextmanager
+    def restore(self):
+        return _restore_mode(self, mode_info=_TorchFunctionModeInfo())
 
     @classmethod
     def push(cls, *args, **kwargs):
@@ -1943,3 +1959,13 @@ class enable_reentrant_dispatch():
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
         del self._raii_guard
+
+def get_buffer(tensor_subclass, data, prefix):
+    import ctypes
+    assert prefix in {"stride", "size"}
+    buffer_name = f"_{prefix}_buffer"
+    if not hasattr(tensor_subclass, buffer_name):
+        SizeType = ctypes.c_longlong * len(data)
+        setattr(tensor_subclass, buffer_name, SizeType(*data))
+    ptr = ctypes.addressof(getattr(tensor_subclass, buffer_name))
+    return (ptr, len(data))

@@ -22,18 +22,17 @@ MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
   const size_t shape_size = size.size();
 
   @autoreleasepool {
-      int32_t* sizeArray = new int32_t[shape_size];
+      std::vector<int32_t> sizeArray(shape_size);
       const int64_t int_max = std::numeric_limits<int32_t>::max();
       for (int i = 0; i < shape_size; i++) {
         TORCH_CHECK(size[i] <= int_max);
         sizeArray[i] = static_cast<int32_t>(size[i]);
       }
-      NSData* shapeData = [NSData dataWithBytes:sizeArray
+      NSData* shapeData = [NSData dataWithBytes:sizeArray.data()
                                          length:shape_size * sizeof(int32_t)];
       MPSGraphTensor* shapeTensor =  [mpsGraph constantWithData:shapeData
                                                           shape:@[[NSNumber numberWithUnsignedInteger: shape_size]]
                                                        dataType:MPSDataTypeInt32];
-      delete[] sizeArray;
 
       MPSGraphTensor* storageOffsetTensor = [mpsGraph constantWithScalar:storage_offset
                                                                 dataType:MPSDataTypeInt32];
@@ -131,16 +130,19 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
       string key = mps::getStridedKey(self, size, stride, storage_offset);
       CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
       if (!cachedGraph) {
+        // Check if this stride operation is already performed on a strided tensor
+        auto origKey = getStridedKey(self, self.sizes(), self.strides(), self.storage_offset());
+        auto origGraph = static_cast<CachedGraph *>(cache_->LookUp(origKey));
         cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
           CachedGraph *newCachedGraph = nil;
           @autoreleasepool {
               MPSGraph* mpsGraph = make_mps_graph();
               newCachedGraph = new CachedGraph(mpsGraph);
 
-              // Self is the input tensor we are creating view of
-              MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : getMPSShape(self)
-                                                                  dataType : getMPSDataType(self.scalar_type())
-                                                                      name : nil];
+              // Self is the input tensor we are creating view of, which can also be a stride
+              // In later case, preserve shape from the original graph
+              auto shape = origGraph ? [origGraph->inputTensor_ shape] : getMPSShape(self);
+              auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self.scalar_type()), shape);
               newCachedGraph->inputTensor_ = inputTensor;
               newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size, stride,
                                                                  storage_offset, inputTensor, self);
@@ -339,9 +341,6 @@ static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
     }
   }
 
-  if (!dst_.is_contiguous()) {
-    TORCH_WARN("The dst MTL buffer in copy_to_mps is non-contiguous");
-  }
   const void* host_src = src.storage().data();
   uint64_t size = src.nbytes();
 
@@ -425,17 +424,13 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
   } else {
     src = src_;
   }
-  Tensor dst = dst_;
-  dst._set_conj(dst_.is_conj());
   src._set_conj(src_.is_conj());
-
-  dst._set_neg(dst_.is_neg());
   src._set_neg(src_.is_neg());
 
-  auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
-  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst.storage().data());
+  auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
+  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst_.storage().data());
 
-  if (src.dtype() == dst.dtype()) {
+  if (src.dtype() == dst_.dtype()) {
     MPSStream* stream = getCurrentMPSStream();
     dispatch_sync(stream->queue(), ^() {
       @autoreleasepool {
@@ -453,7 +448,7 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
   } else {
     copy_cast_mps(dst_, src_, destBuffer, sourceBuffer);
   }
-  return dst;
+  return dst_;
 }
 
 at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)

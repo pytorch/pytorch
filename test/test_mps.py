@@ -7,6 +7,7 @@ import random
 import unittest
 import warnings
 import subprocess
+import tempfile
 import os
 import torch
 import torch.nn as nn
@@ -17,7 +18,7 @@ from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
 from torch.testing._comparison import TensorLikePair
 import torch.backends.mps
-from torch.distributions import Uniform
+from torch.distributions import Uniform, Exponential
 
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
@@ -742,7 +743,46 @@ class TestMPS(TestCase):
                         helper(shape, eps=3, momentum=0.67, wts=True, training=True, channels_last=channels_last,
                                track_running_stats=track_running_stats, test_module=test_module)
 
-    # Test forward instance norm
+    def test_layer_norm(self):
+        # TODO: Test non-contiguous
+        def helper(input_shape, normalized_shape, eps=1e-05, elementwise_affine=True, dtype=torch.float32):
+            cpu_x = torch.randn(input_shape, device='cpu', dtype=dtype, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            cpu_op = torch.nn.LayerNorm(normalized_shape, eps=eps, elementwise_affine=elementwise_affine, device='cpu', dtype=dtype)
+            mps_op = torch.nn.LayerNorm(normalized_shape, eps=eps, elementwise_affine=elementwise_affine, device='mps', dtype=dtype)
+            cpu_wt = torch.randn(normalized_shape, device='cpu', dtype=dtype, requires_grad=True)
+            wt = cpu_wt.detach().clone().to('mps').requires_grad_()
+            cpu_bias = torch.randn(normalized_shape, device='cpu', dtype=dtype, requires_grad=True)
+            bias = cpu_bias.detach().clone().to('mps').requires_grad_()
+
+            if(elementwise_affine):
+                cpu_op.weight = torch.nn.Parameter(cpu_wt)
+                mps_op.weight = torch.nn.Parameter(wt)
+                cpu_op.bias = torch.nn.Parameter(cpu_bias)
+                mps_op.bias = torch.nn.Parameter(bias)
+
+            cpu_result = cpu_op(cpu_x)
+            result = mps_op(x)
+
+            cpu_grad = torch.randn(cpu_result.shape)
+            grad = cpu_grad.to('mps')
+
+            cpu_result.backward(cpu_grad)
+            result.backward(grad)
+
+            self.assertEqual(result, cpu_result)
+            self.assertEqual(x.grad, cpu_x.grad)
+            if(elementwise_affine):
+                self.assertEqual(mps_op.weight.grad, cpu_op.weight.grad)
+                self.assertEqual(mps_op.bias.grad, cpu_op.bias.grad)
+
+        for elementwise_affine in [True, False]:
+            helper((2, 2, 2, 2), (2, 2), elementwise_affine=elementwise_affine)
+            helper((2, 3, 4, 5), (4, 5), elementwise_affine=elementwise_affine)
+            helper((2, 3, 4, 5, 6), (4, 5, 6), elementwise_affine=elementwise_affine)
+
+
     def test_instance_norm(self):
         def helper(shape, eps=1, momentum=0.1, wts=False, channels_last=False, track_running_stats=True, test_module=False):
 
@@ -1404,6 +1444,14 @@ class TestMPS(TestCase):
                          torch.tensor(4, dtype=torch.int32))
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
+        # Cast int8 and uint8 to float and compare results
+        # See https://github.com/pytorch/pytorch/issues/80009 for more details
+        cpu_byte = torch.tensor([60, 160, 20, 220], dtype=torch.uint8)
+        cpu_char = torch.tensor([60, -60, 20, -120], dtype=torch.uint8)
+        for x_cpu in [cpu_byte, cpu_char]:
+            x_mps = x_cpu.to('mps')
+            self.assertEqual(x_mps.to(torch.float32), x_cpu.to(torch.float32))
+
 
     def test_setitem_scalar(self) -> None:
         device = 'mps'
@@ -1419,6 +1467,14 @@ class TestMPS(TestCase):
                     self.assertEqual(t[1, 2], i)
                     self.assertEqual(t[2, 1], j)
                     self.assertEqual(t.sum(), 1 + i + j)
+
+    def test_stride_of_strides(self) -> None:
+        x = torch.rand(32, 1, device='mps')
+        y = x.as_strided(size=(32, 2), stride=(1, 0))
+        # Casting stride of strided tensor to CPU use to crash with "buffer is not large enough." assert
+        # See https://github.com/pytorch/pytorch/issues/79181#issuecomment-1154683435
+        z = y.as_strided(size=(32, 3), stride=(1, 0)).to("cpu")
+        self.assertEqual(x.to("cpu").as_strided(size=(32, 3), stride=(1, 0)), z)
 
 
 class TestSmoothL1Loss(TestCase):
@@ -1461,7 +1517,6 @@ class TestSmoothL1Loss(TestCase):
 
 
 class TestNLLLoss(TestCase):
-
     def test_nll_loss_mismatched_batch(self, device='mps'):
         x = torch.randn((10, 3), requires_grad=True, device=device)
         # t should have size (10,)
@@ -1621,6 +1676,35 @@ class TestNLLLoss(TestCase):
             self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
             self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
 
+    # L1 loss
+    def test_l1_loss(self):
+        def helper(shape, reduction):
+            # create the criterion
+            loss = torch.nn.L1Loss(reduction=reduction)
+
+            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            targetCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
+            targetMPS = targetCPU.detach().clone().to('mps')
+
+            # forward pass
+            outputCPU = loss(inputCPU, targetCPU)
+            outputMPS = loss(inputMPS, targetMPS)
+            self.assertEqual(outputCPU, outputMPS)
+
+            # backward pass
+            if reduction != 'none':
+                # chose 2 just to make the grad_output > 1 in backward pass
+                outputCPU.backward(gradient=torch.full_like(outputCPU, 2))
+                outputMPS.backward(gradient=torch.full_like(outputMPS, 2))
+                self.assertEqual(inputCPU.grad, inputMPS.grad)
+
+        helper([8, 5, 4], 'none')
+        helper([7, 5, 2, 4], 'sum')
+        # verify if changes in shape would cause cached graph lookup problems
+        helper([7, 5, 2, 4, 6], 'sum')
+        helper([8, 4, 5, 7, 6], 'mean')
+
     # Mean Squared Error
     def test_mse_loss(self):
         def helper(shape, reduction):
@@ -1651,7 +1735,7 @@ class TestNLLLoss(TestCase):
         helper([8, 4, 5, 7, 6], 'mean')
 
     # Binary Cross Enropy
-    def test_bce_loss(self):
+    def test_bce_loss_simple(self):
         def helper(shape, reduction):
             # create the criterion
             loss = torch.nn.BCELoss(reduction=reduction)
@@ -1681,6 +1765,146 @@ class TestNLLLoss(TestCase):
         # verify if changes in shape would cause cached graph lookup problems
         helper([7, 5, 2, 4, 6], 'sum')
         helper([8, 4, 5, 7, 6], 'mean')
+        helper([1, 1, 32, 32], 'mean')
+
+    def test_bce_loss_always_nonnegative(self):
+        target = torch.ones(5, device='mps')
+        input = torch.ones(5, device='mps')
+        self.assertEqual((nn.BCELoss()(input, target) < 0).sum(), 0)
+
+        target = torch.zeros(5, device='mps')
+        input = torch.zeros(5, device='mps')
+        self.assertEqual((nn.BCELoss()(input, target) < 0).sum(), 0)
+
+    def test_bce_loss_size_mismatch(self):
+        bceloss = nn.BCELoss()
+        a = torch.rand(25, device='mps')
+        b = torch.rand(25, 1, device='mps')
+        with self.assertRaisesRegex(ValueError, r'Using a target size \('):
+            bceloss(a, b)
+
+    def test_bce_with_logits_gives_same_result_as_sigmoid_and_bce_loss_large_tensors_with_grad(self):
+        x_size = 1024
+        y_size = 256
+        target = torch.rand(x_size, y_size, device='mps')
+
+        for reduction in ['none', 'mean', 'sum']:
+            output_sig = torch.rand(x_size, y_size, device='mps') - 0.5
+            output_logits = output_sig.clone().detach()
+
+            output_sig.requires_grad = True
+            output_logits.requires_grad = True
+            weight = torch.rand(y_size, device='mps')
+
+            loss_sig = nn.BCELoss(weight, reduction=reduction)(
+                torch.sigmoid(output_sig), target
+            )
+            loss_logits = nn.BCEWithLogitsLoss(weight, reduction=reduction)(
+                output_logits, target
+            )
+
+            self.assertEqual(loss_logits, loss_sig)
+
+            if reduction == 'none':
+                grad = torch.rand(x_size, y_size, device='mps')
+                loss_sig.backward(grad)
+                loss_logits.backward(grad)
+            else:
+                loss_sig.backward()
+                loss_logits.backward()
+
+            self.assertEqual(output_sig.grad, output_logits.grad)
+
+    def test_bce_with_logits_has_correct_grad_at_zero(self):
+        output = torch.zeros(3, 1, requires_grad=True, device='mps')
+        target = torch.zeros(3, 1, device='mps')
+        nn.BCEWithLogitsLoss(reduction='sum')(output, target).backward()
+        expected_grad = torch.empty(3, 1, device='mps').fill_(0.5)
+        self.assertEqual(output.grad, expected_grad)
+
+    def test_bce_with_logits_broadcasts_weights(self):
+        target = torch.rand(16, 4, device='mps')
+        output = torch.rand(16, 4, device='mps') - 0.5
+
+        weight = torch.rand(4, device='mps')
+        out1 = nn.BCEWithLogitsLoss(weight)(output, target)
+
+        weight = weight.expand(16, 4).contiguous()
+        out2 = nn.BCEWithLogitsLoss(weight)(output, target)
+
+        self.assertEqual(out1, out2)
+
+        weight = torch.rand(16, 1, device='mps')
+        out1 = nn.BCEWithLogitsLoss(weight)(output, target)
+
+        weight = weight.expand(16, 4).contiguous()
+        out2 = nn.BCEWithLogitsLoss(weight)(output, target)
+
+        self.assertEqual(out1, out2)
+
+    def test_bce_with_logits_ones_in_pos_weights_are_the_same_as_none(self):
+        target = torch.rand(64, 4, device='mps')
+        output = torch.rand(64, 4, device='mps') - 0.5
+        pos_weight = torch.ones(64, 4, device='mps')
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target),
+                         nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target))
+
+    def test_bce_with_logits_broadcasts_pos_weights(self):
+        target = torch.rand(64, 4, device='mps')
+        output = torch.rand(64, 4, device='mps') - 0.5
+        pos_weight = torch.rand(4, device='mps')
+        out1 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
+
+        pos_weight1 = pos_weight.expand(1, 4)
+        out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight1)(output, target)
+
+        pos_weight2 = pos_weight.expand(64, 4)
+        out3 = nn.BCEWithLogitsLoss(pos_weight=pos_weight2)(output, target)
+
+        self.assertEqual(out1, out2)
+        self.assertEqual(out1, out3)
+
+    def test_bce_with_logits_with_pos_weight_has_correct_grad_at_zero(self):
+        output = torch.zeros(3, 1, requires_grad=True, device='mps')
+        target = torch.zeros(3, 1, device='mps')
+        pos_weight = torch.ones(3, 1, device='mps')
+        nn.BCEWithLogitsLoss(pos_weight=pos_weight, reduction='sum')(output, target).backward()
+        expected_grad = torch.empty(3, 1, device='mps').fill_(0.5)
+        grad = output.grad
+        self.assertEqual(grad, expected_grad)
+
+    def test_bce_with_logits_stability(self):
+        output = torch.tensor([0., -120.], device='mps')
+        target = torch.tensor([0., 1.], device='mps')
+        pos_weight = torch.tensor([1., 1.], device='mps')
+
+        out1 = nn.BCEWithLogitsLoss()(output, target)
+        self.assertTrue(torch.isfinite(out1).all().item())
+
+        out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
+        self.assertTrue(torch.isfinite(out2).all().item())
+
+    def test_bce_loss_broadcasts_weights(self):
+        sigmoid = nn.Sigmoid()
+        target = torch.rand(16, 4, device='mps')
+        output = torch.rand(16, 4, device='mps') - 0.5
+
+        weight = torch.rand(4, device='mps')
+        out1 = nn.BCELoss(weight)(sigmoid(output), target)
+
+        weight = weight.expand(16, 4).contiguous()
+        out2 = nn.BCELoss(weight)(sigmoid(output), target)
+
+        self.assertEqual(out1, out2)
+
+        weight = torch.rand(16, 1, device='mps')
+        out1 = nn.BCELoss(weight)(sigmoid(output), target)
+
+        weight = weight.expand(16, 4).contiguous()
+        out2 = nn.BCELoss(weight)(sigmoid(output), target)
+
+        self.assertEqual(out1, out2)
 
     def test_log_softmax(self):
         values = [[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]], [[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]]
@@ -2571,6 +2795,50 @@ class TestNLLLoss(TestCase):
 
         helper((4, 5, 6, 7))
 
+    # Test forward amax
+    def test_amax(self):
+        def helper(shape, dim, keepdim):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            result = torch.amax(x, dim=dim, keepdim=keepdim)
+            result_cpu = torch.amax(cpu_x, dim=dim, keepdim=keepdim)
+
+            cpu_grad = torch.randn(result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            result_cpu.backward(gradient=cpu_grad)
+            result.backward(gradient=grad)
+
+            self.assertEqual(result, result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        for dim in ([], [0], [0, 1], [2, 3]):
+            for keepdim in [False, True]:
+                helper((2, 8, 4, 5), dim, keepdim)
+
+    # Test forward amin
+    def test_amin(self):
+        def helper(shape, dim, keepdim):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            result = torch.amin(x, dim=dim, keepdim=keepdim)
+            result_cpu = torch.amin(cpu_x, dim=dim, keepdim=keepdim)
+
+            cpu_grad = torch.randn(result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            result_cpu.backward(gradient=cpu_grad)
+            result.backward(gradient=grad)
+
+            self.assertEqual(result, result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        for dim in ([], [0], [0, 1], [2, 3]):
+            for keepdim in [False, True]:
+                helper((2, 8, 4, 5), dim, keepdim)
+
     # Test minimum and maximum
     def test_minimum_maximum(self):
         def helper(n, c, h, w):
@@ -2753,6 +3021,16 @@ class TestNLLLoss(TestCase):
             self.assertEqual(strided_mps, strided_cpu)
 
         helper(3, 3)
+
+    def test_assert_topk(self):
+        # here the k > 16 raises an error as expected
+        with self.assertRaisesRegex(RuntimeError, "Currently topk on mps works only for k<=16"):
+            xs = torch.arange(30).to('mps')
+            xs.topk(30)
+        # for k <= 16 it works fine
+        ys_cpu = torch.arange(30)
+        ys_mps = ys_cpu.to('mps')
+        self.assertEqual(ys_cpu.topk(16), ys_mps.topk(16))
 
     def test_topk(self):
         def helper(shape):
@@ -3937,6 +4215,32 @@ class TestNLLLoss(TestCase):
         helper([100, 100], 23, 89, dtype=torch.int64)
         helper([100, 100], 0, 2, dtype=torch.bool)
 
+    # Test exponential
+    def test_exponential(self):
+        def helper(shape, lamda, dtype=torch.float32):
+
+            mps_out = torch.zeros(shape, device='mps', dtype=dtype)
+            mps_out.exponential_(lamda)
+
+            print(mps_out.to('cpu').float().mean(), 1 / lamda)
+            print(mps_out.to('cpu').float().std() ** 2, 1 / (lamda**2))
+
+        for dtype in [torch.float32, torch.float16]:
+            helper([100, 100], 2, dtype)
+            helper([100, 100], 1, dtype)
+            helper([100, 100], 3, dtype)
+            helper([100, 100], 0.5, dtype)
+
+    def test_exponential_1(self):
+        rate = torch.randn(5, 5).abs().requires_grad_()
+        rate_1d = torch.randn(1).abs().requires_grad_()
+        self.assertEqual(Exponential(rate).sample().size(), (5, 5))
+        self.assertEqual(Exponential(rate).sample((7,)).size(), (7, 5, 5))
+        self.assertEqual(Exponential(rate_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Exponential(rate_1d).sample().size(), (1,))
+        self.assertEqual(Exponential(0.2).sample((1,)).size(), (1,))
+        self.assertEqual(Exponential(50.0).sample((1,)).size(), (1,))
+
     # Test add
     def test_add_binary_op(self):
         def helper(shape, alpha):
@@ -3987,6 +4291,22 @@ class TestNLLLoss(TestCase):
         helper(0.0)
         helper(0.1)
         helper(0.2)
+
+        # Test int32 tensor + int64 scalar add
+        # see https://github.com/pytorch/pytorch/issues/79835#issuecomment-1164984534
+        x = torch.ones(4, dtype=torch.int32, device='mps')
+        self.assertEqual(x + 1, torch.full((4,), 2, dtype=torch.int32, device='mps'))
+        self.assertTrue(torch.equal(x + 1.5, torch.full((4,), 2.5, device='mps')))
+
+    def test_types_binary_op(self):
+        # Float * Bool
+        cpu_x = torch.arange(5, dtype=torch.float32, device="cpu") * torch.tensor([True, False, True, False, True], device="cpu")
+        mps_x = torch.arange(5, dtype=torch.float32, device="mps") * torch.tensor([True, False, True, False, True], device="mps")
+        self.assertEqual(cpu_x, mps_x)
+        # Float * Int64
+        cpu_y = torch.arange(5, dtype=torch.float32, device="cpu") * torch.tensor([1, 0, 1, 0, 1], device="cpu")
+        mps_y = torch.arange(5, dtype=torch.float32, device="mps") * torch.tensor([1, 0, 1, 0, 1], device="mps")
+        self.assertEqual(cpu_y, mps_y)
 
     def test_unary_ops(self):
         def helper(shape, op):
@@ -4358,24 +4678,15 @@ class TestRNNMPS(TestCase):
         self.assertEqual(cpu_weight_grad, mps_weight_grad)
 
 class TestFallbackWarning(TestCase):
+    # TODO: Remove once test_testing.py is running on MPS devices
     def test_no_warning_on_import(self):
-        script = """
-import warnings
-
-with warnings.catch_warnings(record=True) as w:
-    import torch
-
-exit(len(w))
-"""
-        try:
-            subprocess.check_output(
-                [sys.executable, '-W', 'all', '-c', script],
-                stderr=subprocess.STDOUT,
-                # On Windows, opening the subprocess with the default CWD makes `import torch`
-                # fail, so just set CWD to this script's directory
-                cwd=os.path.dirname(os.path.realpath(__file__)),)
-        except subprocess.CalledProcessError as e:
-            self.assertTrue(False, "There was a warning when importing torch.")
+        out = subprocess.check_output(
+            [sys.executable, "-W", "all", "-c", "import torch"],
+            stderr=subprocess.STDOUT,
+            # On Windows, opening the subprocess with the default CWD makes `import torch`
+            # fail, so just set CWD to this script's directory
+            cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
+        self.assertEquals(out, "")
 
     def _get_not_implemented_op(self):
         # This can be changed once we actually implement `torch.bincount`
@@ -4402,6 +4713,7 @@ with warnings.catch_warnings(record=True) as w:
     import torch
 
 if len(w) > 0:
+    print(w)
     exit(1)
 
 # This should run just fine and raise warning about perf
@@ -4409,6 +4721,7 @@ with warnings.catch_warnings(record=True) as w:
     {op}
 
 if len(w) != 1:
+    print(w)
     exit(2)
 
 """
@@ -4421,12 +4734,14 @@ if len(w) != 1:
                 cwd=os.path.dirname(os.path.realpath(__file__)),)
         except subprocess.CalledProcessError as e:
             if e.returncode == 1:
-                self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set.")
+                self.assertTrue(False, "There was a warning when importing torch when PYTORCH_ENABLE_MPS_FALLBACK is set." +
+                                       e.output.decode("utf-8"))
             elif e.returncode == 2:
                 self.assertTrue(False, "There wasn't exactly one warning when running not implemented op with "
-                                "PYTORCH_ENABLE_MPS_FALLBACK set.")
+                                f"PYTORCH_ENABLE_MPS_FALLBACK set. {e.output}")
             else:
-                self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set.")
+                self.assertTrue(False, "Running a not implemented op failed even though PYTORCH_ENABLE_MPS_FALLBACK is set. " +
+                                       e.output.decode("utf-8"))
 
 class TestNoRegression(TestCase):
     def test_assert_close(self):
@@ -4466,6 +4781,42 @@ class TestNoRegression(TestCase):
         a = torch.ones(2, device="mps")
 
         b = a.new(1)
+
+    def test_serialization_map_location(self):
+
+        # Ensures that cpu Tensor can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2)
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="mps")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
+        # Ensures that mps Tensors can be loaded on mps
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f)
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "mps")
+
+        # Ensures that mps Tensors can be loaded on cpu
+        with tempfile.NamedTemporaryFile() as f:
+            x = torch.rand(2, device="mps")
+            torch.save(x, f)
+
+            f.seek(0)
+            x2 = torch.load(f, map_location="cpu")
+
+            self.assertEqual(x, x2)
+            self.assertEqual(x2.device.type, "cpu")
+
 
 
 

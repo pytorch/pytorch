@@ -91,4 +91,4 @@ inline std::pair<int64_t, int64_t> collapse_dims(
   return std::pair<int64_t, int64_t>(remappedExcludedDim, dims);
 }
 
-}
+} // namespace at
