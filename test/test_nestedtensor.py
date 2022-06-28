@@ -136,9 +136,21 @@ class TestNestedTensor(TestCase):
     def test_numel(self):
         for constructor in _iter_constructors():
             a1 = constructor([])
-            self.assertRaisesRegex(
-                RuntimeError, "numel is disabled", lambda: a1.numel(),
-            )
+            self.assertEqual(a1.numel(), 0)
+            a1 = constructor([torch.tensor(3.0), torch.tensor(4.0)])
+            self.assertEqual(a1.numel(), 2)
+            a1 = constructor([torch.randn(2, 2, 2)])
+            self.assertEqual(a1.numel(), 8)
+            a1 = constructor([torch.randn([1, 2, 3]), torch.randn(3, 2, 1)])
+            self.assertEqual(a1.numel(), 12)
+            a1 = constructor([torch.randn([1, 1, 3]), torch.randn(3, 2, 4)])
+            self.assertEqual(a1.numel(), 27)
+            a1 = constructor([torch.randn([5, 5, 5]), torch.randn(6, 6, 6)])
+            self.assertEqual(a1.numel(), 341)
+
+            # Interesting edge case
+            a1 = constructor([torch.randn([1, 2, 3]), torch.randn(1, 2, 0)])
+            self.assertEqual(a1.numel(), 6)
 
     @torch.inference_mode()
     def test_size(self):
