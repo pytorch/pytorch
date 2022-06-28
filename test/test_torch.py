@@ -4544,32 +4544,32 @@ else:
                 _unsqueeze_op_add,
                 _unsqueeze_op_clone,
             ]
-            x_c = x.contiguous()
-            y_c = y.contiguous()
-            b_c = bias.contiguous()
             for fn in fns:
-                is_inplace = '_(' in inspect.getsource(fn)
-                x_clone = x.clone() if is_inplace else x
-                x_c_clone = x_c.clone() if is_inplace else x_c
-                result_c = fn(x_c_clone, y_c)
-                result = fn(x_clone, y)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                x_c = x.contiguous()
+                y_c = y.contiguous()
+                result_c = fn(x_c, y_c)
+                result = fn(x, y)
+                self.assertEqual(result, result_c)
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
 
             for fn in bias_fns:
+                x_c = x.contiguous()
+                b_c = bias.contiguous()
                 result_c = fn(x_c, b_c)
                 result = fn(x, bias)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                self.assertEqual(result, result_c)
                 self.assertTrue(
                     result.is_contiguous(memory_format=memory_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), memory_format))
 
             for fn in return_contig_fns:
+                x_c = x.contiguous()
+                y_c = y.contiguous()
                 result_c = fn(x_c, y_c)
                 result = fn(x, y)
-                self.assertEqual(result, result_c, "Failed for '{}'".format(inspect.getsource(fn).strip()))
+                self.assertEqual(result, result_c)
                 self.assertTrue(
                     result.is_contiguous(memory_format=torch.contiguous_format),
                     "result of the '{}' is not in '{}' format".format(inspect.getsource(fn).strip(), torch.contiguous_format))
@@ -5188,9 +5188,8 @@ else:
         def test(probs):
             with self.assertRaisesRegex(RuntimeError,
                                         'probability tensor contains either `inf`, `nan` or element < 0'):
-                out = torch.multinomial(probs.to(device), 2)
-                if out.is_cuda:
-                    torch.cuda.synchronize()
+                torch.multinomial(probs.to(device), 2)
+                torch.cuda.synchronize()
 
         test(torch.tensor([1., -1., 1.]))
         test(torch.tensor([1., inf, 1.]))
@@ -5203,9 +5202,8 @@ else:
         def test(probs, replacement):
             with self.assertRaisesRegex(RuntimeError,
                                         r"invalid multinomial distribution \(sum of probabilities <= 0\)"):
-                out = torch.multinomial(probs, 2, replacement)
-                if out.is_cuda:
-                    torch.cuda.synchronize()
+                torch.multinomial(probs, 2, replacement)
+                torch.cuda.synchronize()
 
         x = torch.zeros(3, device=device)
         y = torch.zeros(3, 3, device=device)

@@ -1,34 +1,27 @@
 import torch
-from torch import Tensor
 from torch.ao.quantization.experimental.observer import APoTObserver
-from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
+from torch.ao.quantization.experimental.quantizer import APoTQuantizer, quantize_APoT, dequantize_APoT
 from torch.ao.quantization.fake_quantize import FakeQuantizeBase
 
 class APoTFakeQuantize(FakeQuantizeBase):
-    alpha: Tensor
-    gamma: Tensor
-    quantization_levels: Tensor
-    level_indices: Tensor
+    observer: APoTObserver
 
-    def __init__(self, **observer_kwargs):
+    def __init__(self, observer: APoTObserver):
         super().__init__()
-        self.activation_post_process = APoTObserver(**observer_kwargs)
+        self.observer = observer
 
-    def calculate_qparams(self, signed: bool):  # type: ignore[override]
-        return self.activation_post_process.calculate_qparams(signed=signed)
+    def calculate_qparams(self, signed: bool, min_val=None, max_val=None):  # type: ignore[override]
+        qparams = self.observer.calculate_qparams(signed=signed, min_val=min_val, max_val=max_val)
+
+        return qparams
 
     def forward(self, X: torch.Tensor, signed: bool):  # type: ignore[override]
         if self.observer_enabled[0] == 1:
-            self.activation_post_process.forward(X)
-            self.alpha, self.gamma, self.quantization_levels, self.level_indices = \
-                self.activation_post_process.calculate_qparams(signed)
+            min_val, max_val = torch.aminmax(X)
+            alpha, gamma, quantization_levels, level_indices = self.observer.calculate_qparams(signed, min_val, max_val)
         if self.fake_quant_enabled[0] == 1:
-            assert (self.alpha is not None
-                    and self.gamma is not None
-                    and self.quantization_levels is not None
-                    and self.level_indices is not None), "Must set qparams for fake quant"
-
-            X = quantize_APoT(X, self.alpha, self.gamma, self.quantization_levels, self.level_indices)
-            X = dequantize_APoT(X)
+            quantizer = APoTQuantizer(alpha, gamma, quantization_levels, level_indices)
+            X = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
+            X = dequantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
 
         return X
