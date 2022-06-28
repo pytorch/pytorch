@@ -1439,7 +1439,7 @@ class TestMathBits(TestCase):
         )
 
 # input strides and size may have been altered due to the result of an inplace op
-def test_inplace_view(func, input, rs, input_size, input_strides):
+def check_inplace_view(func, input, rs, input_size, input_strides):
     if func is None:
         return
     # TODO: extend this test to test ops with multiple outputs and ops like native_batch_norm.out
@@ -1466,7 +1466,7 @@ class TestTagsMode(TorchDispatchMode):
             old_size = args[0].size()
             old_stride = args[0].stride()
             rs = func(*args, **kwargs)
-            test_inplace_view(func, args[0], rs, old_size, old_stride)
+            check_inplace_view(func, args[0], rs, old_size, old_stride)
         else:
             rs = func(*args, **kwargs)
         return rs
@@ -1488,7 +1488,7 @@ class TestTags(TestCase):
                 # TODO: add test for aliases: https://github.com/pytorch/pytorch/issues/78761
                 aten_name = op.aten_name if op.aten_name is not None else op.name
                 opoverloadpacket = getattr(torch.ops.aten, aten_name, None)
-                test_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
+                check_inplace_view(opoverloadpacket, input, rs, old_size, old_stride)
 
 
 class TestRefsOpsInfo(TestCase):

@@ -34,7 +34,7 @@ export LANG=C.UTF-8
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
 if [[ "$TEST_CONFIG" == 'default' ]]; then
-  export CUDA_VISIBLE_DEVICES=0
+  export CUDA_VISIBLE_DEVICES=0,1
   export HIP_VISIBLE_DEVICES=0
 fi
 

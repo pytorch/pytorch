@@ -144,6 +144,21 @@ jobs:
       build-environment: linux-bionic-cuda11.3-py3.7-clang9
       docker-image-name: pytorch-linux-bionic-cuda11.3-cudnn8-py3-clang9
 
+  linux-bionic-cuda11_3-py3_7-clang9-test:
+    name: linux-bionic-cuda11.3-py3.7-clang9
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-bionic-cuda11_3-py3_7-clang9-build
+    with:
+      build-environment: linux-bionic-cuda11.3-py3.7-clang9
+      docker-image: ${{ needs.linux-bionic-cuda11_3-py3_7-clang9-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
   linux-vulkan-bionic-py3_7-clang9-build:
     name: linux-vulkan-bionic-py3.7-clang9
     uses: ./.github/workflows/_linux-build.yml
@@ -185,6 +200,28 @@ jobs:
           { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "distributed", shard: 1, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.8xlarge.nvidia.gpu" },
+        ]}
+
+  linux-xenial-cuda11_3-py3_7-gcc7-build:
+    name: linux-xenial-cuda11.3-py3.7-gcc7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
+      docker-image-name: pytorch-linux-xenial-cuda11.3-cudnn8-py3-gcc7
+
+  linux-xenial-cuda11_3-py3_7-gcc7-test:
+    name: linux-xenial-cuda11.3-py3.7-gcc7
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-xenial-cuda11_3-py3_7-gcc7-build
+    with:
+      build-environment: linux-xenial-cuda11.3-py3.7-gcc7
+      docker-image: ${{ needs.linux-xenial-cuda11_3-py3_7-gcc7-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-xenial-py3-clang5-mobile-build:

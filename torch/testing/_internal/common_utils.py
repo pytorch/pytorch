@@ -40,6 +40,7 @@ import errno
 import ctypes
 from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, TypeVar, Callable
 from unittest.mock import MagicMock
+import pytest
 
 import numpy as np
 
@@ -75,6 +76,8 @@ from torch.onnx import (register_custom_op_symbolic,
                         unregister_custom_op_symbolic)
 torch.backends.disable_global_flags()
 
+USE_PYTEST = ["test_ops", "test_ops_gradients", "test_ops_jit"]
+
 FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
@@ -90,9 +93,6 @@ MAX_NUM_RETRIES = 3
 
 DISABLED_TESTS_FILE = '.pytorch-disabled-tests.json'
 SLOW_TESTS_FILE = '.pytorch-slow-tests.json'
-
-slow_tests_dict: Optional[Dict[str, Any]] = None
-disabled_tests_dict: Optional[Dict[str, Any]] = None
 
 NATIVE_DEVICES = ('cpu', 'cuda', 'meta')
 
@@ -589,20 +589,33 @@ def lint_test_case_extension(suite):
                 succeed = False
     return succeed
 
+def sanitize_pytest_xml(xml_file: str):
+    # pytext xml is different from unittext xml, this function makes pytest xml more similar to unittest xml
+    # should consider writing an equivalent of junitxml plugin to do this
+    import xml.etree.ElementTree as ET
+    tree = ET.parse(xml_file)
+    for testcase in tree.iter('testcase'):
+        full_classname = testcase.attrib['classname']
+        regex_result = re.search(r"^test\.(.*)\.([^\.]*)$", full_classname)
+        classname = regex_result.group(2)
+        file = regex_result.group(1).replace('.', "/")
+        testcase.set('classname', classname)
+        testcase.set('file', f"{file}.py")
+    tree.write(xml_file)
+
 def run_tests(argv=UNITTEST_ARGS):
     # import test files.
     if IMPORT_SLOW_TESTS:
         if os.path.exists(IMPORT_SLOW_TESTS):
-            global slow_tests_dict
             with open(IMPORT_SLOW_TESTS, 'r') as fp:
-                slow_tests_dict = json.load(fp)
+                # use env vars so pytest-xdist subprocesses can still access them
+                os.environ['SLOW_TESTS_DICT'] = fp.read()
         else:
             print(f'[WARNING] slow test file provided but not found: {IMPORT_SLOW_TESTS}')
     if IMPORT_DISABLED_TESTS:
         if os.path.exists(IMPORT_DISABLED_TESTS):
-            global disabled_tests_dict
             with open(IMPORT_DISABLED_TESTS, 'r') as fp:
-                disabled_tests_dict = json.load(fp)
+                os.environ['DISABLED_TESTS_DICT'] = fp.read()
         else:
             print(f'[WARNING] disabled test file provided but not found: {IMPORT_DISABLED_TESTS}')
     # Determine the test launch mechanism
@@ -685,10 +698,33 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
-            output=test_report_path,
-            verbosity=2 if verbose else 1,
-            resultclass=XMLTestResultVerbose))
+        print(torch.cuda.device_count())
+        if test_filename in USE_PYTEST:
+            pytest_report_path = test_report_path.replace('python-unittest', 'python-pytest')
+            os.makedirs(pytest_report_path, exist_ok=True)
+            # eventually move this to test.sh
+            if subprocess.run([sys.executable, "-m", "pip", "show", "pytest-dist"], 
+                              capture_output=True).returncode != 0:
+                subprocess.run([sys.executable, "-m", "pip", "install", "pytest-xdist"])
+            os.environ["NO_COLOR"] = "1"
+            pytest_report_path = os.path.join(pytest_report_path, test_filename)
+            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-n=2', '-vv', '-s',
+                                    f'--junitxml={pytest_report_path}.xml'])
+            sanitize_pytest_xml(f'{pytest_report_path}.xml')
+            unittest_success = unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+                output=test_report_path,
+                verbosity=2 if verbose else 1,
+                resultclass=XMLTestResultVerbose), exit=False).result.wasSuccessful()
+            if unittest_success and (exit_code == 0 or exit_code == 5):
+                exit(0)
+            else:
+                exit(1)
+        else:
+            exit(0)
+            unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+                output=test_report_path,
+                verbosity=2 if verbose else 1,
+                resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
@@ -1464,13 +1500,17 @@ def remove_device_and_dtype_suffixes(test_name: str) -> str:
 
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
+    if "__main__" not in test_suite:
+        # this probably means it is being run via pytest
+        test_suite = f"__main__.{test_suite.split('.')[1]}"
     raw_test_name = f'{test._testMethodName} ({test_suite})'
-    if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
+    if raw_test_name in json.loads(os.environ.get("SLOW_TESTS_DICT", "{}")):
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
     sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
-    if not IS_SANDCASTLE and disabled_tests_dict is not None:
+    if not IS_SANDCASTLE and "DISABLED_TESTS_DICT" in os.environ:
+        disabled_tests_dict = json.loads(os.environ["DISABLED_TESTS_DICT"])
         for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
             disable_test_parts = disabled_test.split()
             if len(disable_test_parts) > 1:

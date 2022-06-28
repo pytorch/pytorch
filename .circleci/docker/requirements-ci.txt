@@ -41,7 +41,7 @@ flatbuffers==2.0
 #Pinned versions:
 #test that import:
 
-hypothesis==4.53.2
+hypothesis==5.35.1
 # Pin hypothesis to avoid flakiness: https://github.com/pytorch/pytorch/issues/31136
 #Description: advanced library for generating parametrized tests
 #Pinned versions: 3.44.6, 4.53.2
