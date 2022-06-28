@@ -10637,13 +10637,13 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
                         # clamp_max supports two tensor input with bool, but not a bool scalar
-                        DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                         # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
                         # dispatch to lazy test failed
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_errors'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
                     )),
     BinaryUfuncInfo('clamp_min',
                     ref=_clamp_min_numpy,
@@ -10655,13 +10655,13 @@ op_db: List[OpInfo] = [
                     rhs_make_tensor_kwargs=dict(exclude_zero=False),
                     skips=(
                         # clamp_min supports two tensor input with bool, but not a bool scalar
-                        DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_dtypes'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                         # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
                         # dispatch to lazy test failed
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_errors'),
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -20710,7 +20710,7 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # test error disabled since rhs non-tensor python scalar is supported
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -20719,7 +20719,7 @@ python_ref_db = [
         supports_nvfuser=False,
         skips=(
             # test error disabled since rhs non-tensor python scalar is supported
-            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_errors'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
         ),
     ),
     PythonRefInfo(
