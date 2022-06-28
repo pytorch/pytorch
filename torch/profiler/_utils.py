@@ -1,9 +1,8 @@
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, List
 import re
+from typing import Dict, List
 
-import torch
 from torch.profiler import DeviceType
 from torch.autograd.profiler import profile
 from torch.autograd import _KinetoEvent
@@ -42,15 +41,19 @@ class EventKey:
         return self.event.id == other.event.id
 
     def __repr__(self):
-        return f"<{self.event.name()} id={self.event.correlation_id}>"
+        return f"{self.event.name()}"
 
     def intervals_overlap(self, intervals: List[Interval]):
         overlap_time = 0
         intervals = sorted(intervals, key=lambda x: x.start)
         for i, interval in enumerate(intervals):
+            # Interval overlaps with next interval
             if i + 1 < len(intervals) and interval.end > intervals[i +
                                                                    1].start:
-                interval.end = intervals[i + 1].start
+                if interval.end >= intervals[i + 1].end:
+                    del intervals[i + 1]
+                else:
+                    interval.end = intervals[i + 1].start
             overlap_start = max(self.event.start_time_ns, interval.start)
             overlap_end = min(self.event.end_time_ns, interval.end)
 
@@ -165,6 +168,7 @@ class BasicEvaluation:
                    <= start_time):
                 current_kernel_index += 1
             current_queue_depth = spawned_kernel_index - current_kernel_index + 1
+            current_queue_depth = max(current_queue_depth, 0)
 
             if hasattr(event, "start_us"):
                 queue_depth_list.append(
@@ -214,27 +218,34 @@ class BasicEvaluation:
         '''
 
         # Find the interval when qd is falling to 0
+        import torch
         queue_depth_list = list(reversed(self.queue_depth_list))
         qd_values = [e.queue_depth for e in queue_depth_list]
 
+        bottom_threashold = 0
+        top_threashold = 4
         decrease_interval = []
-        for i in range(len(qd_values) - 1):
-            if qd_values[i] <= 1:
+        i = 0
+        while (i < len(qd_values)):
+            if qd_values[i] > bottom_threashold:
+                i += 1
+                continue
+            for j in range(i + 1, len(qd_values)):
                 # Find next zero and if the max value between them exceeds
                 # the threshold, then we have a falling interval
-                for j in range(i + 1, len(qd_values)):
-                    if qd_values[j] <= 1:
-                        peak_idx = argmax(qd_values, start=i + 1, end=j)
-                        if peak_idx is None:
-                            continue
-                        # check for threshold
-                        if qd_values[peak_idx] - qd_values[i] > 3:
-                            decrease_interval.append(
-                                Interval(queue_depth_list[peak_idx].start,
-                                         queue_depth_list[i].start))
-                            i = j
-                            break
+                next_minimum_idx = index_of_first_match(
+                    qd_values, lambda x: x <= bottom_threashold, start=j)
+                peak_idx = argmax(qd_values, start=j, end=next_minimum_idx)
 
+                # if is a valid peak, we add to list and continue
+                if peak_idx is not None and qd_values[
+                        peak_idx] >= top_threashold:
+                    decrease_interval.append(
+                        Interval(queue_depth_list[peak_idx].start,
+                                 queue_depth_list[i].start))
+                    i = next_minimum_idx if next_minimum_idx is not None else i
+                    break
+            i += 1
         # Filter out events that are not in the decrease interval
         event_list = [
             event for event in self.metrics.keys()
@@ -244,15 +255,14 @@ class BasicEvaluation:
             self_time = torch.tensor(
                 [self.metrics[event].self_time_ns for event in event_list],
                 dtype=torch.float32)
-            idle_time = torch.tensor(
-                [self.metrics[event].idle_time_ns for event in event_list],
-                dtype=torch.float32)
-
+            idle_time = torch.tensor([
+                self.metrics[event].fraction_idle_time for event in event_list
+            ], dtype=torch.float32)
             normalized_gain = (idle_time -
                                torch.mean(idle_time)) / torch.std(idle_time)
             normalized_self = (self_time -
                                torch.mean(self_time)) / torch.std(self_time)
-            heuristic_score_list = normalized_gain + normalized_self
+            heuristic_score_list = normalized_gain + 0.6 * normalized_self
 
             # Sort events by heuristic
             event_list = [
@@ -268,17 +278,17 @@ class BasicEvaluation:
                                length: int = 1,
                                print_enable: bool = True):
         event_list = self.rank_events(length)
-        output = ""
-        if len(event_list) == 0:
-            output += "No events to optimize\n"
-            return []
-        output += "Optimizable events:\n"
-        for event in event_list:
-            output += f"""{'-'*80}
+        if not print_enable:
+            return event_list
+        output = "Optimizable events:\n" if event_list else "No events to optimize\n"
+
+        output += "\n".join([
+            f"""{'-'*80}
 Event:                {event}
 Source code location: {source_code_location(event.event)}
 Percentage idle time: {self.metrics[event].fraction_idle_time * 100:.2f}%
-{'-'*80}\n"""
+{'-'*80}""" for event in event_list
+        ])
         if print_enable:
             print(output)
         return event_list
