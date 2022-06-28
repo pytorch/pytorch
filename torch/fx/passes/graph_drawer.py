@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import hashlib
 import torch
 import torch.fx
-from typing import Dict, Any, TYPE_CHECKING
+from typing import Optional, Dict, Any, TYPE_CHECKING
 from torch.fx.node import _get_qualified_name, _format_arg
 from torch.fx.passes.shape_prop import TensorMetadata
 from torch.fx._compatibility import compatibility
@@ -253,6 +253,11 @@ if HAS_PYDOT:
         def _get_tensor_label(self, t: torch.Tensor) -> str:
             return str(t.dtype) + str(list(t.shape)) + r"\n"
 
+        def _get_edge_label(self, module: torch.fx.GraphModule, node: torch.fx.Node, user: torch.fx.Node) -> Optional[str]:
+            # Override in subclasses to customize this behavior. By returning
+            # None there will be no label.
+            return None
+
         def _to_dot(
             self,
             graph_module: torch.fx.GraphModule,
@@ -304,7 +309,11 @@ if HAS_PYDOT:
                     continue
 
                 for user in node.users:
-                    dot_graph.add_edge(pydot.Edge(node.name, user.name))
+                    e = pydot.Edge(node.name, user.name)
+                    label = self._get_edge_label(graph_module, node, user)
+                    if label is not None:
+                        e.set_label(label)
+                    dot_graph.add_edge(e)
 
             return dot_graph
 
