@@ -3544,8 +3544,12 @@ class TestSparse(TestCase):
             # some normal cases
             yield (make_diags((1, 5)), make_offsets([0]), (5, 5))
             yield (make_diags((3, 3)), make_offsets([-1, 0, 1]), (4, 4))
-            # noncontigous input
+            # noncontigous diags
             yield (make_diags((5, 4), noncontiguous=True), make_offsets([-1, 1, 0, 2, -2]), (5, 5))
+            # noncontigous offsets
+            yield (make_diags((3, 4)), make_offsets([1, -1, 0, -2, 2])[::2], (5, 5))
+            # noncontigous diags + offsets
+            yield (make_diags((3, 4), noncontiguous=True), make_offsets([1, -1, 0, -2, 2])[::2], (5, 5))
             # correct dimensionality, 2d, 2d , and shapes match, but the number of diagonals is zero
             yield (make_diags((0, 3)), make_offsets([]), (3, 3))
             # forward rotation of upper diagonals
@@ -3559,6 +3563,9 @@ class TestSparse(TestCase):
             yield (make_diags((3, )), make_offsets([1]), (4, 4))
             # Scalar offset
             yield (make_diags((1, 3)), make_offsets(2), (4, 4))
+            # offsets out of range
+            yield (make_diags((1, 3)), make_offsets([3]), (3, 3))
+            yield (make_diags((1, 3)), make_offsets([-3]), (3, 3))
 
         for case in valid_cases():
             check_valid(*case)
@@ -3572,7 +3579,7 @@ class TestSparse(TestCase):
             yield (make_diags((5,)), make_offsets([0, 1, 2, 3, 4]), (3, 3)),\
                 r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
             yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided),\
-                r"Only output layouts \(\w+, \w+, and \w+\) are supported"
+                r"Only output layouts \(\w+, \w+, and \w+\) are supported, got \w+"
 
         for case, error_regex in invalid_cases():
             check_invalid(case, error_regex)
