@@ -4159,8 +4159,10 @@ class TestAutograd(TestCase):
                 jvp_count[0] += 1
                 return x_t, y_t
 
-        x = torch.rand(2, dtype=torch.double, requires_grad=True)
-        y = torch.rand(2, dtype=torch.double, requires_grad=True)
+        # NB: In slow gradcheck we need to loop through numel times so use numel = 1 to ensure
+        #     that fast and slow have the same counts
+        x = torch.rand(1, dtype=torch.double, requires_grad=True)
+        y = torch.rand(1, dtype=torch.double, requires_grad=True)
         gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=False, check_backward_ad=False,
                   check_batched_grad=False, check_batched_forward_grad=False)
         self.assertEqual(jvp_count[0], 2)  # (2) once per input
@@ -4179,8 +4181,8 @@ class TestAutograd(TestCase):
         # Repeat the previous test except we mark one input with requires_grad=False
         # NB: _test_undefined_forward_mode is only (+1), when function has single differentiable input, not (+2)!
         #     Otherwise, other counts are halved.
-        x = torch.rand(2, dtype=torch.double, requires_grad=True)
-        y = torch.rand(2, dtype=torch.double, requires_grad=False)
+        x = torch.rand(1, dtype=torch.double, requires_grad=True)
+        y = torch.rand(1, dtype=torch.double, requires_grad=False)
         gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
                   check_batched_grad=False, check_batched_forward_grad=True)
         self.assertEqual(jvp_count[0], 5)  # 1 + 1 + 3
@@ -6614,7 +6616,6 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertFalse(view_tangent._is_view())  # Optimization to share the same tensor!
         self.assertIs(view_tangent, base_tangent)
         self.assertIs(x_tangent, tangent)
-        self.assertIs(view_tangent, tangent)
 
     def test_inplace_on_view_not_same_layout(self):
         input = torch.zeros([2, 2])
@@ -7758,6 +7759,16 @@ class TestAutogradDeviceType(TestCase):
         with fwAD.dual_level():
             dual = fwAD.make_dual(primal, tangent)
             non_dual.copy_(dual)
+
+    def test_copy_forward_ad_same_layout_copies_grad(self, device):
+        primal = torch.tensor([[3.], [4.]], device=device)
+        tangent = torch.tensor([[5.], [6.]], device=device)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(primal, tangent)
+            non_dual = torch.tensor([[1.], [2.]])
+            non_dual.copy_(x_dual)
+            self.assertTrue(fwAD.unpack_dual(non_dual).tangent is not tangent)
 
     @onlyCUDA
     def test_simple_reentrant_cross_device(self, device):

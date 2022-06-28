@@ -1444,6 +1444,14 @@ class TestMPS(TestCase):
                          torch.tensor(4, dtype=torch.int32))
         self.assertEqual(torch.tensor(-8.34, device='cpu').to('mps', torch.int),
                          torch.tensor(-8.34, device='cpu').to('mps').to(torch.int))
+        # Cast int8 and uint8 to float and compare results
+        # See https://github.com/pytorch/pytorch/issues/80009 for more details
+        cpu_byte = torch.tensor([60, 160, 20, 220], dtype=torch.uint8)
+        cpu_char = torch.tensor([60, -60, 20, -120], dtype=torch.uint8)
+        for x_cpu in [cpu_byte, cpu_char]:
+            x_mps = x_cpu.to('mps')
+            self.assertEqual(x_mps.to(torch.float32), x_cpu.to(torch.float32))
+
 
     def test_setitem_scalar(self) -> None:
         device = 'mps'
@@ -1667,6 +1675,35 @@ class TestNLLLoss(TestCase):
 
             self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
             self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
+
+    # L1 loss
+    def test_l1_loss(self):
+        def helper(shape, reduction):
+            # create the criterion
+            loss = torch.nn.L1Loss(reduction=reduction)
+
+            inputCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            targetCPU = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
+            targetMPS = targetCPU.detach().clone().to('mps')
+
+            # forward pass
+            outputCPU = loss(inputCPU, targetCPU)
+            outputMPS = loss(inputMPS, targetMPS)
+            self.assertEqual(outputCPU, outputMPS)
+
+            # backward pass
+            if reduction != 'none':
+                # chose 2 just to make the grad_output > 1 in backward pass
+                outputCPU.backward(gradient=torch.full_like(outputCPU, 2))
+                outputMPS.backward(gradient=torch.full_like(outputMPS, 2))
+                self.assertEqual(inputCPU.grad, inputMPS.grad)
+
+        helper([8, 5, 4], 'none')
+        helper([7, 5, 2, 4], 'sum')
+        # verify if changes in shape would cause cached graph lookup problems
+        helper([7, 5, 2, 4, 6], 'sum')
+        helper([8, 4, 5, 7, 6], 'mean')
 
     # Mean Squared Error
     def test_mse_loss(self):
@@ -2758,6 +2795,50 @@ class TestNLLLoss(TestCase):
 
         helper((4, 5, 6, 7))
 
+    # Test forward amax
+    def test_amax(self):
+        def helper(shape, dim, keepdim):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            result = torch.amax(x, dim=dim, keepdim=keepdim)
+            result_cpu = torch.amax(cpu_x, dim=dim, keepdim=keepdim)
+
+            cpu_grad = torch.randn(result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            result_cpu.backward(gradient=cpu_grad)
+            result.backward(gradient=grad)
+
+            self.assertEqual(result, result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        for dim in ([], [0], [0, 1], [2, 3]):
+            for keepdim in [False, True]:
+                helper((2, 8, 4, 5), dim, keepdim)
+
+    # Test forward amin
+    def test_amin(self):
+        def helper(shape, dim, keepdim):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            result = torch.amin(x, dim=dim, keepdim=keepdim)
+            result_cpu = torch.amin(cpu_x, dim=dim, keepdim=keepdim)
+
+            cpu_grad = torch.randn(result_cpu.shape)
+            grad = cpu_grad.to('mps')
+
+            result_cpu.backward(gradient=cpu_grad)
+            result.backward(gradient=grad)
+
+            self.assertEqual(result, result_cpu)
+            self.assertEqual(x.grad, cpu_x.grad)
+
+        for dim in ([], [0], [0, 1], [2, 3]):
+            for keepdim in [False, True]:
+                helper((2, 8, 4, 5), dim, keepdim)
+
     # Test minimum and maximum
     def test_minimum_maximum(self):
         def helper(n, c, h, w):
@@ -3645,6 +3726,28 @@ class TestNLLLoss(TestCase):
 
         helper((2, 8, 4, 5))
 
+    # Test flip
+    def test_flip(self):
+        def helper(shape, dims):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+
+            flip_result = torch.flip(x, dims=dims)
+            flip_result_cpu = torch.flip(cpu_x, dims=dims)
+
+            self.assertEqual(flip_result, flip_result_cpu)
+
+        helper((2, 8, 4, 5), [0])
+        helper((8, 8, 4, 5), [0, 1])
+        helper((2, 8, 4, 5), (0, 1, 2, 3))
+        helper((2, 3, 3), (-1,))
+        # empty dims
+        helper((2, 8, 4, 5), [])
+        # input.numel() == 1
+        helper((1,), (0,))
+        # input.numel() == 0
+        helper((0,), (0,))
+
     # Test index select
     def test_index_select(self):
         def helper(shape, dim, index, idx_dtype=torch.int32):
@@ -4064,9 +4167,6 @@ class TestNLLLoss(TestCase):
     # Test normal
     def test_normal(self):
         def helper(shape, mean=0.0, std=1.0):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
             mps_out = torch.normal(mean, std, shape, device='mps')
 
             mean_array = np.ones(shape)
@@ -4079,6 +4179,7 @@ class TestNLLLoss(TestCase):
             cpu_std_tensor = torch.tensor(std_array, device='cpu', dtype=torch.float, requires_grad=False)
             std_tensor = cpu_std_tensor.detach().clone().to('mps')
 
+            # test out
             mps_out = torch.zeros(shape, device='mps')
             torch.normal(mean_tensor, std, out=mps_out)
 
@@ -4088,14 +4189,22 @@ class TestNLLLoss(TestCase):
             mps_out = torch.zeros(shape, device='mps')
             torch.normal(mean_tensor, std_tensor, out=mps_out)
 
+            # test without out
+            mps_out = torch.normal(mean_tensor, std)
+            self.assertEqual(mps_out.size(), mean_tensor.size())
+
+            mps_out = torch.normal(mean, std_tensor)
+            self.assertEqual(mps_out.size(), std_tensor.size())
+
+            inferred_shape = torch.broadcast_shapes(mean_tensor.size(), std_tensor.size())
+            mps_out = torch.normal(mean_tensor, std_tensor)
+            self.assertEqual(mps_out.size(), inferred_shape)
+
         helper((2, 3, 4, 5, 6))
         helper((100, 100), 2.5, 1.2)
 
     def test_bernoulli(self):
         def helper(shape, prob=0.5):
-            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
-            x = cpu_x.detach().clone().to('mps')
-
             prob_array = np.ones(shape)
             prob_array *= prob
             cpu_prob_tensor = torch.tensor(prob_array, device='cpu', dtype=torch.float, requires_grad=False)
@@ -4210,6 +4319,12 @@ class TestNLLLoss(TestCase):
         helper(0.0)
         helper(0.1)
         helper(0.2)
+
+        # Test int32 tensor + int64 scalar add
+        # see https://github.com/pytorch/pytorch/issues/79835#issuecomment-1164984534
+        x = torch.ones(4, dtype=torch.int32, device='mps')
+        self.assertEqual(x + 1, torch.full((4,), 2, dtype=torch.int32, device='mps'))
+        self.assertTrue(torch.equal(x + 1.5, torch.full((4,), 2.5, device='mps')))
 
     def test_types_binary_op(self):
         # Float * Bool
