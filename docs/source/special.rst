@@ -22,6 +22,7 @@ Functions
 .. autofunction:: exp2
 .. autofunction:: expit
 .. autofunction:: expm1
+.. autofunction:: gamma
 .. autofunction:: gammainc
 .. autofunction:: gammaincc
 .. autofunction:: gammaln
@@ -43,6 +44,7 @@ Functions
 .. autofunction:: scaled_modified_bessel_k1
 .. autofunction:: sinc
 .. autofunction:: softmax
+.. autofunction:: spherical_bessel_j0
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta
