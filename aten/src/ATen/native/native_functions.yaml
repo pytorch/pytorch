@@ -12634,6 +12634,58 @@
   python_module: special
   variants: function
 
+- func: special_complete_elliptic_integral_k_e(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_complete_elliptic_integral_k_e.out
+  variants: function
+
+- func: special_complete_elliptic_integral_k_e.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_complete_elliptic_integral_k_e_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_complete_elliptic_integral_k_k(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_complete_elliptic_integral_k_k.out
+  variants: function
+
+- func: special_complete_elliptic_integral_k_k.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_complete_elliptic_integral_k_k_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_complete_elliptic_integral_m_e(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_complete_elliptic_integral_m_e.out
+  variants: function
+
+- func: special_complete_elliptic_integral_m_e.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_complete_elliptic_integral_m_e_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_complete_elliptic_integral_m_k(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_complete_elliptic_integral_m_k.out
+  variants: function
+
+- func: special_complete_elliptic_integral_m_k.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_complete_elliptic_integral_m_k_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
 - func: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
   device_check: NoCheck
   python_module: special
