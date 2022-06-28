@@ -32,5 +32,6 @@ jobs:
       build-environment: linux-focal-py3.7-gcc7
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
       push: true
+      matrix: '[cpp, python]'
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
