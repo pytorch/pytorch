@@ -158,7 +158,6 @@ __all__ = [
     "upsample_trilinear3d",
     "bitwise_not",
     "wrap_logical_op_with_cast_to",
-    "wrap_logical_op_with_cast_to_and_from",
     "wrap_logical_op_with_negation",
     "eq",
     "ne",
@@ -1687,25 +1686,8 @@ def bitwise_not(g, inp):
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
-            return g.op(
-                "Cast",
-                fn(g, input, other),
-                to_i=symbolic_helper.cast_pytorch_to_onnx[to_type],
-            )
-
-        return wrap_with_cast
-
-    return decorator
-
-
-def wrap_logical_op_with_cast_to_and_from(to_type):
-    def decorator(fn):
-        def wrap_with_cast(g, input, other):
             to_cast_func = globals()[f"_cast_{to_type}"]
-            from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
-            return from_cast_func(
-                g, to_cast_func(g, input, False), to_cast_func(g, other, False)
-            )
+            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
 
         return wrap_with_cast
 
@@ -1815,17 +1797,17 @@ def __xor_(g, input, other):
         )
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_and(g, input, other):
     return g.op("And", input, other)
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_or(g, input, other):
     return g.op("Or", input, other)
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_xor(g, input, other):
     return g.op("Xor", input, other)
 
