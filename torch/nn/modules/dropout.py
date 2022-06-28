@@ -3,7 +3,6 @@ from .. import functional as F
 
 from torch import Tensor
 
-__all__ = ['Dropout', 'Dropout1d', 'Dropout2d', 'Dropout3d', 'AlphaDropout', 'FeatureAlphaDropout']
 
 class _DropoutNd(Module):
     __constants__ = ['p', 'inplace']

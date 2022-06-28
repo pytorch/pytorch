@@ -577,12 +577,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * be faster
    */
   int64_t size(int64_t d) const {
+    d = maybe_wrap_dim(d, dim(), false);
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
-      return size_custom(d);
+      return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
     }
-    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
     return sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
   }
 
@@ -674,15 +674,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual IntArrayRef strides_custom() const;
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
   // sizes_strides_policy_ >= CustomSizes
-  // Currently this method only exists to be overwritten by subclasses such as
-  // NestedTensorImpl.
-  virtual int64_t size_custom(int64_t d) const {
-    // TODO: We could add support to Python dispatch here.
-    // TODO: We could call into aten::size.int instead of
-    // sizes_custom()[d] and enable use of the dispatcher.
-    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
-    return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
-  }
   virtual IntArrayRef sizes_custom() const;
   virtual c10::SymIntArrayRef sym_sizes_custom() const;
   virtual Device device_custom() const;

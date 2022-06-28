@@ -560,22 +560,6 @@ Tensor NestedTensor_elementwise_Tensor(
     const Tensor& other,
     const std::string& op_name,
     Func f) {
-  // self is a scalar
-  if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
-    auto other_impl = get_nested_tensor_impl(other);
-    return wrap_buffer(
-      f(self, other_impl->get_buffer()),
-      other_impl->get_nested_size_tensor().clone()
-    );
-  }
-  // other is a scalar
-  if (!other.is_nested() && other.dim() == 0 && other.numel() == 1) {
-    auto self_impl = get_nested_tensor_impl(self);
-    return wrap_buffer(
-      f(self_impl->get_buffer(), other),
-      self_impl->get_nested_size_tensor().clone()
-    );
-  }
   NestedTensorImpl* self_impl = nullptr;
   NestedTensorImpl* other_impl = nullptr;
   std::tie(self_impl, other_impl) =
@@ -614,18 +598,6 @@ Tensor& NestedTensor_elementwise__Tensor(
     const Tensor& other,
     const std::string& op_name,
     Func f) {
-  // self is a scalar
-  if (!self.is_nested() && self.dim() == 0 && self.numel() == 1) {
-    auto other_impl = get_nested_tensor_impl(other);
-    f(self, other_impl->get_buffer());
-    return self;
-  }
-  // other is a scalar
-  if (!other.is_nested() && other.dim() == 0 && other.numel() == 1) {
-    auto self_impl = get_nested_tensor_impl(self);
-    f(self_impl->get_buffer(), other);
-    return self;
-  }
   NestedTensorImpl* self_impl = nullptr;
   NestedTensorImpl* other_impl = nullptr;
   std::tie(self_impl, other_impl) =
