@@ -5,6 +5,8 @@ set -ex
 # Mirror jenkins user in container
 echo "jenkins:x:1014:1014::/var/lib/jenkins:" >> /etc/passwd
 echo "jenkins:x:1014:" >> /etc/group
+# Needed on focal or newer
+echo "jenkins:*:19110:0:99999:7:::" >>/etc/shadow
 
 # Create $HOME
 mkdir -p /var/lib/jenkins
