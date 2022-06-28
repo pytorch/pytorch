@@ -19,7 +19,7 @@ from typing import (
 
 import torch.nn as nn
 from torch.nn.modules.batchnorm import _BatchNorm
-from .symbolic_trace import TracingConfig
+from ._symbolic_trace import TracingConfig
 
 
 __all__ = [

@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
+from torch.distributed.fsdp._symbolic_trace import _patch_tracer
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.distributed.fsdp.symbolic_trace import _patch_tracer
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     run_tests,
@@ -53,11 +53,10 @@ class TestSymbolicTracing(FSDPTest):
             model.layer1,
             model.relu,
             model.layer0,
-            model.relu
+            model.relu,
         ]
         self.assertEqual(
-            execution_info.module_forward_order,
-            correct_module_forward_order
+            execution_info.module_forward_order, correct_module_forward_order
         )
         # test execution_info.module_execution_info_dict
         self.assertEqual(
@@ -69,7 +68,7 @@ class TestSymbolicTracing(FSDPTest):
                 (model.layer1, list(model.layer1.named_parameters())),
                 (model, [("weight2", model.weight2)]),
                 (model.layer0, list(model.layer0.named_parameters())),
-            ]
+            ],
         )
         self.assertEqual(
             execution_info.module_execution_info_dict[model.layer0],
@@ -84,7 +83,7 @@ class TestSymbolicTracing(FSDPTest):
             [
                 (model.layer2[0], list(model.layer2[0].named_parameters())),
                 (model.layer2[2], list(model.layer2[2].named_parameters())),
-            ]
+            ],
         )
         self.assertEqual(execution_info.module_execution_info_dict[model.relu], [])
         # test tracer.param_exec_order

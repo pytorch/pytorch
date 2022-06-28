@@ -57,6 +57,7 @@ from ._optim_utils import (
     _rekey_sharded_optim_state_dict,
     _unflatten_optim_state,
 )
+from ._symbolic_trace import _patch_tracer, TracingConfig
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -69,7 +70,6 @@ from .flatten_params_wrapper import (
     FlatParameter,
     FlattenParamsWrapper,
 )
-from .symbolic_trace import TracingConfig, _patch_tracer
 from .wrap import (
     _or_policy,
     _recursive_wrap,

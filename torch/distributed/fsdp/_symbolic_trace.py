@@ -18,18 +18,18 @@ __all__ = ["TracingConfig"]
 @dataclass
 class TracingConfig:
     """
-    Configurations used in ParamExecOrderWrapPolicy for symbolic tracing of a model.
-    tracer: An instance of torch.fx.Tracer that will be used to perform symbolic
-        tracing. tracer is default to be torch.fx.Tracer(), but can also be instance
-        of some child class of torch.fx.Tracer. For example, for hugginface transformer
-        based models, one may want to use HFTracer:
+    Configurations used in ``ParamExecOrderWrapPolicy`` for symbolic tracing of a model.
+    tracer: An instance of ``torch.fx.Tracer`` that will be used to perform symbolic
+        tracing. ``tracer`` is default to be ``torch.fx.Tracer()``, but can also be instance
+        of some child class of ``torch.fx.Tracer``. For example, for hugginface transformer
+        based models, one may want to use ``HFTracer``:
         https://github.com/huggingface/transformers/blob/6dd00f6bd49141ef4f26ed1d1c555bc0fe109ea8/src/transformers/utils/fx.py#L636
 
-    concrete_args: Concrete arguments that should not be treated as torch.fx.Proxy
+    concrete_args: Concrete arguments that should not be treated as ``torch.fx.Proxy``
         when tracing the forward function.
-        concrete_args allows one to partially specialize the forward function,
+        ``concrete_args`` allows one to partially specialize the forward function,
         including removing control flow or data structures.
-        concrete_args is also the parameter used in tracer.trace():
+        ``concrete_args`` is also the parameter used in ``tracer.trace()``:
         https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.trace
     """
     tracer: torch.fx.Tracer = torch.fx.Tracer()
@@ -53,8 +53,8 @@ class _ExecutionInfo:
         module_execution_info_dict: a dict that maps each module to a list of
             tuple containing a module and a list of named parameters.
             For a given module, each tuple:
-            1. either contains this module and part of its named_parameters that will be executed together,
-            2. or contains one of its child modules and all of the child module's named_parameters.
+            1. either contains this module and part of its ``named_parameters`` that will be executed together,
+            2. or contains one of its child modules and all of the child module's ``named_parameters``.
             The list of tuple is ordered based on the parameter execution order.
     """
     def __init__(self, root_module: torch.nn.Module) -> None:
@@ -84,20 +84,20 @@ def _patched_create_proxy(
     type_expr: Optional[Any] = None
 ):
     """
-    Override of `Tracer.create_proxy` (see
+    Override of ``Tracer.create_proxy`` (see
     https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.create_proxy).
-    Tracer.create_proxy is called in symbolic tracing for each leaf function/method/module.
+    ``Tracer.create_proxy`` is called in symbolic tracing for each leaf function/method/module.
     This override intercepts the recording of each of these operations and
-    update execution_info.module_execution_info_dict.
+    update ``execution_info.module_execution_info_dict``.
 
     Args:
         create_proxy (Callable):
-            The create_proxy function to be patched.
+            The ``create_proxy`` function to be patched.
         execution_info (_ExecutionInfo):
             Used to repord the execution information.
         params_dict (Dict[str, torch.nn.Parameter]):
             A dict that maps each parameter name to the parameter
-        kind, target, args, kwargs, name, type_expr: inputs to the create_proxy function.
+        kind, target, args, kwargs, name, type_expr: inputs to the ``create_proxy`` function.
     """
     proxy = create_proxy(kind, target, args, kwargs, name, type_expr)
 
@@ -138,18 +138,18 @@ def _patched_call_module(
     kwargs: Dict[str, Any]
 ) -> Any:
     """
-    Override of Tracer.call_module (see
+    Override of ``Tracer.call_module`` (see
     https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.call_module).
-    Tracer.call_module is called in symbolic tracing for each non-root module.
+    ``Tracer.call_module`` is called in symbolic tracing for each non-root module.
     This override intercepts the recording of each operation and
-    update execution_info.module_forward_order and execution_info.module_execution_info_dict.
+    update ``execution_info.module_forward_order`` and ``execution_info.module_execution_info_dict``.
 
     Args:
         call_module (Callable):
-            The call_module function to be patched.
+            The ``call_module`` function to be patched.
         execution_info (_ExecutionInfo):
             Used to repord the execution information.
-        module, forward, args, kwargs: inputs to the call_module function.
+        module, forward, args, kwargs: inputs to the ``call_module`` function.
     """
     execution_info.module_forward_order.append(module)
     named_params_list = list(module.named_parameters())
@@ -176,9 +176,9 @@ def _patch_tracer(
     root_module: torch.nn.Module
 ) -> _ExecutionInfo:
     """
-    Patches the input tracer so that during tracer.trace(), the forward order
+    Patches the input tracer so that during ``tracer.trace()``, the forward order
     of all modules and the parameter execution information are recorded.
-    root_module is the top-level module to be traced and should not contain
+    ``root_module`` is the top-level module to be traced and should not contain
     any FSDP modules.
     """
     from .fully_sharded_data_parallel import FullyShardedDataParallel

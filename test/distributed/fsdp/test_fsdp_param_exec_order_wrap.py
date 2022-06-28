@@ -1,12 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.distributed.fsdp.wrap import ParamExecOrderWrapPolicy, always_wrap_policy
-from torch.distributed.fsdp.symbolic_trace import TracingConfig
-from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp._symbolic_trace import TracingConfig
+from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
+from torch.distributed.fsdp.wrap import always_wrap_policy, ParamExecOrderWrapPolicy
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
