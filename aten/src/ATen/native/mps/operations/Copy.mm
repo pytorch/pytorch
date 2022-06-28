@@ -101,7 +101,8 @@ static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_, bool
 
   auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
   if (!src_.is_contiguous()) {
-    src = gatherViewTensor(src_);
+    Tensor emptyShell = Tensor();
+    src = gatherViewTensor(src_, emptyShell);
     if (src.has_storage()) {
       storage_byte_offset = 0;
     } else {
@@ -250,10 +251,21 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
 static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, bool non_blocking)
 {
   auto src_byte_offset = src_.storage_offset() * src_.itemsize();
+  auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
+
+  // If dst is contiguous and there is no byte offset, we can save directly the result of
+  // gather into dst. This reduces the overhead of doing an additional blit for most cases
+  bool returnGatherOutput = (dst_.is_contiguous() && !dst_byte_offset);
   Tensor src;
+
   if (!src_.is_contiguous()) {
-    src = gatherViewTensor(src_);
+    Tensor emptyShell = Tensor();
+    src = gatherViewTensor(src_, returnGatherOutput ? dst_ : emptyShell);
+
     if (src.has_storage()) {
+      if (returnGatherOutput)
+        return dst_;
+
       src_byte_offset = 0;
     } else {
       src = src_.expand_as(dst_).contiguous();
@@ -271,7 +283,6 @@ static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_, boo
   src._set_conj(src_.is_conj());
   src._set_neg(src_.is_neg());
 
-  auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
   id<MTLBuffer> destBuffer = getMTLBufferStorage(dst_);
   id<MTLBuffer> sourceBuffer = getMTLBufferStorage(src);
   const size_t src_size = src.nbytes();

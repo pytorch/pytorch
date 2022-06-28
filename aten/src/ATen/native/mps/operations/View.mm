@@ -209,7 +209,7 @@ static ViewCachedGraph* createViewGraph(const Tensor& self, IntArrayRef size, In
   }
 }
 
-Tensor gatherViewTensor(const at::Tensor& src)
+Tensor gatherViewTensor(const at::Tensor& src, at::Tensor& dst)
 {
   ViewCachedGraph* cachedGraph = nullptr;
 
@@ -224,9 +224,12 @@ Tensor gatherViewTensor(const at::Tensor& src)
   if (!cachedGraph) {
     return Tensor();
   }
-  Tensor output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
 
-  return runViewGraph(cachedGraph, src, output, /*needsScatter*/ false);
+  Tensor output;
+  if (!dst.has_storage())
+    output = at::native::empty_mps(src.sizes(), src.scalar_type(), c10::nullopt, kMPS);
+
+  return runViewGraph(cachedGraph, src, dst.has_storage() ? dst : output, /*needsScatter*/ false);
 }
 
 Tensor& scatterViewTensor(const at::Tensor& src, at::Tensor& output)

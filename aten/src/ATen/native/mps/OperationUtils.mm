@@ -257,8 +257,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor, const Tensor& src, MPSS
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
   // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
   if (src.is_view() || !src.is_contiguous()) {
+     Tensor emptyShell = Tensor();
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
-    _tensor = gatherViewTensor(src);
+    _tensor = gatherViewTensor(src, emptyShell);
     if (!_tensor.has_storage()) {
       // if we cannot gather, we make the the tensor contiguous implicitly, and keep
       // it in placeholder to be able to retrieve it when we return from constructor

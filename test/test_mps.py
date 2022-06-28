@@ -4641,7 +4641,7 @@ class TestGatherScatter(TestCase):
         x_mps = torch.zeros(10, dtype=torch.float32, device="mps")
         x_mps[::2] = 1.0
 
-        x_cpu = torch.zeros(10, dtype=torch.float32, device="mps")
+        x_cpu = torch.zeros(10, dtype=torch.float32, device="cpu")
         x_cpu[::2] = 1.0
 
         self.assertEqual(x_cpu, x_mps)
