@@ -3,8 +3,8 @@
 import torch
 import unittest
 from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT
 from torch.ao.quantization.experimental.fake_quantize import APoTFakeQuantize
-from torch.ao.quantization.experimental.apot_utils import float_to_apot, apot_to_float
 
 class TestFakeQuantize(unittest.TestCase):
     r""" Tests fake quantize calculate_qparams() method
@@ -51,8 +51,8 @@ class TestFakeQuantize(unittest.TestCase):
         X_reduced_precision_fp = apot_fake.forward(torch.clone(X), False)
 
         # get X_expected by converting fp -> apot -> fp to simulate quantize -> dequantize
-        X_expected = X.apply_(lambda x: float_to_apot(x, quantization_levels, level_indices))
-        X_expected = X_expected.apply_(lambda x: apot_to_float(x, quantization_levels, level_indices))
+        X_to_apot = quantize_APoT(X, alpha, gamma, quantization_levels, level_indices)
+        X_expected = dequantize_APoT(X_to_apot)
 
         self.assertTrue(torch.equal(X_reduced_precision_fp, X_expected))
 
