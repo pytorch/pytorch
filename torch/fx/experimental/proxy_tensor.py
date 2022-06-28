@@ -217,7 +217,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         if any(tuple(isinstance(arg, ProxyTensor) for arg in pytree.tree_flatten(args)[0])):
             return proxy_call(func_overload, args, kwargs)
         else:
-            proxy_res = self.tracer.create_proxy('call_function', func, args, kwargs,
+            proxy_res = self.tracer.create_proxy('call_function', func_overload, args, kwargs,
                                                  name=self.tracer.graph._target_to_str(func.__name__))
 
             inner_res = func_overload(*args, **kwargs)

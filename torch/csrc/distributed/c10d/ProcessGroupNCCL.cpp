@@ -14,6 +14,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
@@ -600,8 +601,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << options_->is_high_priority_stream;
 
 #ifdef USE_NCCL_WITH_UCC
-  static std::once_flag initialize_ucc_lib_flag;
-  std::call_once(initialize_ucc_lib_flag, [&] {
+  static c10::once_flag initialize_ucc_lib_flag;
+  c10::call_once(initialize_ucc_lib_flag, [&] {
     uccLib_ = loadTorchUCC();
     if (uccLib_ != nullptr) {
       LOG(INFO) << "[Rank " << rank_ << "] torch_ucc.so loaded";
