@@ -60,7 +60,7 @@ __global__ void rrelu_with_noise_cuda_kernel(
         noise[li] = r;
       } else {
         output[li] = input[li];
-        noise[li] = static_cast<scalar_t>(0);
+        noise[li] = static_cast<scalar_t>(1);
       }
     }
     __syncthreads();
