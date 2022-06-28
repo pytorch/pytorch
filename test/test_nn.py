@@ -7922,7 +7922,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 dim_feedforward=dim_feedforward,
                 dropout=dropout,
                 activation=activation,
-                batch_first=batch_first).to(device)
+                batch_first=batch_first,
+            ).to(device)
 
             with torch.no_grad():
                 # set constant weights of the model
@@ -7940,7 +7941,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         use_cuda = torch.cuda.is_available()
         device = torch.device("cuda" if use_cuda else "cpu")
 
-        def _test(batch_first, training):
+        def _test(batch_first, training, enable_nested_tensor):
             def perm_fn(x):
                 return x.transpose(1, 0) if batch_first else x
 
@@ -7988,7 +7989,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             mask[1, 4] = 1
             # If mask is not left aligned
             # We disable nested tensor
-            model.enable_nested_tensor = False
+            model.enable_nested_tensor = enable_nested_tensor
             result = model(encoder_input, src_key_padding_mask=mask)
             ref_output = perm_fn(torch.tensor([[[2.429026, 0.020793, -0.601741, -0.085642],
                                                 [2.428811, 0.021445, -0.601912, -0.084252]],
@@ -8005,7 +8006,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
             # test case 2, multiple layers no norm
-            model = nn.TransformerEncoder(encoder_layer, 2, enable_nested_tensor=False).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, enable_nested_tensor=enable_nested_tensor).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8023,7 +8024,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
-            model = nn.TransformerEncoder(encoder_layer, 6, enable_nested_tensor=False).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 6, enable_nested_tensor=enable_nested_tensor).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8044,7 +8045,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # test case 3, multiple layers with norm
             # d_model = 4
             norm = nn.LayerNorm(4)
-            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm, enable_nested_tensor=False).to(device)
+            model = nn.TransformerEncoder(encoder_layer, 2, norm=norm, enable_nested_tensor=enable_nested_tensor).to(device)
             if not training:
                 model = model.eval()
             result = model(encoder_input, src_key_padding_mask=mask)
@@ -8079,15 +8080,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                               )).to(device)
             self.assertEqual(tuple(result.shape), tuple(ref_output.shape))
             torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
+
         for batch_first in (True, False):
             for training in (True, False):
-                # Fast path requires inference mode.
-                if training:
-                    cm = contextlib.nullcontext()
-                else:
-                    cm = torch.no_grad()
-                with cm:
-                    _test(batch_first, training)
+                for enable_nested_tensor in (True, False):
+                    # Fast path requires inference mode.
+                    if training:
+                        cm = contextlib.nullcontext()
+                    else:
+                        cm = torch.no_grad()
+                    with cm:
+                        _test(batch_first, training, enable_nested_tensor)
 
     def test_transformerdecoder(self):
         def get_a_test_layer(use_cuda, activation, batch_first=False):
@@ -11089,6 +11092,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertEqual(len(w), 0)
         y = y.contiguous(memory_format=torch.contiguous_format)
         self.assertEqual(y, y_ref)
+
+
+    def test_channel_shuffle_return_self(self):
+        # gh-76616: nn.ChannelShuffle will return self with an  empty input tensor
+        groups = 3
+        input_tensor = torch.rand([0, 9, 4, 4])
+        output = torch.nn.ChannelShuffle(groups)(input_tensor)
+        torch.testing.assert_close(output, input_tensor)
 
     def test_upsamplingLinear1d(self):
         for align_corners in [True, False]:
@@ -14355,6 +14366,7 @@ class TestNNDeviceType(NNTestCase):
         if bias is not None:
             bias.requires_grad_(False)
         self.assertTrue(gradgradcheck(convolution, inputs, nondet_tol=gradcheck_nondet_tol))
+
 
     def test_Dropout(self, device):
         input = torch.empty(1000)
