@@ -45,6 +45,8 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
     fn_name = "(unknown)"
     if hasattr(fn, "__name__"):
         fn_name = fn.__name__
+    elif inspect.isclass(type(fn)):
+        fn_name = type(fn).__name__
 
     if len(sig.parameters) > input_col_size:
         non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
