@@ -1972,8 +1972,14 @@
 
 - func: empty.SymInt(SymInt[] size, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None, MemoryFormat? memory_format=None) -> Tensor
   dispatch:
+    CPU: empty_symint_cpu
+    CUDA: empty_symint_cuda
+    MPS: empty_symint_mps
     Meta: empty_symint_meta
-    CompositeExplicitAutograd: empty_symint
+    MkldnnCPU: empty_symint_mkldnn
+    SparseCPU, SparseCUDA: empty_symint_sparse
+    SparseCsrCPU, SparseCsrCUDA: empty_symint_sparse_compressed
+    QuantizedCPU, QuantizedCUDA: empty_symint_unknown_quantized
 
 # We do not make new_empty a composite that calls into new_empty_strided, as the strided version
 # is significantly more difficult to implement by different backends
