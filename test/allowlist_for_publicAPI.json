@@ -548,9 +548,6 @@
     "List",
     "Template"
   ],
-  "torch.distributed.elastic.utils.data.elastic_distributed_sampler": [
-    "DistributedSampler"
-  ],
   "torch.distributed.elastic.utils.logging": [
     "Optional",
     "get_log_level"
@@ -558,22 +555,6 @@
   "torch.distributed.elastic.utils.store": [
     "List",
     "timedelta"
-  ],
-  "torch.distributed.fsdp.flatten_params_wrapper": [
-    "Any",
-    "Dict",
-    "Generator",
-    "Iterator",
-    "List",
-    "NamedTuple",
-    "Optional",
-    "ParamOffset",
-    "Sequence",
-    "SharedParamInfo",
-    "Tensor",
-    "Tuple",
-    "Union",
-    "accumulate"
   ],
   "torch.distributed.fsdp.utils": [
     "Any",
@@ -710,19 +691,6 @@
     "Context",
     "Copy",
     "Wait"
-  ],
-  "torch.distributed.pipeline.sync.dependency": [
-    "Fork",
-    "Join",
-    "fork",
-    "join"
-  ],
-  "torch.distributed.pipeline.sync.microbatch": [
-    "Batch",
-    "NoChunk",
-    "check",
-    "gather",
-    "scatter"
   ],
   "torch.distributed.pipeline.sync.phony": [
     "get_phony"
@@ -1007,22 +975,6 @@
     "dataclass",
     "map_arg"
   ],
-  "torch.fx.graph_module": [
-    "Any",
-    "Dict",
-    "Graph",
-    "Importer",
-    "List",
-    "Optional",
-    "PackageExporter",
-    "PackageImporter",
-    "Path",
-    "PythonCode",
-    "Set",
-    "Type",
-    "Union",
-    "compatibility"
-  ],
   "torch.fx.immutable_collections": [
     "Any",
     "Context",
@@ -1088,45 +1040,8 @@
     "map_aggregate",
     "map_arg"
   ],
-  "torch.fx.passes.param_fetch": [
-    "Any",
-    "Callable",
-    "Dict",
-    "GraphModule",
-    "List",
-    "Tuple",
-    "Type",
-    "compatibility"
-  ],
-  "torch.fx.passes.shape_prop": [
-    "Any",
-    "Dict",
-    "NamedTuple",
-    "Node",
-    "Optional",
-    "Tuple",
-    "compatibility",
-    "map_aggregate"
-  ],
-  "torch.fx.passes.split_module": [
-    "Any",
-    "Callable",
-    "Dict",
-    "GraphModule",
-    "List",
-    "Optional",
-    "compatibility"
-  ],
   "torch.fx.proxy": [
     "assert_fn"
-  ],
-  "torch.hub": [
-    "HTTPError",
-    "Path",
-    "Request",
-    "tqdm",
-    "urlopen",
-    "urlparse"
   ],
   "torch.jit": [
     "Attribute",
