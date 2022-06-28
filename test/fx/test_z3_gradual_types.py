@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: fx"]
 
 import unittest
-from torch.fx import GraphModule
 from torch.fx import GraphModule, symbolic_trace
 from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT, DVar, TVar, T
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
