@@ -1777,7 +1777,6 @@ def conj(input: TensorLikeType) -> TensorLikeType:
     return prims.conj(input)
 
 
-# @register_decomposition(torch.ops.aten.constant_pad_nd)
 def constant_pad_nd(
     input: TensorLikeType, pad: List[int], value: NumberType = 0
 ) -> TensorLikeType:
@@ -1825,13 +1824,14 @@ def constant_pad_nd(
             )
         new_shape.append(new_dim)
 
-    output = full(
-        new_shape,
-        value,
-        dtype=input.dtype,
-        device=input.device,
-        requires_grad=input.requires_grad,
+    options = dict(
+        dtype=input.dtype, device=input.device, requires_grad=input.requires_grad
     )
+    if value == 0:
+        output = zeros(new_shape, **options)
+    else:
+        output = full(new_shape, value, **options)
+
     c_output = output
     for i in range(l_diff, l_inp):
         pad_idx = 2 * (l_inp - i - 1)
