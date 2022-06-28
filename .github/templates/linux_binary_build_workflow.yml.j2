@@ -77,13 +77,7 @@ jobs:
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: !{{ config["build_name"] }}-build
-{%- if config["gpu_arch_type"] == "rocm" %}
-    runs-on: linux.rocm.gpu
-{%- elif config["gpu_arch_type"] == "cuda" %}
-    runs-on: linux.4xlarge.nvidia.gpu
-{%- else %}
-    runs-on: linux.4xlarge
-{%- endif %}
+    runs-on: ${{ (config["gpu_arch_type"] == "rocm" && linux.rocm.gpu) || (config["gpu_arch_type"] == "cuda" && linux.4xlarge.nvidia.gpu) || linux.4xlarge }}
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
