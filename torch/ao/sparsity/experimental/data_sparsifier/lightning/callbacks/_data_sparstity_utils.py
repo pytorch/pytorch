@@ -5,10 +5,6 @@ import copy
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def _create_data_sparsifier(data_sparsifier_args, data_sparsifier_type):
-    return data_sparsifier_type(**data_sparsifier_args)
-
-
 def _attach_model_to_data_sparsifier(module, data_sparsifier, config=None):
     for name, parameter in module.named_parameters():
         if type(parameter) in SUPPORTED_TYPES:
