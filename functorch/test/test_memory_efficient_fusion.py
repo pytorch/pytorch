@@ -239,8 +239,6 @@ class NoChangeTestCase(TestCase):
         t = torch.randn(2, 2)
         check(f, t, 0)
 
-    # https://github.com/pytorch/functorch/issues/913
-    @unittest.expectedFailure
     def test_rand_like(self):
         def f(x):
             a = torch.rand_like(x)
@@ -249,17 +247,13 @@ class NoChangeTestCase(TestCase):
         t = torch.randn(2, 2)
         check(f, t, 0, check_val=False)
 
-    # https://github.com/pytorch/functorch/issues/913
-    @unittest.expectedFailure
     def test_rand_n(self):
         def f(x):
-            g_cpu = torch.Generator()
-            g_cpu.manual_seed(2147483647)
-            a = torch.randn(4, generator=g_cpu)
-            b = torch.randn(4, generator=g_cpu)
+            a = torch.randn(4)
+            b = torch.randn(4)
             return a + b
         t = torch.randn(2, 2)
-        check(f, t, 0)
+        check(f, t, 0, check_val=False)
 
 
 class ReduceTestCase(TestCase):
