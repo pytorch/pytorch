@@ -244,7 +244,7 @@ def meta_conv(
         return (ln - 1) * s - 2 * p + d * (k - 1) + op + 1
 
     def calc_conv_nd_return_shape(
-        dims,
+        dims: torch.Size,
         kernel_size: torch.Size,
         stride: Union[List[int], int],
         padding: Union[List[int], int],
@@ -252,10 +252,14 @@ def meta_conv(
         output_padding: Optional[Union[List[int], int]] = None,
     ):
         ret_shape = []
+        if isinstance(kernel_size, int):
+            kernel_size = [kernel_size] * len(dims)
         if isinstance(stride, int):
             stride = [stride] * len(dims)
         if isinstance(padding, int):
             padding = [padding] * len(dims)
+        elif len(padding) == 1:
+            padding = [padding[0]] * len(dims)
         if isinstance(dilation, int):
             dilation = [dilation] * len(dims)
         if isinstance(output_padding, int):
@@ -281,11 +285,14 @@ def meta_conv(
                 )
         return ret_shape
 
+    kernel_size = weight.shape[2:]
+    dims = input_tensor.shape[2:]
     if is_transposed:
         out_channels = groups * weight.shape[1]
+
         shape_out = calc_conv_nd_return_shape(
-            input_tensor.shape[2:],
-            weight.shape[2:],
+            dims,
+            kernel_size,
             stride,
             padding,
             dilation,
@@ -295,7 +302,7 @@ def meta_conv(
     else:
         out_channels = weight.shape[0]
         shape_out = calc_conv_nd_return_shape(
-            input_tensor.shape[2:], weight.shape[2:], stride, padding, dilation
+            dims, kernel_size, stride, padding, dilation
         )
     return input_tensor.new_empty((input_tensor.shape[0], out_channels, *shape_out))
 
