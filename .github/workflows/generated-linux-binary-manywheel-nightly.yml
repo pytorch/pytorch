@@ -50,90 +50,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cpu
+          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_7-cpu
@@ -174,24 +111,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -199,29 +120,18 @@ jobs:
         with:
           name: manywheel-py3_7-cpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -293,24 +203,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -386,90 +280,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 10.2
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_7-cuda10_2
@@ -511,24 +342,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -536,29 +351,18 @@ jobs:
         with:
           name: manywheel-py3_7-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -642,24 +446,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -735,93 +523,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 11.3
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_7-cuda11_3
@@ -863,24 +585,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -888,29 +594,18 @@ jobs:
         with:
           name: manywheel-py3_7-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -994,24 +689,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1087,93 +766,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 11.6
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_7-cuda11_6
@@ -1215,24 +828,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -1240,29 +837,18 @@ jobs:
         with:
           name: manywheel-py3_7-cuda11_6
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -1346,24 +932,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1439,90 +1009,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: rocm
+          gpu_arch_version: 5.0
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_7-rocm5_0
@@ -1606,29 +1113,18 @@ jobs:
         with:
           name: manywheel-py3_7-rocm5_0
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -1694,24 +1190,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1787,90 +1267,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: rocm
+          gpu_arch_version: 5.1.1
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_7-rocm5_1_1
@@ -1954,29 +1371,18 @@ jobs:
         with:
           name: manywheel-py3_7-rocm5_1_1
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -2042,24 +1448,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2134,90 +1524,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cpu
+          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_8-cpu
@@ -2258,24 +1585,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2283,29 +1594,18 @@ jobs:
         with:
           name: manywheel-py3_8-cpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -2377,24 +1677,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2470,90 +1754,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 10.2
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_8-cuda10_2
@@ -2595,24 +1816,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2620,29 +1825,18 @@ jobs:
         with:
           name: manywheel-py3_8-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -2726,24 +1920,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2819,93 +1997,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 11.3
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_8-cuda11_3
@@ -2947,24 +2059,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2972,29 +2068,18 @@ jobs:
         with:
           name: manywheel-py3_8-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -3078,24 +2163,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3171,93 +2240,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 11.6
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_8-cuda11_6
@@ -3299,24 +2302,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -3324,29 +2311,18 @@ jobs:
         with:
           name: manywheel-py3_8-cuda11_6
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -3430,24 +2406,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3523,90 +2483,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: rocm
+          gpu_arch_version: 5.0
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_8-rocm5_0
@@ -3690,29 +2587,18 @@ jobs:
         with:
           name: manywheel-py3_8-rocm5_0
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -3778,24 +2664,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3871,90 +2741,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: rocm
+          gpu_arch_version: 5.1.1
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_8-rocm5_1_1
@@ -4038,29 +2845,18 @@ jobs:
         with:
           name: manywheel-py3_8-rocm5_1_1
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -4126,24 +2922,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4218,90 +2998,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cpu
+          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_9-cpu
@@ -4342,24 +3059,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -4367,29 +3068,18 @@ jobs:
         with:
           name: manywheel-py3_9-cpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -4461,24 +3151,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4554,90 +3228,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 10.2
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_9-cuda10_2
@@ -4679,24 +3290,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -4704,29 +3299,18 @@ jobs:
         with:
           name: manywheel-py3_9-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -4810,24 +3394,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4903,93 +3471,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 11.3
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_9-cuda11_3
@@ -5031,24 +3533,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -5056,29 +3542,18 @@ jobs:
         with:
           name: manywheel-py3_9-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -5162,24 +3637,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -5255,93 +3714,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 11.6
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_9-cuda11_6
@@ -5383,24 +3776,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -5408,29 +3785,18 @@ jobs:
         with:
           name: manywheel-py3_9-cuda11_6
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -5514,24 +3880,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -5607,90 +3957,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: rocm
+          gpu_arch_version: 5.0
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_9-rocm5_0
@@ -5774,29 +4061,18 @@ jobs:
         with:
           name: manywheel-py3_9-rocm5_0
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -5862,24 +4138,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -5955,90 +4215,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: rocm
+          gpu_arch_version: 5.1.1
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_9-rocm5_1_1
@@ -6122,29 +4319,18 @@ jobs:
         with:
           name: manywheel-py3_9-rocm5_1_1
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -6210,24 +4396,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -6302,90 +4472,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cpu
+          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_10-cpu
@@ -6426,24 +4533,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -6451,29 +4542,18 @@ jobs:
         with:
           name: manywheel-py3_10-cpu
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: Pull Docker image
         run: |
           retry () {
@@ -6545,24 +4625,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -6638,90 +4702,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 10.2
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_10-cuda10_2
@@ -6763,24 +4764,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -6788,29 +4773,18 @@ jobs:
         with:
           name: manywheel-py3_10-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -6894,24 +4868,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -6987,93 +4945,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 11.3
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_10-cuda11_3
@@ -7115,24 +5007,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -7140,29 +5016,18 @@ jobs:
         with:
           name: manywheel-py3_10-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -7246,24 +5111,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -7339,93 +5188,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Set BUILD_SPLIT_CUDA
-        run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: cuda
+          gpu_arch_version: 11.6
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_10-cuda11_6
@@ -7467,24 +5250,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -7492,29 +5259,18 @@ jobs:
         with:
           name: manywheel-py3_10-cuda11_6
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
@@ -7598,24 +5354,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -7691,90 +5431,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: rocm
+          gpu_arch_version: 5.0
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_10-rocm5_0
@@ -7858,29 +5535,18 @@ jobs:
         with:
           name: manywheel-py3_10-rocm5_0
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -7946,24 +5612,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -8039,90 +5689,27 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
-        run: |
-          set -x
-          mkdir -p artifacts/
-          container_name=$(docker run \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/manywheel/build.sh"
-      - name: Chown artifacts
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+          branch: main
+          directory: builder
+      - name: Build Linux binary
+        uses: .github/actions/linux-binary-build
+        with:
+          gpu_arch_type: rocm
+          gpu_arch_version: 5.1.1
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_10-rocm5_1_1
@@ -8206,29 +5793,18 @@ jobs:
         with:
           name: manywheel-py3_10-rocm5_1_1
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+      - name Checkout and clean PyTorch
+        uses: ./.github/actions/common-checkout
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
+          repository: pytorch/pytorch
+          branch: 
+          directory: pytorch
+      - name Checkout and clean pytorch/builder
+        uses: ./.github/actions/common-checkout
         with:
-          ref: main
-          submodules: recursive
           repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
+          branch: main
+          directory: builder
       - name: ROCm set GPU_FLAG
         run: |
           echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
@@ -8294,24 +5870,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
     steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup Linux
-        uses: ./.github/actions/setup-linux
-      - name: Chown workspace
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${ALPINE_IMAGE}"
-          # Ensure the working directory gets chowned back to the current user
-          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
-        uses: seemethere/add-github-ssh-key@v1
+      - name: Setup EC2 Linux
+        uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
