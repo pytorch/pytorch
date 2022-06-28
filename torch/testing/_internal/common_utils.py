@@ -707,7 +707,7 @@ def run_tests(argv=UNITTEST_ARGS):
                 subprocess.run([sys.executable, "-m", "pip", "install", "pytest-xdist"])
             os.environ["NO_COLOR"] = "1"
             pytest_report_path = os.path.join(pytest_report_path, test_filename)
-            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-n=1', '-vv', '-s',
+            exit_code = pytest.main(args=[inspect.getfile(sys._getframe(1)), '-vv', '-s',
                                     f'--junitxml={pytest_report_path}.xml'])
             sanitize_pytest_xml(f'{pytest_report_path}.xml')
             unittest_success = unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
