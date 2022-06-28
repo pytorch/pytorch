@@ -36,9 +36,6 @@ def _hook_then_optimizer(
 ) -> Callable[[Any, dist.GradBucket], torch.futures.Future[torch.Tensor]]:
     r"""
     Runs optimizer in a functional fashion after DDP communication hook.
-
-    .. warning ::
-        This API is experimental adn subject to change.
     """
     has_set_params = (
         hasattr(optimizer_state, 'params_to_optimize')
