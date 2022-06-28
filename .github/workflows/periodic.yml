@@ -171,3 +171,7 @@ jobs:
       IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
       IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
       IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
+
+  buck-build-test:
+    name: buck-build-test
+    uses: ./.github/workflows/_buck-build-test.yml
