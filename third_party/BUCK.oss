@@ -1,10 +1,11 @@
 load("//third_party:glog.buck.bzl", "define_glog")
 load("//third_party:xnnpack.buck.bzl", "define_xnnpack")
 load("//third_party:kineto.buck.bzl", "define_kineto")
+load("//:buckbuild.bzl", "third_party")
 
 define_glog()
 
-define_xnnpack()
+define_xnnpack(third_party)
 
 define_kineto()
 
