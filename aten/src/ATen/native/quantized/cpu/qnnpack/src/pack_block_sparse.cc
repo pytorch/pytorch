@@ -24,13 +24,17 @@ std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
   assert(K > 0);
   std::unique_ptr<BCSRMatrix> bcsr_mat_ptr = std::make_unique<BCSRMatrix>();
   auto& bcsr_mat = *bcsr_mat_ptr;
+  auto& row_values = bcsr_mat.row_values.vector();
+  auto& col_indices = bcsr_mat.col_indices.vector();
+  auto& values = bcsr_mat.values.vector();
+
   const uint32_t num_row_blocks = (N + row_block_size - 1) / row_block_size;
   // K must be > 0
   const uint32_t num_col_blocks = (K + col_block_size - 1) / col_block_size;
 
-  bcsr_mat.row_values.reserve(num_row_blocks);
+  row_values.reserve(num_row_blocks);
   uint32_t num_nnz_blocks{0};
-  bcsr_mat.row_values.push_back(num_nnz_blocks);
+  row_values.push_back(num_nnz_blocks);
   for (uint32_t i = 0; i < num_row_blocks; ++i) {
     for (uint32_t j = 0; j < num_col_blocks; ++j) {
       bool block_zero{true};
@@ -52,14 +56,14 @@ std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
       }
 block_scanned:
       if (!block_zero) {
-        bcsr_mat.col_indices.push_back(j);
+        col_indices.push_back(j);
         num_nnz_blocks++;
         for (uint32_t ib = 0; ib < row_block_size; ++ib) {
           uint32_t row_index = i * row_block_size + ib;
           if PYTORCH_QNNP_UNLIKELY(row_index >= N) {
             for (; row_index < (num_row_blocks * row_block_size); row_index++) {
               for (uint32_t jb = 0; jb < col_block_size; ++jb) {
-                bcsr_mat.values.push_back(zero_points[N-1]);
+                values.push_back(zero_points[N-1]);
               }
             }
             break;
@@ -67,16 +71,16 @@ block_scanned:
           for (uint32_t jb = 0; jb < col_block_size; ++jb) {
             uint32_t col_index = j * col_block_size + jb;
             if PYTORCH_QNNP_UNLIKELY(col_index >= K) {
-              bcsr_mat.values.push_back(zero_points[row_index]);
+              values.push_back(zero_points[row_index]);
             } else {
               uint8_t val = *(a + row_index * K + col_index);
-              bcsr_mat.values.push_back(val);
+              values.push_back(val);
             }
           }
         }
       }
     }
-    bcsr_mat.row_values.push_back(num_nnz_blocks);
+    row_values.push_back(num_nnz_blocks);
   }
   bcsr_mat.row_block_size = row_block_size;
   bcsr_mat.col_block_size = col_block_size;
@@ -84,9 +88,9 @@ block_scanned:
 }
 
 std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
-    const int32_t* col_indices,
-    const int32_t* row_values,
-    const int8_t* values,
+    uint32_t* col_indices,
+    uint32_t* row_values,
+    uint8_t* values,
     const int64_t col_indices_size,
     const int64_t row_values_size,
     const int64_t values_size,
@@ -94,31 +98,11 @@ std::unique_ptr<BCSRMatrix> generateBlockCSRMatrix(
     const int64_t col_block_size) {
   std::unique_ptr<BCSRMatrix> bcsr_mat_ptr = std::make_unique<BCSRMatrix>();
   BCSRMatrix& bcsr_mat = *bcsr_mat_ptr;
-  const auto make_unsigned = [](int32_t v) { return static_cast<uint32_t>(v); };
-  const auto add_128 = [](int8_t v) {
-    return static_cast<uint8_t>(static_cast<int16_t>(v) + 128);
-  };
-
-  bcsr_mat_ptr->col_indices.reserve(col_indices_size);
-  bcsr_mat_ptr->row_values.reserve(row_values_size);
-  bcsr_mat_ptr->values.reserve(values_size);
-
-  std::transform(
-      col_indices,
-      col_indices + col_indices_size,
-      std::back_inserter(bcsr_mat_ptr->col_indices),
-      make_unsigned);
-  std::transform(
-      row_values,
-      row_values + row_values_size,
-      std::back_inserter(bcsr_mat_ptr->row_values),
-      make_unsigned);
-  std::transform(
-      values,
-      values + values_size,
-      std::back_inserter(bcsr_mat_ptr->values),
-      add_128);
-
+  bcsr_mat.col_indices =
+      OwnedOrBorrowedVector<uint32_t>(col_indices, col_indices_size);
+  bcsr_mat.row_values =
+      OwnedOrBorrowedVector<uint32_t>(row_values, row_values_size);
+  bcsr_mat.values = OwnedOrBorrowedVector<uint8_t>(values, values_size);
   bcsr_mat.row_block_size = row_block_size;
   bcsr_mat.col_block_size = col_block_size;
   return bcsr_mat_ptr;
@@ -128,18 +112,18 @@ void BCSRMatrix::print() const {
   std::cout << "row block size:" << row_block_size << std::endl;
   std::cout << "col block size:" << col_block_size << std::endl;
   std::cout << "row ptr\n";
-  for (const auto& t : row_values) {
-    std::cout << t << ", ";
+  for (int i = 0; i < row_values.size(); i++) {
+    std::cout << row_values[i] << ", ";
   }
   std::cout << std::endl;
   std::cout << "col indices\n";
-  for (const auto& t : col_indices) {
-    std::cout << t << ", ";
+  for (int i = 0; i < col_indices.size(); i++) {
+    std::cout << col_indices[i] << ", ";
   }
   std::cout << std::endl;
   std::cout << "Actual values\n";
-  for (const auto& t : values) {
-    std::cout << (uint32_t)t << ", ";
+  for (int i = 0; i < values.size(); i++) {
+    std::cout << (uint32_t)values[i] << ", ";
   }
   std::cout << std::endl;
 }
