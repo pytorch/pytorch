@@ -2856,6 +2856,18 @@
 - name: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
   x: non_differentiable
 
+- name: special_complete_elliptic_integral_k_e(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_complete_elliptic_integral_k_k(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_complete_elliptic_integral_m_e(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_complete_elliptic_integral_m_k(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
   x: non_differentiable
   n: non_differentiable
