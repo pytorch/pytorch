@@ -10,6 +10,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_to_copy.h>
 #include <ATen/ops/to_native.h>
 #include <ATen/ops/resize.h>
 #include <ATen/ops/as_strided.h>
@@ -32,7 +33,7 @@ namespace {
       if (ivalue.isTensor()) {
         any_tensor_inputs = true;
         auto t = ivalue.toTensor();
-        if (at::functionalization::impl::isFunctionalTensor(t)) {
+        if (t.defined() && at::functionalization::impl::isFunctionalTensor(t)) {
           any_functional_inputs = true;
           at::functionalization::impl::sync(t);
           auto t_new = c10::IValue(at::functionalization::impl::from_functional_tensor(t));
@@ -73,6 +74,7 @@ namespace {
       const auto& ivalue = returns[idx];
       if (ivalue.isTensor() && should_wrap_outputs) {
         auto t = ivalue.toTensor();
+        if (!t.defined()) continue;
         auto t_new = c10::IValue(at::functionalization::impl::to_functional_tensor(t));
         (*stack)[returns_begin + idx] = t_new;
       } else if (ivalue.isTensorList() && should_wrap_outputs) {
@@ -171,6 +173,48 @@ at::Tensor lift_functionalize(const at::Tensor & self) {
   return at::functionalization::impl::to_functional_tensor(self);
 }
 
+bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
+    // If the target device is empty, then the output tensor should be on the same device as the input
+    auto real_tgt_device = tgt_device.has_value() ? tgt_device.value() : self_device;
+    return real_tgt_device.type() == c10::DeviceType::XLA || real_tgt_device.type() == c10::DeviceType::Lazy;
+}
+
+// note I only need this because the to.dtype/to.dtype_layout overload calls this, so we skip the op above.
+// We should probably get rid of this though.
+at::Tensor _to_copy_functionalize(
+        const at::Tensor & self,
+        c10::optional<at::ScalarType> dtype,
+        c10::optional<at::Layout> layout,
+        c10::optional<at::Device> device,
+        c10::optional<bool> pin_memory,
+        bool non_blocking,
+        c10::optional<at::MemoryFormat> memory_format) {
+  at::Tensor self_;
+  if (at::functionalization::impl::isFunctionalTensor(self)) {
+    // sync any pending updates
+    at::functionalization::impl::sync(self);
+    // pass the unwrapped tensor to the backend
+    self_ = at::functionalization::impl::from_functional_tensor(self);
+  } else {
+    self_ = self;
+  }
+
+  at::AutoDispatchSkipFunctionalize guard;
+  auto out = at::_to_copy(self_, dtype, layout, device, pin_memory, non_blocking, memory_format);
+
+  // Special case: if the Functionalize key is not in TLS, we assume that we're running
+  // on a lazy backend (LTC).
+  // In that case, if we're copying to a non-functionalize-enabled device,
+  // then the functionalization pass should "end". We need to sync any updates on the input
+  // tensor, but we shouldn't wrap the output.
+  if (!c10::impl::tls_local_dispatch_key_set().included_.has(c10::DispatchKey::Functionalize)) {
+    if (!device_opted_into_functionalization(self.device(), device)) {
+      return out;
+    }
+  }
+  return at::functionalization::impl::to_functional_tensor(out);
+}
+
 TORCH_LIBRARY_IMPL(_, Functionalize, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&functionalizeFallback>());
 }
@@ -178,4 +222,5 @@ TORCH_LIBRARY_IMPL(_, Functionalize, m) {
 TORCH_LIBRARY_IMPL(aten, Functionalize, m) {
   m.impl("resize_", TORCH_FN(resize__functionalization));
   m.impl("lift", TORCH_FN(lift_functionalize));
+  m.impl("_to_copy", TORCH_FN(_to_copy_functionalize));
 }

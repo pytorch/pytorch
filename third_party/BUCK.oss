@@ -1,12 +1,27 @@
 load("//third_party:glog.buck.bzl", "define_glog")
 load("//third_party:xnnpack.buck.bzl", "define_xnnpack")
 load("//third_party:kineto.buck.bzl", "define_kineto")
+load("//:buckbuild.bzl", "third_party")
 
 define_glog()
 
-define_xnnpack()
+define_xnnpack(third_party)
 
 define_kineto()
+
+# a placeholder for libraries that are not implemented in OSS
+cxx_library(
+    name = "no-op",
+    visibility = ['PUBLIC'],
+)
+
+cxx_library(
+    name = "rt",
+    exported_platform_linker_flags = [
+        ("^linux-.*$", ["-lrt"]),
+    ],
+    visibility = ['PUBLIC'],
+)
 
 cxx_library(
     name = "fmt",
