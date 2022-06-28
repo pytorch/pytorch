@@ -43,7 +43,6 @@ def query_commits(commits: List[str], qlambda: Any) -> Any:
 
 def print_commit_status(commit: str, results: Dict[str, Any]) -> None:
     print(commit)
-
     for check in results['results']:
         if check['sha'] == commit:
             print(f"\t{check['conclusion']:>10}: {check['name']}")
