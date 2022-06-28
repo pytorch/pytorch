@@ -159,7 +159,7 @@ static inline __device__ void gpuAtomic##NAME(uint8_t *address, uint8_t val) {  
 Atomic##NAME##IntegerImpl<uint8_t, sizeof(uint8_t)>()(address,                                                         \
                                                       val,                                                             \
                                                       [](uint8_t a, uint8_t b) {                                       \
-                                                          return OP(a, b);                                             \
+                                                          return OP;                                                   \
                                                       });                                                              \
 }                                                                                                                      \
                                                                                                                        \
@@ -167,7 +167,7 @@ static inline  __device__ void gpuAtomic##NAME(int8_t *address, int8_t val) {   
 Atomic##NAME##IntegerImpl<int8_t, sizeof(int8_t)>()(address,                                                           \
                                                     val,                                                               \
                                                     [](int8_t a, int8_t b) {                                           \
-                                                        return OP(a, b);                                               \
+                                                        return OP;                                                     \
                                                     });                                                                \
 }                                                                                                                      \
                                                                                                                        \
@@ -175,7 +175,7 @@ static inline  __device__ void gpuAtomic##NAME(int16_t *address, int16_t val) { 
 Atomic##NAME##IntegerImpl<int16_t, sizeof(int16_t)>()(address,                                                         \
                                                       val,                                                             \
                                                       [](int16_t a, int16_t b) {                                       \
-                                                          return OP(a, b);                                             \
+                                                          return OP;                                                   \
                                                       });                                                              \
 }                                                                                                                      \
                                                                                                                        \
@@ -370,10 +370,8 @@ static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) { 
 
 // Atomic multiplication implementation.
 
-#define PROD(X, Y) X * Y
 ATOMIC_INTEGER_IMPL(Mul)
-GPU_ATOMIC_INTEGER(Mul, PROD)
-#undef PROD
+GPU_ATOMIC_INTEGER(Mul, a * b)
 
 inline __device__ at::Half gpuAtomicMul(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
@@ -429,10 +427,8 @@ __host__ __device__ T safe_max(T a, T b) {
   return max;
 }
 
-#define MAX(X, Y) safe_max(X, Y)
 ATOMIC_INTEGER_IMPL(Max)
-GPU_ATOMIC_INTEGER(Max, MAX)
-#undef MAX
+GPU_ATOMIC_INTEGER(Max, safe_max(a, b))
 
 inline __device__ at::Half gpuAtomicMax(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
@@ -487,10 +483,8 @@ __host__ __device__ T safe_min(T a, T b) {
   return min;
 }
 
-#define MIN(X, Y) safe_min(X, Y)
 ATOMIC_INTEGER_IMPL(Min)
-GPU_ATOMIC_INTEGER(Min, MIN)
-#undef MIN
+GPU_ATOMIC_INTEGER(Min, safe_min(a, b))
 
 inline __device__ at::Half gpuAtomicMin(at::Half * address, at::Half val) {
   return AtomicFPOp<at::Half>()(address, val,
