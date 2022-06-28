@@ -139,6 +139,9 @@ Pushing a release candidate should trigger the `binary_builds` workflow within C
 This trigger functionality is configured here: [`pytorch-circleci-labels.yml`](https://github.com/pytorch/pytorch/blob/master/.github/pytorch-circleci-labels.yml)
 
 To view the state of the release build, please navigate to [HUD](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12). and make sure all binary builds are successful.
+
+Please note: final release tag ```v1.12.0``` is added only after the release is alive. 
+
 ### Release Candidate Storage
 
 Release candidates are currently stored in the following places:
