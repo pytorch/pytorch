@@ -11,6 +11,7 @@
 #include <ATen/detail/ORTHooksInterface.h>
 #include <c10/core/QEngine.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
+#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 
@@ -99,10 +100,10 @@ class TORCH_API Context {
   // defined in header so that getNonVariableType has ability to inline
   // call_once check. getNonVariableType is called fairly frequently
   void lazyInitCUDA() {
-    std::call_once(thc_init, [&] { detail::getCUDAHooks().initCUDA(); });
+    c10::call_once(thc_init, [&] { detail::getCUDAHooks().initCUDA(); });
   }
   void lazyInitHIP() {
-    std::call_once(thh_init, [&] { detail::getHIPHooks().initHIP(); });
+    c10::call_once(thh_init, [&] { detail::getHIPHooks().initHIP(); });
   }
   static const at::cuda::NVRTC& getNVRTC() {
     return detail::getCUDAHooks().nvrtc();
@@ -244,8 +245,8 @@ class TORCH_API Context {
     }
   }
   static bool checkCuBLASConfigDeterministic();
-  std::once_flag thc_init;
-  std::once_flag thh_init;
+  c10::once_flag thc_init;
+  c10::once_flag thh_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool _deterministic_algorithms = false;
