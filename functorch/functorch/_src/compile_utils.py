@@ -4,6 +4,14 @@ import torch.fx as fx
 from torch.utils._pytree import tree_flatten
 
 aten = torch.ops.aten
+
+
+def get_aten_target(node):
+    if hasattr(node.target, 'overloadpacket'):
+        return node.target.overloadpacket
+    return node.target
+
+
 rand_ops = [aten.dropout, aten._fused_dropout, aten._standard_gamma,
             aten.bernoulli, aten.multinomial, aten.native_dropout,
             aten.normal, aten.poisson, aten.binomial, aten.rrelu,
@@ -19,7 +27,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
     for n in fx_g.nodes:
         # The placeholder, output, and get_attr nodes are copied to the new grpah without change
         # do not CSE away random operations
-        if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or n.target in rand_ops:
+        if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in rand_ops:
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
         else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'

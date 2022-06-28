@@ -7,7 +7,7 @@ import copy
 import os
 from torch.fx.passes import graph_drawer
 from typing import Tuple
-from .compile_utils import fx_graph_cse, strip_overloads
+from .compile_utils import fx_graph_cse, get_aten_target
 
 
 class InvalidNodeBase(object):
@@ -227,7 +227,6 @@ def min_cut_rematerialization_partition(
     except ImportError:
         raise RuntimeError("Need networkx installed to perform smart recomputation heuristics")
 
-    strip_overloads(joint_module)
     joint_module.graph.eliminate_dead_code()
     joint_module.recompile()
     fx_g = joint_module.graph
@@ -299,22 +298,22 @@ def min_cut_rematerialization_partition(
 
     def ban_recomputation(node):
         if AGGRESSIVE_RECOMPUTATION:
-            return (node.op == 'call_function' and node.target in unrecomputable_ops)
+            return (node.op == 'call_function' and get_aten_target(node) in unrecomputable_ops)
         else:
             if node.op != 'call_function':
                 return False
-            if node.target not in recomputable_ops:
+            if get_aten_target(node) not in recomputable_ops:
                 return True
             # If the output of the reduction is 4x smaller (arbitrary choice),
             # then we don't allow recomputation.
-            if node.target in reduction_ops:
+            if get_aten_target(node) in reduction_ops:
                 input_tensors_size = sum(_size_of(i.meta['tensor_meta']) for i in node.args if isinstance(i, fx.Node))
                 output_size = _size_of(node.meta['tensor_meta'])
                 return (output_size * 4 < input_tensors_size)
             return False
 
     def is_fusible(a, b):
-        return a.target in fusible_ops and b.target in fusible_ops
+        return get_aten_target(a) in fusible_ops and get_aten_target(b) in fusible_ops
 
     def is_materialized(node):
         if node.op == 'placeholder':
