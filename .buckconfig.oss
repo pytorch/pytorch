@@ -15,6 +15,11 @@
 [cxx]
   cxxflags = -std=c++17
   should_remap_host_platform = true
+  cpp = /usr/bin/clang
+  cc = /usr/bin/clang
+  cxx = /usr/bin/clang++
+  cxxpp = /usr/bin/clang++
+  ld = /usr/bin/clang++
 
 [project]
   default_flavors_mode=all
