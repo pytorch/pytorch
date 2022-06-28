@@ -8909,6 +8909,11 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
         yield SampleInput(a, args=(c, b))
 
+    # Python scalars type promotion
+    for scalar in (0, 0.0, 0j, False):
+        yield SampleInput(scalar, args=(c, b))
+        yield SampleInput(a, args=(c, scalar))
+
 
 def error_inputs_where(op_info, device, **kwargs):
     shape = (S,)
@@ -20190,14 +20195,13 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        # nvFuser test for float32 fails with AssertionError: Dtypes torch.float64 and torch.float32 are not equal!
-        # The test with int dtype passes
+        # When keepdim=False logsumexp function uses squeeze operation
+        # that is not yet exposed in nvFuser's Python API.
         supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.log_softmax",
         torch_opinfo_name="log_softmax",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
