@@ -56,10 +56,12 @@ jobs:
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: !{{ config["gpu_arch_type"] }}
+          {%- if config["gpu_arch_version"]%}
           gpu_arch_version: !{{ config["gpu_arch_version"] }}
+          {%- endif %}
       - uses: !{{ common.upload_artifact_s3_action }}
         with:
           name: !{{ config["build_name"] }}

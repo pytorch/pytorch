@@ -54,23 +54,21 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cpu
-          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_7-cpu
@@ -120,13 +118,12 @@ jobs:
         with:
           name: manywheel-py3_7-cpu
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -284,20 +281,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -351,13 +347,12 @@ jobs:
         with:
           name: manywheel-py3_7-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -527,20 +522,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -594,13 +588,12 @@ jobs:
         with:
           name: manywheel-py3_7-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -770,20 +763,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -837,13 +829,12 @@ jobs:
         with:
           name: manywheel-py3_7-cuda11_6
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1013,20 +1004,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.0
@@ -1113,13 +1103,12 @@ jobs:
         with:
           name: manywheel-py3_7-rocm5_0
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1271,20 +1260,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.1.1
@@ -1371,13 +1359,12 @@ jobs:
         with:
           name: manywheel-py3_7-rocm5_1_1
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1528,23 +1515,21 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cpu
-          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_8-cpu
@@ -1594,13 +1579,12 @@ jobs:
         with:
           name: manywheel-py3_8-cpu
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1758,20 +1742,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1825,13 +1808,12 @@ jobs:
         with:
           name: manywheel-py3_8-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2001,20 +1983,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -2068,13 +2049,12 @@ jobs:
         with:
           name: manywheel-py3_8-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2244,20 +2224,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -2311,13 +2290,12 @@ jobs:
         with:
           name: manywheel-py3_8-cuda11_6
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2487,20 +2465,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.0
@@ -2587,13 +2564,12 @@ jobs:
         with:
           name: manywheel-py3_8-rocm5_0
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2745,20 +2721,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.1.1
@@ -2845,13 +2820,12 @@ jobs:
         with:
           name: manywheel-py3_8-rocm5_1_1
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3002,23 +2976,21 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cpu
-          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_9-cpu
@@ -3068,13 +3040,12 @@ jobs:
         with:
           name: manywheel-py3_9-cpu
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3232,20 +3203,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -3299,13 +3269,12 @@ jobs:
         with:
           name: manywheel-py3_9-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3475,20 +3444,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -3542,13 +3510,12 @@ jobs:
         with:
           name: manywheel-py3_9-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3718,20 +3685,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -3785,13 +3751,12 @@ jobs:
         with:
           name: manywheel-py3_9-cuda11_6
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3961,20 +3926,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.0
@@ -4061,13 +4025,12 @@ jobs:
         with:
           name: manywheel-py3_9-rocm5_0
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -4219,20 +4182,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.1.1
@@ -4319,13 +4281,12 @@ jobs:
         with:
           name: manywheel-py3_9-rocm5_1_1
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -4476,23 +4437,21 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cpu
-          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: manywheel-py3_10-cpu
@@ -4542,13 +4501,12 @@ jobs:
         with:
           name: manywheel-py3_10-cpu
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -4706,20 +4664,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -4773,13 +4730,12 @@ jobs:
         with:
           name: manywheel-py3_10-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -4949,20 +4905,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -5016,13 +4971,12 @@ jobs:
         with:
           name: manywheel-py3_10-cuda11_3
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -5192,20 +5146,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -5259,13 +5212,12 @@ jobs:
         with:
           name: manywheel-py3_10-cuda11_6
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -5435,20 +5387,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.0
@@ -5535,13 +5486,12 @@ jobs:
         with:
           name: manywheel-py3_10-rocm5_0
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -5693,20 +5643,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.1.1
@@ -5793,13 +5742,12 @@ jobs:
         with:
           name: manywheel-py3_10-rocm5_1_1
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder

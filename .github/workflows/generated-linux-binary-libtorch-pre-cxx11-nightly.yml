@@ -55,23 +55,21 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cpu
-          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -122,13 +120,12 @@ jobs:
         with:
           name: libtorch-cpu-shared-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -287,23 +284,21 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cpu
-          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-shared-without-deps-pre-cxx11
@@ -354,13 +349,12 @@ jobs:
         with:
           name: libtorch-cpu-shared-without-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -519,23 +513,21 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cpu
-          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-static-with-deps-pre-cxx11
@@ -586,13 +578,12 @@ jobs:
         with:
           name: libtorch-cpu-static-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -751,23 +742,21 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cpu
-          gpu_arch_version: 
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-static-without-deps-pre-cxx11
@@ -818,13 +807,12 @@ jobs:
         with:
           name: libtorch-cpu-static-without-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -984,20 +972,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1052,13 +1039,12 @@ jobs:
         with:
           name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1230,20 +1216,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1298,13 +1283,12 @@ jobs:
         with:
           name: libtorch-cuda10_2-shared-without-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1476,20 +1460,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1544,13 +1527,12 @@ jobs:
         with:
           name: libtorch-cuda10_2-static-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1722,20 +1704,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1790,13 +1771,12 @@ jobs:
         with:
           name: libtorch-cuda10_2-static-without-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -1968,20 +1948,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -2036,13 +2015,12 @@ jobs:
         with:
           name: libtorch-cuda11_3-shared-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2214,20 +2192,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -2282,13 +2259,12 @@ jobs:
         with:
           name: libtorch-cuda11_3-shared-without-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2460,20 +2436,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -2528,13 +2503,12 @@ jobs:
         with:
           name: libtorch-cuda11_3-static-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2706,20 +2680,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -2774,13 +2747,12 @@ jobs:
         with:
           name: libtorch-cuda11_3-static-without-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -2952,20 +2924,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -3020,13 +2991,12 @@ jobs:
         with:
           name: libtorch-cuda11_6-shared-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3198,20 +3168,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -3266,13 +3235,12 @@ jobs:
         with:
           name: libtorch-cuda11_6-shared-without-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3444,20 +3412,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -3512,13 +3479,12 @@ jobs:
         with:
           name: libtorch-cuda11_6-static-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3690,20 +3656,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -3758,13 +3723,12 @@ jobs:
         with:
           name: libtorch-cuda11_6-static-without-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -3936,20 +3900,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.0
@@ -4037,13 +4000,12 @@ jobs:
         with:
           name: libtorch-rocm5_0-shared-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -4197,20 +4159,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.0
@@ -4298,13 +4259,12 @@ jobs:
         with:
           name: libtorch-rocm5_0-static-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -4458,20 +4418,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.1.1
@@ -4559,13 +4518,12 @@ jobs:
         with:
           name: libtorch-rocm5_1_1-shared-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -4719,20 +4677,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.1.1
@@ -4820,13 +4777,12 @@ jobs:
         with:
           name: libtorch-rocm5_1_1-static-with-deps-pre-cxx11
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder

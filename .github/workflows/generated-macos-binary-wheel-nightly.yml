@@ -69,13 +69,12 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -217,13 +216,12 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -365,13 +363,12 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
@@ -513,13 +510,12 @@ jobs:
           chmod +x "${RUNNER_TEMP}/conda.sh"
           /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
           echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder

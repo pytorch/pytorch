@@ -50,20 +50,19 @@ jobs:
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder
           branch: main
           directory: builder
       - name: Build Linux binary
-        uses: .github/actions/linux-binary-build
+        uses: ./.github/actions/linux-binary-build
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -117,13 +116,12 @@ jobs:
         with:
           name: manywheel-py3_7-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name Checkout and clean PyTorch
+      - name: Checkout and clean PyTorch
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/pytorch
-          branch: 
           directory: pytorch
-      - name Checkout and clean pytorch/builder
+      - name: Checkout and clean pytorch/builder
         uses: ./.github/actions/common-checkout
         with:
           repository: pytorch/builder

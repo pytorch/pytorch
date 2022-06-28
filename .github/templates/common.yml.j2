@@ -218,11 +218,13 @@ on:
 {%- endmacro -%}
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
-      - name Checkout and clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
+      - name: Checkout and clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: ./.github/actions/common-checkout
         with:
           repository: !{{ repository }}
+          {%- if branch%}
           branch: !{{ branch }}
+          {%- endif %}
           directory: !{{ directory }}
 {%- endmacro -%}
 
