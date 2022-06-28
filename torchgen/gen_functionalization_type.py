@@ -363,7 +363,17 @@ def emit_view_functionalization_body(
       );
       {return_type} reference_tensor_output;
       {{
-        at::AutoDispatchSkipFunctionalize guard;
+        // Exclude any modes: the purpose of calling into meta kernels is only as an implementation
+        // detail to perform shape inference, and we don't want any modal keys to run.
+        // Specifically, we want to prevent functionalization and Python modes from running.
+        c10::impl::ExcludeDispatchKeyGuard guard(
+            c10::functorch_transforms_ks |
+            c10::DispatchKeySet({{
+              c10::DispatchKey::FuncTorchDynamicLayerBackMode,
+              c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
+              c10::DispatchKey::Python
+            }})
+        );
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
       }}
@@ -391,12 +401,25 @@ def emit_view_functionalization_body(
         return at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
       }}
       auto reapply_views = at::functionalization::impl::getFunctionalizationReapplyViewsTLS();
-      {return_type} tmp_output;
       {return_type} reference_tensor_output;
       {{
-        at::AutoDispatchSkipFunctionalize guard;
+        // Exclude any modes: the purpose of calling into meta kernels is only as an implementation
+        // detail to perform shape inference, and we don't want any modal keys to run.
+        // Specifically, we want to prevent functionalization and Python modes from running.
+        c10::impl::ExcludeDispatchKeyGuard guard(
+            c10::functorch_transforms_ks |
+            c10::DispatchKeySet({{
+              c10::DispatchKey::FuncTorchDynamicLayerBackMode,
+              c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
+              c10::DispatchKey::Python
+            }})
+        );
         {meta_conversion_str}
         reference_tensor_output = at::_ops::{noop_api_name}::call({', '.join(meta_call_args)});
+      }}
+      {return_type} tmp_output;
+      {{
+        at::AutoDispatchSkipFunctionalize guard;
         if (reapply_views) {{
           tmp_output = at::_ops::{noop_api_name}::call({', '.join(view_redispatch_args)});
         }} else {{
@@ -603,8 +626,20 @@ def emit_inplace_functionalization_body(
         // Before converting the mutable op to its functional variant, run meta tensors through the original op.
         // This will help us catch shape errors that apply to inplace ops that wouldn't apply to their functional variants.
         // (We can only do this for inplace ops today though, because they technicaly all support meta tensors).
+        //
+        // Exclude any modes: the purpose of calling into meta kernels is only as an implementation
+        // detail to perform shape inference, and we don't want any modal keys to run.
+        // Specifically, we want to prevent functionalization and Python modes from running.
+        c10::impl::ExcludeDispatchKeyGuard guard(
+            c10::functorch_transforms_ks |
+            c10::DispatchKeySet({{
+              c10::DispatchKey::FuncTorchDynamicLayerBackMode,
+              c10::DispatchKey::FuncTorchDynamicLayerFrontMode,
+              c10::DispatchKey::Python
+            }})
+        );
+        at::AutoDispatchSkipFunctionalize func_guard;
         {meta_conversion_str}
-        at::AutoDispatchSkipFunctionalize guard;
         at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(a.name for a in meta_call_ctx)});
       }}
       {unwrap_tensor_args_str}

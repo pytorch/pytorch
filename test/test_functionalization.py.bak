@@ -141,9 +141,10 @@ def forward(self, a_1):
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, fill_scalar);  view_copy_default = fill_scalar = None
-    view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2])
+    view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
     mul_tensor = torch.ops.aten.mul.Tensor(view_copy_default_1, view_copy_default_1);  view_copy_default_1 = None
-    return add_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_simple_out(self):
@@ -168,7 +169,8 @@ def forward(self, a_1):
     empty_1 = torch.ops.aten.empty([], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     add_tensor = torch.ops.aten.add.Tensor(view_copy_default, fill_scalar);  view_copy_default = fill_scalar = None
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, add_tensor);  add_tensor = None
-    return mul_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_multi_out(self):
@@ -191,7 +193,8 @@ def forward(self, a_1):
     aminmax_default = torch.ops.aten.aminmax.default(a_1, dim = 0);  a_1 = None
     getitem = aminmax_default[0]
     getitem_1 = aminmax_default[1];  aminmax_default = None
-    return getitem
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_tensor_ctr(self):
@@ -222,7 +225,8 @@ def forward(self, a_1):
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2])
     add_tensor = torch.ops.aten.add.Tensor(a_1, fill_scalar);  a_1 = fill_scalar = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
-    return view_copy_default_1
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     # Some ops that are mutable are neither inplace nor out= ops.
@@ -244,7 +248,9 @@ def forward(self, a_1):
     getitem_3 = _fused_moving_avg_obs_fq_helper_functional[3]
     getitem_4 = _fused_moving_avg_obs_fq_helper_functional[4]
     getitem_5 = _fused_moving_avg_obs_fq_helper_functional[5];  _fused_moving_avg_obs_fq_helper_functional = None
-    return (getitem, getitem_1)
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    return (_tensor_constant0, _tensor_constant1)
     """)
 
     def test_as_strided(self):
@@ -262,7 +268,8 @@ def forward(self, a_1):
     as_strided_copy_default = torch.ops.aten.as_strided_copy.default(a_1, [2], [2], 1)
     add_tensor = torch.ops.aten.add.Tensor(as_strided_copy_default, 1);  as_strided_copy_default = None
     as_strided_scatter_default = torch.ops.aten.as_strided_scatter.default(a_1, add_tensor, [2], [2], 1);  a_1 = add_tensor = None
-    return as_strided_scatter_default
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_tensor_list_composite(self):
@@ -278,7 +285,8 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     block_diag_default = torch.ops.aten.block_diag.default([a_1, a_1]);  a_1 = None
-    return block_diag_default
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_cat(self):
@@ -295,7 +303,8 @@ def forward(self, a_1):
 def forward(self, a_1):
     empty = torch.ops.aten.empty([0], dtype = torch.float32, device = device(type='cpu'), pin_memory = False)
     cat_default = torch.ops.aten.cat.default([a_1]);  a_1 = None
-    return cat_default
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_diagonal(self):
@@ -319,7 +328,8 @@ def forward(self, a_1):
     add_tensor = torch.ops.aten.add.Tensor(diagonal_copy_default, fill_scalar);  diagonal_copy_default = fill_scalar = None
     diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(a_1, add_tensor);  a_1 = add_tensor = None
     mul_tensor = torch.ops.aten.mul.Tensor(diagonal_scatter_default, diagonal_scatter_default);  diagonal_scatter_default = None
-    return mul_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_diagonal_mutated_input(self):
@@ -358,10 +368,11 @@ def forward(self, a_1):
     split_copy_tensor_1 = torch.ops.aten.split_copy.Tensor(a_1, 2)
     getitem_2 = split_copy_tensor_1[0]
     getitem_3 = split_copy_tensor_1[1];  split_copy_tensor_1 = None
-    diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(getitem_3, add_tensor);  getitem_3 = None
+    diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(getitem_3, add_tensor);  getitem_3 = add_tensor = None
     slice_scatter_default = torch.ops.aten.slice_scatter.default(a_1, diagonal_scatter_default, 0, 2, 4);  a_1 = diagonal_scatter_default = None
     mul_tensor = torch.ops.aten.mul.Tensor(slice_scatter_default, slice_scatter_default);  slice_scatter_default = None
-    return add_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_view_inplace(self):
@@ -388,7 +399,8 @@ def forward(self, a_1):
     select_scatter_default = torch.ops.aten.select_scatter.default(transpose_copy_int_1, add_tensor, 0, 0);  transpose_copy_int_1 = add_tensor = None
     transpose_copy_int_2 = torch.ops.aten.transpose_copy.int(select_scatter_default, 1, 0);  select_scatter_default = None
     transpose_copy_int_3 = torch.ops.aten.transpose_copy.int(transpose_copy_int_2, 1, 0);  transpose_copy_int_2 = None
-    return transpose_copy_int_3
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_optional_tensor_list(self):
@@ -413,8 +425,9 @@ def forward(self, a_1):
     empty_1 = torch.ops.aten.empty([0], dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     arange_1 = torch.ops.aten.arange(0, 4, 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'))
     index_put_default = torch.ops.aten.index_put.default(view_copy_default, [arange], arange_1);  view_copy_default = arange = arange_1 = None
-    view_copy_default_1 = torch.ops.aten.view_copy.default(index_put_default, [4, 2])
-    return index_put_default
+    view_copy_default_1 = torch.ops.aten.view_copy.default(index_put_default, [4, 2]);  index_put_default = None
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_scalars(self):
@@ -440,7 +453,8 @@ def forward(self, a_1):
     mul_tensor = torch.ops.aten.mul.Tensor(add_tensor, 2)
     div_tensor = torch.ops.aten.div.Tensor(mul_tensor, 1);  mul_tensor = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(add_tensor, [4, 2]);  add_tensor = None
-    return div_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_metadata_change(self):
@@ -474,7 +488,8 @@ def forward(self, a_1):
 
 def forward(self, a_1):
     view_copy_default = torch.ops.aten.view_copy.default(a_1, [4, 2]);  a_1 = None
-    return view_copy_default
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_everything(self):
@@ -518,7 +533,7 @@ def forward(self, a_1):
     transpose_copy_int_1 = torch.ops.aten.transpose_copy.int(_reshape_alias_copy_default_1, 1, 0);  _reshape_alias_copy_default_1 = None
     unsqueeze_copy_default_1 = torch.ops.aten.unsqueeze_copy.default(transpose_copy_int_1, 0);  transpose_copy_int_1 = None
     squeeze_copy_default_1 = torch.ops.aten.squeeze_copy.default(unsqueeze_copy_default_1);  unsqueeze_copy_default_1 = None
-    slice_scatter_default = torch.ops.aten.slice_scatter.default(squeeze_copy_default_1, add_tensor_1, 0, 0, 2);  squeeze_copy_default_1 = None
+    slice_scatter_default = torch.ops.aten.slice_scatter.default(squeeze_copy_default_1, add_tensor_1, 0, 0, 2);  squeeze_copy_default_1 = add_tensor_1 = None
     unsqueeze_copy_default_2 = torch.ops.aten.unsqueeze_copy.default(slice_scatter_default, 0);  slice_scatter_default = None
     squeeze_copy_dim = torch.ops.aten.squeeze_copy.dim(unsqueeze_copy_default_2, 0);  unsqueeze_copy_default_2 = None
     transpose_copy_int_2 = torch.ops.aten.transpose_copy.int(squeeze_copy_dim, 1, 0);  squeeze_copy_dim = None
@@ -528,7 +543,8 @@ def forward(self, a_1):
     _reshape_alias_copy_default_3 = torch.ops.aten._reshape_alias_copy.default(view_copy_default_3, [2, 4], [4, 1]);  view_copy_default_3 = None
     select_copy_int_1 = torch.ops.aten.select_copy.int(_reshape_alias_copy_default_3, 0, 0);  _reshape_alias_copy_default_3 = None
     add_tensor_2 = torch.ops.aten.add.Tensor(select_copy_int_1, _unsafe_view_default);  select_copy_int_1 = _unsafe_view_default = None
-    return add_tensor_1
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_reapply_views_simple(self):
@@ -549,9 +565,10 @@ def forward(self, a_1):
     fill_scalar = torch.ops.aten.fill.Scalar(empty, 1.0);  empty = None
     view_default = torch.ops.aten.view.default(a_1, [4, 2]);  a_1 = None
     add_tensor = torch.ops.aten.add.Tensor(view_default, fill_scalar);  view_default = fill_scalar = None
-    view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2])
+    view_default_1 = torch.ops.aten.view.default(add_tensor, [4, 2]);  add_tensor = None
     mul_tensor = torch.ops.aten.mul.Tensor(view_default_1, view_default_1);  view_default_1 = None
-    return add_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_aliases_maintained_after_pass_when_reapplying_views(self):
@@ -603,7 +620,8 @@ def forward(self, a_1):
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_functional);  zero_functional = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-    return add_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
         # Test 2: copy_() with same dtype, different shape
@@ -620,7 +638,8 @@ def forward(self, a_1):
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_functional);  zero_functional = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-    return add_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
         # Test 3: copy_() with different dtype, same shape
@@ -637,7 +656,8 @@ def forward(self, a_1):
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_functional);  zero_functional = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-    return add_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
         # Test 4: copy_() with different dtype, different shape
@@ -654,7 +674,8 @@ def forward(self, a_1):
     diagonal_copy_default_1 = torch.ops.aten.diagonal_copy.default(zero_functional);  zero_functional = None
     copy_default = torch.ops.aten.copy.default(diagonal_copy_default_1, a_1);  diagonal_copy_default_1 = None
     add_tensor = torch.ops.aten.add.Tensor(copy_default, a_1);  copy_default = a_1 = None
-    return add_tensor
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_fill_(self):
@@ -675,7 +696,8 @@ def forward(self, a_1):
     diagonal_copy_default = torch.ops.aten.diagonal_copy.default(add_tensor)
     fill_scalar = torch.ops.aten.fill.Scalar(diagonal_copy_default, 0);  diagonal_copy_default = None
     diagonal_scatter_default = torch.ops.aten.diagonal_scatter.default(add_tensor, fill_scalar);  add_tensor = fill_scalar = None
-    return diagonal_scatter_default
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_resize_smaller(self):
@@ -710,7 +732,8 @@ def forward(self, a_1):
     view_copy_default_5 = torch.ops.aten.view_copy.default(view_copy_default_4, [4, 4]);  view_copy_default_4 = None
     as_strided_copy_default_2 = torch.ops.aten.as_strided_copy.default(view_copy_default_5, [3, 3], [3, 1]);  view_copy_default_5 = None
     add_tensor_2 = torch.ops.aten.add.Tensor(as_strided_copy_default_2, 1);  as_strided_copy_default_2 = None
-    return add_tensor_2
+    _tensor_constant0 = self._tensor_constant0
+    return _tensor_constant0
     """)
 
     def test_resize_larger_valid(self):
@@ -742,8 +765,10 @@ def forward(self, a_1):
     view_copy_default = torch.ops.aten.view_copy.default(resize_functional, [25]);  resize_functional = None
     fill_scalar = torch.ops.aten.fill.Scalar(view_copy_default, 1);  view_copy_default = None
     view_copy_default_1 = torch.ops.aten.view_copy.default(fill_scalar, [5, 5]);  fill_scalar = None
-    add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1)
-    return (view_copy_default_1, add_tensor_1)
+    add_tensor_1 = torch.ops.aten.add.Tensor(view_copy_default_1, 1);  view_copy_default_1 = None
+    _tensor_constant0 = self._tensor_constant0
+    _tensor_constant1 = self._tensor_constant1
+    return (_tensor_constant0, _tensor_constant1)
     """)
 
     def test_resize_larger_invalid(self):
