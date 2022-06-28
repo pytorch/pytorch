@@ -268,49 +268,6 @@ Val* getProducerIndexWithGather(
     size_t producer_root_axis,
     const TensorView* producer_tv,
     const TensorView* consumer_tv,
-    const std::unordered_map<IterDomain*, IterDomain*>& concrete_to_ref_map,
-    const std::unordered_map<IterDomain*, Val*>& ref_index_map) {
-  auto gather_op = dynamic_cast<const GatherOp*>(consumer_tv->definition());
-
-  // Just return the producer index as is if this is not a gather
-  if (gather_op == nullptr) {
-    return producer_index;
-  }
-
-  // Consumer axis that corresponds to the producer axis
-  int consumer_axis = -1;
-  for (const auto i : c10::irange(producer_root_axis + 1)) {
-    if (producer_tv->getMaybeRFactorDomain()[i]->isReduction() ||
-        producer_tv->getMaybeRFactorDomain()[i]->isStride()) {
-      continue;
-    }
-    ++consumer_axis;
-  }
-
-  TORCH_INTERNAL_ASSERT(
-      consumer_axis >= 0 &&
-          consumer_axis < (int)gather_op->windowShape().size(),
-      "Invalid consumer axis",
-      consumer_axis,
-      ", producer_axis: ",
-      producer_root_axis);
-
-  auto offset = getProducerOffsetWithGather(
-      consumer_axis, consumer_tv, ref_index_map, true, concrete_to_ref_map);
-  return SimplifyingIrBuilder::addExpr(producer_index, offset);
-}
-
-//! Offset a producer index of a gather expression
-//!
-//! Given an index of a producer root axis, build a new index
-//! expression that accesses a window position that the current loop
-//! structure refers to. Use getGatherProducerOffset to create an
-//! offset Val.
-Val* getProducerIndexWithGather(
-    Val* producer_index,
-    size_t producer_root_axis,
-    const TensorView* producer_tv,
-    const TensorView* consumer_tv,
     const std::unordered_map<IterDomain*, Val*>& concrete_index_map) {
   auto gather_op = dynamic_cast<const GatherOp*>(consumer_tv->definition());
 
@@ -1246,37 +1203,6 @@ c10::optional<IterDomain*> getMaybeIndexedIdToHoist(
   return indexed_id;
 }
 
-Val* hoistConsumerIndex(
-    IterDomain* consumer_root_id,
-    const TensorView* consumer_tv,
-    const IndexCompute& consumer_indexing,
-    TensorDomain* ref_td,
-    const IndexCompute& ref_indexing,
-    const std::vector<kir::ForLoop*>& loops,
-    Val* index) {
-  auto maybe_hoisted_consumer_id = getMaybeIndexedIdToHoist(
-      consumer_root_id, consumer_tv, consumer_indexing, index);
-
-  if (!maybe_hoisted_consumer_id.has_value()) {
-    return index;
-  }
-
-  // Insert the index into the common index map. A previously inserted
-  // val can be returned.
-  auto common_index = GpuLower::current()
-                          ->commonIndexMap()
-                          .insert(
-                              maybe_hoisted_consumer_id.value(),
-                              consumer_tv->domain(),
-                              ref_td,
-                              ref_indexing.indexMap(),
-                              loops,
-                              index)
-                          .first;
-
-  return common_index;
-}
-
 // Version of hoisting without using reference tensor,
 //  should eventually deprecate the other one once reference
 //  tensor is completely deprecated.
@@ -1322,56 +1248,6 @@ std::unordered_map<IterDomain*, IterDomain*> invertOneToOneMap(
         kv.second->toString());
   }
   return inverted;
-}
-
-Val* hoistProducerIndex(
-    IterDomain* producer_root_id,
-    const TensorView* producer_tv,
-    const IndexCompute& producer_indexing,
-    const TensorView* consumer_tv,
-    const std::unordered_map<IterDomain*, IterDomain*>& p2c_map,
-    TensorDomain* ref_td,
-    const IndexCompute& ref_indexing,
-    const std::vector<kir::ForLoop*>& loops,
-    Val* index) {
-  auto maybe_indexed_producer_id = getMaybeIndexedIdToHoist(
-      producer_root_id, producer_tv, producer_indexing, index);
-
-  if (!maybe_indexed_producer_id.has_value()) {
-    return index;
-  }
-
-  auto indexed_consumer_id_it = p2c_map.find(maybe_indexed_producer_id.value());
-
-  // There can be no corresponding consumer ID. For example, consider:
-  //   consumer: [b1, i2, i3]
-  //   producer: [i2, i3].
-  // Suppose the consumer is transformed as:
-  //   consumer: [(b1*i2)*i3]
-  // Then the producer would be transformed when indexed:
-  //   producer: [i2*i3]
-  // Assuming i2 and i3 are contiguous, the producer indexing is done
-  // with the mreged i2*i3 domain, but there's no domain in the
-  // cosumer that maps with the producer indexed domain.
-  // It seems non-trivial to support patterns like this. Skip for now.
-  if (indexed_consumer_id_it == p2c_map.end()) {
-    return index;
-  }
-
-  IterDomain* indexed_consumer_id = indexed_consumer_id_it->second;
-
-  auto common_index = GpuLower::current()
-                          ->commonIndexMap()
-                          .insert(
-                              indexed_consumer_id,
-                              consumer_tv->domain(),
-                              ref_td,
-                              ref_indexing.indexMap(),
-                              loops,
-                              index)
-                          .first;
-
-  return common_index;
 }
 
 Val* hoistProducerIndex(
@@ -2341,19 +2217,6 @@ std::vector<PredicateDomainInfo> getPredicateContigIds(
     contig_id_infos.push_back(contig_id_info);
   }
   return contig_id_infos;
-}
-
-IterDomain* getMappedReferenceDomain(
-    IterDomain* id,
-    const ReferenceTensor& reference) {
-  // Partially overlaps with getPredicateContigIds()
-  auto concrete_id = GpuLower::current()->caMap()->getConcreteMappedID(
-      id, IdMappingMode::EXACT);
-  auto it = reference.concrete_to_id.find(concrete_id);
-  if (it == reference.concrete_to_id.end()) {
-    return nullptr;
-  }
-  return it->second;
 }
 
 std::vector<PredicateDomainInfo> getNonDivisibleConsumerDomainsToPredicate(
