@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, Dict
 import pytorch_lightning as pl
 
-from ._data_sparstity_utils import _create_data_sparsifier, _attach_model_to_data_sparsifier, _log_sparsified_level
+from ._data_sparstity_utils import _attach_model_to_data_sparsifier, _log_sparsified_level
 
 
 @dataclass
@@ -48,7 +48,7 @@ class PostTrainingDataSparsity(_DataSparsity):
 
     def on_fit_end(self, trainer, pl_module) -> None:
         self.sparsified = deepcopy(pl_module.model).eval()
-        self.data_sparsifier = _create_data_sparsifier(self.data_sparsifier_args, self.data_sparsifier_type)
+        self.data_sparsifier = self.data_sparsifier_type(**self.data_sparsifier_args)
 
         _attach_model_to_data_sparsifier(self.sparsified, self.data_sparsifier)
 
