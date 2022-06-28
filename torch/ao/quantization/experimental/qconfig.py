@@ -38,9 +38,6 @@ Default qconfig configuration.
 
 def get_default_qconfig():
     """
-    Returns the default PTQ qconfig
-    Return:
-        qconfig
+    Returns the default qconfig
     """
-    qconfig = default_qconfig
-    return qconfig
+    return default_qconfig
