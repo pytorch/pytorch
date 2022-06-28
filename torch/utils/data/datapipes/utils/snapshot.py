@@ -1,3 +1,4 @@
+from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.graph_settings import apply_shuffle_seed
 
@@ -6,8 +7,7 @@ from torch.utils.data.graph_settings import apply_shuffle_seed
 #   1. Caller (either the ReadingService or DataLoader) must pass in the initial RNG
 #   2. `in_batch_shuffle` and `bucketbatch` are not compatible with this because they currently
 #      lack the option to `set_seed`.
-
-def _simple_snapshot_graph(datapipe: IterDataPipe, n_iterations: int, rng=None) -> None:
+def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int, rng=None) -> None:
     r"""
     This function will restore a snapshot by fast-forwarding the given DataPipe by ``n_iterations``,
     and in the process, fast-forward its parent DataPipes as well at the cost of re-doing every computation.
@@ -26,10 +26,12 @@ def _simple_snapshot_graph(datapipe: IterDataPipe, n_iterations: int, rng=None) 
         rng: ``Optional[torch.Generator]``. If not ``None``, this RNG will be used for shuffling. The generator
             should be in its `initial` state as it was first passed into ``DataLoader`` or ``ReadingService``.
     """
-    # This operation can only take place if `datapipe` has been recently restored (usually through `__setstate__`)
-    # and an iterator has not started yet.
-    if not datapipe._restored:
-        return
+    if datapipe._snapshot_state != _SnapshotState.Deserialized:
+        raise RuntimeError(
+            "Snapshot restoration cannot be applied. You can only restore simple snapshot to the graph "
+            "if your graph has recently been came from deserialized,\nand have not restored another snapshot or "
+            "create any iterator. It is possible to override this by setting "
+            "`datapipe._snapshot_state = _SnapshotState.Deserialized`.")
 
     apply_shuffle_seed(datapipe, rng)
 
@@ -47,7 +49,7 @@ def _simple_snapshot_graph(datapipe: IterDataPipe, n_iterations: int, rng=None) 
 
     # This will prevent the DataPipe from resetting in the `iter()` call
     # If another DataPipe is consuming it, it won't have to start over again
-    datapipe._restored = True
+    datapipe._snapshot_state = _SnapshotState.Restored
 
 
 def _fast_forward_graph(datapipe: IterDataPipe, n_iterations: int) -> None:
