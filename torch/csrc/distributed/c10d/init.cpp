@@ -1263,7 +1263,13 @@ Arguments:
 
           .def(
               "alltoall",
-              &::c10d::ProcessGroup::alltoall,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const std::vector<at::Tensor>& output_tensors,
+                 const std::vector<at::Tensor>& input_tensors,
+                 const ::c10d::AllToAllOptions& opts) {
+                return ::c10d::ops::alltoall(
+                    self, output_tensors, input_tensors, opts);
+              },
               py::arg("output_tensor"),
               py::arg("input_tensor"),
               py::arg("opts") = ::c10d::AllToAllOptions(),
@@ -1271,10 +1277,11 @@ Arguments:
 
           .def(
               "alltoall",
-              [](::c10d::ProcessGroup& pg,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& pg,
                  std::vector<at::Tensor>& output,
                  std::vector<at::Tensor>& input) {
-                return pg.alltoall(output, input, ::c10d::AllToAllOptions());
+                return ::c10d::ops::alltoall(
+                    pg, output, input, ::c10d::AllToAllOptions());
               },
               py::arg("output"),
               py::arg("input"),
@@ -1297,7 +1304,10 @@ Arguments:
 
           .def(
               "barrier",
-              &::c10d::ProcessGroup::barrier,
+              [](const c10::intrusive_ptr<::c10d::ProcessGroup>& self,
+                 const ::c10d::BarrierOptions& opts) {
+                return ::c10d::ops::barrier(self, opts);
+              },
               py::arg("opts") = ::c10d::BarrierOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
