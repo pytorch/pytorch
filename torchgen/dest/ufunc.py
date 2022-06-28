@@ -21,7 +21,6 @@ from torchgen.api.types import (
     BaseCType,
     Expr,
     NamedCType,
-    ScalarTypeToCppMapping,
     VectorizedCType,
 )
 from torchgen.context import with_native_function
@@ -290,7 +289,7 @@ def compute_ufunc_cuda(g: NativeFunctionsGroup) -> str:
     for dtype, inner_ufunctor_sigs in ufunctor_sigs.items():
         dtype_cases.append(
             f"""
-AT_PRIVATE_CASE_TYPE("{sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapping[dtype]},
+AT_DISPATCH_CASE(at::ScalarType::{dtype},
   [&]() {{
     {compute_ufunc_cuda_dtype_body(g, dtype, inner_ufunctor_sigs, sig.arguments())}
   }}
@@ -309,13 +308,9 @@ AT_PRIVATE_CASE_TYPE("{sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapp
 {stub_sig.dispatch_decl()};
 
 {stub_sig.kernel_defn()} {{
-  at::ScalarType st = iter.common_dtype();
-  RECORD_KERNEL_FUNCTION_DTYPE("{sig.name}", st);
-  switch (st) {{
+  AT_DISPATCH_SWITCH(iter.common_dtype(), "{sig.name}",
     {dtype_cases_str}
-    default:
-      TORCH_CHECK(false, "{sig.name}", " not implemented for '", toString(st), "'");
-  }}
+  );
 }}
 REGISTER_DISPATCH({stub_sig.name}, &{stub_sig.kernel_name});
 
@@ -522,7 +517,7 @@ def compute_ufunc_cpu_kernel(g: NativeFunctionsGroup) -> str:
     for dtype, inner_ufunc_sigs in ufunc_sigs.items():
         dtype_cases.append(
             f"""
-AT_PRIVATE_CASE_TYPE("{stub_sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCppMapping[dtype]},
+AT_DISPATCH_CASE(at::ScalarType::{dtype},
   [&]() {{
     {compute_ufunc_cpu_dtype_body(g, dtype, inner_ufunc_sigs, stub_sig.arguments())}
   }}
@@ -535,13 +530,9 @@ AT_PRIVATE_CASE_TYPE("{stub_sig.name}", at::ScalarType::{dtype}, {ScalarTypeToCp
 namespace {{
 
 {stub_sig.kernel_defn()} {{
-  at::ScalarType st = iter.common_dtype();
-  RECORD_KERNEL_FUNCTION_DTYPE("{stub_sig.name}", st);
-  switch (st) {{
+  AT_DISPATCH_SWITCH(iter.common_dtype(), "{stub_sig.name}",
     {dtype_cases_str}
-    default:
-      TORCH_CHECK(false, "{stub_sig.name}", " not implemented for '", toString(st), "'");
-  }}
+  );
 }}
 
 }} // anonymous namespace
