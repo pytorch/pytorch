@@ -227,4 +227,3 @@ class CollatorIterDataPipe(MapperIterDataPipe):
                 # TODO(VitalyFedyunin): Validate passed dictionary
                 collate_fn = functools.partial(_collate_helper, conversion)
                 super().__init__(datapipe, fn=collate_fn)
-            
