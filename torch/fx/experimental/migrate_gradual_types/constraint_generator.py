@@ -12,7 +12,7 @@ from torch.nn.modules.conv import Conv2d
 from torch.nn.modules.batchnorm import BatchNorm2d
 _INFERENCE_RULES: Dict[Target, Callable] = {}
 
-MAX_TENSOR_RANK = 5
+MAX_TENSOR_RANK = 4
 
 def register_inference_rule(call_target):
     def register(fn):
@@ -43,7 +43,7 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
     my_add, counter = gen_tvar(counter)
     symbols[n] = my_add
 
-    # retrive arg variables
+    # retrieve arg variables
     e1 = symbols[n.args[0]]
     e2 = symbols[n.args[1]]
 
@@ -122,7 +122,7 @@ def linear_inference_rule(n: Node, module_instance, symbols, constraints, counte
     c1 = Conj([input_dyn, output_dyn])
 
     c2 = []
-    for i in range(1, MAX_TENSOR_RANK):
+    for i in range(1, MAX_TENSOR_RANK + 1):
         new_dims_rhs_1, counter = gen_tensor_dims(i, counter)
         new_dims_rhs_2, counter = gen_tensor_dims(i, counter)
 
