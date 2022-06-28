@@ -277,7 +277,7 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
-        datapipe = dp.iter.FileLister(temp_dir, '')
+        datapipe: IterDataPipe = dp.iter.FileLister(temp_dir, '')
 
         count = 0
         for pathname in datapipe:
@@ -2639,6 +2639,121 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
         self.assertEqual(1, next(it3))
+
+class TestIterDataPipeCountSampleYielded(TestCase):
+
+    def _yield_count_test_helper(self, datapipe, n_expected_samples):
+
+        # Functional Test: Check if number of samples yielded is as expected
+        res = list(datapipe)
+        self.assertEqual(len(res), datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check if the count is correct when DataPipe is partially read
+        it = iter(datapipe)
+        res = []
+        for i, value in enumerate(it):
+            res.append(value)
+            if i == n_expected_samples - 1:
+                break
+        self.assertEqual(n_expected_samples, datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check for reset behavior and if iterator also works
+        it = iter(datapipe)  # reset the DataPipe
+        res = list(it)
+        self.assertEqual(len(res), datapipe._number_of_samples_yielded)
+
+    def test_iterdatapipe_sample_yielded_generator_function(self):
+        # Functional Test: `__iter__` is a generator function
+        datapipe: IterDataPipe = dp.iter.IterableWrapper(range(10))
+        self._yield_count_test_helper(datapipe, n_expected_samples=5)
+
+    def test_iterdatapipe_sample_yielded_generator_function_exception(self):
+        # Functional Test: `__iter__` is a custom generator function with exception
+        class _CustomGeneratorFnDataPipe(IterDataPipe):
+            # This class's `__iter__` has a Runtime Error
+            def __iter__(self):
+                yield 0
+                yield 1
+                yield 2
+                raise RuntimeError("Custom test error after yielding 3 elements")
+                yield 3
+
+        # Functional Test: Ensure the count is correct even when exception is raised
+        datapipe: IterDataPipe = _CustomGeneratorFnDataPipe()
+        with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
+            list(datapipe)
+        self.assertEqual(3, datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check for reset behavior and if iterator also works
+        it = iter(datapipe)  # reset the DataPipe
+        with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
+            list(it)
+        self.assertEqual(3, datapipe._number_of_samples_yielded)
+
+    def test_iterdatapipe_sample_yielded_return_self(self):
+        class _CustomGeneratorDataPipe(IterDataPipe):
+            # This class's `__iter__` is not a generator function
+            def __init__(self):
+                self.source = iter(range(10))
+
+            def __iter__(self):
+                return self.source
+
+            def reset(self):
+                self.source = iter(range(10))
+
+        datapipe: IterDataPipe = _CustomGeneratorDataPipe()
+        self._yield_count_test_helper(datapipe, n_expected_samples=5)
+
+    def test_iterdatapipe_sample_yielded_next(self):
+        class _CustomNextDataPipe(IterDataPipe):
+            # This class's `__iter__` returns `self` and has a `__next__`
+            def __init__(self):
+                self.source = iter(range(10))
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                return next(self.source)
+
+            def reset(self):
+                self.source = iter(range(10))
+
+        datapipe: IterDataPipe = _CustomNextDataPipe()
+        self._yield_count_test_helper(datapipe, n_expected_samples=5)
+
+    def test_iterdatapipe_sample_yielded_next_exception(self):
+        class _CustomNextDataPipe(IterDataPipe):
+            # This class's `__iter__` returns `self` and has a `__next__`
+            def __init__(self):
+                self.source = iter(range(10))
+                self.count = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.count == 3:
+                    raise RuntimeError("Custom test error after yielding 3 elements")
+                self.count += 1
+                return next(self.source)
+
+            def reset(self):
+                self.count = 0
+                self.source = iter(range(10))
+
+        # Functional Test: Ensure the count is correct even when exception is raised
+        datapipe: IterDataPipe = _CustomNextDataPipe()
+        with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
+            list(datapipe)
+        self.assertEqual(3, datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check for reset behavior and if iterator also works
+        it = iter(datapipe)  # reset the DataPipe
+        with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
+            list(it)
+        self.assertEqual(3, datapipe._number_of_samples_yielded)
 
 if __name__ == '__main__':
     run_tests()
