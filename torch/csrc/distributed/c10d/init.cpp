@@ -1777,6 +1777,36 @@ Example::
   module.attr("_DEFAULT_PG_TIMEOUT") = py::cast(kProcessGroupDefaultTimeout);
   module.attr("_DEFAULT_NO_TIMEOUT") = py::cast(kNoTimeout);
 
+  module.def(
+      "_create_work_from_future",
+      [](std::shared_ptr<jit::PythonFutureWrapper> future) {
+        return ::c10d::ProcessGroup::Work::create_from_future(future->fut);
+      },
+      py::arg("future"),
+      R"(
+        Arguments:
+            future(str): The future to wrap.
+        Returns:
+            A ``ProcessGroup::Work`` object which is associated with the completion of
+            the ``torch.futures.Future``.
+        This is the prefered way of constructing Work objects when writing a custom ProcessGroup
+        in python.
+        Example::
+            >>> class SingleRankProcessGroup(torch.distributed.ProcessGroup):
+            >>>     def broadcast(self, tensor_list, opts):
+            >>>         fut = torch.futures.Future()
+            >>>         fut.set_result(tensor_list)
+            >>>         return torch._C._distributed_c10d._create_work_from_future(fut)
+        .. warning ::
+            This API is experimental and subject to change.
+            The returned Work object has multiple limitations:
+            - synchronize() does nothing. Use ``torch.futures.Future`` based synchronization.
+            - wait() ignored timeout argument.
+            - sourceRank() raises.
+            - abort() raises.
+            The provided Future object result must be a Tensor or a list of Tensors.
+           )");
+
   Py_RETURN_TRUE;
 }
 

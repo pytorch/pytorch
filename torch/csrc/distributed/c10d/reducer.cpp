@@ -69,6 +69,22 @@ class CpuTimer : public Timer {
 
 C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 
+std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
+  if (result.isPyObject()) {
+    return result.toPyObjectHolder()->extractTensors();
+  }
+  TORCH_INTERNAL_ASSERT(
+      result.isTensor() || result.isTensorList(),
+      "expected the hook result is either a Tensor or a TensorList found ",
+      result.tagKind());
+
+  if (result.isTensor()) {
+    return {result.toTensor()};
+  }
+
+  return result.toTensorVector();
+}
+
 } // namespace
 
 Reducer::Reducer(
@@ -494,7 +510,10 @@ void Reducer::set_divide_factor() {
     auto& workHandle = forwardPassWorkHandle_.workHandle;
     if (workHandle && !forwardPassWorkHandle_.useStaticWorldSize) {
       workHandle->wait();
-      auto results = workHandle->result();
+      // PyProcessGroup::PyWork doesn't expose value, so fetch it from the
+      // future
+      auto results = extractTensors(workHandle->getFuture()->value());
+
       // Guard against the results being empty
       TORCH_INTERNAL_ASSERT(results.size() > 0);
       at::Tensor& res = results.front();

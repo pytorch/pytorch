@@ -191,4 +191,56 @@ void ProcessGroup::init() {
       fmt::format("c10d.process_group_{}", getBackendName()));
 }
 
+class FutureWrappingWork : public ProcessGroup::Work {
+ public:
+  FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
+      : Work(), _fut(fut) {}
+
+  ~FutureWrappingWork() {}
+
+  bool isCompleted() override {
+    return _fut->completed();
+  }
+
+  bool isSuccess() const override {
+    return _fut->hasValue();
+  }
+
+  std::exception_ptr exception() const override {
+    return _fut->exception_ptr();
+  }
+
+  int sourceRank() const override {
+    TORCH_CHECK(false, "FutureWrappingWork::sourceRank() not implemented");
+  }
+
+  std::vector<at::Tensor> result() override {
+    return _fut->value().toPyObjectHolder()->extractTensors();
+  }
+
+  bool wait(std::chrono::milliseconds timeout) override {
+    // FIXME
+    TORCH_CHECK(
+        timeout == kNoTimeout,
+        "FutureWrappingWork::wait() with finite timeout not implemented");
+    _fut->wait();
+    return true;
+  }
+
+  void abort() override {
+    TORCH_CHECK(false, "FutureWrappingWork::abort() not implemented");
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+    return _fut;
+  }
+
+ private:
+  c10::intrusive_ptr<c10::ivalue::Future> _fut;
+};
+
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::Work::create_from_future(
+    c10::intrusive_ptr<c10::ivalue::Future> future) {
+  return c10::make_intrusive<FutureWrappingWork>(future);
+}
 } // namespace c10d
