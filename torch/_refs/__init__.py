@@ -91,6 +91,7 @@ __all__ = [
     "tan",
     "tanh",
     "trace",
+    "trunc",
     #
     # Elementwise Binary References
     #
@@ -102,11 +103,11 @@ __all__ = [
     "bitwise_right_shift",
     "bitwise_xor",
     # "complex",
-    # 'copysign', # where
-    # 'div', # need to implement all rounding modes first
+    "copysign",
+    "div",
     "eq",
     "float_power",
-    # 'floor_divide', # requires floor
+    "floor_divide",
     "fmax",
     "fmin",
     "fmod",
@@ -141,6 +142,7 @@ __all__ = [
     # # special.zeta
     "sub",
     "true_divide",
+    "trunc_divide",
     # 'xlogy', # where?, log, mul
     #
     # Elementwise Ternary References
@@ -223,6 +225,7 @@ __all__ = [
     "full_like",
     "ones",
     "ones_like",
+    "scalar_tensor",
     "zeros",
     "zeros_like",
     #
@@ -697,6 +700,11 @@ def tanh(a):
     return prims.tanh(a)
 
 
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def trunc(a):
+    return prims.trunc(a)
+
+
 def _make_elementwise_binary_reference(
     prim: Callable,
     *,
@@ -824,8 +832,56 @@ bitwise_xor = _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 
+
+def _copysign(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    if isinstance(b, Number) and isinstance(a, Tensor):
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
+        msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+            a.device, b.device
+        )
+        raise RuntimeError(msg)
+    return where(signbit(b), neg(abs(a)), abs(a))
+
+
+# TODO: add docstring
+copysign = _make_elementwise_binary_reference(
+    _copysign,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    supports_lhs_python_scalar=False,
+    aten_op=torch.ops.aten.copysign,
+)
+
 # TODO: add docstring
 # complex =  _make_elementwise_binary_reference(prims.complex, type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+
+
+@register_decomposition(torch.ops.aten.div)
+@out_wrapper()
+def div(
+    a: Union[TensorLikeType, NumberType],
+    b: Union[TensorLikeType, NumberType],
+    *,
+    rounding_mode: Optional[str] = None,
+):
+    """
+    Reference implementation of torch.div
+    """
+    if rounding_mode is None:
+        return true_divide(a, b)
+    elif rounding_mode == "trunc":
+        return trunc_divide(a, b)
+    elif rounding_mode == "floor":
+        return floor_divide(a, b)
+    else:
+        msg = (
+            "div expected rounding_mode to be one of None, 'trunc', or 'floor' "
+            "but found {0}.".format(rounding_mode)
+        )
+        raise ValueError(msg)
+
 
 # TODO: add docstring
 eq = _make_elementwise_binary_reference(
@@ -865,6 +921,84 @@ def float_power(
 
     a, b = _maybe_broadcast(a, b)
     return prims.pow(a, b)
+
+
+# >>> a = torch.tensor(-0.2500, dtype=torch.float64)
+# tensor(-0.250000000000000, dtype=torch.float64)
+#
+# >>> b = torch.tensor(-0.0010, dtype=torch.float64)
+# tensor(-0.001000000000000, dtype=torch.float64)
+#
+# Note: In this case, casting float to double will expand the float mantissa with zeros,
+# while creating a double generates a distinct mantissa.
+# >>> torch.tensor(-0.001).to(dtype=torch.float64)
+# tensor(-0.001000000047497, dtype=torch.float64)
+#
+# Floor Division
+# The difference is caused because torch.remainder(a, b) = -0.001.
+#
+# >>> torch.floor(torch.true_divide(a, b))
+# tensor(250., dtype=torch.float64)
+#
+# >>> torch.div(a, b, rounding_mode='floor')
+# tensor(249., dtype=torch.float64)
+#
+# Definition: a // b = (a - remainder(a, b)) / b
+# >>> torch.true_divide(torch.sub(a, torch.remainder(a, b)), b)
+# tensor(249., dtype=torch.float64)
+#
+# For reference, see CPython's implementation:
+# https://github.com/python/cpython/blob/ace008c531dd685a30c1dd68f9b5ba35f20171cf/Objects/floatobject.c#L636
+def _floor_divide(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    # Wrap scalars because some references only accept tensor arguments.
+    if isinstance(a, Number) and isinstance(b, Number):
+        a = scalar_tensor(a)
+        b = scalar_tensor(b)
+    elif isinstance(b, Number) and isinstance(a, Tensor):
+        b = scalar_tensor(b, dtype=a.dtype, device=a.device)
+    elif isinstance(a, Number) and isinstance(b, Tensor):
+        a = scalar_tensor(a, dtype=b.dtype, device=b.device)
+    elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
+        if a.device == torch.device("cpu"):
+            msg = "Expected divisor (b) to be on the same device ({0}) as dividend (a), but it is found on {1}!".format(
+                a.device, b.device
+            )
+            raise RuntimeError(msg)
+        else:
+            b = prims.device_put(b, device=a.device)
+
+    mod = fmod(a, b)
+    div = true_divide(sub(a, mod), b)
+
+    # Ensure that the remainder has the same sign as denominator
+    different_signed_inputs = bitwise_xor(lt(a, 0), lt(b, 0))
+    non_zero_remainder = ne(mod, 0)
+    mask = bitwise_and(non_zero_remainder, different_signed_inputs)
+    div = where(mask, sub(div, 1), div)
+
+    # Map quotient to nearest integer value
+    floor_div = floor(div)
+    mask = gt(sub(div, floor_div), 0.5)
+    floor_div = where(mask, add(floor_div, 1), floor_div)
+
+    basic_div = true_divide(a, b)
+    zero_tensor = scalar_tensor(0, dtype=basic_div.dtype, device=basic_div.device)
+
+    # If quotient is zero, copy signbit from true_divide quotient
+    floor_div = where(ne(div, 0), floor_div, copysign(zero_tensor, basic_div))
+
+    # If denominator is zero, then follow true_divide behavior
+    return where(ne(b, 0), floor_div, basic_div)
+
+
+# TODO: add docstring
+floor_divide = _make_elementwise_binary_reference(
+    _floor_divide,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+    aten_op=torch.ops.aten.floor_divide,
+)
 
 
 # TODO: add docstring
@@ -1163,6 +1297,20 @@ def sub(
 true_divide = _make_elementwise_binary_reference(
     prims.div,
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    aten_op=None,  # CompositeImplicitAutograd
+)
+
+
+def _trunc_divide(
+    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+):
+    return trunc(true_divide(a, b))
+
+
+# TODO: add docstring
+trunc_divide = _make_elementwise_binary_reference(
+    _trunc_divide,
+    type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # CompositeImplicitAutograd
 )
 
@@ -2559,6 +2707,18 @@ def full_like(
 ones = partial(full, fill_value=True)
 
 ones_like = partial(full_like, fill_value=True)
+
+
+def scalar_tensor(
+    a: NumberType,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+) -> TensorLikeType:
+    dtype = dtype if dtype is not None else utils.type_to_dtype(type(a))
+    device = device if device is not None else torch.device("cpu")
+    return prims.scalar_tensor(a, dtype=dtype, device=device)
+
 
 zeros = partial(full, fill_value=False)
 
