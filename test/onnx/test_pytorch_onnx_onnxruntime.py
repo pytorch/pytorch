@@ -12223,11 +12223,14 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
         ("zeros", "border", "reflection"),
     )
     @common_utils.parametrize(
-        "align_corners", (True, False),
+        "align_corners",
+        (True, False),
         name_fn=lambda align_corners: str(align_corners),
     )
     def test_grid_sample(self, mode, padding_mode, align_corners):
+
         n, c, h_in, w_in, h_out, w_out = 1, 1, 3, 2, 2, 4
+
         class GridSampleModule(torch.nn.Module):
             def __init__(self, mode, padding_mode, align_corners) -> None:
                 super().__init__()
