@@ -74,6 +74,10 @@ jobs:
         run: |
           buck build aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack
 
+      - name: Test QNNPACK
+        run: |
+          buck test aten/src/ATen/native/quantized/cpu/qnnpack:pytorch_qnnpack_test
+
       - name: Build aten_cpu
         run: |
           buck build :aten_cpu
