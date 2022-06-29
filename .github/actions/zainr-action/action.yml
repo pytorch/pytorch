@@ -14,7 +14,7 @@ runs:
     - shell: bash
       run: ls -l
     - shell: bash
-      run: pushd android
+      run: pushd android && ls -l
     - shell: bash
       run: ls -l
     - shell: bash
