@@ -2,7 +2,8 @@
 
 import torch
 from torch import quantize_per_tensor
-from torch.ao.quantization.experimental.quantizer import APoTQuantizer
+from torch.ao.quantization.experimental.observer import APoTObserver
+from torch.ao.quantization.experimental.quantizer import APoTQuantizer, quantize_APoT, dequantize_APoT
 import unittest
 import random
 
@@ -22,16 +23,24 @@ class TestQuantizer(unittest.TestCase):
         # generate tensor with random fp values between 0 -> 1000
         tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
-        quantizer = APoTQuantizer(4, 1, torch.max(tensor2quantize), False)
+        observer = APoTObserver(b=8, k=1)
+        observer.forward(tensor2quantize)
+        observer.min_val = torch.tensor([0])
+        observer.max_val = torch.tensor([255])
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
+        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
+                                alpha=alpha,
+                                gamma=gamma,
+                                quantization_levels=quantization_levels,
+                                level_indices=level_indices)
 
         # get uniform quantization quantized tensor result
         uniform_quantized = quantize_per_tensor(input=tensor2quantize, scale=1.0, zero_point=0, dtype=torch.quint8).int_repr()
 
-        qtensor_data = torch.tensor(qtensor).type(torch.uint8)
-        uniform_quantized_tensor = uniform_quantized.data
+        qtensor_data = qtensor.data.int()
+        uniform_quantized_tensor = uniform_quantized.data.int()
 
         self.assertTrue(torch.equal(qtensor_data, uniform_quantized_tensor))
 
@@ -54,21 +63,28 @@ class TestQuantizer(unittest.TestCase):
         level_indices = tensor([ 0, 3, 12, 15,  2, 14,  8, 11, 10, 1, 13,  9,  4,  7,  6,  5]))
         """
 
-        # generate tensor with random fp values between 0 -> 1000
-        tensor2quantize = torch.tensor([0.0215, 0.1692, 0.385, 0.0391])
+        # generate tensor with random fp values
+        tensor2quantize = torch.tensor([0, 0.0215, 0.1692, 0.385, 1, 0.0391])
 
-        quantizer = APoTQuantizer(4, 2, 1.0, False)
+        observer = APoTObserver(b=4, k=2)
+        observer.forward(tensor2quantize)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
         # get apot quantized tensor result
-        qtensor = quantizer.quantize_APoT(tensor2quantize=tensor2quantize)
-        qtensor_data = torch.tensor(qtensor).type(torch.uint8)
+        qtensor = quantize_APoT(tensor2quantize=tensor2quantize,
+                                alpha=alpha,
+                                gamma=gamma,
+                                quantization_levels=quantization_levels,
+                                level_indices=level_indices)
+
+        qtensor_data = qtensor.data.int()
 
         # expected qtensor values calculated based on
         # corresponding level_indices to nearest quantization level
         # for each fp value in tensor2quantize
         # e.g.
         # 0.0215 in tensor2quantize nearest 0.0208 in quantization_levels -> 3 in level_indices
-        expected_qtensor = torch.tensor([3, 8, 13, 12], dtype=torch.uint8)
+        expected_qtensor = torch.tensor([0, 3, 8, 13, 5, 12], dtype=torch.int32)
 
         self.assertTrue(torch.equal(qtensor_data, expected_qtensor))
 
@@ -81,52 +97,86 @@ class TestQuantizer(unittest.TestCase):
         * k: 2
     """
     def test_dequantize_quantize_rand_b4(self):
-        # generate random size of float2apot between 1->20
+        # make observer
+        observer = APoTObserver(4, 2)
+
+        # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
 
-        # initialize quantize APoT tensor to dequantize:
-        # generate tensor with random values between 0 -> 2**4 = 16
-        # because there are 2**b = 2**4 quantization levels total
-        float2apot = 16 * torch.rand(size)
-        quantizer = APoTQuantizer(4, 2, 1.0, False)
-        float2apot = float2apot.int()
-        orig_input = torch.clone(float2apot)
+        # make tensor2quantize: random fp values between 0 -> 1000
+        tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
-        dequantized_result = quantizer.dequantize(float2apot)
+        observer.forward(tensor2quantize)
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
-        quantized_result = quantized_result.int()
+        # make mock apot_tensor
+        original_apot = quantize_APoT(tensor2quantize=tensor2quantize,
+                                      alpha=alpha,
+                                      gamma=gamma,
+                                      quantization_levels=quantization_levels,
+                                      level_indices=level_indices)
 
-        self.assertTrue(torch.equal(quantized_result, orig_input))
+        original_input = torch.clone(original_apot.data).int()
+
+        # dequantize apot_tensor
+        dequantize_result = dequantize_APoT(apot_tensor=original_apot)
+
+        # quantize apot_tensor
+        final_apot = quantize_APoT(tensor2quantize=dequantize_result,
+                                   alpha=alpha,
+                                   gamma=gamma,
+                                   quantization_levels=quantization_levels,
+                                   level_indices=level_indices)
+
+        result = final_apot.data.int()
+
+        self.assertTrue(torch.equal(original_input, result))
 
     r""" Tests dequantize_apot result on random 1-dim tensor
         and hardcoded values for b, k.
         Dequant -> quant an input tensor and verify that
         result is equivalent to input
         * tensor2quantize: Tensor
-        * b: 6
-        * k: 2
+        * b: 12
+        * k: 4
     """
     def test_dequantize_quantize_rand_b6(self):
-        # generate random size of float2apot
+        # make observer
+        observer = APoTObserver(12, 4)
+
+        # generate random size of tensor2quantize between 1 -> 20
         size = random.randint(1, 20)
 
-        # initialize quantize APoT tensor to dequantize:
-        # generate tensor with random values between 0 -> 2**6 = 64
-        # because there are 2**b = 2**6 quantization levels total
-        float2apot = 64 * torch.rand(size)
-        quantizer = APoTQuantizer(6, 2, 1.0, False)
-        float2apot = float2apot.int()
-        orig_input = torch.clone(float2apot)
+        # make tensor2quantize: random fp values between 0 -> 1000
+        tensor2quantize = 1000 * torch.rand(size, dtype=torch.float)
 
-        dequantized_result = quantizer.dequantize(float2apot)
+        observer.forward(tensor2quantize)
 
-        quantized_result = quantizer.quantize_APoT(tensor2quantize=dequantized_result)
+        alpha, gamma, quantization_levels, level_indices = observer.calculate_qparams(signed=False)
 
-        quantized_result = quantized_result.int()
+        # make mock apot_tensor
+        original_apot = quantize_APoT(tensor2quantize=tensor2quantize,
+                                      alpha=alpha,
+                                      gamma=gamma,
+                                      quantization_levels=quantization_levels,
+                                      level_indices=level_indices)
 
-        self.assertTrue(torch.equal(quantized_result, orig_input))
+        original_input = torch.clone(original_apot.data).int()
+
+        # dequantize apot_tensor
+        dequantize_result = dequantize_APoT(apot_tensor=original_apot)
+
+        # quantize apot_tensor
+        final_apot = quantize_APoT(tensor2quantize=dequantize_result,
+                                   alpha=alpha,
+                                   gamma=gamma,
+                                   quantization_levels=quantization_levels,
+                                   level_indices=level_indices)
+
+        result = final_apot.data.int()
+
+        self.assertTrue(torch.equal(original_input, result))
 
     def test_q_apot_alpha(self):
         with self.assertRaises(NotImplementedError):
