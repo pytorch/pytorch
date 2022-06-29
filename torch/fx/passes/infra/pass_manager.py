@@ -2,24 +2,26 @@ import inspect
 from functools import wraps
 from typing import Callable, Dict, List, Set
 
-from torch.nn import Module
+import torch.nn as nn
+from torch.fx.passes.infra.pass_base import PassResult
 
 def inplace_wrapper(fn: Callable) -> Callable:
     """
     Convenience wrapper for passes which modify an object inplace. This
-    wrapper makes them return the modified object instead.
+    wrapper makes them return a PassResult containing the modified object and
+    True for the "modified" flag.
 
     Args:
-        fn (Callable[Object, Any])
+        fn (Callable[Module, Any])
 
     Returns:
-        wrapped_fn (Callable[Object, Object])
+        wrapped_fn (Callable[Module, PassResult])
     """
 
     @wraps(fn)
     def wrapped_fn(gm):
         fn(gm)
-        return gm
+        return PassResult(gm, True)
 
     return wrapped_fn
 
@@ -129,7 +131,7 @@ class PassManager:
             after each pass
     """
 
-    passes: List[Callable[[Module], Module]] = []
+    passes: List[Callable[[nn.Module], PassResult]] = []
     constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
@@ -191,44 +193,47 @@ class PassManager:
         sig = inspect.signature(check)
 
         if len(list(sig.parameters.values())) != 1:
-            raise TypeError("PassManager check function should only take in one variable, a graph_module")
+            raise TypeError("PassManager check function should only take in one variable, a module")
 
         setattr(self, "check", check)  # noqa: B010
 
-    def check(self, graph_module: Module) -> None:
+    def check(self, module: nn.Module) -> None:
         pass
 
-    def __call__(self, graph_module: Module) -> Module:
+    def __call__(self, module: nn.Module) -> nn.Module:
         """
         Runs a list of passes in the order based on `self.passes` on the given
         graph module. Each time a pass is run, checks and linting will be run on
         the graph module to ensure that it still maintains the same required
         invariants.
 
-        The list of passes will be run until the graph stops changing, or until
-        `steps` number of times.
+        If the module is a graph module, we will run the list of passes until
+        the graph stops changing, or until `steps` number of times.
         """
         # Order the passes based on the constraints
         self.solve_constraints()
 
         # Check graph invariants
-        self.check(graph_module)
+        self.check(module)
 
         # Run the set of passes `steps` number of times or until the graph stops
         # changing
         for _ in range(self.steps):
-            orig_graph_module_code = graph_module.code
+            modified = False
 
             # Run the set of passes on the graph module
             for fn in self.passes:
-                graph_module = fn(graph_module)
+                res = fn(module)
 
+                module = res.graph_module
+                modified = modified or res.modified
+
+                # Check graph invariants
                 if self.run_checks_after_each_pass:
-                    # Check graph invariants
-                    self.check(graph_module)
+                    self.check(module)
 
             # If the graph no longer changes, then we can stop running these passes
-            if orig_graph_module_code == graph_module.code:
+            if not modified:
                 break
 
-        return graph_module
+        return module

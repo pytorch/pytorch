@@ -4,6 +4,7 @@ import torch
 import torch.fx as fx
 
 from torch.testing._internal.common_utils import TestCase
+from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import (
     PassManager,
     this_before_that_pass_constraint,
@@ -11,16 +12,20 @@ from torch.fx.passes.infra.pass_manager import (
 )
 
 def replace_add_with_mul_pass(gm):
+    modified = False
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.add:
+            modified = True
             node.target = torch.mul
-    return gm
+    return PassResult(gm, modified)
 
 def replace_mul_with_div_pass(gm):
+    modified = False
     for node in gm.graph.nodes:
         if node.op == "call_function" and node.target == torch.mul:
+            modified = True
             node.target = torch.div
-    return gm
+    return PassResult(gm, modified)
 
 class AddModule(torch.nn.Module):
     def __init__(self):
@@ -45,10 +50,11 @@ class TestPassManager(TestCase):
         pm.validate_constraints()
         self.assertEqual(len(pm.passes), 2)
 
-        pm(traced_m)
+        modified_m = pm(traced_m)
+        assert isinstance(modified_m, fx.GraphModule)
 
         # Check that all call_function nodes are divs
-        for node in traced_m.graph.nodes:
+        for node in modified_m.graph.nodes:
             if node.op == "call_function":
                 self.assertEqual(node.target, torch.div)
 
