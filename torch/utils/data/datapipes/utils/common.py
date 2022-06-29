@@ -219,6 +219,7 @@ class StreamWrapper:
     the wrapped file handler is closed when it's out of scope.
     '''
     session_streams: Dict[Any, int] = {}
+    debug_unclosed_streams: bool = False
 
     def __init__(self, file_obj, parent_stream=None, name=None):
         self.file_obj = file_obj
@@ -226,12 +227,14 @@ class StreamWrapper:
         self.parent_stream = parent_stream
         self.close_on_last_child = False
         self.name = name
+        self.closed = False
         if parent_stream is not None:
             if not isinstance(parent_stream, StreamWrapper):
                 raise RuntimeError('Parent stream should be StreamWrapper, {} was given'.format(type(parent_stream)))
             parent_stream.child_counter += 1
             self.parent_stream = parent_stream
-        StreamWrapper.session_streams[self] = 1
+        if StreamWrapper.debug_unclosed_streams:
+            StreamWrapper.session_streams[self] = 1
 
     @classmethod
     def close_streams(cls, v, depth=0):
@@ -256,12 +259,17 @@ class StreamWrapper:
         return getattr(file_obj, name)
 
     def close(self, *args, **kwargs):
-        del StreamWrapper.session_streams[self]
+        if StreamWrapper.debug_unclosed_streams:
+            del StreamWrapper.session_streams[self]
         if self.parent_stream is not None:
             self.parent_stream.child_counter -= 1
             if not self.parent_stream.child_counter and self.parent_stream.close_on_last_child:
                 self.parent_stream.close()
-        self.file_obj.close(*args, **kwargs)
+        try:
+            self.file_obj.close(*args, **kwargs)
+        except AttributeError:
+            pass
+        self.closed = True
 
     def autoclose(self):
         '''
@@ -278,11 +286,8 @@ class StreamWrapper:
         return list(set(list(attrs)))
 
     def __del__(self):
-        try:
-            self.file_obj.close()
-            del StreamWrapper.session_streams[self]
-        except AttributeError:
-            pass
+        if not self.closed:
+            self.close()
 
     def __iter__(self):
         for line in self.file_obj:
