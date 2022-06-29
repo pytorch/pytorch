@@ -6,7 +6,11 @@ import torch.nn as nn
 import torch.ao.quantization.quantize_fx as quantize_fx
 import torch.nn.functional as F
 from torch.ao.quantization import QConfig, QConfigMapping
-from torch.ao.quantization.fx._model_report.detector import DynamicStaticDetector, PerChannelDetector
+from torch.ao.quantization.fx._model_report.detector import (
+    DynamicStaticDetector,
+    InputWeightEqualizationDetector,
+    PerChannelDetector,
+)
 from torch.ao.quantization.fx._model_report.model_report_observer import ModelReportObserver
 from torch.ao.quantization.fx._model_report.model_report import ModelReport
 from torch.ao.quantization.observer import HistogramObserver, default_per_channel_weight_observer
@@ -1089,5 +1093,225 @@ class TestFxModelReportClass(QuantizationTestCase):
 
 class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
-    def test_simple_pass(self):
-        pass
+    class LinearConv(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(3, 3)
+            self.relu = torch.nn.ReLU()
+            self.conv = torch.nn.Conv2d(3, 3, 1)
+
+        def forward(self, x):
+            x = self.linear(x)
+            x = self.relu(x)
+            x = self.conv(x)
+            x = self.relu(x)
+            return x
+
+    class TwoBlockComplexNet(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.block1 = TestFxDetectInputWeightEqualization.LinearConv()
+            self.block2 = TestFxDetectInputWeightEqualization.LinearConv()
+            self.conv = torch.nn.Conv2d(3, 3, 1)
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.block1(x)
+            y = self.block2(x)
+            z = x + y
+            z = self.conv(z)
+            z = self.relu(z)
+            return z
+
+    class ReluOnly(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.relu = torch.nn.ReLU()
+
+        def forward(self, x):
+            x = self.relu(x)
+            return x
+
+    def _get_prepped_for_calibration_model(self, model, detector_set, fused=False):
+        r"""Returns a model that has been prepared for callibration and corresponding model_report"""
+        # set the backend for this test
+        torch.backends.quantized.engine = "fbgemm"
+
+        model_report = ModelReport(detector_set)
+
+        # create model instance and prepare it
+        example_input = torch.arange(27).reshape((1, 3, 3, 3))
+        example_input = example_input.to(torch.float)
+        q_config_mapping = torch.ao.quantization.get_default_qconfig_mapping()
+
+        # if they passed in fusion paramter, make sure to test that
+        if fused:
+            model = torch.quantization.fuse_modules(model, [['conv', 'relu']])
+
+        model_prep = quantize_fx.prepare_fx(model, q_config_mapping, example_input)
+
+        # prepare the model for callibration
+        prepared_for_callibrate_model = model_report.prepare_detailed_calibration(model_prep)
+
+        return (prepared_for_callibrate_model, model_report)
+
+    @skipIfNoFBGEMM
+    def test_input_weight_equalization_determine_points(self):
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+
+            detector_set = set([InputWeightEqualizationDetector(0.5)])
+            model_report = ModelReport(detector_set)
+
+            # get tst model and callibrate
+            non_fused = self._get_prepped_for_calibration_model(self.TwoBlockComplexNet(), detector_set)
+            fused = self._get_prepped_for_calibration_model(self.TwoBlockComplexNet(), detector_set, fused=True)
+
+            # reporter should still give same counts even for fused model
+            for prepared_for_callibrate_model, mod_report in [non_fused, fused]:
+
+                # supported modules to check
+                mods_to_check = set([nn.Linear, nn.Conv2d])
+
+                # get the set of all nodes in the graph their fqns
+                node_fqns = set([node.target for node in prepared_for_callibrate_model.graph.nodes])
+
+                # there should be 5 node fqns that have the observer inserted
+                correct_number_of_obs_inserted = 5
+                number_of_obs_found = 0
+                obs_name_to_find = InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME
+
+                for node in prepared_for_callibrate_model.graph.nodes:
+                    # if the obs name is inside the target, we found an observer
+                    if obs_name_to_find in str(node.target):
+                        number_of_obs_found += 1
+
+                self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
+
+                # assert that each of the desired modules have the observers inserted
+                for fqn, module in prepared_for_callibrate_model.named_modules():
+                    # check if module is a supported module
+                    is_in_include_list = sum(list(map(lambda x: isinstance(module, x), mods_to_check))) > 0
+
+                    if is_in_include_list:
+                        # make sure it has the observer attribute
+                        self.assertTrue(hasattr(module, InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME))
+                    else:
+                        # if it's not a supported type, it shouldn't have observer attached
+                        self.assertTrue(not hasattr(module, InputWeightEqualizationDetector.DEFAULT_PRE_OBSERVER_NAME))
+
+    @skipIfNoFBGEMM
+    def test_input_weight_equalization_report_gen(self):
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+
+            test_input_weight_detector = InputWeightEqualizationDetector(0.4)
+            detector_set = set([test_input_weight_detector])
+            # prepare the model for callibration
+            prepared_for_callibrate_model, model_report = self._get_prepped_for_calibration_model(
+                self.TwoBlockComplexNet(), detector_set
+            )
+
+            # now we actually callibrate the model
+            example_input = torch.arange(27).reshape((1, 3, 3, 3))
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = model_report.generate_model_report(prepared_for_callibrate_model, True)
+
+            # check that sizes are appropriate only 1 detector
+            self.assertEqual(len(generated_report), 1)
+
+            # get the specific report for input weight equalization
+            input_weight_str, input_weight_dict = generated_report[test_input_weight_detector.get_detector_name()]
+
+            # we should have 5 layers looked at since 5 conv / linear layers
+            self.assertEqual(len(input_weight_dict), 5)
+
+            # we can validate that the max and min values of the detector were recorded properly for the first one
+            # this is because no data has been processed yet, so it should be values from original input
+
+            example_input = example_input.reshape((3, 3, 3))  # reshape input
+            for module_fqn in input_weight_dict:
+                # look for the first linear
+                if "block1.linear" in module_fqn:
+                    block_1_lin_recs = input_weight_dict[module_fqn]
+                    # get input range info and the channel axis
+                    input_range_info = block_1_lin_recs[InputWeightEqualizationDetector.INPUT_INFO_KEY]
+                    ch_axis = block_1_lin_recs[InputWeightEqualizationDetector.CHANNEL_KEY]
+
+                    # ensure that the min and max values extracted match properly
+                    example_min, example_max = torch.aminmax(example_input, dim=ch_axis)
+                    dimension_min = torch.amin(example_min, dim=ch_axis)
+                    dimension_max = torch.amax(example_max, dim=ch_axis)
+
+                    # make sure per channel min and max are as expected
+                    per_channel_min = input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY]
+                    per_channel_max = input_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY]
+                    self.assertEqual(per_channel_min, dimension_min)
+                    self.assertEqual(per_channel_max, dimension_max)
+
+                    # make sure the global min and max were correctly recorded and presented
+                    global_min = input_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY]
+                    global_max = input_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY]
+                    self.assertEqual(global_min, min(dimension_min))
+                    self.assertEqual(global_max, max(dimension_max))
+
+                    input_ratio = torch.sqrt((per_channel_max - per_channel_min) / (global_max - global_min))
+                    # ensure comparision stat passed back is sqrt of range ratios
+                    # need to get the weight ratios first
+                    weight_range_info = block_1_lin_recs[InputWeightEqualizationDetector.WEIGHT_INFO_KEY]
+
+                    # get weight per channel and global info
+                    per_channel_min = weight_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MIN_KEY]
+                    per_channel_max = weight_range_info[InputWeightEqualizationDetector.PER_CHANNEL_MAX_KEY]
+
+                    global_min = weight_range_info[InputWeightEqualizationDetector.GLOBAL_MIN_KEY]
+                    global_max = weight_range_info[InputWeightEqualizationDetector.GLOBAL_MAX_KEY]
+
+                    weight_ratio = torch.sqrt((per_channel_max - per_channel_min) / (global_max - global_min))
+
+                    # also get comp stat for this specific layer
+                    comp_stat = block_1_lin_recs[InputWeightEqualizationDetector.COMP_METRIC_KEY]
+
+                    weight_to_input_ratio = weight_ratio / input_ratio
+
+                    self.assertEqual(comp_stat, weight_to_input_ratio)
+                    # only looking at the first example so can break
+                    break
+
+    @skipIfNoFBGEMM
+    def test_input_weight_equalization_report_gen_empty(self):
+        # tests report gen on a model that doesn't have any layers
+        # use fbgemm and create our model instance
+        # then create model report instance with detector
+        with override_quantized_engine('fbgemm'):
+            test_input_weight_detector = InputWeightEqualizationDetector(0.4)
+            detector_set = set([test_input_weight_detector])
+            # prepare the model for callibration
+            prepared_for_callibrate_model, model_report = self._get_prepped_for_calibration_model(self.ReluOnly(), detector_set)
+
+            # now we actually callibrate the model
+            example_input = torch.arange(27).reshape((1, 3, 3, 3))
+            example_input = example_input.to(torch.float)
+
+            prepared_for_callibrate_model(example_input)
+
+            # now get the report by running it through ModelReport instance
+            generated_report = model_report.generate_model_report(prepared_for_callibrate_model, True)
+
+            # check that sizes are appropriate only 1 detector
+            self.assertEqual(len(generated_report), 1)
+
+            # get the specific report for input weight equalization
+            input_weight_str, input_weight_dict = generated_report[test_input_weight_detector.get_detector_name()]
+
+            # we should have 0 layers since there is only a Relu
+            self.assertEqual(len(input_weight_dict), 0)
+
+            # make sure that the string only has two lines, as should be if no suggestions
+            self.assertEqual(input_weight_str.count("\n"), 2)
