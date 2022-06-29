@@ -1519,11 +1519,70 @@ class TestRefsOpsInfo(TestCase):
         '_refs.zeros_like'
     }
 
+    skip_decomp_check = {
+        # duplicated in _decomp and _refs
+        '_refs.nn.functional.elu',
+        '_refs.masked_fill',
+        '_refs.transpose',
+        '_refs.var',
+        # these are not aten ops?
+        '_refs.broadcast_shapes',
+        '_refs.broadcast_tensors',
+        '_refs.nn.functional.tanhshrink',
+        '_refs.swap_axes',
+        # CompositeImplicitAutograd
+        '_refs.isfinite',
+        '_refs.square',
+        '_refs.true_divide',
+        '_refs.trunc_divide',
+        # doesn't work
+        # not sure
+        '_refs.copy_to',
+    }
+
     @parametrize("op", ref_ops_names)
     def test_refs_are_in_python_ref_db(self, op):
         if op in self.skip_ref_ops:
             raise unittest.SkipTest(f"{op} does not have an entry in python_ref_db")
         self.assertIn(op, self.ref_db_names)
+
+    @parametrize("op", ref_ops_names)
+    def test_refs_are_in_decomp_table(self, op):
+        if op in self.skip_decomp_check:
+            raise unittest.SkipTest(f"{op} would fail decomposition_table registration check")
+
+        path = op.split('.')
+        module_path = '.'.join(path[:-1])
+        op_name = path[-1]
+        op_impl = getattr(import_module(f"torch.{module_path}"), op_name)
+
+        self.assertTrue(op_impl in torch._decomp.decomposition_table.values(),
+                        f"Did not find {op} in torch._decomp.decomposition_table.values()")
+
+        '''
+        ref_info = next(x for x in python_ref_db if x.name == op)
+
+        op_impl = torch.ops.aten
+        for p in op.split('.'):
+            op_impl = getattr(op_impl, p)
+
+        def check_in_table(opoverload: torch._ops.OpOverload):
+            self.assertTrue(opoverload in torch._decomp.decomposition_table,
+                    f"Did not find {opoverload} in torch._decomp.decomposition_table")
+
+        if isinstance(op_impl, torch._ops.OpOverload):
+            check_in_table(op_impl)
+        elif isinstance(op_impl, torch._ops.OpOverloadPacket):
+            for overload in op_impl.overloads():
+                check_in_table(getattr(op_impl, overload))
+        else:
+            print(type(op_impl), op_impl)
+        '''
+
+# asdfadsf
+# asdfasdfasdfsefsef
+#  a sdfasdfasdfasdf
+# asdfasdf
 
 
 fake_skips = (
