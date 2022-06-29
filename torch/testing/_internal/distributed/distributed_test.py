@@ -8994,7 +8994,6 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         def test_ddp_hook_pickling_powerSGD_logs(self):
-
             hook = powerSGD.powerSGD_hook
             powersgd_state = powerSGD.PowerSGDState(
                 process_group=None,
@@ -9012,7 +9011,6 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         def test_ddp_hook_pickling_powerSGD_parity(self):
-
             hook = powerSGD.powerSGD_hook
             powersgd_state = powerSGD.PowerSGDState(
                 process_group=None,
@@ -9031,7 +9029,6 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         def test_ddp_hook_pickling_postlocal_SGD_logs(self):
-
             hook = post_localSGD.post_localSGD_hook
             postlocalsgd_state = post_localSGD.PostLocalSGDState(
                 process_group=None,
@@ -9053,7 +9050,6 @@ class DistributedTest:
         )
         @skip_if_lt_x_gpu(2)
         def test_ddp_hook_pickling_postlocal_SGD_parity(self):
-
             hook = post_localSGD.post_localSGD_hook
             postlocalsgd_state = post_localSGD.PostLocalSGDState(
                 process_group=None,
