@@ -261,6 +261,13 @@ void initNvFuserPythonBindings(PyObject* module) {
       .def(
           "define_constant",
           [](FusionDefinitionContextManager& self,
+             std::complex<double> val) -> torch::jit::fuser::cuda::Val* {
+            return IrBuilder::create<ComplexDouble>(c10::complex<double>(val));
+          },
+          py::return_value_policy::reference)
+      .def(
+          "define_constant",
+          [](FusionDefinitionContextManager& self,
              bool val) -> torch::jit::fuser::cuda::Val* {
             return IrBuilder::create<Bool>(val);
           },
@@ -280,6 +287,8 @@ void initNvFuserPythonBindings(PyObject* module) {
               -> torch::jit::fuser::cuda::Val* {
             if (dtype == torch::jit::fuser::cuda::DataType::Double) {
               return IrBuilder::create<Double>();
+            } else if (dtype == torch::jit::fuser::cuda::DataType::ComplexDouble) {
+              return IrBuilder::create<ComplexDouble>();
             } else if (dtype == torch::jit::fuser::cuda::DataType::Bool) {
               return IrBuilder::create<Bool>();
             } else if (dtype == torch::jit::fuser::cuda::DataType::Int) {
