@@ -27,13 +27,11 @@ class nvFuserScalarValTemplate:
 def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
-            x = nvFuserTensorViewTemplate(
+            return nvFuserTensorViewTemplate(
                 arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
             )
-            return x
         elif isinstance(arg, Number):
-            x = nvFuserScalarValTemplate(getnvFuserDtype(type(arg)))
-            return x
+            return nvFuserScalarValTemplate(getnvFuserDtype(type(arg)))
         else:
             return arg
 
