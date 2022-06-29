@@ -39,7 +39,10 @@ from torch.distributed._shard.sharded_tensor import (
     ShardedTensor,
     init_from_local_shards,
 )
-from torch.distributed.algorithms._comm_hooks import allreduce_hook
+from torch.distributed.algorithms._comm_hooks import (
+    LOW_PRECISION_HOOKS,
+    default_hooks
+)
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.distributed.utils import (
     _replace_by_prefix,
@@ -1329,6 +1332,16 @@ class FullyShardedDataParallel(nn.Module):
         return (
             self.mixed_precision is not None
             and self.mixed_precision.reduce_dtype is not None
+            and not self._low_precision_hook_enabled()
+        )
+
+    def _low_precision_hook_enabled(self) -> bool:
+        """
+        Wether a low precision hook is registered.
+        """
+        return (
+            self.communication_hook is not None
+            and self.communication_hook in LOW_PRECISION_HOOKS
         )
 
     def _cast_fp_inputs_to_precision(
@@ -3107,8 +3120,11 @@ class FullyShardedDataParallel(nn.Module):
                     # would thus be in this reduced precision, or
                     # 2) parameters did not have precision reduced, but grads
                     # had reduced precision for communication.
+                    # If a lower precision hook is registered, gradients are casted
+                    # back by the hook.
                     if (
-                        self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce()
+                        not self._low_precision_hook_enabled() and
+                        (self._mixed_precision_enabled_for_params() or self._mixed_precision_enabled_for_reduce())
                     ):
                         # Cast gradients back to the full parameter precision so that
                         # optimizer.step() happens in full precision.
@@ -4171,7 +4187,7 @@ class FullyShardedDataParallel(nn.Module):
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             return None
         else:
-            return allreduce_hook.allreduce_hook
+            return default_hooks.allreduce_hook
 
     def _get_default_comm_hook_state(self) -> Any:
         r"""
@@ -4180,7 +4196,7 @@ class FullyShardedDataParallel(nn.Module):
         if self.sharding_strategy != ShardingStrategy.NO_SHARD:
             return None
         else:
-            return allreduce_hook.AllReduceState(process_group=self.process_group)
+            return default_hooks.AllReduceState(process_group=self.process_group)
 
     def register_comm_hook(self, state: object, hook: callable):
         """
