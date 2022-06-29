@@ -15,6 +15,9 @@ from torch.fx.node import (
 from torch.fx.passes.param_fetch import lift_lowering_attrs_to_nodes
 from torch.fx.passes.shape_prop import ShapeProp
 
+__all__ = ['replace_target_nodes_with', 'size_bytes', 'get_size_of_all_nodes', 'get_tensor_meta',
+           'get_size_of_node', 'serialize_shape', 'serialize_stride', 'serialize_tensor_quantization',
+           'serialize_weight', 'serialize_leaf_module', 'serialize_module']
 
 @compatibility(is_backward_compatible=False)
 def replace_target_nodes_with(

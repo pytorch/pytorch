@@ -8,6 +8,7 @@ from .. import functional as F
 
 from typing import Optional
 
+__all__ = ['orthogonal', 'spectral_norm']
 
 def _is_orthogonal(Q, eps=None):
     n, k = Q.size(-2), Q.size(-1)
