@@ -25,16 +25,18 @@
 
 namespace at {
     namespace native {
-        static void gamma_kernel(TensorIteratorBase& iterator) {
-            TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
+        inline namespace CPU_CAPABILITY {
+            static void scaled_modified_bessel_k0_kernel(TensorIteratorBase& iterator) {
+                TORCH_INTERNAL_ASSERT(iterator.ntensors() == 2);
 
-            AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "gamma_cpu", [&]() {
-                cpu_kernel(iterator, [](scalar_t x) {
-                    return gamma_forward(x);
+                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_k0_cpu", [&]() {
+                    cpu_kernel(iterator, [](scalar_t x) {
+                        return scaled_modified_bessel_k0_forward(x);
+                    });
                 });
-            });
-        } // gamma_kernel(TensorIteratorBase& iterator)
+            } // scaled_modified_bessel_k0_kernel(TensorIteratorBase& iterator)
+        } // namespace CPU_CAPABILITY
 
-        REGISTER_DISPATCH(special_gamma_stub, &gamma_kernel);
+        REGISTER_DISPATCH(special_scaled_modified_bessel_k0_stub, &CPU_CAPABILITY::scaled_modified_bessel_k0_kernel);
     } // namespace native
 } // namespace at

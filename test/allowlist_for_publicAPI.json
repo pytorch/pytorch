@@ -1,17 +1,4 @@
 {
-  "torch.amp.autocast_mode": [
-    "Any",
-    "Optional"
-  ],
-  "torch.ao.nn.sparse.quantized.dynamic.linear": [
-    "LinearBlockSparsePattern",
-    "Optional",
-    "hide_packed_params_repr"
-  ],
-  "torch.ao.nn.sparse.quantized.linear": [
-    "Optional",
-    "hide_packed_params_repr"
-  ],
   "torch.ao.quantization": [
     "ABC",
     "ABCMeta",
@@ -103,13 +90,6 @@
     "reverse3",
     "reverse_sequential_wrapper2"
   ],
-  "torch.ao.quantization.backend_config.observation_type": [
-    "Enum"
-  ],
-  "torch.ao.quantization.backend_config.tensorrt": [
-    "ObservationType",
-    "reverse_sequential_wrapper2"
-  ],
   "torch.ao.quantization.quantization_types": [
       "Any",
       "Node",
@@ -126,12 +106,6 @@
     "GraphModule",
     "Set",
     "Union"
-  ],
-  "torch.ao.quantization.fx.lower_to_fbgemm": [
-    "Dict",
-    "QConfigAny",
-    "QuantizedGraphModule",
-    "Tuple"
   ],
   "torch.ao.quantization.fx.pattern_utils": [
     "Any",
@@ -272,42 +246,6 @@
     "QConfig",
     "QuantType",
     "wrap_cpp_module"
-  ],
-  "torch.ao.sparsity.experimental.pruner.base_pruner": [
-    "ActivationReconstruction",
-    "BaseSparsifier",
-    "BiasHook",
-    "ModuleDict",
-    "ModuleList",
-    "PruningParametrization",
-    "ZeroesParametrization",
-    "fqn_to_module",
-    "module_to_fqn"
-  ],
-  "torch.ao.sparsity.experimental.pruner.parametrization": [
-    "Any",
-    "List"
-  ],
-  "torch.ao.sparsity.scheduler.base_scheduler": [
-    "BaseSparsifier",
-    "wraps"
-  ],
-  "torch.ao.sparsity.scheduler.lambda_scheduler": [
-    "BaseScheduler"
-  ],
-  "torch.ao.sparsity.sparsifier.base_sparsifier": [
-    "Dict",
-    "FakeSparsity",
-    "Optional",
-    "Tuple",
-    "defaultdict",
-    "fqn_to_module",
-    "module_to_fqn"
-  ],
-  "torch.ao.sparsity.sparsifier.weight_norm_sparsifier": [
-    "BaseSparsifier",
-    "Tuple",
-    "reduce"
   ],
   "torch.autograd": [
     "NestedIOFunction",
@@ -454,11 +392,6 @@
     "ProcessGroupMPI",
     "ProcessGroupNCCL"
   ],
-  "torch.distributed.algorithms.ddp_comm_hooks": [
-    "DistributedDataParallel",
-    "Enum",
-    "partial"
-  ],
   "torch.distributed.algorithms.ddp_comm_hooks.debugging_hooks": [
     "Any",
     "GradBucket"
@@ -470,23 +403,6 @@
   "torch.distributed.algorithms.ddp_comm_hooks.optimizer_overlap_hooks": [
     "Any",
     "Callable"
-  ],
-  "torch.distributed.algorithms.join": [
-    "ABC",
-    "Any",
-    "List",
-    "NamedTuple",
-    "Optional",
-    "TracebackType",
-    "Type",
-    "abstractmethod"
-  ],
-  "torch.distributed.algorithms.model_averaging.averagers": [
-    "ABC",
-    "Dict",
-    "Iterable",
-    "Union",
-    "abstractmethod"
   ],
   "torch.distributed.algorithms.model_averaging.utils": [
     "Dict",
@@ -627,44 +543,6 @@
   "torch.distributed.elastic.rendezvous.dynamic_rendezvous": [
     "get_method_name"
   ],
-  "torch.distributed.elastic.rendezvous.registry": [
-    "RendezvousHandler",
-    "RendezvousParameters",
-    "create_handler"
-  ],
-  "torch.distributed.elastic.rendezvous.utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Event",
-    "Optional",
-    "Thread",
-    "Tuple",
-    "Union",
-    "timedelta"
-  ],
-  "torch.distributed.elastic.timer.api": [
-    "Any",
-    "Dict",
-    "List",
-    "Optional",
-    "Set",
-    "contextmanager",
-    "getframeinfo",
-    "stack"
-  ],
-  "torch.distributed.elastic.timer.local_timer": [
-    "Any",
-    "Dict",
-    "Empty",
-    "List",
-    "RequestQueue",
-    "Set",
-    "TimerClient",
-    "TimerRequest",
-    "TimerServer",
-    "Tuple"
-  ],
   "torch.distributed.elastic.utils.api": [
     "Any",
     "List",
@@ -697,34 +575,6 @@
     "Union",
     "accumulate"
   ],
-  "torch.distributed.fsdp.fully_sharded_data_parallel": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "FlatParameter",
-    "FlattenParamsWrapper",
-    "Generator",
-    "Iterable",
-    "Iterator",
-    "List",
-    "Mapping",
-    "NamedTuple",
-    "Optional",
-    "Parameter",
-    "ProcessGroup",
-    "Set",
-    "Shard",
-    "ShardedTensor",
-    "Tuple",
-    "Union",
-    "Variable",
-    "auto",
-    "cast",
-    "contextmanager",
-    "dataclass",
-    "init_from_local_shards"
-  ],
   "torch.distributed.fsdp.utils": [
     "Any",
     "Callable",
@@ -745,25 +595,6 @@
     "Tuple",
     "Type",
     "cast"
-  ],
-  "torch.distributed.launcher.api": [
-    "Any",
-    "Callable",
-    "ChildFailedError",
-    "Dict",
-    "List",
-    "LocalElasticAgent",
-    "Optional",
-    "RendezvousParameters",
-    "SignalException",
-    "Std",
-    "Tuple",
-    "Union",
-    "WorkerSpec",
-    "dataclass",
-    "field",
-    "get_logger",
-    "parse_rendezvous_endpoint"
   ],
   "torch.distributed.nn": [
     "Function",
@@ -1022,117 +853,6 @@
     "Optional",
     "Union"
   ],
-  "torch.distributed.rpc.server_process_global_profiler": [
-    "profile"
-  ],
-  "torch.distributions.bernoulli": [
-    "ExponentialFamily",
-    "Number",
-    "binary_cross_entropy_with_logits",
-    "broadcast_all",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.beta": [
-    "Dirichlet",
-    "ExponentialFamily",
-    "Number",
-    "Real",
-    "broadcast_all"
-  ],
-  "torch.distributions.binomial": [
-    "Distribution",
-    "broadcast_all",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.categorical": [
-    "Distribution",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.cauchy": [
-    "Distribution",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.chi2": [
-    "Gamma"
-  ],
-  "torch.distributions.continuous_bernoulli": [
-    "ExponentialFamily",
-    "Number",
-    "binary_cross_entropy_with_logits",
-    "broadcast_all",
-    "clamp_probs",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.dirichlet": [
-    "ExponentialFamily",
-    "Function",
-    "once_differentiable"
-  ],
-  "torch.distributions.distribution": [
-    "Any",
-    "Dict",
-    "Optional",
-    "lazy_property"
-  ],
-  "torch.distributions.exp_family": [
-    "Distribution"
-  ],
-  "torch.distributions.exponential": [
-    "ExponentialFamily",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.fishersnedecor": [
-    "Distribution",
-    "Gamma",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.gamma": [
-    "ExponentialFamily",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.geometric": [
-    "Distribution",
-    "Number",
-    "binary_cross_entropy_with_logits",
-    "broadcast_all",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.gumbel": [
-    "AffineTransform",
-    "ExpTransform",
-    "Number",
-    "TransformedDistribution",
-    "Uniform",
-    "broadcast_all"
-  ],
-  "torch.distributions.half_cauchy": [
-    "AbsTransform",
-    "Cauchy",
-    "TransformedDistribution"
-  ],
-  "torch.distributions.half_normal": [
-    "AbsTransform",
-    "Normal",
-    "TransformedDistribution"
-  ],
-  "torch.distributions.independent": [
-    "Dict",
-    "Distribution"
-  ],
   "torch.distributions.kl": [
     "Bernoulli",
     "Beta",
@@ -1164,141 +884,12 @@
     "Uniform",
     "total_ordering"
   ],
-  "torch.distributions.kumaraswamy": [
-    "AffineTransform",
-    "PowerTransform",
-    "TransformedDistribution",
-    "Uniform",
-    "broadcast_all"
-  ],
-  "torch.distributions.laplace": [
-    "Distribution",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.lkj_cholesky": [
-    "Beta",
-    "Distribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.log_normal": [
-    "ExpTransform",
-    "Normal",
-    "TransformedDistribution"
-  ],
-  "torch.distributions.logistic_normal": [
-    "Normal",
-    "StickBreakingTransform",
-    "TransformedDistribution"
-  ],
-  "torch.distributions.lowrank_multivariate_normal": [
-    "Distribution",
-    "lazy_property"
-  ],
-  "torch.distributions.mixture_same_family": [
-    "Categorical",
-    "Dict",
-    "Distribution"
-  ],
-  "torch.distributions.multinomial": [
-    "Binomial",
-    "Categorical",
-    "Distribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.multivariate_normal": [
-    "Distribution",
-    "lazy_property"
-  ],
-  "torch.distributions.negative_binomial": [
-    "Distribution",
-    "broadcast_all",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.normal": [
-    "ExponentialFamily",
-    "Number",
-    "Real",
-    "broadcast_all"
-  ],
-  "torch.distributions.one_hot_categorical": [
-    "Categorical",
-    "Distribution"
-  ],
-  "torch.distributions.pareto": [
-    "AffineTransform",
-    "ExpTransform",
-    "Exponential",
-    "TransformedDistribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.poisson": [
-    "ExponentialFamily",
-    "Number",
-    "broadcast_all"
-  ],
-  "torch.distributions.relaxed_bernoulli": [
-    "Distribution",
-    "Number",
-    "SigmoidTransform",
-    "TransformedDistribution",
-    "broadcast_all",
-    "clamp_probs",
-    "lazy_property",
-    "logits_to_probs",
-    "probs_to_logits"
-  ],
-  "torch.distributions.relaxed_categorical": [
-    "Categorical",
-    "Distribution",
-    "ExpTransform",
-    "TransformedDistribution",
-    "broadcast_all",
-    "clamp_probs"
-  ],
-  "torch.distributions.studentT": [
-    "Chi2",
-    "Distribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.transformed_distribution": [
-    "ComposeTransform",
-    "Dict",
-    "Distribution",
-    "Independent",
-    "Transform"
-  ],
-  "torch.distributions.uniform": [
-    "Distribution",
-    "Number",
-    "broadcast_all"
-  ],
   "torch.distributions.utils": [
     "Any",
     "Dict",
     "Number",
     "is_tensor_like",
     "update_wrapper"
-  ],
-  "torch.distributions.von_mises": [
-    "Distribution",
-    "broadcast_all",
-    "lazy_property"
-  ],
-  "torch.distributions.weibull": [
-    "AffineTransform",
-    "Exponential",
-    "PowerTransform",
-    "TransformedDistribution",
-    "broadcast_all"
-  ],
-  "torch.distributions.wishart": [
-    "ExponentialFamily",
-    "Number",
-    "Union",
-    "lazy_property"
   ],
   "torch.fft": [
     "Tensor",
@@ -1440,25 +1031,6 @@
     "Tuple",
     "compatibility"
   ],
-  "torch.fx.interpreter": [
-    "Any",
-    "Argument",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "Iterator",
-    "List",
-    "Node",
-    "Optional",
-    "Proxy",
-    "Target",
-    "Tracer",
-    "Tuple",
-    "Union",
-    "compatibility",
-    "map_aggregate",
-    "map_arg"
-  ],
   "torch.fx.node": [
     "Any",
     "ArgsKwargsPair",
@@ -1516,33 +1088,6 @@
     "map_aggregate",
     "map_arg"
   ],
-  "torch.fx.passes.net_min_base": [
-    "Any",
-    "Callable",
-    "Dict",
-    "FxNetAccFusionsFinder",
-    "Names",
-    "NodeList",
-    "NodeSet",
-    "Optional",
-    "ShapeProp",
-    "TensorOrTensors",
-    "Tensors",
-    "Tuple",
-    "compatibility",
-    "dataclass",
-    "map_arg",
-    "split_by_tags"
-  ],
-  "torch.fx.passes.operator_support": [
-    "IsNodeSupported",
-    "SupportDict",
-    "SupportedArgumentDTypes",
-    "TargetTypeName",
-    "TensorMetadata",
-    "compatibility",
-    "get_node_target"
-  ],
   "torch.fx.passes.param_fetch": [
     "Any",
     "Callable",
@@ -1572,86 +1117,8 @@
     "Optional",
     "compatibility"
   ],
-  "torch.fx.passes.split_utils": [
-    "Dict",
-    "List",
-    "NodeList",
-    "NodeSet",
-    "Optional",
-    "compatibility",
-    "dataclass",
-    "field",
-    "map_arg"
-  ],
-  "torch.fx.passes.splitter_base": [
-    "Any",
-    "Dict",
-    "FxGraphDrawer",
-    "FxNetAccFusionsFinder",
-    "Iterable",
-    "List",
-    "NamedTuple",
-    "NodeList",
-    "NodeSet",
-    "OperatorSupportBase",
-    "Optional",
-    "Sequence",
-    "ShapeProp",
-    "Tensors",
-    "Tuple",
-    "compatibility",
-    "dataclass",
-    "defaultdict",
-    "get_node_target",
-    "get_size_of_node",
-    "is_node_output_tensor",
-    "map_arg",
-    "split_by_tags"
-  ],
-  "torch.fx.passes.tools_common": [
-    "Any",
-    "Dict",
-    "List",
-    "Mapping",
-    "Names",
-    "NodeList",
-    "NodeSet",
-    "Set",
-    "TensorOrTensors",
-    "Tensors",
-    "Tuple",
-    "Union",
-    "compatibility",
-    "dataclass"
-  ],
   "torch.fx.proxy": [
-    "Any",
-    "Argument",
-    "Callable",
-    "Dict",
-    "Graph",
-    "Iterable",
-    "Iterator",
-    "Node",
-    "Optional",
-    "Target",
-    "Tuple",
-    "check_for_mutable_operation",
-    "compatibility",
-    "map_aggregate"
-  ],
-  "torch.fx.subgraph_rewriter": [
-    "Callable",
-    "Dict",
-    "Graph",
-    "GraphModule",
-    "List",
-    "NamedTuple",
-    "Node",
-    "Optional",
-    "Set",
-    "compatibility",
-    "symbolic_trace"
+    "assert_fn"
   ],
   "torch.hub": [
     "HTTPError",
@@ -1942,17 +1409,6 @@
   "torch.nn.intrinsic.modules": [
     "_FusedModule"
   ],
-  "torch.nn.intrinsic.modules.fused": [
-    "BatchNorm1d",
-    "BatchNorm2d",
-    "BatchNorm3d",
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "Linear",
-    "ReLU",
-    "type_before_parametrizations"
-  ],
   "torch.nn.intrinsic.qat.modules.conv_fused": [
     "Parameter",
     "TypeVar",
@@ -1984,28 +1440,6 @@
     "parallel_apply",
     "replicate",
     "scatter_kwargs"
-  ],
-  "torch.nn.parallel.distributed": [
-    "Any",
-    "Callable",
-    "Enum",
-    "Function",
-    "Join",
-    "JoinHook",
-    "Joinable",
-    "Module",
-    "RRef",
-    "ReduceOp",
-    "Type",
-    "Variable",
-    "auto",
-    "contextmanager",
-    "dataclass",
-    "gather",
-    "is_namedtuple",
-    "scatter_kwargs",
-    "tree_flatten",
-    "tree_unflatten"
   ],
   "torch.nn.parallel.parallel_apply": [
     "ExceptionWrapper",
@@ -2051,17 +1485,8 @@
   "torch.nn.quantized": [
     "MaxPool2d"
   ],
-  "torch.nn.quantized.dynamic.modules.conv": [
-    "Tensor"
-  ],
   "torch.nn.quantized.dynamic.modules.rnn": [
-    "Dict",
-    "List",
-    "Optional",
-    "PackedSequence",
-    "Tensor",
-    "Tuple",
-    "Union"
+    "apply_permutation"
   ],
   "torch.nn.quantized.functional": [
     "List",
@@ -2074,31 +1499,6 @@
   ],
   "torch.nn.quantized.modules.batchnorm": [
     "Tensor"
-  ],
-  "torch.nn.quantized.modules.conv": [
-    "List",
-    "Optional",
-    "TypeVar",
-    "WeightedQuantizedModule",
-    "fuse_conv_bn_weights"
-  ],
-  "torch.nn.quantized.modules.embedding_ops": [
-    "List",
-    "Optional",
-    "Tensor",
-    "hide_packed_params_repr"
-  ],
-  "torch.nn.quantized.modules.functional_modules": [
-    "List",
-    "Tensor"
-  ],
-  "torch.nn.quantized.modules.linear": [
-    "Iterable",
-    "Optional",
-    "WeightedQuantizedModule",
-    "fuse_linear_bn_weights",
-    "hide_packed_params_repr",
-    "type_before_parametrizations"
   ],
   "torch.nn.quantized.modules.utils": [
     "repeat"
@@ -2156,19 +1556,6 @@
     "Any",
     "ModuleType",
     "is_mangled"
-  ],
-  "torch.package.analyze.trace_dependencies": [
-    "Any",
-    "Callable",
-    "Iterable",
-    "List",
-    "Tuple"
-  ],
-  "torch.package.file_structure_representation": [
-    "Dict",
-    "GlobGroup",
-    "GlobPattern",
-    "List"
   ],
   "torch.package.find_file_dependencies": [
     "List",
@@ -2451,7 +1838,6 @@
     "exp2",
     "expit",
     "expm1",
-    "gamma",
     "gammainc",
     "gammaincc",
     "gammaln",
@@ -2478,6 +1864,7 @@
     "polygamma",
     "psi",
     "round",
+    "scaled_modified_bessel_k0",
     "scaled_modified_bessel_k1",
     "shifted_chebyshev_polynomial_t",
     "shifted_chebyshev_polynomial_u",
@@ -2485,6 +1872,7 @@
     "shifted_chebyshev_polynomial_w",
     "sinc",
     "softmax",
+    "spherical_bessel_j0",
     "xlog1py",
     "xlogy",
     "zeta"
@@ -2641,19 +2029,6 @@
     "BinaryIO",
     "IO",
     "Union"
-  ],
-  "torch.utils.tensorboard.summary": [
-    "HistogramProto",
-    "Optional",
-    "PrCurvePluginData",
-    "Summary",
-    "SummaryMetadata",
-    "TensorProto",
-    "TensorShapeProto",
-    "TextPluginData",
-    "convert_to_HWC",
-    "make_np",
-    "range"
   ],
   "torch": [
     "BFloat16Storage",
