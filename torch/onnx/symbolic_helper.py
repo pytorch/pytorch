@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import enum
 import functools
 import inspect
 import sys
 import warnings
-from typing import Optional, Set
+from typing import List, Optional, Set, Tuple
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -153,7 +155,7 @@ def _get_const(value, desc, arg_name):
     return _parse_arg(value, desc)
 
 
-def _unpack_list(list_value):
+def _unpack_list(list_value: _C.Value) -> List[_C.Value]:
     list_node = list_value.node()
     assert list_node.kind() == "prim::ListConstruct"
     return list(list_node.inputs())
@@ -1211,7 +1213,11 @@ def _handle_reduce_dim_none(g, self, op_name):
     return g.op(op_name, self, keepdims_i=0)
 
 
-def dequantize_helper(g, qtensor, qdtype=None):
+def dequantize_helper(
+    g,
+    qtensor: _C.Value,
+    qdtype: Optional[torch.onnx.TensorProtoDataType] = None,
+) -> Tuple[_C.Value, _C.Value, _C.Value, Optional[_C.Value]]:
     """Appends to graph `g` ONNX nodes that dequantizes `qtensor` into `tensor`.
 
     Args:
@@ -1252,7 +1258,13 @@ def dequantize_helper(g, qtensor, qdtype=None):
     )
 
 
-def quantize_helper(g, tensor, scale, zero_point, axis=None):
+def quantize_helper(
+    g,
+    tensor: _C.Value,
+    scale: _C.Value,
+    zero_point: _C.Value,
+    axis: Optional[_C.Value] = None,
+) -> _C.Value:
     """Appends to graph `g` ONNX nodes that quantizes `tensor` based on `scale`, `zero_point` and `axis`.
 
     Args:

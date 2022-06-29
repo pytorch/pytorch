@@ -626,13 +626,18 @@ class Quantized:
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
+    @symbolic_helper.parse_args("v", "i", "v", "v")
     @staticmethod
-    # TODO: Unpack list here with the decorator
-    def cat(g, q_inputs: _C.Value, dim, op_scale, op_zero_point):
+    def cat(
+        g,
+        q_inputs: _C.Value,
+        dim: int,
+        op_scale: _C.Value,
+        op_zero_point: _C.Value,
+    ) -> _C.Value:
+        unpacked_inputs = symbolic_helper._unpack_list(q_inputs)
         dequantized = [
-            symbolic_helper.dequantize_helper(g, input)[0] for input in q_inputs
+            symbolic_helper.dequantize_helper(g, input)[0] for input in unpacked_inputs
         ]
-
-        output = opset9.cat(g, dequantized, dim=dim)
-
-        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+        concatenated = g.op("Concat", *dequantized, axis_i=dim)
+        return symbolic_helper.quantize_helper(g, concatenated, op_scale, op_zero_point)
