@@ -366,22 +366,18 @@ def _get_string_reduction_arg(
     return ret
 
 
-def _nll_loss_2d(
+def _nll_loss_nd(
     input: TensorLikeType,
     target: TensorLikeType,
     weight: Optional[TensorLikeType],
     reduction: str,
     ignore_index: int,
 ) -> TensorLikeType:
-    if input.ndim != 4:
-        msg = "Expected 4 dimensions for input but got {}."
+    if input.ndim == 3 or input.ndim > 4:
+        msg = "Expected input dimension to be either [1, 2, 4] but recieved {}."
         raise ValueError(msg.format(input.ndim))
 
-    if target.ndim != 3:
-        msg = "Expected 3 dimensions for input but got {}."
-        raise ValueError(msg.format(input.ndim))
-
-    if input.shape[0] != target.shape[0]:
+    if input.ndim != 1 and input.shape[0] != target.shape[0]:
         msg = "Expected input batch size ({}) to match target batch size ({})."
         raise ValueError(msg.format(input.shape[0], target.shape[0]))
 
@@ -403,62 +399,22 @@ def _nll_loss_2d(
             weight[flat_target],
         )
 
-    batch_size = input.shape[0]
-    height = input.shape[2]
-    width = input.shape[3]
-    extent = height * width
-    numel = batch_size * extent
-
-    bdx = torch.arange(numel) // extent
-    hdx = (torch.arange(numel) - (bdx * extent)) // width
-    wdx = torch.arange(numel) % width
-
-    loss = -input[bdx, flat_target, hdx, wdx] * current_weight
-    loss = torch.reshape(loss, target.shape)
-
-    if reduction == "none":
-        return loss
-    elif reduction == "sum":
-        return torch.sum(loss)
-    else:
-        return torch.sum(loss) / torch.sum(current_weight)
-
-
-def _nll_loss_1d(
-    input: TensorLikeType,
-    target: TensorLikeType,
-    weight: Optional[TensorLikeType],
-    reduction: str,
-    ignore_index: int,
-) -> TensorLikeType:
-    if input.ndim < 1 or input.ndim > 2:
-        msg = "Expected 1 or 2 dimensions for input but got {}."
-        raise ValueError(msg.format(input.ndim))
-
-    if input.ndim != 1 and input.shape[0] != target.shape[0]:
-        msg = "Expected input batch size ({}) to match target batch size ({})."
-        raise ValueError(msg.format(input.shape[0], target.shape[0]))
-
-    _check_reduction_value(reduction)
-
-    ignore_classes_mask = torch.eq(target, ignore_index)
-    ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
-    if weight is None:
-        current_weight = torch.where(
-            ignore_classes_mask,
-            ignore_class_weight,
-            torch.scalar_tensor(1, dtype=input.dtype, device=input.device),
-        )
-    else:
-        current_weight = torch.where(
-            ignore_classes_mask, ignore_class_weight.expand_as(target), weight[target]
-        )
-
     if input.ndim == 1:
         loss = -input[target] * current_weight
-    else:
+    elif input.ndim == 2:
         batch_size = input.shape[0]
         loss = -input[torch.arange(batch_size), target] * current_weight
+    else:
+        batch_size = input.shape[0]
+        height = input.shape[2]
+        width = input.shape[3]
+        extent = height * width
+        numel = batch_size * extent
+        bdx = torch.arange(numel) // extent
+        hdx = (torch.arange(numel) - (bdx * extent)) // width
+        wdx = torch.arange(numel) % width
+        loss = -input[bdx, flat_target, hdx, wdx] * current_weight
+    loss = torch.reshape(loss, target.shape)
 
     if reduction == "none":
         return loss
@@ -478,15 +434,11 @@ def nll_loss(
     reduction: str = "mean",
 ) -> TensorLikeType:
     if size_average is not None or reduce is not None:
-        # TODO raise exception instead of converting value
+        # TODO: raise exception instead of converting value
         # msg = "size_average and reduce args are deprecated, please use reduction argument."
         reduction = _get_string_reduction_arg(size_average, reduce)
 
-    if input.ndim == 1 or input.ndim == 2:
-        return _nll_loss_1d(input, target, weight, reduction, ignore_index)
-    elif input.ndim == 4:
-        return _nll_loss_2d(input, target, weight, reduction, ignore_index)
-    else:
+    if input.ndim == 3 or input.ndim > 4:
         # input ndim is == 3 or > 4
         batch_size = input.shape[0]
         num_classes = input.shape[1]
@@ -508,10 +460,12 @@ def nll_loss(
             target = torch.reshape(target, [batch_size, 0, 0])
 
         if reduction == "none":
-            return _nll_loss_2d(input, target, weight, reduction, ignore_index)
+            return _nll_loss_nd(input, target, weight, reduction, ignore_index)
         else:
-            result = _nll_loss_2d(input, target, weight, reduction, ignore_index)
+            result = _nll_loss_nd(input, target, weight, reduction, ignore_index)
             return torch.reshape(result, out_size)
+    else:
+        return _nll_loss_nd(input, target, weight, reduction, ignore_index)
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out
