@@ -12,6 +12,10 @@ if torch.cuda.is_available():
     from torch._C._nvfuser import DataType, Fusion, FusionDefinition  # type: ignore[import]
 
 
+# nvFuserTensorViewTemplate and nvFuserScalarValTemplate are helper objects
+# for cached construction of the nvFuser's Fusion
+# TODO: change what is stored in the cache for nvFuser's TensorView objects
+# https://github.com/pytorch/pytorch/issues/80551
 @dataclass(frozen=True)
 class nvFuserTensorViewTemplate:
     size: tuple
