@@ -254,6 +254,8 @@ class ParametrizationList(ModuleList):
                     original_i.set_(tensor)
 
     def forward(self) -> Tensor:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         # Unpack the originals for the first parametrization
         if self.is_tensor:
             x = self[0](self.original)
@@ -327,8 +329,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
         return tensor
 
     def get_parametrized(self) -> Tensor:
-        #print("going through get_parametrized for class", id(module.__class__))
-
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         parametrization = self.parametrizations[tensor_name]
         if _cache_enabled:
             if torch.jit.is_scripting():
@@ -345,6 +347,8 @@ def _inject_property(module: Module, tensor_name: str) -> None:
             return parametrization()
 
     def set_original(self, value: Tensor) -> None:
+        if torch.jit.is_scripting():
+            raise RuntimeError('Parametrization is not working with scripting.')
         self.parametrizations[tensor_name].right_inverse(value)
 
     #print("injecting property for attribute", tensor_name, "into class", id(module.__class__))
