@@ -1,7 +1,6 @@
 # Only used for PyTorch open source BUCK build
 # @lint-ignore-every BUCKRESTRICTEDSYNTAX
-
-load("@fbcode_macros//build_defs:python_binary.bzl", "python_binary")
+# @lint-ignore-every FBCODEBZLADDLOADS
 
 def fb_python_binary(**kwgs):
     if read_config("pt", "is_oss", "0") == "0":
