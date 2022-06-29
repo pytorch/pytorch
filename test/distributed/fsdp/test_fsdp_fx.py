@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import torch
-from torch.distributed.fsdp._symbolic_trace import _patch_tracer
+from torch.distributed.fsdp._symbolic_trace import _ExecutionInfo, _patch_tracer
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -38,8 +38,16 @@ class TestSymbolicTracing(FSDPTest):
     def test_symbolic_tracing_outputs(self):
         model = Model()
         tracer = torch.fx.Tracer()
-        execution_info = _patch_tracer(tracer, model)
-        tracer.trace(model)
+        execution_info = _ExecutionInfo(model)
+        original_call_module = tracer.call_module
+        original_create_proxy = tracer.create_proxy
+        with _patch_tracer(
+            tracer=tracer, root_module=model, execution_info=execution_info
+        ):
+            tracer.trace(model)
+        # the member functions of tracer should not be changed
+        self.assertEqual(original_call_module, tracer.call_module)
+        self.assertEqual(original_create_proxy, tracer.create_proxy)
         # test tracer.module_forward_order
         correct_module_forward_order = [
             model,

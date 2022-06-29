@@ -1,15 +1,9 @@
+import contextlib
 import functools
-import torch
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Set,
-    Tuple,
-)
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
+
+import torch
 
 
 __all__ = ["TracingConfig"]
@@ -21,9 +15,9 @@ class TracingConfig:
     Configurations used in ``ParamExecOrderWrapPolicy`` for symbolic tracing of a model.
     tracer: An instance of ``torch.fx.Tracer`` that will be used to perform symbolic
         tracing. ``tracer`` is default to be ``torch.fx.Tracer()``, but can also be instance
-        of some child class of ``torch.fx.Tracer``. For example, for hugginface transformer
-        based models, one may want to use ``HFTracer``:
-        https://github.com/huggingface/transformers/blob/6dd00f6bd49141ef4f26ed1d1c555bc0fe109ea8/src/transformers/utils/fx.py#L636
+        of some child class of ``torch.fx.Tracer``. For example, one may want to use ``HFTracer``
+        for models in Transformers:
+        .. _Transformers: https://huggingface.co/docs/transformers/index
 
     concrete_args: Concrete arguments that should not be treated as ``torch.fx.Proxy``
         when tracing the forward function.
@@ -32,6 +26,7 @@ class TracingConfig:
         ``concrete_args`` is also the parameter used in ``tracer.trace()``:
         https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.trace
     """
+
     tracer: torch.fx.Tracer = torch.fx.Tracer()
     concrete_args: Optional[Dict[str, Any]] = None
 
@@ -57,14 +52,14 @@ class _ExecutionInfo:
             2. or contains one of its child modules and all of the child module's ``named_parameters``.
             The list of tuple is ordered based on the parameter execution order.
     """
+
     def __init__(self, root_module: torch.nn.Module) -> None:
         self.current_module = root_module
         self.module_forward_order: List[torch.nn.Module] = [root_module]
 
         named_params_type = List[Tuple[str, torch.nn.Parameter]]
         self.module_execution_info_dict: Dict[
-            torch.nn.Module,
-            List[Tuple[torch.nn.Module, named_params_type]]
+            torch.nn.Module, List[Tuple[torch.nn.Module, named_params_type]]
         ] = dict()
         self.module_execution_info_dict[root_module] = []
 
@@ -81,7 +76,7 @@ def _patched_create_proxy(
     args: Tuple[Any, ...],
     kwargs: Dict[str, Any],
     name: Optional[str] = None,
-    type_expr: Optional[Any] = None
+    type_expr: Optional[Any] = None,
 ):
     """
     Override of ``Tracer.create_proxy`` (see
@@ -112,9 +107,9 @@ def _patched_create_proxy(
                         execution_info.param_exec_order.append(param)
                         execution_info._traced_param_set.add(param)
             if named_params:
-                execution_info.module_execution_info_dict[execution_info.current_module].append(
-                    (execution_info.current_module, named_params)
-                )
+                execution_info.module_execution_info_dict[
+                    execution_info.current_module
+                ].append((execution_info.current_module, named_params))
     elif kind == "call_module":
         module = execution_info.current_module
         named_params_list = list(module.named_parameters())
@@ -135,7 +130,7 @@ def _patched_call_module(
     module: torch.nn.Module,
     forward: Callable[..., Any],
     args: Tuple[Any, ...],
-    kwargs: Dict[str, Any]
+    kwargs: Dict[str, Any],
 ) -> Any:
     """
     Override of ``Tracer.call_module`` (see
@@ -171,32 +166,39 @@ def _patched_call_module(
     return output
 
 
+@contextlib.contextmanager
 def _patch_tracer(
     tracer: torch.fx.Tracer,
-    root_module: torch.nn.Module
-) -> _ExecutionInfo:
+    root_module: torch.nn.Module,
+    execution_info: _ExecutionInfo,
+) -> Generator:
     """
-    Patches the input tracer so that during ``tracer.trace()``, the forward order
-    of all modules and the parameter execution information are recorded.
+    Within the context manager, patches the input tracer so that during
+    ``tracer.trace()``, the forward order of all modules and the parameter
+    execution information are recorded. The patches of the input tracer
+    will be removed after the context manager exits.
     ``root_module`` is the top-level module to be traced and should not contain
     any FSDP modules.
     """
     from .fully_sharded_data_parallel import FullyShardedDataParallel
+
     for module in root_module.modules():
-        assert (
-            not isinstance(module, FullyShardedDataParallel)
+        assert not isinstance(
+            module, FullyShardedDataParallel
         ), "The input root_module of _patch_tracer should not contain FSDP modules"
-    execution_info = _ExecutionInfo(root_module)
+
+    original_call_module = tracer.call_module
+    original_create_proxy = tracer.create_proxy
+
     tracer.call_module = functools.partial(
-        _patched_call_module,
-        tracer.call_module,
-        execution_info
+        _patched_call_module, original_call_module, execution_info
     )
     params_dict = dict(root_module.named_parameters())
     tracer.create_proxy = functools.partial(
-        _patched_create_proxy,
-        tracer.create_proxy,
-        execution_info,
-        params_dict
+        _patched_create_proxy, original_create_proxy, execution_info, params_dict
     )
-    return execution_info
+    try:
+        yield
+    finally:
+        tracer.call_module = original_call_module
+        tracer.create_proxy = original_create_proxy

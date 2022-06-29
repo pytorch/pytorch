@@ -57,7 +57,7 @@ from ._optim_utils import (
     _rekey_sharded_optim_state_dict,
     _unflatten_optim_state,
 )
-from ._symbolic_trace import _patch_tracer, TracingConfig
+from ._symbolic_trace import _ExecutionInfo, _patch_tracer, TracingConfig
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -937,8 +937,13 @@ class FullyShardedDataParallel(nn.Module):
             TracingConfig
         ):
             tracer = auto_wrap_policy.tracing_config.tracer
-            execution_info = _patch_tracer(tracer, module)
-            tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
+            execution_info = _ExecutionInfo(module)
+            with _patch_tracer(
+                tracer=tracer,
+                root_module=module,
+                execution_info=execution_info,
+            ):
+                tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
         self.__init__(*args, **kwargs)

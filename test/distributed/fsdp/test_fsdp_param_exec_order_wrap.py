@@ -35,15 +35,21 @@ class Model(torch.nn.Module):
         return z
 
     def get_input(self, device: torch.device):
-        return (torch.randn((8, 6)).to(device), )
+        return (torch.randn((8, 6)).to(device),)
 
     def get_loss(self, input, output):
         return (output - input[0]).sum()
 
     @staticmethod
-    def wrap(sharding_strategy: ShardingStrategy, device: torch.device, wrap_policy=always_wrap_policy):
+    def wrap(
+        sharding_strategy: ShardingStrategy,
+        device: torch.device,
+        wrap_policy=always_wrap_policy,
+    ):
         model = Model()
-        fsdp_model = FSDP(model, auto_wrap_policy=wrap_policy, sharding_strategy=sharding_strategy)
+        fsdp_model = FSDP(
+            model, auto_wrap_policy=wrap_policy, sharding_strategy=sharding_strategy
+        )
         return fsdp_model.to(device)
 
 
@@ -65,11 +71,7 @@ class TestFSDPExecOrder(FSDPTest):
     ):
         """Tests the basic APIs of FSDP with ParamExecOrderWrapPolicy"""
         wrap_policy = ParamExecOrderWrapPolicy(init_policy=always_wrap_policy)
-        fsdp_model = Model.wrap(
-            sharding_strategy,
-            self.device,
-            wrap_policy=wrap_policy
-        )
+        fsdp_model = Model.wrap(sharding_strategy, self.device, wrap_policy=wrap_policy)
         self.assertTrue(fsdp_model._is_param_exec_order_prep_stage())
         for _ in range(iters):
             input = fsdp_model.module.get_input(self.device)
@@ -82,12 +84,7 @@ class TestFSDPExecOrder(FSDPTest):
         # should be different from named_parameters.
         self.assertEqual(
             fsdp_model._fsdp_params_exec_order,
-            [
-                params_list[0],
-                params_list[2],
-                params_list[3],
-                params_list[1]
-            ]
+            [params_list[0], params_list[2], params_list[3], params_list[1]],
         )
         self.assertTrue(fsdp_model._use_param_exec_order_policy())
         self.assertTrue(not fsdp_model._is_param_exec_order_prep_stage())
@@ -109,8 +106,7 @@ class TestFSDPExecOrder(FSDPTest):
         should always set as False.
         """
         wrap_policy = ParamExecOrderWrapPolicy(
-            init_policy=always_wrap_policy,
-            tracing_config=TracingConfig()
+            init_policy=always_wrap_policy, tracing_config=TracingConfig()
         )
         fsdp_model = Model.wrap(
             sharding_strategy,
@@ -127,12 +123,7 @@ class TestFSDPExecOrder(FSDPTest):
         # the ordering in flatten_named_params_exec_order should be different from named_parameters
         self.assertEqual(
             fsdp_model._fsdp_params_exec_order,
-            [
-                params_list[0],
-                params_list[2],
-                params_list[3],
-                params_list[1]
-            ]
+            [params_list[0], params_list[2], params_list[3], params_list[1]],
         )
         self.assertTrue(fsdp_model._use_param_exec_order_policy())
         self.assertTrue(not fsdp_model._is_param_exec_order_prep_stage())
