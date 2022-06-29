@@ -9,11 +9,7 @@
 #pragma once
 #include <cassert>
 #include <cstdint>
-#include <cstdlib>
-#include <functional>
 #include <memory>
-#include <optional>
-#include <variant>
 #include <vector>
 
 #ifndef _WIN32
@@ -33,29 +29,33 @@ struct OwnedOrBorrowedVector {
       std::vector<T>;
 #endif
 
-  std::variant<VECTOR_T, std::tuple<T*, uint32_t>> data_;
-
-  bool owned() const {
-    return (data_.index() == 0);
-  }
+  // Only one of owned_vec_data_ or borrowed_tuple_data_ will be meaningfully
+  // populated.
+  // A union could potentially be used here to reduce memory usage.
+  // std::variant is not used here because it causes internal build errors
+  // due to incompatibility.
+  VECTOR_T owned_vec_data_;
+  std::tuple<T*, uint32_t> borrowed_tuple_data_;
+  bool owned;
 
   VECTOR_T& vector() {
-    return std::get<0>(data_);
+    assert(owned);
+    return owned_vec_data_;
   }
 
   uint32_t size() const {
-    if (owned()) {
-      return std::get<0>(data_).size();
+    if (owned) {
+      return owned_vec_data_.size();
     } else {
-      return std::get<1>(std::get<1>(data_));
+      return std::get<1>(borrowed_tuple_data_);
     }
   }
 
   const T* data() const {
-    if (owned()) {
-      return std::get<0>(data_).data();
+    if (owned) {
+      return owned_vec_data_.data();
     } else {
-      return std::get<0>(std::get<1>(data_));
+      return std::get<0>(borrowed_tuple_data_);
     }
   }
 
@@ -63,11 +63,11 @@ struct OwnedOrBorrowedVector {
     return data()[i];
   }
 
-  OwnedOrBorrowedVector() = default;
+  OwnedOrBorrowedVector() : owned(true) {}
 
-  OwnedOrBorrowedVector(T* data_ptr, const uint32_t size) {
-    data_ = std::tuple<T*, uint32_t>(data_ptr, size);
-  }
+  OwnedOrBorrowedVector(T* data_ptr, const uint32_t size)
+      : borrowed_tuple_data_(std::tuple<T*, uint32_t>(data_ptr, size)),
+        owned(false) {}
 };
 
 typedef struct BCSRMatrix {

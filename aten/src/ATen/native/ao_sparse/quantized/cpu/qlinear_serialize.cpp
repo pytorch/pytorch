@@ -1,3 +1,5 @@
+#include <ATen/ATen.h>
+
 #ifdef USE_FBGEMM
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 #endif
