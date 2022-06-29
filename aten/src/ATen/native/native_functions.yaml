@@ -1034,6 +1034,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_not_out
+    MPS: logical_not_out_mps
 
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1051,6 +1052,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_xor_out
+    MPS: logical_xor_out_mps
 
 - func: logical_and(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1068,6 +1070,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_and_out
+    MPS: logical_and_out_mps
 
 - func: logical_or(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1085,6 +1088,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_or_out
+    MPS: logical_or_out_mps
 
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
