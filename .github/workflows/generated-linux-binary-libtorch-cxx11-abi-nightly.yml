@@ -82,14 +82,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -420,14 +420,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -758,14 +758,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1096,14 +1096,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1435,14 +1435,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1787,14 +1787,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2139,14 +2139,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2491,14 +2491,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2843,14 +2843,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3198,14 +3198,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3553,14 +3553,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3908,14 +3908,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4263,14 +4263,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4618,14 +4618,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -4973,14 +4973,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -5328,14 +5328,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -5683,14 +5683,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -6034,14 +6034,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -6385,14 +6385,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -6736,14 +6736,14 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout makslevental/builder
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: disable-tests-static
           submodules: recursive
-          repository: pytorch/builder
+          repository: makslevental/builder
           path: builder
-      - name: Clean pytorch/builder checkout
+      - name: Clean makslevental/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
