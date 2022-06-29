@@ -30,6 +30,8 @@ import re
 from collections import defaultdict
 import unittest
 import warnings
+import weakref
+
 
 bf16 = torch.bfloat16
 f64 = torch.float64
@@ -166,6 +168,35 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m.stride(), y.stride())
         self.assertEqual(m.storage_offset(), y.storage_offset())
 
+    def test_weakref(self):
+        x = torch.randn(4, 4, 4)
+        m = MetaConverter()
+        y = m(x)
+        z = m(x)
+        self.assertIs(y, z)
+        self.assertEqual(len(m.tensor_memo), 1)
+        self.assertEqual(len(m.storage_memo), 1)
+        del x
+        self.assertEqual(len(m.tensor_memo), 0)
+        m.check_for_expired_weak_storages()
+        self.assertEqual(len(m.storage_memo), 0)
+        li = []
+        for i in range(4):
+            li.append(torch.rand([i]))
+            m(li[-1])
+        self.assertEqual(len(m.tensor_memo), 4)
+        del li
+        self.assertEqual(len(m.tensor_memo), 0)
+        m.check_for_expired_weak_storages()
+        self.assertEqual(len(m.storage_memo), 0)
+
+    def test_tensor_outlives_converter(self):
+        m = MetaConverter()
+        ref = weakref.ref(m)
+        x = torch.randn([4, 4])
+        y = m(x)
+        del m
+        self.assertIs(ref(), None)
 
 def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
