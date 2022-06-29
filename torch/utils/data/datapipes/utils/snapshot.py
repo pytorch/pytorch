@@ -26,12 +26,12 @@ def _simple_graph_snapshot_restoration(datapipe: IterDataPipe, n_iterations: int
         rng: ``Optional[torch.Generator]``. If not ``None``, this RNG will be used for shuffling. The generator
             should be in its `initial` state as it was first passed into ``DataLoader`` or ``ReadingService``.
     """
-    if datapipe._snapshot_state != _SnapshotState.Deserialized:
+    if datapipe._snapshot_state != _SnapshotState.NotStarted:
         raise RuntimeError(
             "Snapshot restoration cannot be applied. You can only restore simple snapshot to the graph "
-            "if your graph has recently been came from deserialized,\nand have not restored another snapshot or "
+            "if your graph has not started,\nand have not restored another snapshot or "
             "create any iterator. It is possible to override this by setting "
-            "`datapipe._snapshot_state = _SnapshotState.Deserialized`.")
+            "`datapipe._snapshot_state = _SnapshotState.NotStarted`.")
 
     apply_shuffle_seed(datapipe, rng)
 
