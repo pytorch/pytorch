@@ -14,7 +14,7 @@ def execute(gm: GraphModule, *args, executor: str = "aten"):
     """
 
     if executor == "aten":
-        return gm.forward(args)
+        return gm.forward(*args)
     elif executor == "nvfuser":
         return nvfuser_execute(gm, *args)
 
@@ -65,6 +65,6 @@ def make_traced(fn: Callable):
 
         with TorchRefsMode.push():
             gm = make_fx(wrapped)(all_args)
-        return execute(gm, *all_args, executor=executor)
+        return execute(gm, all_args, executor=executor)
 
     return _traced
