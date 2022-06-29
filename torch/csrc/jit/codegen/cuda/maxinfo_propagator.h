@@ -81,12 +81,18 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
     NextHopType type;
     TensorView* from = nullptr;
     TensorView* to;
+
+    NextHop() = default;
+    NextHop(NextHopType type_, TensorView* from_, TensorView* to_) : type(type_), from(from_), to(to_) {}
   };
 
   struct NextHopWithInfo {
     NextHop next_hop;
     std::shared_ptr<Information> info_from;
     std::shared_ptr<Information> info_to;
+
+    NextHopWithInfo() = default;
+    NextHopWithInfo(NextHop n_h, std::shared_ptr<Information> info_f, std::shared_ptr<Information> info_t) : next_hop(n_h), info_from(info_f), info_to(info_t) {}
 
     bool operator<(const NextHopWithInfo& r) const {
       return *info_to < *(r.info_to);
