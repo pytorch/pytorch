@@ -14,9 +14,10 @@ jobs:
     runs-on: linux.20_04.16x
     name: Job-One
     steps:
-      - uses: actions/checkout@v3
       - name: First step
         run: echo "hi there"
+      - name: Let's checkout some actions
+        uses: actions/checkout@v3
       - name: action time
         uses: ./.github/actions/zainr-action
 
