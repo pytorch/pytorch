@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
-from torch.distributed.algorithms._comm_hooks import allreduce_hook
+from torch.distributed.algorithms._comm_hooks import default_hooks
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
 
@@ -98,7 +98,7 @@ class TestCommunicationHooks(FSDPTest):
 
         # Check that default hook is set to `all_reduce`
         for entry in FSDP.fsdp_modules(net_default_hook):
-            self.assertEqual(entry.communication_hook, allreduce_hook.allreduce_hook)
+            self.assertEqual(entry.communication_hook, default_hooks.allreduce_hook)
 
         for _ in range(4):
 
@@ -179,7 +179,7 @@ class TestCommunicationHooks(FSDPTest):
 
             # Check that default hook is set to `all_reduce`
             for entry in FSDP.fsdp_modules(fsdp_model_with_hook):
-                self.assertEqual(entry.communication_hook, allreduce_hook.allreduce_hook)
+                self.assertEqual(entry.communication_hook, default_hooks.allreduce_hook)
 
             dummy_state = DummyState(process_group=None)
 
