@@ -8,7 +8,7 @@
 
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
-#include <utils/python_arg_parser.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 
 namespace torch {
 namespace jit {

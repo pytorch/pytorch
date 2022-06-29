@@ -26,6 +26,10 @@ load(
     "libtorch_profiler_sources",
 )
 load(
+    ":pt_ops.bzl",
+    "USED_PT_BACKENDS",
+)
+load(
     ":pt_template_srcs.bzl",
     "METAL_MASKRCNN_SOURCE_LIST",
     "METAL_SOURCE_LIST",
@@ -118,20 +122,22 @@ C10 = "//c10:c10" if IS_OSS else "//xplat/caffe2/c10:c10"
 
 # a dictionary maps third party library name to fbsource and oss target
 THIRD_PARTY_LIBS = {
-    "FP16": ["//third-party/FP16:FP16", "//third_party:FP16"],
-    "FXdiv": ["//third-party/FXdiv:FXdiv", "//third_party:FXdiv"],
+    "FP16": ["//xplat/third-party/FP16:FP16", "//third_party:FP16"],
+    "FXdiv": ["//xplat/third-party/FXdiv:FXdiv", "//third_party:FXdiv"],
     "XNNPACK": ["//xplat/third-party/XNNPACK:XNNPACK", "//third_party:XNNPACK"],
-    "clog": ["//third-party/clog:clog", "//third_party:clog"],
+    "clog": ["//xplat/third-party/clog:clog", "//third_party:clog"],
     "cpuinfo": ["//third-party/cpuinfo:cpuinfo", "//third_party:cpuinfo"],
     "flatbuffers-api": ["//third-party/flatbuffers:flatbuffers-api", "//third_party:flatbuffers-api"],
     "flatc": ["//third-party/flatbuffers:flatc", "//third_party:flatc"],
     "fmt": ["//third-party/fmt:fmt", "//third_party:fmt"],
     "glog": ["//third-party/glog:glog", "//third_party:glog"],
+    "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
+    "gtest": ["//xplat/third-party/gmock:gmock", "//third_party:gtest"],
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
-    "psimd": ["//third-party/psimd:psimd", "//third_party:psimd"],
-    "pthreadpool": ["//third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
-    "pthreadpool_header": ["//third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
+    "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
+    "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
+    "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
     "pyyaml": ["//third-party/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
@@ -234,12 +240,6 @@ def get_pt_preprocessor_flags():
     if _is_build_mode_dev():
         PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
     return PT_PREPROCESSOR_FLAGS
-
-USED_PT_BACKENDS = [
-    "CPU",
-    "QuantizedCPU",
-    "SparseCPU",  # brings ~20 kb size regression
-]
 
 # This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892
 PT_BACKEND_HEADERS = [
