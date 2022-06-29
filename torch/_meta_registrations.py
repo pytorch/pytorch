@@ -8,8 +8,6 @@ from torch._prims.utils import (
 )
 from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
-import math
-
 from typing import List, Optional, Union
 
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
@@ -222,7 +220,7 @@ def meta_conv(
         Returns:
             The output length
         """
-        return math.floor((ln + 2 * p - d * (k - 1) - 1) / s + 1)
+        return (ln + 2 * p - d * (k - 1) - 1) // s + 1
 
     def _formula_transposed(ln: int, p: int, d: int, k: int, s: int, op: int) -> int:
         """
