@@ -6,6 +6,7 @@ from torch.fx.node import Node, map_aggregate
 from typing import Any, Tuple, NamedTuple, Optional, Dict
 from torch.fx._compatibility import compatibility
 
+__all__ = ['TensorMetadata', 'ShapeProp']
 
 @compatibility(is_backward_compatible=True)
 class TensorMetadata(NamedTuple):
