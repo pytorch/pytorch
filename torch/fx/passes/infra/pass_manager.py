@@ -3,23 +3,45 @@ from functools import wraps
 from typing import Callable, Dict, List, Set
 
 import torch.nn as nn
+from torch.fx.passes.infra.pass_base import PassResult
 
 def inplace_wrapper(fn: Callable) -> Callable:
     """
     Convenience wrapper for passes which modify an object inplace. This
-    wrapper makes them return the modified object instead.
+    wrapper makes them return a PassResult containing the modified object and
+    True for the "modified" flag.
 
     Args:
-        fn (Callable[Object, Any])
+        fn (Callable[Module, Any])
 
     Returns:
-        wrapped_fn (Callable[Object, Object])
+        wrapped_fn (Callable[Module, PassResult])
     """
 
     @wraps(fn)
     def wrapped_fn(gm):
         fn(gm)
-        return gm
+        return PassResult(gm, True)
+
+    return wrapped_fn
+
+def pass_result_wrapper(fn: Callable) -> Callable:
+    """
+    Temporary wrapper for passes which currently do not return a PassResult.
+    This wrapper makes them return a PassResult containing the modified object
+    and True for the "modified" flag.
+
+    Args:
+        fn (Callable[Module, Any])
+
+    Returns:
+        wrapped_fn (Callable[Module, PassResult])
+    """
+
+    @wraps(fn)
+    def wrapped_fn(gm):
+        gm = fn(gm)
+        return PassResult(gm, True)
 
     return wrapped_fn
 
@@ -128,7 +150,7 @@ class PassManager:
             after each pass
     """
 
-    passes: List[Callable[[nn.Module], nn.Module]] = []
+    passes: List[Callable[[nn.Module], PassResult]] = []
     constraints: List[Callable[[Callable, Callable], bool]] = []
     _validated: bool = False
     steps: int = 1
@@ -221,14 +243,15 @@ class PassManager:
             # Run the set of passes on the graph module
             for fn in self.passes:
                 res = fn(module)
-                module = res
+
+                module = res.graph_module
+                modified = modified or res.modified
 
                 # Check graph invariants
                 if self.run_checks_after_each_pass:
                     self.check(module)
 
-            # TODO(angelayi): If the graph no longer changes, then we can stop
-            # running these passes
+            # If the graph no longer changes, then we can stop running these passes
             if not modified:
                 break
 

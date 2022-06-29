@@ -1,7 +1,15 @@
 import abc
+from collections import namedtuple
 
 import torch.fx as fx
 
+
+"""
+Result of a pass:
+    graph_module: The modified graph module
+    modified: A flag for if the pass has modified the graph module
+"""
+PassResult = namedtuple("PassResult", ["graph_module", "modified"])
 
 class PassBase(abc.ABC):
     """
@@ -18,17 +26,18 @@ class PassBase(abc.ABC):
     def __init__(self) -> None:
         pass
 
-    def __call__(self, graph_module: fx.GraphModule) -> None:
+    def __call__(self, graph_module: fx.GraphModule) -> PassResult:
         """
         Runs the precondition check, the pass itself, and the postcondition check.
         """
 
         self.requires(graph_module)
-        self.call(graph_module)
+        res = self.call(graph_module)
         self.ensures(graph_module)
+        return res
 
     @abc.abstractmethod
-    def call(self, graph_module: fx.GraphModule) -> None:
+    def call(self, graph_module: fx.GraphModule) -> PassResult:
         """
         The pass that is run through the given graph module. To implement a
         pass, it is required to implement this function.
