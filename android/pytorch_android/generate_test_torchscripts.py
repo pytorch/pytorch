@@ -2,6 +2,8 @@ import torch
 from torch import Tensor
 from typing import Dict, List, Tuple, Optional
 
+import numpy as np
+
 OUTPUT_DIR = "src/androidTest/assets/"
 
 def scriptAndSave(module, fileName):
@@ -56,9 +58,7 @@ class Test(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def listIntSumReturnTuple(self, input: List[int]) -> Tuple[List[int], int]:
-        sum = 0
-        for x in input:
-            sum += x
+        sum = np.sum(sum)
         return (input, sum)
 
     @torch.jit.script_method
@@ -77,9 +77,7 @@ class Test(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def tupleIntSumReturnTuple(self, input: Tuple[int, int, int]) -> Tuple[Tuple[int, int, int], int]:
-        sum = 0
-        for x in input:
-            sum += x
+        sum = np.sum(sum)
         return (input, sum)
 
     @torch.jit.script_method
