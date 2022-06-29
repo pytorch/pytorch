@@ -1036,6 +1036,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.polygamma: lambda input, n, out=None: -1,
         torch.special.psi: lambda input: -1,
         torch.special.round: lambda input: -1,
+        torch.special.scaled_modified_bessel_k0: lambda input: -1,
         torch.special.scaled_modified_bessel_k1: lambda input: -1,
         torch.special.shifted_chebyshev_polynomial_t: lambda input, n, out=None: -1,
         torch.special.shifted_chebyshev_polynomial_u: lambda input, n, out=None: -1,
