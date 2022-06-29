@@ -1162,6 +1162,21 @@ def cudnn_batch_norm_backward(
         [True, True, True],
     )
 
+@register_decomposition(aten.upsample_bilinear2d.vec)
+def upsample_bilinear2d_vec(
+    input: Tensor,
+    output_size: Optional(List(int)),
+    align_corners: bool,
+    scale_factors: Optional(List(float))
+    ) -> Tensor:
+
+    if (output_size is not None):
+        return output_size
+    elif (scale_factors is not None):
+        pass
+
+    return input
+
 
 @register_decomposition(aten.transpose.int)
 def transpose_int(self: Tensor, dim0: int, dim1: int) -> Tensor:
