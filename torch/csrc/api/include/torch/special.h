@@ -986,6 +986,30 @@ inline Tensor& hermite_polynomial_he_out(
   return torch::special_hermite_polynomial_he_out(output, x, n);
 }
 
+/// Hyperbolic cosine integral.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.hyperbolic_integral_chi.
+inline Tensor hyperbolic_integral_chi(const Tensor& self) {
+  return torch::special_hyperbolic_integral_chi(self);
+}
+
+inline Tensor& hyperbolic_integral_chi_out(Tensor& result, const Tensor& self) {
+  return torch::special_hyperbolic_integral_chi_out(result, self);
+}
+
+/// Hyperbolic sine integral.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.hyperbolic_integral_shi.
+inline Tensor hyperbolic_integral_shi(const Tensor& self) {
+  return torch::special_hyperbolic_integral_shi(self);
+}
+
+inline Tensor& hyperbolic_integral_shi_out(Tensor& result, const Tensor& self) {
+  return torch::special_hyperbolic_integral_shi_out(result, self);
+}
+
 /// Laguerre polynomial.
 ///
 /// See
@@ -1380,6 +1404,30 @@ inline Tensor spherical_bessel_j0(const Tensor& x) {
 
 inline Tensor& spherical_bessel_j0_out(Tensor& y, const Tensor& x) {
   return torch::special_spherical_bessel_j0_out(y, x);
+}
+
+/// Cosine integral.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.trigonometric_integral_ci.
+inline Tensor trigonometric_integral_ci(const Tensor& self) {
+  return torch::special_trigonometric_integral_ci(self);
+}
+
+inline Tensor& trigonometric_integral_ci_out(Tensor& result, const Tensor& self) {
+  return torch::special_trigonometric_integral_ci_out(result, self);
+}
+
+/// Sine integral.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.trigonometric_integral_si.
+inline Tensor trigonometric_integral_si(const Tensor& self) {
+  return torch::special_trigonometric_integral_si(self);
+}
+
+inline Tensor& trigonometric_integral_si_out(Tensor& result, const Tensor& self) {
+  return torch::special_trigonometric_integral_si_out(result, self);
 }
 } // namespace special
 } // namespace torch
