@@ -7507,6 +7507,14 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
         yield SampleInput(a, args=(b, c))
 
 
+def _clamp_min_numpy(a, min=None):
+    return np.maximum(a, min)
+
+
+def _clamp_max_numpy(a, max=None):
+    return np.minimum(a, max)
+
+
 def _clamp_numpy(a, min=None, max=None):
     if min is None:
         return np.minimum(a, max)
@@ -8894,6 +8902,13 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(a, args=(c, b))
 
+    # two python scalars
+    c = make_cond((10, 3), noncontiguous=True)
+    a = make_arg((1,)).item()
+    b = make_arg((1,)).item()
+
+    yield SampleInput(a, args=(c, b))
+
     # NaN propagation
     if dtype.is_floating_point or dtype.is_complex:
         if dtype.is_floating_point:
@@ -8908,6 +8923,11 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
         b[0, 2] = nan
 
         yield SampleInput(a, args=(c, b))
+
+    # Python scalars type promotion
+    for scalar in (0, 0.0, 0j, False):
+        yield SampleInput(scalar, args=(c, b))
+        yield SampleInput(a, args=(c, scalar))
 
 
 def error_inputs_where(op_info, device, **kwargs):
@@ -10619,6 +10639,42 @@ op_db: List[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
+                    )),
+    BinaryUfuncInfo('clamp_max',
+                    ref=_clamp_max_numpy,
+                    dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_rhs_python_scalar=False,
+                    supports_fwgrad_bwgrad=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=False),
+                    skips=(
+                        # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='cuda'),
+                        # dispatch to lazy test failed
+                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        # test error disabled since rhs non-tensor python scalar is supported
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+                    )),
+    BinaryUfuncInfo('clamp_min',
+                    ref=_clamp_min_numpy,
+                    dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_rhs_python_scalar=False,
+                    supports_fwgrad_bwgrad=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=False),
+                    skips=(
+                        # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='cuda'),
+                        # dispatch to lazy test failed
+                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        # test error disabled since rhs non-tensor python scalar is supported
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -13703,7 +13759,7 @@ op_db: List[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
                DecorateInfo(
-                   toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
+                   toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_noncontiguous_samples', device_type='cuda')],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
@@ -14732,18 +14788,22 @@ op_db: List[OpInfo] = [
                          active_if=(IS_MACOS or IS_WINDOWS)),
         ),
     ),
-    OpInfo(
+    UnaryUfuncInfo(
         'nn.functional.threshold',
-        aten_backward_name='threshold_backward',
-        ref=lambda x, threshold, value: np.where(x > threshold, x, value).astype(x.dtype),
+        ref=lambda x, threshold, value: np.where(x <= threshold, value, x).astype(x.dtype),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        supports_autograd=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
+        sample_kwargs=lambda device, dtype, input: ({'threshold': 0.123,
+                                                    'value': -9},
+                                                    {'threshold': 0.123,
+                                                    'value': -9}),
+        # TODO(whc) should not need sample_inputs_func, but without it
+        # kwargs aren't being hooked up properly
         sample_inputs_func=sample_inputs_threshold,
     ),
     OpInfo(
@@ -16618,7 +16678,7 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+           backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_index,
            error_inputs_func=error_inputs_index_select,
            supports_forward_ad=True,
@@ -16626,7 +16686,7 @@ op_db: List[OpInfo] = [
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_add',
-           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+           dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            supports_out=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -19377,7 +19437,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         "repeat_interleave",
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
+        backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
         sample_inputs_func=sample_inputs_repeat_interleave,
         supports_out=False,
         supports_forward_ad=True,
@@ -19678,34 +19738,6 @@ op_db: List[OpInfo] = [
         supports_one_python_scalar=True,
         supports_autograd=False,
     ),
-    UnaryUfuncInfo(
-        'special.gamma',
-        decorators=(
-            toleranceOverride(
-                {
-                    torch.float32: tol(atol=1e-03, rtol=1.3e-05),
-                    torch.float64: tol(atol=1e-05, rtol=1.3e-05)
-                }
-            ),
-        ),
-        dtypes=all_types_and(torch.bool),
-        ref=scipy.special.gamma if TEST_SCIPY else _NOTHING,
-        skips=(
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                'TestUnaryUfuncs',
-                'test_reference_numerics_large',
-                dtypes=[torch.float32, torch.float64],
-            ),
-            DecorateInfo(
-                unittest.skip("Skipped!"),
-                'TestUnaryUfuncs',
-                'test_reference_numerics_small',
-                dtypes=[torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64],
-            ),
-        ),
-        supports_autograd=False,
-    ),
     BinaryUfuncInfo(
         'special.hermite_polynomial_h',
         dtypes=all_types_and(torch.bool),
@@ -19808,6 +19840,20 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
+        'special.scaled_modified_bessel_k0',
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=1e-03),
+                    torch.float64: tol(atol=1e-05, rtol=1e-03),
+                }
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k0e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
         'special.scaled_modified_bessel_k1',
         decorators=(
             toleranceOverride(
@@ -19867,6 +19913,20 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo'),
         ),
         supports_one_python_scalar=True,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
+        'special.spherical_bessel_j0',
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=1e-03),
+                    torch.float64: tol(atol=1e-05, rtol=1e-03),
+                }
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
 ]
@@ -20092,7 +20152,6 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.atanh",
         torch_opinfo_name="atanh",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.bitwise_not",
@@ -20201,14 +20260,13 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        # nvFuser test for float32 fails with AssertionError: Dtypes torch.float64 and torch.float32 are not equal!
-        # The test with int dtype passes
+        # When keepdim=False logsumexp function uses squeeze operation
+        # that is not yet exposed in nvFuser's Python API.
         supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.log_softmax",
         torch_opinfo_name="log_softmax",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
@@ -20318,6 +20376,11 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.celu",
         torch_opinfo_name="nn.functional.celu",
+    ),
+    ElementwiseUnaryPythonRefInfo(
+        "_refs.nn.functional.threshold",
+        torch_opinfo_name="nn.functional.threshold",
+        supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
@@ -20765,6 +20828,24 @@ python_ref_db = [
     #
     # Elementwise Ternary Reference OpInfos
     #
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.clamp_min",
+        torch_opinfo_name="clamp_min",
+        supports_nvfuser=False,
+        skips=(
+            # test error disabled since rhs non-tensor python scalar is supported
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.clamp_max",
+        torch_opinfo_name="clamp_max",
+        supports_nvfuser=False,
+        skips=(
+            # test error disabled since rhs non-tensor python scalar is supported
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
+    ),
     PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
@@ -21137,6 +21218,7 @@ python_ref_db = [
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
+        supports_nvfuser=False,
     ),
 ]
 

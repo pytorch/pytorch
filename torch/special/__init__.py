@@ -21,7 +21,6 @@ __all__ = [
     'exp2',
     'expit',
     'expm1',
-    'gamma',
     'gammainc',
     'gammaincc',
     'gammaln',
@@ -52,9 +51,11 @@ __all__ = [
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
+    'scaled_modified_bessel_k0',
     'scaled_modified_bessel_k1',
     'sinc',
     'softmax',
+    'spherical_bessel_j0',
     'xlog1py',
     'xlogy',
     'zeta',
@@ -1031,31 +1032,6 @@ Keyword args:
     {out}
 """.format(**common_args))
 
-gamma = _add_docstr(_special.special_gamma,
-                    r"""
-gamma(input, *, out=None) -> Tensor
-
-Gamma function :math:`\Gamma\left(\text{input}\right)` defined as the
-convergent improper integral:
-
-.. math::
-    \int_{0}^{\infty}x^{z - 1}e^{-x}dx
-
-The gamma function is often referred to as the generalized factorial function
-since :math:`\Gamma\left(n + 1\right) = n!` for natural numbers
-:math:`n \in \mathbb{N}`. It satisfies the recurrence relation
-:math:`\Gamma\left(z + 1\right) = z \Gamma\left(z\right)` for complex
-:math:`z \in \mathbb{C}`, which, combined with the fact that
-:math:`\Gamma\left(1\right) = 1`, implies the above identity for :math:`z = n`.
-
-""" + r"""
-Args:
-    {input}
-
-Keyword args:
-    {out}
-""".format(**common_args))
-
 hermite_polynomial_h = _add_docstr(_special.special_hermite_polynomial_h,
                                    r"""
 hermite_polynomial_h(input, n, *, out=None) -> Tensor
@@ -1204,11 +1180,25 @@ Keyword args:
     {out}
 """.format(**common_args))
 
+scaled_modified_bessel_k0 = _add_docstr(_special.special_scaled_modified_bessel_k0,
+                                        r"""
+scaled_modified_bessel_k0(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the second kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
 scaled_modified_bessel_k1 = _add_docstr(_special.special_scaled_modified_bessel_k1,
                                         r"""
 scaled_modified_bessel_k1(input, *, out=None) -> Tensor
 
-Scaled modified Bessel function of the second kind of order :math:`0`.
+Scaled modified Bessel function of the second kind of order :math:`1`.
 
 """ + r"""
 Args:
@@ -1273,6 +1263,20 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 Args:
     {input}
     n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_j0 = _add_docstr(_special.special_spherical_bessel_j0,
+                                  r"""
+spherical_bessel_j0(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the first kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
 
 Keyword args:
     {out}
