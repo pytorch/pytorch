@@ -133,7 +133,7 @@ class MetaConverter:
     def meta_tensor(self, t):
         # see expired-storages
         self.check_expired_count += 1
-        if self.check_expired_count == self.check_expired_frequency:
+        if self.check_expired_count >= self.check_expired_frequency:
             self.check_for_expired_weak_storages()
             self.check_expired_count = 0
 
