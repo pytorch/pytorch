@@ -69,6 +69,7 @@ if TEST_SCIPY:
 L = 20
 M = 10
 S = 5
+XS = 3
 
 # Unique value to distinguish default from anything else
 _NOTHING = object()
@@ -2629,6 +2630,9 @@ def sample_inputs_elementwise_unary(
     if not op_kwargs:
         op_kwargs = {}
 
+    if kwargs.get("small_inputs_only", False):
+        L = 5
+
     low, high = op_info.domain
     low = low if low is None else low + op_info._domain_eps
     high = high if high is None else high - op_info._domain_eps
@@ -3150,6 +3154,10 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
+    if kwargs.get("small_inputs_only", False):
+        M = 5
+        S = 3
+
     # input_shape, batch1_shape, batch2_shape, beta_val, alpha_val, is_broadcasting
     test_cases = [((S, M), (S, S, S), (S, S, M), 1, 1, False),
                   ((1,), (S, S, S), (S, S, M), 1, 1, True),
@@ -3203,6 +3211,9 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
     return tuple(sample_inputs)
 
 def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
+    if kwargs.get("small_inputs_only", False):
+        M = 5
+        S = 3
     test_cases = [((S, S, M), (S, S, S), (S, S, M), 1, 1, False),
                   ((1,), (S, S, S), (S, S, M), 1, 1, True),
                   ((S, S, M), (S, S, S), (S, S, M), 0.6, 0.2, False),
@@ -4559,11 +4570,11 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
         ((S, S), 1, None, None),
         ((S, S), 0, (1, S), (2, S)),
         ((S, S), 0, None, (2, S)),
-        ((S, S, S), 1, None, None),
-        ((S, S, S), 2, None, None),
-        ((S, S, S), 1, (S, 1, S), (S, 1, S)),
-        ((S, S, S), 2, (S, S, 1), (S, S, 1)),
-        ((S, S, S), 2, (S, S, S), (S, S, S)),)
+        ((XS, XS, XS), 1, None, None),
+        ((XS, XS, XS), 2, None, None),
+        ((XS, XS, XS), 1, (XS, 1, XS), (XS, 1, XS)),
+        ((XS, XS, XS), 2, (XS, XS, 1), (XS, XS, 1)),
+        ((XS, XS, XS), 2, (XS, XS, XS), (XS, XS, XS)),)
 
     sample_inputs = []
     for size, dim, size_prepend, size_append in test_cases:
@@ -4577,8 +4588,8 @@ def sample_inputs_diff(op_info, device, dtype, requires_grad, **kwargs):
             sample_inputs.append(SampleInput(input_tensor, args=(n, dim, prepend, append,)))
 
     # add some samples with n > dim_size
-    sample_inputs.append(SampleInput(make_arg((S, S, S)), args=(S + 1, 1,)))
-    sample_inputs.append(SampleInput(make_arg((S, S, S)), args=(S * 3 + 2, 2, make_arg((S, S, S)), make_arg((S, S, S)),)))
+    sample_inputs.append(SampleInput(make_arg((XS, XS, XS)), args=(S + 1, 1,)))
+    sample_inputs.append(SampleInput(make_arg((XS, XS, XS)), args=(S * 3 + 2, 2, make_arg((XS, XS, XS)), make_arg((XS, XS, XS)),)))
 
     return sample_inputs
 
@@ -7657,10 +7668,10 @@ def sample_inputs_diagonal_diag_embed(op_info, device, dtype, requires_grad, **k
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
 
     # Shapes for 2D Tensors
-    shapes_2d = ((M, M), (3, 5), (5, 3))
+    shapes_2d = ((S, S), (3, 5), (5, 3))
 
     # Shapes for 3D Tensors
-    shapes_3d = ((M, M, M),)
+    shapes_3d = ((S, S, S),)
 
     kwargs_2d = (dict(), dict(offset=2), dict(offset=2), dict(offset=1))
     kwargs_3d = (dict(offset=1, dim1=1, dim2=2),
@@ -7957,6 +7968,10 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
+    if kwargs.get("small_inputs_only", False):
+        S = 3
+        M = 5
+        L = 5
     test_cases = (((L,), (L,)),
                   ((S, M), (M,)),
                   ((M,), (M, S)),
@@ -8687,6 +8702,8 @@ def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kw
                 args=(make_arg(shape_other, requires_grad=False),)))
 
 def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs):
+    if kwargs.get("small_inputs_only", False):
+        S = 3
     input_list = []
     shapes = ((S, S, S, S), (S, S, S), (S, S), (S, ), (),)
     make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
