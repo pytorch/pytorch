@@ -114,7 +114,8 @@ def embedding_inference_rule(n: Node, module_instance, symbols, constraints, cou
 
     c1 = Conj([input_dyn, output_dyn])
     c2 = []
-    for i in range(1, MAX_TENSOR_RANK + 1):
+
+    for i in range(1, MAX_TENSOR_RANK):
         new_dims, counter = gen_tensor_dims(i, counter)
         nat_constraints = gen_nat_constraints(new_dims)
 
