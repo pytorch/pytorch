@@ -420,7 +420,6 @@ lazy_tensor_core_sources = [
 lazy_tensor_ts_sources = [
     "torch/csrc/lazy/ts_backend/dynamic_ir.cpp",
     "torch/csrc/lazy/ts_backend/config.cpp",
-    "torch/csrc/lazy/ts_backend/ops/batch_norm_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/device_data.cpp",
     "torch/csrc/lazy/ts_backend/ops/random_ops.cpp",
     "torch/csrc/lazy/ts_backend/ops/generic.cpp",
@@ -1126,8 +1125,8 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/IndexKernel.cpp",
     "aten/src/ATen/native/cpu/LerpKernel.cpp",
     "aten/src/ATen/native/cpu/LinearAlgebraKernel.cpp",
-    "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxPoolKernel.cpp",
+    "aten/src/ATen/native/cpu/MaxPooling.cpp",
     "aten/src/ATen/native/cpu/MaxUnpoolKernel.cpp",
     "aten/src/ATen/native/cpu/MultinomialKernel.cpp",
     "aten/src/ATen/native/cpu/PixelShuffleKernel.cpp",
@@ -1148,10 +1147,13 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/UnfoldBackwardKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleKernel.cpp",
     "aten/src/ATen/native/cpu/UpSampleMoreKernel.cpp",
+    "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
+    "aten/src/ATen/native/cpu/airy_ai.cpp",
     "aten/src/ATen/native/cpu/batch_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/group_norm_kernel.cpp",
     "aten/src/ATen/native/cpu/layer_norm_kernel.cpp",
-    "aten/src/ATen/native/cpu/WeightNormKernel.cpp",
+    "aten/src/ATen/native/cpu/scaled_modified_bessel_k1.cpp",
+    "aten/src/ATen/native/cpu/spherical_bessel_j0.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
 ]
 
