@@ -781,7 +781,9 @@ endif()
 
 if(USE_MPS OR USE_METAL)
   if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.16")
-    enable_language(OBJCXX)
+    if (NOT USE_COREML_DELEGATE)
+      enable_language(OBJCXX)
+    endif()
   endif()
 endif()
 
