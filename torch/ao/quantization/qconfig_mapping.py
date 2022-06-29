@@ -5,7 +5,12 @@ from typing import Any, Callable, Dict, Tuple, Union
 import torch
 
 from .fake_quantize import default_weight_fake_quant
-from .observer import default_weight_observer
+from .observer import (
+    _PartialWrapper,
+    default_fixed_qparams_range_0to1_observer,
+    default_fixed_qparams_range_neg1to1_observer,
+    default_weight_observer,
+)
 from .qconfig import (
     default_reuse_input_qconfig,
     get_default_qconfig,
@@ -29,8 +34,24 @@ MODULE_NAME_REGEX_DICT_KEY = "module_name_regex"
 MODULE_NAME_DICT_KEY = "module_name"
 MODULE_NAME_OBJECT_TYPE_ORDER_DICT_KEY = "module_name_object_type_order"
 
+_FIXED_QPARAMS_OP_TO_OBSERVER: Dict[Union[Callable, str], _PartialWrapper] = {
+    torch.nn.Hardsigmoid: default_fixed_qparams_range_0to1_observer,
+    torch.nn.functional.hardsigmoid: default_fixed_qparams_range_0to1_observer,
+    "hardsigmoid": default_fixed_qparams_range_0to1_observer,
+    "hardsigmoid_": default_fixed_qparams_range_0to1_observer,
+    torch.nn.Sigmoid: default_fixed_qparams_range_0to1_observer,
+    torch.sigmoid: default_fixed_qparams_range_0to1_observer,
+    "sigmoid": default_fixed_qparams_range_0to1_observer,
+    "sigmoid_": default_fixed_qparams_range_0to1_observer,
+    torch.nn.Softmax: default_fixed_qparams_range_0to1_observer,
+    torch.nn.Tanh: default_fixed_qparams_range_neg1to1_observer,
+    torch.tanh: default_fixed_qparams_range_neg1to1_observer,
+    "tanh": default_fixed_qparams_range_neg1to1_observer,
+    "tanh_": default_fixed_qparams_range_neg1to1_observer,
+}
 
-def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int):
+
+def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int) -> QConfigMapping:
     """
     Return the default QConfigMapping for the given quantization type and backend.
     """
@@ -38,18 +59,18 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int):
         qconfig = get_default_qat_qconfig(backend, version)
     else:
         qconfig = get_default_qconfig(backend, version)
+    default_weight = default_weight_fake_quant if is_qat else default_weight_observer
 
     # default_per_channel_weight_observer is not currently compatible with fbgemm backend
     # so we have to modify the weight observer to default_weight_observer or another
     # per tensor supported observer.
     # see https://github.com/pytorch/pytorch/issues/47535
     if backend == "fbgemm":
-        default_weight = default_weight_fake_quant if is_qat else default_weight_observer
         qconfig_transpose = QConfig(activation=qconfig.activation, weight=default_weight)
     else:
         qconfig_transpose = qconfig
 
-    return QConfigMapping() \
+    qconfig_mapping = QConfigMapping() \
         .set_global(qconfig) \
         .set_object_type("reshape", default_reuse_input_qconfig) \
         .set_object_type(torch.nn.Conv1d, qconfig) \
@@ -73,13 +94,25 @@ def _get_default_qconfig_mapping(is_qat: bool, backend: str, version: int):
         .set_object_type(torch.nn.BatchNorm2d, qconfig) \
         .set_object_type(torch.nn.BatchNorm3d, qconfig)
 
-def get_default_qconfig_mapping(backend="fbgemm", version=0):
+    # Use special observers for ops with fixed qparams
+    fixed_qparams_observer_to_qconfig: Dict[Any, QConfigAny] = {}
+    for fixed_qparams_op, observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
+        if observer in fixed_qparams_observer_to_qconfig:
+            fixed_qparams_qconfig = fixed_qparams_observer_to_qconfig[observer]
+        else:
+            fixed_qparams_qconfig = QConfig(activation=observer, weight=default_weight)
+            fixed_qparams_observer_to_qconfig[observer] = fixed_qparams_qconfig
+        qconfig_mapping.set_object_type(fixed_qparams_op, fixed_qparams_qconfig)
+
+    return qconfig_mapping
+
+def get_default_qconfig_mapping(backend="fbgemm", version=0) -> QConfigMapping:
     """
     Return the default QConfigMapping for post training quantization.
     """
     return _get_default_qconfig_mapping(False, backend, version)
 
-def get_default_qat_qconfig_mapping(backend="fbgemm", version=1):
+def get_default_qat_qconfig_mapping(backend="fbgemm", version=1) -> QConfigMapping:
     """
     Return the default QConfigMapping for quantization aware training.
     """
