@@ -2914,6 +2914,9 @@
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
   self: non_differentiable
 
+- name: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_scaled_modified_bessel_k1(Tensor x) -> Tensor
   x: non_differentiable
 
