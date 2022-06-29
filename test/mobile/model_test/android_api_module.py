@@ -2,7 +2,7 @@ from typing import Dict, List, Tuple, Optional
 
 import torch
 from torch import Tensor
-
+import numpy as np
 
 class AndroidAPIModule(torch.jit.ScriptModule):
     def __init__(self):
@@ -46,9 +46,7 @@ class AndroidAPIModule(torch.jit.ScriptModule):
 
     @torch.jit.script_method
     def listIntSumReturnTuple(self, input: List[int]) -> Tuple[List[int], int]:
-        sum = 0
-        for x in input:
-            sum += x
+        sum = np.sum(sum)
         return (input, sum)
 
     @torch.jit.script_method
@@ -69,9 +67,7 @@ class AndroidAPIModule(torch.jit.ScriptModule):
     def tupleIntSumReturnTuple(
         self, input: Tuple[int, int, int]
     ) -> Tuple[Tuple[int, int, int], int]:
-        sum = 0
-        for x in input:
-            sum += x
+        sum = np.sum(sum)
         return (input, sum)
 
     @torch.jit.script_method
