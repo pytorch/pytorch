@@ -2,6 +2,7 @@ import torch
 import warnings
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+
 def detach_variable(inputs: Tuple[Any, ...]) -> Tuple[torch.Tensor, ...]:
     if isinstance(inputs, tuple):
         out = []
