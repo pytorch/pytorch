@@ -1,8 +1,9 @@
-from torch.ao.sparsity import BaseDataSparsifier
 from functools import wraps
 import weakref
 import abc
 import warnings
+
+from torch.ao.sparsity._experimental.data_sparsifier import BaseDataSparsifier
 
 __all__ = ['BaseDataScheduler']
 
