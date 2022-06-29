@@ -1557,20 +1557,20 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
             err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
             e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
-            # with self.assertRaisesRegex(TypeError, err_msg):
-            e.is_contiguous()
-            # with self.assertRaisesRegex(TypeError, err_msg):
-            #     e.contiguous()
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.is_contiguous()
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.contiguous()
 
-            # e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
-            # self.assertEqual(e.is_contiguous(), True)
-            # e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
+            e = ExampleTensor2(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.is_contiguous(), True)
+            e.contiguous()  # this will just return the original TensorImpl since is_contiguous = True
 
-            # err_msg = "no implementation found for"
-            # e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
-            # self.assertEqual(e.is_contiguous(), False)
-            # with self.assertRaisesRegex(TypeError, err_msg):
-            #     e.contiguous()
+            err_msg = "no implementation found for"
+            e = ExampleTensor3(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.is_contiguous(), False)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.contiguous()
 
     def test_device_slowpath(self):
         for use_wrapper_subclass in [True]:
@@ -1581,8 +1581,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
-                    import pdb; pdb.set_trace()
-                    print ("dispatch for device, i think", func)
                     return NotImplemented
 
             class ExampleTensor2(torch.Tensor):
@@ -1608,18 +1606,18 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                     return NotImplemented
 
             err_msg = "no implementation found for 'torch.ops.prim.device'"
-            # with self.assertRaisesRegex(TypeError, err_msg):
-            e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
-            e.device()
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
+                e.device()
 
-            # ten = torch.rand([1])
-            # e = ExampleTensor2(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
-            # self.assertEqual(e.device.type, 'meta')
-            # self.assertEqual(ten.type_as(e).device.type, 'meta')
+            ten = torch.rand([1])
+            e = ExampleTensor2(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
+            self.assertEqual(e.device.type, 'meta')
+            self.assertEqual(ten.type_as(e).device.type, 'meta')
 
-            # e = ExampleTensor3(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
-            # self.assertEqual(e.device.type, 'meta')
-            # self.assertEqual(ten.type_as(e).device.type, 'meta')
+            e = ExampleTensor3(torch.randn(3, 3, device='cpu'), use_wrapper_subclass)
+            self.assertEqual(e.device.type, 'meta')
+            self.assertEqual(ten.type_as(e).device.type, 'meta')
 
     def test_dim_slowpath(self):
         data = torch.randn(3, 3)
