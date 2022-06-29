@@ -272,7 +272,7 @@ sparse.spdiags(diagonals, offsets, shape, layout=None) -> Tensor
 Creates a sparse 2D tensor by placing the values from rows of
 :attr:`diagonals` along specified diagonals of the output
 
-The :attr:`offsets` controls which diagonals are set.
+The :attr:`offsets` tensor controls which diagonals are set.
 
 - If :attr:`offsets[i]` = 0, it is the main diagonal
 - If :attr:`offsets[i]` < 0, it is below the main diagonal
@@ -298,11 +298,11 @@ Set the main and first two lower diagonals of a matrix::
     >>> diags
     tensor([[0, 1, 2],
             [3, 4, 5],
-            [6, 7, 8])
-    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3,3))
+            [6, 7, 8]])
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3, 3))
     >>> s
     tensor(indices=tensor([[0, 1, 2, 1, 2, 2],
-                          [0, 1, 2, 0, 1, 0]]),
+                           [0, 1, 2, 0, 1, 0]]),
            values=tensor([0, 1, 2, 3, 4, 6]),
            size=(3, 3), nnz=6, layout=torch.sparse_coo)
     >>> s.to_dense()
@@ -316,7 +316,7 @@ Change the output layout::
     >>> diags = torch.arange(9).reshape(3, 3)
     >>> diags
     tensor([[0, 1, 2],[3, 4, 5], [6, 7, 8])
-    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3,3), layout=torch.sparse_csr)
+    >>> s = torch.sparse.spdiags(diags, torch.tensor([0, -1, -2]), (3, 3), layout=torch.sparse_csr)
     >>> s
     tensor(crow_indices=tensor([0, 1, 3, 6]),
            col_indices=tensor([0, 0, 1, 0, 1, 2]),
@@ -330,17 +330,13 @@ Change the output layout::
 Set partial diagonals of a large output::
 
     >>> diags = torch.tensor([[1, 2], [3, 4]])
-    >>> torch.sparse.spdiags(diags, [0, -1], (10, 10)).to_dense()
-    tensor([[1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [3, 2, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 4, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]])
+    >>> offsets = torch.tensor([0, -1])
+    >>> torch.sparse.spdiags(diags, offsets, (5, 5)).to_dense()
+    tensor([[1, 0, 0, 0, 0],
+            [3, 2, 0, 0, 0],
+            [0, 4, 0, 0, 0],
+            [0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0]])
 
 .. note::
 
