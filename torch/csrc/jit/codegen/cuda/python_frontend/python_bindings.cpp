@@ -287,7 +287,8 @@ void initNvFuserPythonBindings(PyObject* module) {
               -> torch::jit::fuser::cuda::Val* {
             if (dtype == torch::jit::fuser::cuda::DataType::Double) {
               return IrBuilder::create<Double>();
-            } else if (dtype == torch::jit::fuser::cuda::DataType::ComplexDouble) {
+            } else if (
+                dtype == torch::jit::fuser::cuda::DataType::ComplexDouble) {
               return IrBuilder::create<ComplexDouble>();
             } else if (dtype == torch::jit::fuser::cuda::DataType::Bool) {
               return IrBuilder::create<Bool>();
