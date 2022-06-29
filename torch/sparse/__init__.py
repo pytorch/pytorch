@@ -348,7 +348,7 @@ Set partial diagonals of a large output::
 
 Specifying a positive offset::
 
-    >>> diags = torch.tensor([[1, 2, 3],[1, 2, 3],[1, 2, 3]])
+    >>> diags = torch.tensor([[1, 2, 3], [1, 2, 3], [1, 2, 3]])
     >>> torch.sparse.spdiags(diags, torch.tensor([0, 1, 2]), (5, 5)).to_dense()
     tensor([[1, 2, 3, 0, 0],
             [0, 2, 3, 0, 0],
