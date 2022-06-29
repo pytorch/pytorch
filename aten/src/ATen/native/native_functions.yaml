@@ -5279,7 +5279,7 @@
 - func: _spdiags(Tensor diagonals, Tensor offsets, int[] shape, Layout? layout=None) -> Tensor
   python_module: sparse
   dispatch:
-    CPU: spdiags_cpu
+    CPU: spdiags
 
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   device_check: NoCheck   # TensorIterator
