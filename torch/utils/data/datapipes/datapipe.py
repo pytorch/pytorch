@@ -112,7 +112,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     repr_hook: Optional[Callable] = None
     _valid_iterator_id: Optional[int] = None
     _number_of_samples_yielded: int = 0
-    _snapshot_state: _SnapshotState = _SnapshotState.Iterating
+    _snapshot_state: _SnapshotState = _SnapshotState.NotStarted
     _fast_forward_iterator: Optional[Iterator] = None
 
     def __getattr__(self, attribute_name):
@@ -160,7 +160,7 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
         """
         This method definition is necessary so that the hook function in `_typing.py` can work.
         """
-        self.__dict__ = state
+        self.__dict__.update(state)
 
     def __reduce_ex__(self, *args, **kwargs):
         if IterDataPipe.reduce_ex_hook is not None:
