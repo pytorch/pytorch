@@ -467,18 +467,6 @@ class TestReductions(TestCase):
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, -1)
 
-    @onlyCPU
-    @dtypes(torch.float, torch.bfloat16)
-    def test_dim_reduction_lastdim(self, device, dtype):
-        x = torch.randn(3, 5, 40, device=device, dtype=dtype)
-        x = x[:, :, 0:40:2]
-        x2 = x.contiguous()
-        ops = [torch.norm, torch.argmax, torch.argmin]
-        for op in ops:
-            y = op(x, dim=-1)
-            y2 = op(x2, dim=-1)
-            self.assertEqual(y, y2)
-
     @skipIfNoSciPy
     def test_logsumexp(self, device):
         from scipy.special import logsumexp

@@ -4,7 +4,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec/vec.h>
-#include <ATen/cpu/vec/functional.h>
 #include <ATen/native/ReduceOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorIterator.h>
@@ -198,19 +197,6 @@ static void prod_kernel_impl(TensorIterator& iter) {
   }
 }
 
-template <typename scalar_t, typename acc_t>
-inline void norm_two_reduce_step(Vectorized<acc_t>& acc_vec, Vectorized<scalar_t>& data_vec) {
-  acc_vec += data_vec * data_vec;
-}
-
-template <>
-inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat16>& data_bvec) {
-  Vectorized<float> data_fvec0, data_fvec1;
-  std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
-  acc_fvec += data_fvec0 * data_fvec0;
-  acc_fvec += data_fvec1 * data_fvec1;
-}
-
 static void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
     const Scalar& p) {
@@ -228,9 +214,6 @@ static void norm_kernel_tensor_iterator_impl(
     iter.output().fill_((val < 0) ? INFINITY : 0);
     return;
   }
-
-  bool use_fast_path = is_reduce_lastdim(iter) && iter.dtype(0) == iter.input_dtype()
-      && (iter.input_dtype() == kFloat || iter.input_dtype() == kBFloat16);
 
   // In the dispatch code blocks below, reduction kernels accumulate results as
   // the type `acc_t`. When `scalar_t` is complex, `acc_t` is the downgraded
@@ -254,36 +237,6 @@ static void norm_kernel_tensor_iterator_impl(
       );
     });
   } else if (val == 2) {
-    if (use_fast_path) {
-      AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
-        // use float as accumulate type for BFloat16
-        using acc_t = vec_scalar_t<scalar_t>;
-        binary_kernel_reduce_lastdim(iter, [](char* result_data_bytes, char* self_data_bytes, int64_t size) {
-          scalar_t* result_data = (scalar_t*)result_data_bytes;
-          scalar_t* self_data = (scalar_t*)self_data_bytes;
-
-          using Vec = Vectorized<scalar_t>;
-          using fVec = Vectorized<acc_t>;
-          fVec acc_vec{acc_t(0)};
-          acc_t buffer[fVec::size()];
-          int64_t d = 0;
-          for (; d < size - (size % Vec::size()); d += Vec::size()) {
-            Vec data_vec = Vec::loadu(self_data + d);
-            norm_two_reduce_step(acc_vec, data_vec);
-          }
-          acc_vec.store(buffer);
-          for (int j = 1; j < fVec::size(); j++) {
-            buffer[0] = buffer[0] + buffer[j];
-          }
-          for (; d < size; d++) {
-            acc_t data_val = acc_t(self_data[d]);
-            buffer[0] += data_val * data_val;
-          }
-          result_data[0] = scalar_t(std::sqrt(buffer[0]));
-        });
-      });
-      return;
-    }
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
       using acc_t = typename scalar_value_type<scalar_t>::type;
       binary_kernel_reduce(
@@ -453,21 +406,6 @@ static void max_values_kernel_impl(TensorIterator& iter) {
 
 static void argmax_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmax_cpu", [&] {
-    if (is_reduce_lastdim(iter)) {
-      using arg_t = std::pair<scalar_t, int64_t>;
-      auto op = ArgMaxOps<scalar_t>{};
-      binary_kernel_reduce_lastdim(iter, [&](char* result_data_bytes, char* self_data_bytes, int64_t size) {
-        int64_t* result_data = (int64_t*)result_data_bytes;
-        scalar_t* self_data = (scalar_t*)self_data_bytes;
-
-        arg_t acc = arg_t(lower_bound<scalar_t>(), 0);
-        for (int64_t i = 0; i < size; i++) {
-          acc = op.reduce(acc, self_data[i], i);
-        }
-        result_data[0] = acc.second;
-      });
-      return;
-    }
     binary_kernel_reduce(
       iter,
       ArgMaxOps<scalar_t>{},
@@ -477,21 +415,6 @@ static void argmax_kernel_impl(TensorIterator &iter) {
 
 static void argmin_kernel_impl(TensorIterator &iter) {
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(1), "argmin_cpu", [&] {
-    if (is_reduce_lastdim(iter)) {
-      using arg_t = std::pair<scalar_t, int64_t>;
-      auto op = ArgMinOps<scalar_t>{};
-      binary_kernel_reduce_lastdim(iter, [&](char* result_data_bytes, char* self_data_bytes, int64_t size) {
-        int64_t* result_data = (int64_t*)result_data_bytes;
-        scalar_t* self_data = (scalar_t*)self_data_bytes;
-
-        arg_t acc = arg_t(upper_bound<scalar_t>(), 0);
-        for (int64_t i = 0; i < size; i++) {
-          acc = op.reduce(acc, self_data[i], i);
-        }
-        result_data[0] = acc.second;
-      });
-      return;
-    }
     binary_kernel_reduce(
       iter,
       ArgMinOps<scalar_t>{},
