@@ -1198,51 +1198,53 @@ Tensor& huber_loss_backward_out_mps(
                     MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(input.scalar_type()), input_shape);
                     MPSGraphTensor* targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(target.scalar_type()), getMPSShape(target));
                     MPSGraphTensor* isMeanReductionTensor = [mpsGraph constantWithScalar:is_mean_reduction
-                                                                          dataType:MPSDataTypeInt64]; // constant does not support MPSDataTypeBool
+                                                                                dataType:MPSDataTypeInt64]; // constant does not support MPSDataTypeBool
                     MPSGraphTensor* inputNumelTensor = [mpsGraph constantWithScalar:input_numel
-                                                                          dataType:getMPSDataType(new_grad_output.scalar_type())];
+                                                                           dataType:getMPSDataType(new_grad_output.scalar_type())];
 
                     MPSGraphTensor* normGradOutputTensor = [mpsGraph selectWithPredicateTensor:isMeanReductionTensor
                                                                truePredicateTensor: [mpsGraph divisionWithPrimaryTensor:gradOutputTensor
-                                                                                                    secondaryTensor:inputNumelTensor
-                                                                                                               name:nil]
-                                                                falsePredicateTensor: gradOutputTensor
+                                                                                                        secondaryTensor:inputNumelTensor
+                                                                                                                   name:nil]
+                                                              falsePredicateTensor: gradOutputTensor
                                                                               name:nil];
                     MPSGraphTensor* deltaTensor = [mpsGraph constantWithScalar:delta
-                                                                          shape:getMPSShape(target)
-                                                                          dataType:MPSDataTypeFloat32];
+                                                                         shape:getMPSShape(target)
+                                                                      dataType:MPSDataTypeFloat32];
                     MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:inputTensor
-                                                                          secondaryTensor:targetTensor
-                                                                                     name:nil];
+                                                                        secondaryTensor:targetTensor
+                                                                                   name:nil];
                     MPSGraphTensor* normGradOutputDeltaTensor = [mpsGraph multiplicationWithPrimaryTensor:normGradOutputTensor
-                                                             secondaryTensor:deltaTensor
-                                                                        name:nil];
-                    // (input - target) <= -delta
+                                                                                          secondaryTensor:deltaTensor
+                                                                                                     name:nil];
+                    // first condition: (input - target) <= -delta
+                    // formula: -norm * grad_output * delta
                     MPSGraphTensor* firstCondTensor = [mpsGraph negativeWithTensor: normGradOutputDeltaTensor
                                                                               name: nil];
-                    // (input - target) >= delta
+                    // second condition: (input - target) >= delta
+                    // formula: norm * grad_output * delta
                     MPSGraphTensor* secondCondTensor = normGradOutputDeltaTensor;
 
-                    // else
+                    // third condition: (input - target) within -delta to delta
+                    // formula: norm * (input - target) * grad_output
                     MPSGraphTensor* thirdCondTensor = [mpsGraph multiplicationWithPrimaryTensor:normGradOutputTensor
-                                                             secondaryTensor:diffTensor
-                                                                        name:nil];
+                                                                                secondaryTensor:diffTensor
+                                                                                           name:nil];
 
                     MPSGraphTensor* secondThirdTensor = [mpsGraph selectWithPredicateTensor: [mpsGraph greaterThanOrEqualToWithPrimaryTensor:diffTensor
-                                                                                                                     secondaryTensor:deltaTensor
-                                                                                                                                name:nil]
+                                                                                                                             secondaryTensor:deltaTensor
+                                                                                                                                        name:nil]
                                                                         truePredicateTensor: secondCondTensor
                                                                        falsePredicateTensor: thirdCondTensor
                                                                                        name:nil];
                     MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor: [mpsGraph lessThanOrEqualToWithPrimaryTensor: diffTensor
                                                                                                                      secondaryTensor:[mpsGraph negativeWithTensor: deltaTensor
-                                                                                                                                                          name: nil]
+                                                                                                                                                          nnnname: nil]
                                                                                                                                 name:nil]
                                                                    truePredicateTensor: firstCondTensor
                                                                   falsePredicateTensor: secondThirdTensor
                                                                                   name:nil];
 
-                    //outputTensor = normGradOutputDeltaTensor;
                     newCachedGraph->gradOutputTensor_ = gradOutputTensor;
                     newCachedGraph->inputTensor_ = inputTensor;
                     newCachedGraph->targetTensor_ = targetTensor;
