@@ -2145,6 +2145,9 @@
   result0: gather(self_t.flatten(-3), -1, result1.flatten(-3)).view_as(result1)
   output_differentiability: [True, False]
 
+- name: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
+
 #mps
 - name: _mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
   self: mps_max_pool2d_backward(grad, self, kernel_size, stride, padding, dilation, ceil_mode)
@@ -2904,6 +2907,9 @@
 
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
   self: non_differentiable
+
+- name: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
+  x: non_differentiable
 
 - name: special_scaled_modified_bessel_k1(Tensor x) -> Tensor
   x: non_differentiable

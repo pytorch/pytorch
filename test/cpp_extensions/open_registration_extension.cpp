@@ -70,6 +70,15 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
 }
 
 
+// This macro does the heavy lifting.
+// With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
+// For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
+// Later in this file, we map a custom device to the PrivateUse1 device type,
+// which allows user code that puts a tensor on your custom_device to eventually get plumbed
+// into the kernels registered here.
+//
+// This macro registers your kernels to the PyTorch Dispatcher.
+// More details on the dispatcher can be found at http://blog.ezyang.com/2020/09/lets-talk-about-the-pytorch-dispatcher/.
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("add.Tensor", &custom_add_Tensor);
   m.impl("empty.memory_format", &custom_empty_memory_format);
@@ -77,6 +86,11 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("_copy_from", &custom__copy_from);
 }
 
+// This basic implementation doesn't bother dealing with different device indices
+// (e.g. custom_device:0 vs. custom_device:1).
+// We could do that by letting the user pass in a device index in our exposed device function.
+// Note that if you do that, you'll also need to register a device guard to core.
+// See `c10/core/impl/DeviceGuardImplInterface.h:C10_REGISTER_GUARD_IMPL`.
 c10::Device get_custom_device() {
   return c10::Device(c10::DeviceType::PrivateUse1, 0);
 }
@@ -90,6 +104,10 @@ bool custom_add_called() {
   return called;
 }
 
+// Here, we're exposing a custom device object that corresponds to our custom backend.
+// We do this using pybind: exposing an "extension_name.custom_device()" function in python,
+// that's implemented in C++.
+// The implementation in this file maps directly to the `PrivateUse1` device type.
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
