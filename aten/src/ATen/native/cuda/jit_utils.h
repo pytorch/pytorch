@@ -19,6 +19,67 @@ struct NvrtcFunction {
   CUfunction function = nullptr;
 };
 
+struct KernelDescriptor {
+  std::string name;
+  std::string f;
+  c10::ScalarType f_inputs_type;
+  c10::ScalarType result_type;
+  c10::SmallVector<c10::ScalarType> extra_args_types;
+  int nInputs, nOutputs;
+};
+
+// Helper function to return a vector<string>
+// corresponding to the type of the arguments in parameter pack.
+template <typename... Args>
+c10::SmallVector<at::ScalarType> get_extra_args_types() {
+  return {c10::CppTypeToScalarType<Args>::value ...};
+}
+
+template <
+  typename result_type,
+  typename f_inputs_type,
+  int arity,
+  typename... ExtraArgs>
+KernelDescriptor make_kernel_descriptor(std::string name, std::string f) {
+  KernelDescriptor ret;
+  ret.name = std::move(name);
+  ret.f = std::move(f);
+  ret.f_inputs_type = c10::CppTypeToScalarType<f_inputs_type>::value;
+  ret.result_type = c10::CppTypeToScalarType<result_type>::value;
+  ret.extra_args_types = get_extra_args_types<ExtraArgs...>();
+  ret.nInputs = arity;
+  ret.nOutputs = 1;  // TODO: Support more than 1 output
+  return ret;
+}
+
+inline int can_vectorize_up_to(size_t default_alignment, void *pointer) {
+  auto ip = reinterpret_cast<uintptr_t>(pointer);
+  if (ip % (4 * default_alignment) == 0) {
+    return 4;
+  }
+  if (ip % (2 * default_alignment) == 0) {
+    return 2;
+  }
+  return 1;
+}
+
+inline int can_vectorize_up_to(const KernelDescriptor &desc, c10::ArrayRef<char*> pointers) {
+  TORCH_INTERNAL_ASSERT(desc.nOutputs == 1);
+  TORCH_INTERNAL_ASSERT(pointers.size() == 1 + desc.nInputs);
+
+  // Deals with output
+  auto result_size = c10::scalarTypeToTypeMeta(desc.result_type).itemsize();
+  int result = can_vectorize_up_to(result_size, pointers[0]);
+
+  // Incorporates input(s)
+  auto input_size = c10::scalarTypeToTypeMeta(desc.f_inputs_type).itemsize();
+  for (auto i : c10::irange(1, pointers.size())) {
+    result = std::min(result, can_vectorize_up_to(input_size, pointers[i]));
+  }
+
+  return result;
+}
+
 std::string generate_code(
     int nInputs,
     int nOutputs,
@@ -31,6 +92,15 @@ std::string generate_code(
     bool dynamic_casting,
     BinaryFuncVariant scalar_pos,
     c10::SmallVector<std::string>& extra_args_typenames,
+    bool vectorized=false,
+    int vec_size=0,
+    bool return_by_ref=false);
+
+std::string generate_code(
+    const KernelDescriptor &desc,
+    bool contiguous,
+    bool dynamic_casting,
+    BinaryFuncVariant scalar_pos,
     bool vectorized=false,
     int vec_size=0,
     bool return_by_ref=false);
@@ -108,17 +178,12 @@ template <> inline std::string typeName<at::BFloat16>(){
 }
 
 #define TYPE_NAME_CASE(ctype, scalartype)                    \
-  case ScalarType::scalartype:  return std::string(#ctype);
+  case ScalarType::scalartype:  return typeName<ctype>();
 inline std::string typeName(ScalarType t) {
     switch (t) {
-        AT_FORALL_SCALAR_TYPES(TYPE_NAME_CASE)
-        case ScalarType::Bool : return "bool";
-        case ScalarType::Half : return "at::Half";
-        case ScalarType::BFloat16 : return "at::BFloat16";
-        case ScalarType::ComplexFloat : return "std::complex<float>";
-        case ScalarType::ComplexDouble : return "std::complex<double>";
-        default:
-            TORCH_CHECK(false, "invalid type for jiterator");
+      AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(TYPE_NAME_CASE)
+      default:
+          TORCH_CHECK(false, "invalid type for jiterator");
     }
 }
 #undef TYPE_NAME_CASE
