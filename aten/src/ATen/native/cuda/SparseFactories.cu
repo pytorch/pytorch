@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
+#include <ATen/native/DispatchStub.h>
 #include <ATen/native/sparse/SparseFactories.h>
 #include <c10/util/ArrayRef.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
@@ -20,7 +21,6 @@
 
 namespace at {
 namespace native {
-using namespace at::sparse;
 
 namespace {
 void _spdiags_kernel_cuda(
@@ -70,15 +70,7 @@ void _spdiags_kernel_cuda(
       });
 }
 } // namespace
-
-SparseTensor spdiags_cuda(
-    const Tensor& diagonals,
-    const Tensor& offsets,
-    IntArrayRef shape,
-    c10::optional<Layout> layout) {
-  return impl::spdiags_impl(
-      diagonals, offsets, shape, layout, _spdiags_kernel_cuda);
-}
+REGISTER_DISPATCH(spdiags_kernel_stub, &_spdiags_kernel_cuda)
 
 } // namespace native
 } // namespace at
