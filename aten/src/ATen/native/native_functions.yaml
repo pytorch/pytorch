@@ -8395,7 +8395,15 @@
     MPS: normal_mps_
     Meta: normal_meta_
     SparseCsrCPU, SparseCsrCUDA: normal_sparse_csr_
-  autogen: normal, normal.out
+  autogen: normal.out
+
+# Only used by the functionalization pass.
+# Normally, the codegen would be able to generate a normal() NativeFunction,
+# but we can't due to overload ambiguity with normal.Tensor_float.
+- func: normal_functional(Tensor self, float mean=0, float std=1, *, Generator? generator=None) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  dispatch:
+    CompositeExplicitAutograd: normal_functional
 
 - func: normal.Tensor_float_out(Tensor mean, float std=1, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
   dispatch:

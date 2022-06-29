@@ -874,8 +874,6 @@ class NativeFunctionsGroup:
             assert self.mutable.namespace == self.functional.namespace
             # See Note [Overload Ambiguity With Functional Variants]
             assert self.functional.func.name.name.functional_overload
-        else:
-            assert not self.functional.func.name.name.functional_overload
 
         if self.structured:
             # For now, structured composite kernels are not supported (need some
