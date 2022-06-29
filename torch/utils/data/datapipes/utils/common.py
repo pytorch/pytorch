@@ -228,7 +228,7 @@ class StreamWrapper:
         self.name = name
         if parent_stream is not None:
             if not isinstance(parent_stream, StreamWrapper):
-                raise RuntimeError('Parent steam should be StreamWrapper, {} was given'.format(type(parent_stream)))
+                raise RuntimeError('Parent stream should be StreamWrapper, {} was given'.format(type(parent_stream)))
             parent_stream.child_counter += 1
             self.parent_stream = parent_stream
         StreamWrapper.session_streams[self] = 1
@@ -265,7 +265,8 @@ class StreamWrapper:
 
     def autoclose(self):
         '''
-        Marks Steam to close automatically as soon as all child streams are closed.
+            Close steam if there is no children, or make it to be automatically closed as soon as
+            all child streams are closed.
         '''
         if self.child_counter == 0:
             self.close()
@@ -279,6 +280,7 @@ class StreamWrapper:
     def __del__(self):
         try:
             self.file_obj.close()
+            del StreamWrapper.session_streams[self]
         except AttributeError:
             pass
 
