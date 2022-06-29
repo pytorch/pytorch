@@ -78,7 +78,9 @@ struct BatchedTensorImpl : public c10::TensorImpl {
 #endif
 
   void refreshTensorMetadata();
-
+  void _unsafe_set_level(int64_t level) {
+    level_ = level;
+  }
  private:
   // see NOTE: [BatchedTensorImpl levels invariant]
   void checkInvariants() const;
