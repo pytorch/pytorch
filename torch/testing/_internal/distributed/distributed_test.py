@@ -9003,10 +9003,8 @@ class DistributedTest:
             )
             restore_msg = "NOTE: Process group will be set to a default group (i.e. the world size).\n"\
                 "If a different group is desired, please set `self.process_group` after PowerSGD state is loaded."
-            special_attrs = ["process_group", "rng"]
 
             self._test_hook_pickling_logs(hook, powersgd_state, restore_msg=restore_msg)
-            self._test_hook_pickling_parity(hook, powersgd_state, special_attrs=special_attrs)
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
@@ -9041,7 +9039,7 @@ class DistributedTest:
                 start_localSGD_iter=0
             )
             restore_msg = "NOTE: Process group will be set to a default group (i.e. the world size).\n"\
-                "Subgroup will be set to `None` (a new set of intra-node subgroups will be created by `postLocalSGD_hook`)\n"\
+                "Subgroup will be set to a default subgroup (i.e. an intra-node subgroup)\n"\
                 "If a different group is desired, please set `self.process_group` after `PostLocalSGD`'s state is loaded."
             self._test_hook_pickling_logs(hook, postlocalsgd_state, restore_msg=restore_msg)
 
@@ -9062,7 +9060,6 @@ class DistributedTest:
                 subgroup=None,
                 start_localSGD_iter=0
             )
-            special_attrs = ["process_group", "subgroup"]
             self._test_hook_pickling_parity(
                 hook,
                 postlocalsgd_state,
