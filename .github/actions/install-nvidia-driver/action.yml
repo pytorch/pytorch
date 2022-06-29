@@ -5,7 +5,7 @@ description: Get the ID of the workflow job that is currently running.
 inputs:
   pytorch-repo-directory:
     description: Path to root of pytorch repo
-    default: "."
+    default: .
 
 runs:
   using: composite
