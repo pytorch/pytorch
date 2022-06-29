@@ -5,11 +5,11 @@ from torch.fx.experimental.migrate_gradual_types.constraint_generator import Con
 from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint
 from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_eq, op_neq
 from torch.fx.experimental.migrate_gradual_types.operation import op_leq, op_sub, op_div, op_mul, op_mod
-from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, z3_dyn, D
 from torch.fx.tensor_type import TensorType, Dyn
 
 try:
     import z3  # type: ignore[import]
+    from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, z3_dyn, D
     HAS_Z3 = True
 
     def transform_to_z3(constraint, counter, dimension_dict):
