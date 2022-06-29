@@ -3,8 +3,10 @@ from functools import wraps
 from typing import Callable, Dict, List, Set
 
 import torch.nn as nn
+from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 
+@compatibility(is_backward_compatible=False)
 def inplace_wrapper(fn: Callable) -> Callable:
     """
     Convenience wrapper for passes which modify an object inplace. This
@@ -58,6 +60,7 @@ def _validate_pass_schedule_constraint(
                 f" list."
             )
 
+@compatibility(is_backward_compatible=False)
 def topological_sort_passes(
     passes: List[Callable], constraints: List[Callable]
 ) -> List[Callable]:
@@ -100,6 +103,7 @@ def topological_sort_passes(
     res.reverse()
     return res
 
+@compatibility(is_backward_compatible=True)
 def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable:
     """
     Defines a partial order ('depends on' function) where `this` must occur
@@ -130,6 +134,7 @@ def this_before_that_pass_constraint(this: Callable, that: Callable) -> Callable
     return depends_on
 
 
+@compatibility(is_backward_compatible=False)
 class PassManager:
     """
     Construct a PassManager.
