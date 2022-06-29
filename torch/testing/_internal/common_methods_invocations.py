@@ -2630,8 +2630,7 @@ def sample_inputs_elementwise_unary(
     if not op_kwargs:
         op_kwargs = {}
 
-    if kwargs.get("small_inputs_only", False):
-        L = 5
+    _L = S if kwargs.get("small_inputs_only", False) else L
 
     low, high = op_info.domain
     low = low if low is None else low + op_info._domain_eps
@@ -2640,7 +2639,7 @@ def sample_inputs_elementwise_unary(
         # Tensors with dim=2 for sparse compressed testing
         yield SampleInput(
             make_tensor(
-                (L, L),
+                (_L, _L),
                 device=device,
                 dtype=dtype,
                 low=low,
@@ -2651,7 +2650,7 @@ def sample_inputs_elementwise_unary(
         )
     else:
         # Creates a 1D, empty, and scalar tensor
-        for shape in ((L,), (1, 0, 3), ()):
+        for shape in ((_L,), (1, 0, 3), ()):
             yield SampleInput(
                 make_tensor(
                     shape,
@@ -3154,17 +3153,16 @@ def sample_inputs_addmv(op_info, device, dtype, requires_grad, **kwargs):
 def sample_inputs_addbmm(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
 
-    if kwargs.get("small_inputs_only", False):
-        M = 5
-        S = 3
+    _M = S if kwargs.get("small_inputs_only", False) else M
+    _S = XS if kwargs.get("small_inputs_only", False) else S
 
     # input_shape, batch1_shape, batch2_shape, beta_val, alpha_val, is_broadcasting
-    test_cases = [((S, M), (S, S, S), (S, S, M), 1, 1, False),
-                  ((1,), (S, S, S), (S, S, M), 1, 1, True),
-                  ((S, M), (S, S, S), (S, S, M), 0.6, 0.2, False),
-                  ((1,), (S, S, S), (S, S, M), 0.6, 0.2, True),
-                  ((), (S, S, S), (S, S, M), 1, 1, True),
-                  ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
+    test_cases = [((_S, _M), (_S, _S, _S), (_S, _S, _M), 1, 1, False),
+                  ((1,), (_S, _S, _S), (_S, _S, _M), 1, 1, True),
+                  ((_S, _M), (_S, _S, _S), (_S, _S, _M), 0.6, 0.2, False),
+                  ((1,), (_S, _S, _S), (_S, _S, _M), 0.6, 0.2, True),
+                  ((), (_S, _S, _S), (_S, _S, _M), 1, 1, True),
+                  ((), (_S, _S, _S), (_S, _S, _M), 0.6, 0.2, True),
                   ]
 
     for input_shape, batch1_shape, batch2_shape, beta, alpha, is_broadcasting in test_cases:
@@ -3211,15 +3209,15 @@ def sample_inputs_addcmul_addcdiv(op_info, device, dtype, requires_grad, **kwarg
     return tuple(sample_inputs)
 
 def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
-    if kwargs.get("small_inputs_only", False):
-        M = 5
-        S = 3
-    test_cases = [((S, S, M), (S, S, S), (S, S, M), 1, 1, False),
-                  ((1,), (S, S, S), (S, S, M), 1, 1, True),
-                  ((S, S, M), (S, S, S), (S, S, M), 0.6, 0.2, False),
-                  ((1,), (S, S, S), (S, S, M), 0.6, 0.2, True),
-                  ((), (S, S, S), (S, S, M), 1, 1, True),
-                  ((), (S, S, S), (S, S, M), 0.6, 0.2, True),
+    _M = S if kwargs.get("small_inputs_only", False) else M
+    _S = XS if kwargs.get("small_inputs_only", False) else S
+
+    test_cases = [((_S, _S, _M), (_S, _S, _S), (_S, _S, _M), 1, 1, False),
+                  ((1,), (_S, _S, _S), (_S, _S, _M), 1, 1, True),
+                  ((_S, _S, _M), (_S, _S, _S), (_S, _S, _M), 0.6, 0.2, False),
+                  ((1,), (_S, _S, _S), (_S, _S, _M), 0.6, 0.2, True),
+                  ((), (_S, _S, _S), (_S, _S, _M), 1, 1, True),
+                  ((), (_S, _S, _S), (_S, _S, _M), 0.6, 0.2, True),
                   ]
     sample_inputs = []
     for (input_shape, batch1_shape, batch2_shape, alpha, beta, broadcasts_input) in test_cases:
@@ -3244,7 +3242,7 @@ def sample_inputs_baddbmm(op_info, device, dtype, requires_grad, **kwargs):
                 broadcasts_input=broadcasts_input))
 
     if dtype.is_complex:
-        shapes = [(S, S, S), (S, M, S), (S, S, M)]
+        shapes = [(_S, _S, _S), (_S, _M, _S), (_S, _S, _M)]
         args = (make_tensor(shapes[0], dtype=dtype, device=device,
                             low=None, high=None,
                             requires_grad=requires_grad),
@@ -7976,24 +7974,23 @@ def sample_inputs_matrix_exp(op_info, device, dtype, requires_grad, **kwargs):
     return samples
 
 def sample_inputs_matmul(op_info, device, dtype, requires_grad, **kwargs):
-    if kwargs.get("small_inputs_only", False):
-        S = 3
-        M = 5
-        L = 5
-    test_cases = (((L,), (L,)),
-                  ((S, M), (M,)),
-                  ((M,), (M, S)),
-                  ((S, M), (M, S)),
-                  ((S, 0), (0, M)),
-                  ((S, S, M), (M,)),
-                  ((S, S, M), (M, S)),
-                  ((S, S, 0), (0, S)),
-                  ((M,), (S, M, S)),
-                  ((S, M), (S, M, S)),
-                  ((0, 0), (S, 0, 0)),
-                  ((S, S, M, M), (S, S, M, S)),
-                  ((S, S, M, M), (M,)),
-                  ((M,), (S, S, M, S)))
+    _L = S if kwargs.get("small_inputs_only", False) else M
+    _M = S if kwargs.get("small_inputs_only", False) else M
+    _S = XS if kwargs.get("small_inputs_only", False) else S
+    test_cases = (((_L,), (_L,)),
+                  ((_S, _M), (_M,)),
+                  ((_M,), (_M, _S)),
+                  ((_S, _M), (_M, _S)),
+                  ((_S, 0), (0, _M)),
+                  ((_S, _S, _M), (_M,)),
+                  ((_S, _S, _M), (_M, _S)),
+                  ((_S, _S, 0), (0, _S)),
+                  ((_M,), (_S, _M, _S)),
+                  ((_S, _M), (_S, _M, _S)),
+                  ((0, 0), (_S, 0, 0)),
+                  ((_S, _S, _M, _M), (_S, _S, _M, _S)),
+                  ((_S, _S, _M, _M), (_M,)),
+                  ((_M,), (_S, _S, _M, _S)))
     sample_inputs = []
     for lhs_shape, rhs_shape in test_cases:
         lhs = make_tensor(lhs_shape, dtype=dtype, device=device, low=None, high=None, requires_grad=requires_grad)
@@ -8710,10 +8707,9 @@ def sample_inputs_view_as_reshape_as(op_info, device, dtype, requires_grad, **kw
                 args=(make_arg(shape_other, requires_grad=False),)))
 
 def sample_inputs_atleast1d2d3d(op_info, device, dtype, requires_grad, **kwargs):
-    if kwargs.get("small_inputs_only", False):
-        S = 3
+    _S = XS if kwargs.get("small_inputs_only", False) else S
     input_list = []
-    shapes = ((S, S, S, S), (S, S, S), (S, S), (S, ), (),)
+    shapes = ((_S, _S, _S, _S), (_S, _S, _S), (_S, _S), (_S, ), (),)
     make_tensor_partial = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
     samples = []
     for shape in shapes:
