@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Any
@@ -204,6 +205,9 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
+
+    # Flush stdout so that any errors in rockset upload show up last in the logs.
+    sys.stdout.flush()
 
     # For PRs, only upload a summary of test_runs. This helps lower the
     # volume of writes we do to Rockset.
