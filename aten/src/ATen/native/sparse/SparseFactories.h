@@ -51,10 +51,7 @@ Tensor spdiags_impl(
       offsets_1d.scalar_type());
 
   TORCH_CHECK(
-      offsets_1d.unsqueeze(1)
-          .eq(offsets_1d)
-          .sum(-1)
-          .equal(at::ones_like(offsets_1d)),
+      offsets_1d.numel() == std::get<0>(at::_unique(offsets_1d)).numel(),
       "Offset tensor contains duplicate values");
 
   auto nnz_per_diag = at::where(
