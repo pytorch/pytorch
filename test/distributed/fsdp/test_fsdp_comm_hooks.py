@@ -8,9 +8,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import distributed as dist
 from torch.distributed.algorithms._comm_hooks import default_hooks
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    MixedPrecision
+)
 from torch.distributed.fsdp.fully_sharded_data_parallel import ShardingStrategy
-
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
@@ -25,7 +27,7 @@ if not dist.is_available():
 
 class Net(nn.Module):
 
-    def __init__(self, has_wrapping, sharding_strategy):
+    def __init__(self, has_wrapping, sharding_strategy, mixed_precision=None):
         # to ensure determinism
         torch.manual_seed(0)
         torch.cuda.manual_seed(0)
@@ -38,11 +40,13 @@ class Net(nn.Module):
                 FSDP(
                     nn.Linear(16, 8),
                     device_id=torch.cuda.current_device(),
-                    sharding_strategy=sharding_strategy
+                    sharding_strategy=sharding_strategy,
+                    mixed_precision=mixed_precision,
                 )
             ),
                 device_id=torch.cuda.current_device(),
-                sharding_strategy=sharding_strategy
+                sharding_strategy=sharding_strategy,
+                mixed_precision=mixed_precision,
             )
         else:
             self.net = nn.Sequential(
@@ -124,13 +128,14 @@ class TestCommunicationHooks(FSDPTest):
             if not submodule.check_is_root()
         ]
 
-    def _init_model(self, core, sharding_strategy):
+    def _init_model(self, core, sharding_strategy, mixed_precision=None):
 
         device = torch.device("cuda")
         return FSDP(
             core,
             device_id=torch.cuda.current_device(),
-            sharding_strategy=sharding_strategy
+            sharding_strategy=sharding_strategy,
+            mixed_precision=mixed_precision,
         ).to(device)
 
     @skip_if_lt_x_gpu(2)
@@ -154,7 +159,7 @@ class TestCommunicationHooks(FSDPTest):
             sharding_strategy (Optional[ShardingStrategy]): Configures the FSDP algorithm.
         """
 
-        # Initialize the model and inputs
+        # Initialize a model
         fsdp_model_with_hook = self._init_model(
             Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
             sharding_strategy=sharding_strategy
@@ -285,6 +290,82 @@ class TestCommunicationHooks(FSDPTest):
                 dummy_state,
                 DummyHook.dummy_hook
             )
+
+    def _check_low_precision_hook(self, state, hook, sharding_strategy, dtype, has_wrapping):
+        # keep everything deterministic for input data
+        torch.manual_seed(0)
+        torch.cuda.manual_seed(0)
+
+        fsdp_with_hook = self._init_model(
+            Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy),
+            sharding_strategy=sharding_strategy
+        )
+        fsdp_with_hook.register_comm_hook(state, hook)
+
+        mp_only_grad = MixedPrecision(reduce_dtype=dtype)
+        fsdp_with_mp = self._init_model(
+            Net(has_wrapping=has_wrapping, sharding_strategy=sharding_strategy, mixed_precision=mp_only_grad),
+            sharding_strategy=sharding_strategy,
+            mixed_precision=mp_only_grad
+        )
+
+        optim_hook = torch.optim.SGD(fsdp_with_hook.parameters(), lr=0.1)
+        optim_mp = torch.optim.SGD(fsdp_with_mp.parameters(), lr=0.1)
+
+        in_data = torch.rand(16, 8).cuda()
+        fsdp_with_hook.train()
+        fsdp_with_mp.train()
+        optim_mp.zero_grad()
+        optim_hook.zero_grad()
+        loss_hook = fsdp_with_hook(in_data).sum()
+        loss_mp = fsdp_with_mp(in_data).sum()
+        loss_hook.backward()
+        # Make sure grads were cast to the parameter's precision
+        self.assertEqual(fsdp_with_hook.params[0].dtype, state.parameter_type)
+        loss_mp.backward()
+        optim_hook.step()
+        optim_mp.step()
+
+        dist.barrier()
+
+        for hook_params, mp_params in zip(fsdp_with_hook.parameters(), fsdp_with_mp.parameters()):
+            self.assertEqual(hook_params.grad, mp_params.grad)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("has_wrapping", [True, False])
+    @parametrize(
+        "sharding_strategy",
+        [
+            ShardingStrategy.NO_SHARD
+        ])
+    def test_fp16_hook(
+        self,
+        has_wrapping: bool,
+        sharding_strategy: Optional[ShardingStrategy]
+    ):
+
+        state = default_hooks.LowPrecisionState(process_group=None, parameter_type=torch.float32)
+        hook = default_hooks.fp16_compress_hook
+
+        self._check_low_precision_hook(state, hook, sharding_strategy, torch.float16, has_wrapping)
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("has_wrapping", [True, False])
+    @parametrize(
+        "sharding_strategy",
+        [
+            ShardingStrategy.NO_SHARD
+        ])
+    def test_bf16_hook(
+        self,
+        has_wrapping: bool,
+        sharding_strategy: Optional[ShardingStrategy]
+    ):
+
+        state = default_hooks.LowPrecisionState(process_group=None, parameter_type=torch.float32)
+        hook = default_hooks.bf16_compress_hook
+
+        self._check_low_precision_hook(state, hook, sharding_strategy, torch.bfloat16, has_wrapping)
 
 
 instantiate_parametrized_tests(TestCommunicationHooks)

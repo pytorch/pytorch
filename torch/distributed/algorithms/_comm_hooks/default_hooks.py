@@ -43,6 +43,14 @@ class DefaultState(object):
         return float(factor)
 
 class LowPrecisionState(DefaultState):
+    r"""
+    Stores state needed to perform gradient communication in a lower precision
+    within a communication hook. Builds on top of the :class:`DefaultState`
+
+    Args:
+        parameter_type (torch.dtype): The precision of model's parameters.
+        Required for a hook to cast gradients back to a parameter's precision.
+    """
 
     __slots__ = [
         "parameter_type",
@@ -66,7 +74,7 @@ def _decompress(state: LowPrecisionState, grad: torch.Tensor):
     orig_grad_data = grad.data
     grad.data = grad.data.to(state.parameter_type)
     # Don't let this memory get reused until after the transfer.
-    orig_grad_data.record_stream(torch.cuda.current_stream())
+    orig_grad_data.record_stream(torch.cuda.current_stream())  # type: ignore[arg-type]
 
 def allreduce_hook(state: DefaultState, grad: torch.Tensor):
     r"""
@@ -89,11 +97,11 @@ def fp16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
     It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
     ``state.predivide_factor``, and after an allreduce step gradients are averaged by a ``state.postdivide_factor``.
-    Onse post-division is done, compressed gradients are casted back to full precision (``torch.float32``).
+    Onse post-division is done, compressed gradients are casted back to parameters' precision.
 
     Args:
         state (DefaultState): State information, configures pre- and post-division factors
-        grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks.
+        grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
     """
 
     grad.data = grad.data.to(torch.float16)
@@ -106,11 +114,11 @@ def bf16_compress_hook(state: LowPrecisionState, grad: torch.Tensor):
     approach that casts ``grad`` to half-precision floating-point format (``torch.float16``).
     It also averages gradients by ``world_size`` in two steps: first it pre-divides gradients by a
     ``state.predivide_factor``, and after an allreduce step gradients are averaged by a ``state.postdivide_factor``.
-    Onse post-division is done, compressed gradients are casted back to full precision (``torch.float32``).
+    Onse post-division is done, compressed gradients are casted back to parameters' precision.
 
     Args:
         state (DefaultState): State information, configures pre- and post-division factors
-        grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks.
+        grad (torch.Tensor): A gradient for the local batch that needs to be communicated across ranks in a lower precision.
     """
 
     grad.data = grad.data.to(torch.bfloat16)
