@@ -3648,6 +3648,9 @@ class TestSparse(TestCase):
                 r"Number of diagonals \(\d\) does not match the number of offsets \(\d\)"
             yield (make_diags((2, 2)), make_offsets([-1, 0]), (2, 3), torch.strided),\
                 r"Only output layouts \(\w+, \w+, and \w+\) are supported, got \w+"
+            yield (make_diags((2, 5)), make_offsets([0, 0]), (5, 5)), "Offsets tensor contains duplicate values"
+            yield (make_diags((1, 5)), make_offsets([0]).to(torch.int32), (5, 5)), r"Offset Tensor must has dtype Long but got \w+"
+
 
         for case, error_regex in invalid_cases():
             check_invalid(case, error_regex)
