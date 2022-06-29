@@ -62,8 +62,7 @@ class HFOperations(unittest.TestCase):
         transformed = transform_all_constraints(traced, counter=0)
         s = z3.Solver()
         s.add(transformed)
-
-        assert self.assertEquals(s.check(), z3.sat)
+        self.assertEquals(s.check(), z3.sat)
         assert s.model()[embedding_result].arg(0).arg(0) == 0
         assert s.model()[embedding_result].arg(1).arg(0) == 0
         assert s.model()[embedding_result].arg(2).arg(1) == B[2]
@@ -136,6 +135,47 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
 
         self.assertEquals(s.check(), z3.unsat)
+
+
+    def test_view_mul(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
+
+            def forward(self, x: TensorType([2, 4])):
+                size = x.size()
+                getitem = size[-1]
+                view = x.view(-1, getitem)
+                embed_tokens = self.embed_tokens(view)
+                mul = embed_tokens * 32.0
+                return mul
+
+        B = BasicBlock().forward(torch.ones([2, 4], dtype=torch.long)).size()
+
+        # print(B)
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        # print(traced)
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
+
+        embedding_result = z3.Const(5, tensor_type)
+
+        # note that the view output will be: tensor3(dim(0, 0), dim(1, 4), dim(1, 1024))
+        # this is due to the reshape constraints. This can be lifted
+        # but would require revising the type rules accordingly so we leave it for now
+        assert (s.model()[embedding_result].arg(1).arg(1)) == 4
+        assert (s.model()[embedding_result].arg(2).arg(1)) == 1024
+
+        mul_result = z3.Const(12, tensor_type)
+        assert s.model()[mul_result] == s.model()[embedding_result]
 
 
 class ComposeOperationsGradualTypes(unittest.TestCase):
