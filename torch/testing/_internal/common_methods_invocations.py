@@ -8902,6 +8902,13 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(a, args=(c, b))
 
+    # two python scalars
+    c = make_cond((10, 3), noncontiguous=True)
+    a = make_arg((1,)).item()
+    b = make_arg((1,)).item()
+
+    yield SampleInput(a, args=(c, b))
+
     # NaN propagation
     if dtype.is_floating_point or dtype.is_complex:
         if dtype.is_floating_point:
@@ -8918,7 +8925,7 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
         yield SampleInput(a, args=(c, b))
 
     # Python scalars type promotion
-    for scalar in (0, 0.0, 0j, False):
+    for scalar in (0, 0.0, 2j, False):
         yield SampleInput(scalar, args=(c, b))
         yield SampleInput(a, args=(c, scalar))
 
@@ -19544,7 +19551,7 @@ op_db: List[OpInfo] = [
         # complex not added to dtypes as complex gradients are not properly handled
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
     OpInfo(
@@ -19553,21 +19560,21 @@ op_db: List[OpInfo] = [
         # complex not added to dtypes as complex gradients are not properly handled
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
     OpInfo(
         'scatter_reduce',
         variant_test_name='amin',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
     OpInfo(
         'scatter_reduce',
         variant_test_name='amax',
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_scatter_reduce,
     ),
     OpInfo(
@@ -21211,6 +21218,7 @@ python_ref_db = [
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
+        supports_nvfuser=False,
     ),
 ]
 
