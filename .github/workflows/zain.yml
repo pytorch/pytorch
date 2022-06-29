@@ -22,6 +22,7 @@ jobs:
         uses: ./.github/actions/zainr-action
       - name: action time - android dir
         uses: ./.github/actions/zainr-action
+        with:
           pytorch-repo-directory: android
       - name: action time - test dir
         uses: ./.github/actions/zainr-action
