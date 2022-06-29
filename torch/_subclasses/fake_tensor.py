@@ -523,7 +523,7 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
                 out = torch.zeros_like(e, device=e.fake_device)
-                inp_impls[out] = e
+                inp_impls[id(out)] = e
                 return out
             return e
 
@@ -547,7 +547,7 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
         # not be set up, bc of conversion to device, unless we can reuse an
         # input impl
         for e in tree_flatten(r)[0]:
-            if e not in inp_impls and (
+            if id(e) not in inp_impls and (
                 isinstance(e, torch.Tensor) and e.storage()._cdata in storages
             ):
                 raise orig_not_implemented_exception
@@ -555,11 +555,9 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
     # the outputs which are are not reused from impls will be converted
     # to fake tensors later
     meta_converter = MetaConverter()
+
     def map_out(e):
-        if e in inp_impls:
-            return inp_impls[e]
-        else:
-            return meta_converter(e)
+        return inp_impls.get(id(e), meta_converter(e))
 
     return tree_map(map_out, r)
 
