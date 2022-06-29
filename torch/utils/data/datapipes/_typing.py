@@ -355,11 +355,12 @@ class _IterDataPipeMeta(_DataPipeMeta):
                 restored DataPipe to preserve its restored state during the initial `__iter__` call.
                 """
                 datapipe = args[0]
-                if datapipe._snapshot_state != _SnapshotState.Iterating:
-                    datapipe._snapshot_state = _SnapshotState.Iterating
-                else:
+                if datapipe._snapshot_state in (_SnapshotState.NotStarted, _SnapshotState.Iterating):
+                    # Reset `NotStarted` is necessary because the `source_datapipe` of a DataPipe might have
+                    # already begun iterating.
                     datapipe._number_of_samples_yielded = 0
                     reset_func(*args, **kwargs)
+                datapipe._snapshot_state = _SnapshotState.Iterating
 
             namespace['reset'] = conditional_reset
 
@@ -378,7 +379,7 @@ class _IterDataPipeMeta(_DataPipeMeta):
                     # This needs happen after because the state being passed in
                     # may have `datapipe._SnapshotState = Iterating`.
                     datapipe = args[0]
-                    datapipe._snapshot_state = _SnapshotState.Deserialized
+                    datapipe._snapshot_state = _SnapshotState.NotStarted
 
             namespace['__setstate__'] = wrap_setstate
 
