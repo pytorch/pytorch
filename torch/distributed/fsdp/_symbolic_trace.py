@@ -159,9 +159,7 @@ def _patched_call_module(
     # the forward of module is called multiple times, this will record
     # the execution info of the last forward pass.
     execution_info.module_execution_info_dict[module] = []
-    # Delegates into the normal Tracer.call_module method
     output = call_module(module, forward, args, kwargs)
-    # Restores current_module
     execution_info.current_module = old_current_module
     return output
 
