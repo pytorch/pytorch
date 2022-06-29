@@ -779,6 +779,12 @@ if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
 endif()
 
+if(USE_MPS OR USE_METAL)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.16")
+    enable_language(OBJCXX)
+  endif()
+endif()
+
 # NOTE [ Linking AVX and non-AVX files ]
 #
 # Regardless of the CPU capabilities, we build some files with AVX2, and AVX512
