@@ -18,8 +18,15 @@ jobs:
         run: echo "hi there"
       - name: Let's checkout some actions
         uses: actions/checkout@v3
-      - name: action time
+      - name: action time - no dir
         uses: ./.github/actions/zainr-action
+      - name: action time - android dir
+        uses: ./.github/actions/zainr-action
+          pytorch-repo-directory: android
+      - name: action time - test dir
+        uses: ./.github/actions/zainr-action
+        with:
+          pytorch-repo-directory: test
 
   # please ensure that this and its corresponding job in trunk.yml are in sync
   linux-bionic-rocm5_1-py3_7-build:

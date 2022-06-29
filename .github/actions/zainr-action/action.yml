@@ -7,17 +7,19 @@ inputs:
     description: 'The branch, tag, or SHA to checkout'
     default: "some_branch"
 
+inputs:
+  pytorch-repo-directory:
+    description: Path to root of pytorch repo
+    default: .
 
 runs:
   using: composite
   steps:
     - shell: bash
-      run: ls -l
-    - shell: bash
-      run: pushd android && ls -l
-    - shell: bash
-      run: ls -l
-    - shell: bash
-      run: popd
-    - shell: bash
-      run: ls -l
+      run: |
+          set -ex
+          ls -l
+          pushd {{ inputs.pytorch-repo-directory }} && ls -l
+          ls -l
+          popd
+          ls -l
