@@ -59,7 +59,7 @@ class TestGradients(TestCase):
             #   the tensors that require grad as varargs, and then recomposes them back into the
             #   original input.
 
-            # Creates gradcheck inputs by identifying tensors requiring grad
+            # Creates gradcheck inputs by identifying tensors requiring grad.
             all_args = None
             if is_iterable_of_tensors(sample.input):
                 all_args = chain(sample.input, sample.args, sample.kwargs.values())
