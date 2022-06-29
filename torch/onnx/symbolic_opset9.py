@@ -158,7 +158,6 @@ __all__ = [
     "upsample_trilinear3d",
     "bitwise_not",
     "wrap_logical_op_with_cast_to",
-    "wrap_logical_op_with_cast_to_and_from",
     "wrap_logical_op_with_negation",
     "eq",
     "ne",
@@ -1687,25 +1686,8 @@ def bitwise_not(g, inp):
 def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         def wrap_with_cast(g, input, other):
-            return g.op(
-                "Cast",
-                fn(g, input, other),
-                to_i=symbolic_helper.cast_pytorch_to_onnx[to_type],
-            )
-
-        return wrap_with_cast
-
-    return decorator
-
-
-def wrap_logical_op_with_cast_to_and_from(to_type):
-    def decorator(fn):
-        def wrap_with_cast(g, input, other):
             to_cast_func = globals()[f"_cast_{to_type}"]
-            from_cast_func = wrap_logical_op_with_cast_to(input.type().scalarType())(fn)
-            return from_cast_func(
-                g, to_cast_func(g, input, False), to_cast_func(g, other, False)
-            )
+            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
 
         return wrap_with_cast
 
@@ -1815,17 +1797,17 @@ def __xor_(g, input, other):
         )
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_and(g, input, other):
     return g.op("And", input, other)
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_or(g, input, other):
     return g.op("Or", input, other)
 
 
-@wrap_logical_op_with_cast_to_and_from("Bool")
+@wrap_logical_op_with_cast_to("Bool")
 def logical_xor(g, input, other):
     return g.op("Xor", input, other)
 
@@ -3072,27 +3054,71 @@ def tanhshrink(g, self):
 
 @symbolic_helper.parse_args("v", "f")
 def hardshrink(g, self, lambd):
-    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = symbolic_helper.ScalarType.FLOAT
+    else:
+        dtype = symbolic_helper.scalar_type_to_onnx.index(
+            symbolic_helper.cast_pytorch_to_onnx[dtype]
+        )
+    lambd_op = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        ),
+    )
     cond = logical_or(g, gt(g, self, lambd_op), lt(g, self, neg(g, lambd_op)))
-    return g.op("Where", cond, self, g.op("Constant", value_t=torch.FloatTensor([0])))
+    return g.op(
+        "Where",
+        cond,
+        self,
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
+    )
 
 
 @symbolic_helper.parse_args("v", "f")
 def softshrink(g, self, lambd):
-    lambd_op = g.op("Constant", value_t=torch.FloatTensor([lambd]))
+    dtype = self.type().scalarType()
+    if dtype is None:
+        dtype = symbolic_helper.ScalarType.FLOAT
+    else:
+        dtype = symbolic_helper.scalar_type_to_onnx.index(
+            symbolic_helper.cast_pytorch_to_onnx[dtype]
+        )
+    lambd_op = g.op(
+        "Constant",
+        value_t=torch.tensor(
+            lambd, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+        ),
+    )
     gt_cond = gt(g, self, lambd_op)
     gt_out = g.op(
         "Where",
         gt_cond,
         sub(g, self, lambd_op),
-        g.op("Constant", value_t=torch.FloatTensor([0])),
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
     )
     lt_cond = lt(g, self, neg(g, lambd_op))
     lt_out = g.op(
         "Where",
         lt_cond,
         add(g, self, lambd_op),
-        g.op("Constant", value_t=torch.FloatTensor([0])),
+        g.op(
+            "Constant",
+            value_t=torch.tensor(
+                0, dtype=symbolic_helper.scalar_type_to_pytorch_type[dtype]
+            ),
+        ),
     )
     return add(g, gt_out, lt_out)
 
