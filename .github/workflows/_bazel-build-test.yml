@@ -117,7 +117,7 @@ jobs:
 
           COMMIT_MESSAGES=$(git cherry -v "origin/${GIT_DEFAULT_BRANCH:-master}")
 
-          # add quotes around multiline variables to avoid batch from trying to interpret each line
+          # add quotes around potential multiline variables to avoid batch from trying to interpret each line
           # see https://github.com/pytorch/pytorch/pull/80043#issuecomment-1167796028
           export COMMIT_MESSAGES="${COMMIT_MESSAGES}"
           export PR_BODY="${PR_BODY}"
