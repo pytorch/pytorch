@@ -45,7 +45,7 @@ def i1e(a):
 
 
 @register_decomposition(torch.ops.aten.logit)
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self",),
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
