@@ -15,10 +15,12 @@ import torch.nn.functional as F
 import itertools
 from torch._six import inf
 from torch.nn import Parameter
-from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN
+from torch.testing._internal.common_utils import run_tests, TestCase, download_file, TEST_WITH_UBSAN, gradcheck, gradgradcheck
+from torch.testing import make_tensor
 from torch.testing._comparison import TensorLikePair
 import torch.backends.mps
 from torch.distributions import Uniform, Exponential
+from functools import partial
 
 from torch.testing._internal.common_nn import NNTestCase
 import numpy as np
