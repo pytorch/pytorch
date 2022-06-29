@@ -271,7 +271,7 @@ class FakeTensorConverterTest(TestCase):
         self.assertEqual(len(converter.tensor_memo), 0)
         converter.meta_converter.check_for_expired_weak_storages()
         self.assertEqual(len(converter.meta_converter.storage_memo), 0)
-    
+
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cudnn_rnn(self):
         def fn(

@@ -514,7 +514,7 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
     # these should all be supported, just to be safe
     # avoid fallback for operators which inplace modify metadata
     # because the input fake tensors would be umodified
-    if torch.Tag.inplace_view in func.tags:
+    if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
         raise orig_not_implemented_exception
 
     with no_dispatch():
