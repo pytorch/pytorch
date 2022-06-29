@@ -69,8 +69,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
 
         # create a tensor using our custom device object.
         device = module.custom_device()
+
         x = torch.empty(4, 4, device=device)
         y = torch.empty(4, 4, device=device)
+
+        # Check that our device is correct.
+        self.assertTrue(x.device == device)
+        self.assertFalse(x.is_cpu)
 
         self.assertFalse(module.custom_add_called())
 
@@ -81,6 +86,13 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         self.assertTrue(module.custom_add_called())
 
         z_cpu = z.to(device='cpu')
+
+        # Check that our cross-device copy correctly copied the data to cpu
+        self.assertTrue(z_cpu.is_cpu)
+        self.assertFalse(z.is_cpu)
+        self.assertTrue(z.device == device)
+        self.assertEqual(z, z_cpu)
+
         z2 = z_cpu + z_cpu
 
         # None of our CPU operations should call the custom add function.
