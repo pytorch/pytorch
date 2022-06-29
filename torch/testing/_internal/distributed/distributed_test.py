@@ -8869,13 +8869,13 @@ class DistributedTest:
             self,
             hook,
             hook_state,
-            special_attrs,
             optim_wrapper=None
         ):
             torch.manual_seed(0)
             learning_rate = 0.01
             chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
             rank = self.rank
+            special_attrs = ["process_group", "subgroup", "rng"]
 
             input = torch.randn(7, 1, device=rank)
             net = torch.nn.Linear(1, 5).to(rank)
@@ -8933,7 +8933,7 @@ class DistributedTest:
             self.assertEqual(hook_state.__slots__, dummy_hook_state.__slots__)
 
             # Check that all slots' attributes are restored correctly
-            # Excluding attributes, that need special check.
+            # excluding attributes that need a special check.
             for entry in dummy_hook_state.__slots__:
                 if entry not in special_attrs:
                     self.assertEqual(getattr(dummy_hook_state, entry), getattr(hook_state, entry))
@@ -9021,8 +9021,7 @@ class DistributedTest:
                 matrix_approximation_rank=1,
                 start_powerSGD_iter=4,
             )
-            special_attrs = ["process_group", "rng"]
-            self._test_hook_pickling_parity(hook, powersgd_state, special_attrs=special_attrs)
+            self._test_hook_pickling_parity(hook, powersgd_state)
 
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
@@ -9067,8 +9066,7 @@ class DistributedTest:
             self._test_hook_pickling_parity(
                 hook,
                 postlocalsgd_state,
-                optim_wrapper=self._postlocalsgd_optimizer,
-                special_attrs=special_attrs
+                optim_wrapper=self._postlocalsgd_optimizer
             )
 
 

@@ -69,13 +69,15 @@ class PostLocalSGDState(object):
         r"""
         Takes provided ``state`` and retrieves ``PostLocalSGDState``.
         ``process_group`` and ``subgroup`` are set to default process_group and subgroup respectively.
-        Default subgroup is equivalent to the subgroup on each node.
+        Default subgroup is equivalent to the subgroup on each node. To specify a custom subgroup,
+        please use :func:`torch.distributed.new_group`.
+
         """
         self.process_group = distributed_c10d._get_default_group()
         self.subgroup, _ = dist.new_subgroups()
         logger.warning(
             "NOTE: Process group will be set to a default group (i.e. the world size).\n"
-            "Subgroup will be set to `None` (a new set of intra-node subgroups will be created by `postLocalSGD_hook`)\n"
+            "Subgroup will be set to a default subgroup (i.e. an intra-node subgroup)\n"
             "If a different group is desired, please set `self.process_group` after `PostLocalSGD`'s state is loaded."
         )
         for slot, value in state.items():
