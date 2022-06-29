@@ -52,6 +52,8 @@ jobs:
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
     steps:
+      - name: Checkout Composite Actions
+        uses: actions/checkout@v3
       !{{ common.setup_ec2_linux() }}
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
