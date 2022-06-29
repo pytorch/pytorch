@@ -137,8 +137,22 @@ on:
 {%- endmacro -%}
 
 {%- macro setup_ec2_linux() -%}
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+      - name: Chown workspace
+        run: |
+          !{{ add_retry_to_env() }}
+          retry docker pull "${ALPINE_IMAGE}"
+          # Ensure the working directory gets chowned back to the current user
+          docker run --pull=never --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
+      - name: Clean workspace
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        uses: seemethere/add-github-ssh-key@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 {%- endmacro -%}
@@ -218,14 +232,32 @@ on:
 {%- endmacro -%}
 
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
-      - name: Checkout and clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
-        uses: ./.github/actions/common-checkout
+      - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+      {%- if branch %}
+          ref: !{{ branch }}
+      {%- elif checkout_pr_head %}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      {%- endif %}
+      {%- if deep_clone %}
+          # deep clone, to allow use of git merge-base
+          fetch-depth: 0
+      {%- endif %}
+          submodules: !{{ submodules }}
+      {%- if repository != "pytorch/pytorch" %}
           repository: !{{ repository }}
-          {%- if branch%}
-          branch: !{{ branch }}
-          {%- endif %}
-          directory: !{{ directory }}
+      {%- endif %}
+      {%- if directory %}
+          path: !{{ directory }}
+      {%- endif %}
+      - name: Clean !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }} checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+      {%- if directory%}
+        working-directory: !{{ directory }}
+      {%- endif %}
 {%- endmacro -%}
 
 {%- macro upload_downloaded_files(name, config=None, shard=None, num_shards=None, runner=None, artifact_name="", use_s3=True, when="always()") -%}
