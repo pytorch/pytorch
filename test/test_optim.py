@@ -870,12 +870,13 @@ class TestOptim(TestCase):
 
     def test_lbfgs(self):
         self._test_basic_cases(
-            lambda weight, bias: optim.LBFGS([weight, bias]),
-            ignore_multidevice=True
+            lambda weight, bias, maximize: optim.LBFGS([weight, bias], maximize=maximize),
+            ignore_multidevice=True,
+            constructor_accepts_maximize=True
         )
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias], line_search_fn="strong_wolfe"),
-            ignore_multidevice=True
+            ignore_multidevice=True,
         )
 
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")

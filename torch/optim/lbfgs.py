@@ -210,6 +210,8 @@ class LBFGS(Optimizer):
             value/parameter changes (default: 1e-9).
         history_size (int): update history size (default: 100).
         line_search_fn (str): either 'strong_wolfe' or None (default: None).
+        maximize (bool, optional): maximize the params based on the objective, instead of
+            minimizing (default: False)
     """
 
     def __init__(self,
@@ -220,7 +222,8 @@ class LBFGS(Optimizer):
                  tolerance_grad=1e-7,
                  tolerance_change=1e-9,
                  history_size=100,
-                 line_search_fn=None):
+                 line_search_fn=None,
+                 maximize: bool = False):
         if max_eval is None:
             max_eval = max_iter * 5 // 4
         defaults = dict(
@@ -239,6 +242,7 @@ class LBFGS(Optimizer):
 
         self._params = self.param_groups[0]['params']
         self._numel_cache = None
+        self.maximize = maximize
 
     def _numel(self):
         if self._numel_cache is None:
@@ -437,6 +441,7 @@ class LBFGS(Optimizer):
                     with torch.enable_grad():
                         loss = float(closure())
                     flat_grad = self._gather_flat_grad()
+                    flat_grad = flat_grad if not self.maximize else -flat_grad
                     opt_cond = flat_grad.abs().max() <= tolerance_grad
                     ls_func_evals = 1
 
