@@ -3,6 +3,8 @@ from typing import Optional
 import torch
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
+__all__ = ['LinearPackedParams', 'Linear']
+
 # TODO (zaf): Inherit from `quantized.LinearPackedParams` (T83294430)
 class LinearPackedParams(torch.nn.Module):
     _version = 1
@@ -67,6 +69,10 @@ class LinearPackedParams(torch.nn.Module):
 
     @torch.jit.export
     def __setstate__(self, state):
+        self.weight = torch._empty_affine_quantized([1, 1], scale=1.0, zero_point=0, dtype=torch.qint8)
+        self.bias = None
+        self.row_block_size = 1
+        self.col_block_size = 4
         (self._packed_params, self.training, self.dtype) = state
 
     def __repr__(self):
