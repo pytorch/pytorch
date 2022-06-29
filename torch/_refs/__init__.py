@@ -1318,7 +1318,7 @@ trunc_divide = _make_elementwise_binary_reference(
 # Elementwise Ternary References
 #
 
-
+@register_decomposition(torch.ops.aten.clamp)
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "min", "max"),
