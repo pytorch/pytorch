@@ -430,6 +430,11 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
     // constructor for moving the enum
     Vectorized(const Vectorized<c10::qint8>& other) : Vectorizedqi(other.vals) { }
 
+    // This is added to avoid error: definition of implicit copy assignment operator
+    // for 'Vectorized<c10::qint8>' is deprecated because it has a user-declared
+    // copy constructor [-Werror,-Wdeprecated-copy]
+    Vectorized& operator=(const Vectorized<c10::qint8>&) = default;
+
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
             memcpy(ptr, &vals, count * sizeof(value_type));
@@ -588,6 +593,11 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     }
 
     Vectorized(const Vectorized<c10::quint8>& other) : Vectorizedqi(other.vals) { }
+
+    // This is added to avoid error: definition of implicit copy assignment operator
+    // for 'Vectorized<c10::quint8>' is deprecated because it has a user-declared
+    // copy constructor [-Werror,-Wdeprecated-copy]
+    Vectorized& operator=(const Vectorized<c10::quint8>&) = default;
 
     void store(void* ptr, int count = size()) const {
         if (count != size()) {
