@@ -1008,7 +1008,6 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.exp2: lambda input: -1,
         torch.special.expit: lambda input: -1,
         torch.special.expm1: lambda input: -1,
-        torch.special.gamma: lambda input: -1,
         torch.special.gammainc: lambda input, other, out=None: -1,
         torch.special.gammaincc: lambda input, other, out=None: -1,
         torch.special.gammaln: lambda input: -1,
@@ -1035,6 +1034,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.special.polygamma: lambda input, n, out=None: -1,
         torch.special.psi: lambda input: -1,
         torch.special.round: lambda input: -1,
+        torch.special.scaled_modified_bessel_k0: lambda input: -1,
         torch.special.scaled_modified_bessel_k1: lambda input: -1,
         torch.special.shifted_chebyshev_polynomial_t: lambda input, n, out=None: -1,
         torch.special.shifted_chebyshev_polynomial_u: lambda input, n, out=None: -1,
@@ -1963,7 +1963,7 @@ class enable_reentrant_dispatch():
 
 def get_buffer(tensor_subclass, data, prefix):
     import ctypes
-    assert prefix in {"stride", "size"}
+    assert prefix in {"stride", "size", "sym_size"}
     buffer_name = f"_{prefix}_buffer"
     if not hasattr(tensor_subclass, buffer_name):
         SizeType = ctypes.c_longlong * len(data)
