@@ -1770,7 +1770,6 @@ class TestNLLLoss(TestCase):
             self.assertEqual(result_long['mps'].to('cpu'), result_long['cpu'])
             self.assertEqual(grad_long['mps'].to('cpu'), grad_long['cpu'])
 
-
     # L1 loss
     def test_l1_loss(self):
         def helper(shape, reduction):
