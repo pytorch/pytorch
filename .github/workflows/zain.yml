@@ -1,0 +1,30 @@
+name: pull
+
+on:
+  push:
+    branches:
+      - *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  the-first-job:
+    runs-on: linux.20_04.16x
+    name: Job-One
+    steps:
+      - name: First step
+        run: echo "hi there"
+      - name: action time
+        uses: ./.github/actions/zainr-action
+
+  # please ensure that this and its corresponding job in trunk.yml are in sync
+  linux-bionic-rocm5_1-py3_7-build:
+    # don't run build twice on master
+    if: github.event_name == 'pull_request'
+    name: linux-bionic-rocm5.1-py3.7
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-bionic-rocm5.1-py3.7
+      docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7

@@ -1,0 +1,23 @@
+name: Setup Linux
+
+description: Zain's compostie action
+
+inputs:
+  BRANCH:
+    description: 'The branch, tag, or SHA to checkout'
+    default: "some_branch"
+
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: ls -l
+    - shell: bash
+      run: pushd ..
+    - shell: bash
+      run: ls -l
+    - shell: bash
+      run: popd
+    - shell: bash
+      run: ls -l
