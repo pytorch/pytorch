@@ -1,6 +1,5 @@
 import sys
 import warnings
-from typing import Sequence
 
 import torch
 import torch._C._onnx as _C_onnx
