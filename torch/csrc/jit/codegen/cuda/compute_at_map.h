@@ -117,6 +117,10 @@ using DoubleBufferIndices = std::unordered_map<DoubleBufferLoopStage, Int*>;
 class TORCH_CUDA_CU_API ComputeAtMap {
  public:
   ComputeAtMap() = delete;
+  ComputeAtMap(const ComputeAtMap&) = delete;
+  ComputeAtMap& operator=(const ComputeAtMap&) = delete;
+  ComputeAtMap(ComputeAtMap&&) = default;
+  ComputeAtMap& operator=(ComputeAtMap&&) = default;
   ComputeAtMap(Fusion* fusion);
 
   //! Run through disjoint sets in the LOOP map, make sure there's only one
