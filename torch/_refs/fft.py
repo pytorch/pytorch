@@ -17,7 +17,7 @@ from typing import Union, Tuple, Iterable, Sequence, Optional, NamedTuple
 from typing_extensions import Literal
 import math
 
-__all__ = ["fft", "ifft", "rfft", "irfft", "hfft", "ihfft"]
+__all__ = ["fft", "ifft", "rfft", "irfft", "hfft", "ihfft", "fftn", "ifftn"]
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
 
@@ -217,3 +217,111 @@ def ihfft(
     norm: NormType = None,
 ) -> TensorLikeType:
     return _fft_r2c("ihfft", input, n, dim, norm, forward=False, onesided=True)
+
+
+class _ShapeAndDims(NamedTuple):
+    shape: Tuple[int, ...]
+    dims: Tuple[int, ...]
+
+
+def _canonicalize_fft_shape_and_dim_args(
+    input: TensorLikeType, shape: Optional[ShapeType], dim: Optional[DimsType]
+) -> _ShapeAndDims:
+    input_dim = input.ndim
+    input_sizes = input.shape
+
+    if dim is not None:
+        if not isinstance(dim, Sequence):
+            dim = (dim,)
+        ret_dims = utils.canonicalize_dims(input_dim, dim)
+
+        # Check dims are unique
+        if len(set(dim)) != len(dim):
+            raise RuntimeError("FFT dims must be unique")
+
+    if shape is not None:
+        if not isinstance(shape, Sequence):
+            shape = (shape,)
+
+        # Has shape, might have dim
+        if dim is not None and len(dim) != len(shape):
+            raise RuntimeError(
+                "When given, dim and shape arguments must have the same length"
+            )
+        transform_ndim = len(shape)
+
+        if transform_ndim > input_dim:
+            raise RuntimeError(
+                f"Got shape with {len(shape)} values but input tensor "
+                f"only has {input_dim} dimensions."
+            )
+
+        # If shape is given, dims defaults to the last len(shape) dimensions
+        if dim is None:
+            ret_dims = tuple(range(input_dim - transform_ndim, input_dim))
+
+        # Translate any -1 values in shape to the default length
+        ret_shape = tuple(
+            s if s != -1 else input_sizes[d] for (s, d) in zip(shape, ret_dims)
+        )
+    elif dim is None:
+        # No shape, no dim
+        ret_dims = tuple(range(input_dim))
+        ret_shape = tuple(input_sizes)
+    else:
+        # No shape, has dim
+        ret_shape = tuple(input_sizes[d] for d in ret_dims)
+
+    for n in ret_shape:
+        if n <= 0:
+            raise RuntimeError(f"Invalid number of data points ({n}) specified")
+
+    return _ShapeAndDims(shape=ret_shape, dims=ret_dims)
+
+
+def _prod(xs: Iterable[int]):
+    prod = 1
+    for x in xs:
+        prod *= x
+    return prod
+
+
+def _fftn_c2c(
+    function_name: str,
+    input: TensorLikeType,
+    shape: Tuple[int, ...],
+    dim: Tuple[int, ...],
+    norm: NormType,
+    forward: bool,
+) -> TensorLikeType:
+    if not input.dtype.is_complex:
+        raise RuntimeError(
+            f"{function_name} expects a complex input tensor, " f"but got {input.dtype}"
+        )
+    x = _resize_fft_input(input, dim, shape)
+    output = prims.fft_c2c(x, dim=dim, forward=forward)
+    return _apply_norm(output, norm=norm, signal_numel=_prod(shape), forward=forward)
+
+
+@out_wrapper
+def fftn(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsSequenceType] = None,
+    norm: NormType = None,
+) -> TensorLikeType:
+    (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
+    x = _promote_tensor_fft(input, require_complex=True)
+    return _fftn_c2c("fftn", x, shape, dim, norm, forward=True)
+
+
+@out_wrapper
+def ifftn(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsSequenceType] = None,
+    norm: NormType = None,
+) -> TensorLikeType:
+    (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
+    x = _promote_tensor_fft(input, require_complex=True)
+    return _fftn_c2c("ifftn", x, shape, dim, norm, forward=False)
