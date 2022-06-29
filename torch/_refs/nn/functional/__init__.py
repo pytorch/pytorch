@@ -381,22 +381,26 @@ def _nll_loss_2d(
         msg = "Expected 3 dimensions for input but got {}."
         raise ValueError(msg.format(input.ndim))
 
+    if input.shape[0] != target.shape[0]:
+        msg = "Expected input batch size ({}) to match target batch size ({})."
+        raise ValueError(msg.format(input.shape[0], target.shape[0]))
+
     _check_reduction_value(reduction)
 
-    current_target = torch.reshape(target, [-1])
-    ignore_classes_mask = torch.eq(current_target, ignore_index)
+    flat_target = torch.reshape(target, [-1])
+    ignore_classes_mask = torch.eq(flat_target, ignore_index)
+    ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
     if weight is None:
         current_weight = torch.where(
             ignore_classes_mask,
-            torch.scalar_tensor(0, dtype=input.dtype, device=input.device),
+            ignore_class_weight,
             torch.scalar_tensor(1, dtype=input.dtype, device=input.device),
         )
     else:
-        ignore_class_weight = torch.scalar_tensor(
-            0, dtype=input.dtype, device=input.device
-        ).expand_as(current_target)
         current_weight = torch.where(
-            ignore_classes_mask, ignore_class_weight, weight[current_target]
+            ignore_classes_mask,
+            ignore_class_weight.expand_as(flat_target),
+            weight[flat_target],
         )
 
     batch_size = input.shape[0]
@@ -409,7 +413,7 @@ def _nll_loss_2d(
     hdx = (torch.arange(numel) - (bdx * extent)) // width
     wdx = torch.arange(numel) % width
 
-    loss = -input[bdx, current_target, hdx, wdx] * current_weight
+    loss = -input[bdx, flat_target, hdx, wdx] * current_weight
     loss = torch.reshape(loss, target.shape)
 
     if reduction == "none":
@@ -427,8 +431,8 @@ def _nll_loss_1d(
     reduction: str,
     ignore_index: int,
 ) -> TensorLikeType:
-    if input.ndim < 1:
-        msg = "Expected 1 or more dimension for input but got {}."
+    if input.ndim < 1 or input.ndim > 2:
+        msg = "Expected 1 or 2 dimensions for input but got {}."
         raise ValueError(msg.format(input.ndim))
 
     if input.ndim != 1 and input.shape[0] != target.shape[0]:
@@ -437,31 +441,24 @@ def _nll_loss_1d(
 
     _check_reduction_value(reduction)
 
-    if target.ndim <= 1:
-        current_target = target
-    else:
-        current_target = target[:, 0]
-
-    ignore_classes_mask = torch.eq(current_target, ignore_index)
+    ignore_classes_mask = torch.eq(target, ignore_index)
+    ignore_class_weight = torch.scalar_tensor(0, dtype=input.dtype, device=input.device)
     if weight is None:
         current_weight = torch.where(
             ignore_classes_mask,
-            torch.scalar_tensor(0, dtype=input.dtype, device=input.device),
+            ignore_class_weight,
             torch.scalar_tensor(1, dtype=input.dtype, device=input.device),
         )
     else:
-        ignore_class_weight = torch.scalar_tensor(
-            0, dtype=input.dtype, device=input.device
-        ).expand_as(current_target)
         current_weight = torch.where(
-            ignore_classes_mask, ignore_class_weight, weight[current_target]
+            ignore_classes_mask, ignore_class_weight.expand_as(target), weight[target]
         )
 
-    batch_size = input.shape[0]
     if input.ndim == 1:
-        loss = -input[current_target] * current_weight
+        loss = -input[target] * current_weight
     else:
-        loss = -input[torch.arange(batch_size), current_target] * current_weight
+        batch_size = input.shape[0]
+        loss = -input[torch.arange(batch_size), target] * current_weight
 
     if reduction == "none":
         return loss
