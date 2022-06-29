@@ -3,11 +3,6 @@ name: Setup Linux
 description: Zain's compostie action
 
 inputs:
-  BRANCH:
-    description: 'The branch, tag, or SHA to checkout'
-    default: "some_branch"
-
-inputs:
   pytorch-repo-directory:
     description: Path to root of pytorch repo
     default: .
