@@ -20509,6 +20509,9 @@ python_ref_db = [
         "_refs.nn.functional.nll_loss",
         torch_opinfo_name="nn.functional.nll_loss",
         supports_nvfuser=False,
+        # For simpler indexing, we flatten target indices, then reshape the result tensor.
+        # This creates inconsistent view state with reference impl.
+        validate_view_consistency=False,
         skips=(
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
             DecorateInfo(
