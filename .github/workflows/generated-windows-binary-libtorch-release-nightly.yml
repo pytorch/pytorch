@@ -267,7 +267,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -563,7 +563,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -859,7 +859,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1155,7 +1155,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1454,7 +1454,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1753,7 +1753,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2052,7 +2052,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2351,7 +2351,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2650,7 +2650,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2949,7 +2949,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3248,7 +3248,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3547,7 +3547,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch

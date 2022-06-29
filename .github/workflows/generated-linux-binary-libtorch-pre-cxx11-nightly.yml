@@ -35,6 +35,10 @@ concurrency:
   group: linux-binary-libtorch-pre-cxx11-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   libtorch-cpu-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -54,7 +58,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -81,7 +85,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cpu
       - uses: seemethere/upload-artifact-s3@v5
@@ -128,7 +132,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -234,7 +238,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -313,7 +317,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -340,7 +344,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cpu
       - uses: seemethere/upload-artifact-s3@v5
@@ -387,7 +391,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -493,7 +497,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -572,7 +576,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -599,7 +603,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cpu
       - uses: seemethere/upload-artifact-s3@v5
@@ -646,7 +650,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -752,7 +756,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -831,7 +835,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -858,7 +862,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cpu
       - uses: seemethere/upload-artifact-s3@v5
@@ -905,7 +909,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -1011,7 +1015,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1091,7 +1095,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -1118,7 +1122,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1167,7 +1171,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -1285,7 +1289,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1365,7 +1369,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -1392,7 +1396,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1441,7 +1445,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -1559,7 +1563,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1639,7 +1643,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -1666,7 +1670,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1715,7 +1719,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -1833,7 +1837,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1913,7 +1917,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -1940,7 +1944,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 10.2
@@ -1989,7 +1993,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2107,7 +2111,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2187,7 +2191,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -2214,7 +2218,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -2263,7 +2267,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2381,7 +2385,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2461,7 +2465,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -2488,7 +2492,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -2537,7 +2541,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2655,7 +2659,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2735,7 +2739,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -2762,7 +2766,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -2811,7 +2815,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2929,7 +2933,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3009,7 +3013,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -3036,7 +3040,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.3
@@ -3085,7 +3089,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -3203,7 +3207,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3283,7 +3287,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -3310,7 +3314,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -3359,7 +3363,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -3477,7 +3481,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3557,7 +3561,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -3584,7 +3588,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -3633,7 +3637,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -3751,7 +3755,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3831,7 +3835,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -3858,7 +3862,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -3907,7 +3911,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -4025,7 +4029,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4105,7 +4109,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -4132,7 +4136,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: cuda
           gpu_arch_version: 11.6
@@ -4181,7 +4185,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -4299,7 +4303,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4379,7 +4383,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -4406,7 +4410,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.0
@@ -4586,7 +4590,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4666,7 +4670,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -4693,7 +4697,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.0
@@ -4873,7 +4877,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4953,7 +4957,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -4980,7 +4984,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.1.1
@@ -5160,7 +5164,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -5240,7 +5244,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -5267,7 +5271,7 @@ jobs:
           git clean -fxd
         working-directory: builder
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: rocm
           gpu_arch_version: 5.1.1
@@ -5447,7 +5451,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch

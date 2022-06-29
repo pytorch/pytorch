@@ -44,6 +44,10 @@ env:
   SKIP_ALL_TESTS: 1
 !{{ common.concurrency(build_environment) }}
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
@@ -56,7 +60,7 @@ jobs:
       !{{ common.checkout(deep_clone=False, directory="pytorch") }}
       !{{ common.checkout(deep_clone=False, directory="builder", repository="pytorch/builder", branch=common.builder_branch) }}
       - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
+        uses: ./.github/actions/linux-build-binary
         with:
           gpu_arch_type: !{{ config["gpu_arch_type"] }}
           {%- if config["gpu_arch_version"]%}

@@ -1,0 +1,24 @@
+name: Setup EC2 Linux
+
+description: Setups Linux, chowns the workspace, enables SSH, and then deletes the workspace for the upcoming pytorch and builder checkouts
+
+inputs:
+  GITHUB_TOKEN:
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Linux
+      uses: ./.github/actions/setup-linux
+    - name: Chown workspace
+      uses: ./.github/actions/chown-workspace
+    - name: "Enable SSH (Click me for login details)"
+      uses: ./.github/actions/setup-ssh
+      with:
+        github-secret: ${{ inputs.GITHUB_TOKEN }}
+    - name: Clean workspace
+      shell: bash
+      run: |
+        rm -rf "${GITHUB_WORKSPACE}"
+        mkdir "${GITHUB_WORKSPACE}"
