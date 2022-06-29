@@ -2705,3 +2705,4 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
 # populate the decomp table
 import torch._refs.nn.functional
 import torch._refs.special
+import torch._refs.fft

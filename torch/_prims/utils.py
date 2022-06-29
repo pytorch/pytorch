@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type
+from typing import Any, Union, Sequence, Optional, Tuple, List, Callable, Type, overload
 from enum import Enum
 from functools import reduce, cmp_to_key
 import operator
@@ -389,7 +389,17 @@ def canonicalize_dim(rank: int, idx: int) -> int:
 
 # Takes a dimension or sequence of dimensions and "wraps" them,
 # mapping negative offsets to positive ones
-def canonicalize_dims(rank: int, indices: DimsType) -> DimsType:
+@overload
+def canonicalize_dims(rank: int, indices: Sequence[int]) -> Tuple[int, ...]:
+    pass
+
+
+@overload
+def canonicalize_dims(rank: int, indices: int) -> int:
+    pass
+
+
+def canonicalize_dims(rank, indices):
     if isinstance(indices, int):
         return canonicalize_dim(rank, indices)
 

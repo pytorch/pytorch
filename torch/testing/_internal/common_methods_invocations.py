@@ -6389,11 +6389,14 @@ def sample_inputs_spectral_ops(self, device, dtype, requires_grad=False, **kwarg
         # cuFFT supports powers of 2 for half and complex half precision
         # NOTE: For hfft, hfft2, hfftn, irfft, irfft2, irfftn with default args
         # where output_size n=2*(input_size - 1), we make sure that logical fft size is a power of two
-        if self.name in ['fft.hfft', 'fft.irfft']:
+        if self.name in ['fft.hfft', 'fft.irfft',
+                         '_refs.fft.hfft', '_refs.fft.irfft']:
             shapes = ((2, 9, 9), (33,))
-        elif self.name in ['fft.hfft2', 'fft.irfft2']:
+        elif self.name in ['fft.hfft2', 'fft.irfft2',
+                           '_refs.fft.hfft2', '_refs.fft.irfft2']:
             shapes = ((2, 8, 9), (33,))
-        elif self.name in ['fft.hfftn', 'fft.irfftn']:
+        elif self.name in ['fft.hfftn', 'fft.irfftn',
+                           '_refs.fft.hfftn', '_refs.fft.irfftn']:
             shapes = ((2, 2, 33), (33,))
         else:
             shapes = ((2, 8, 16), (32,))
@@ -6472,6 +6475,10 @@ class SpectralFuncInfo(OpInfo):
                  sample_inputs_func=sample_inputs_spectral_ops,
                  decorators=None,
                  **kwargs):
+
+        self._original_spectral_func_args = dict(locals()).copy()
+        self._original_spectral_func_args.update(kwargs)
+
         decorators = list(decorators) if decorators is not None else []
         decorators += [
             skipCPUIfNoFFT,
@@ -20060,6 +20067,30 @@ class ElementwiseBinaryPythonRefInfo(BinaryUfuncInfo):
 
         super(ElementwiseBinaryPythonRefInfo, self).__init__(**ukwargs)
 
+class SpectralFuncPythonRefInfo(SpectralFuncInfo):
+    '''
+    An OpInfo for a Python reference of an elementwise unary operation.
+    '''
+    def __init__(
+            self,
+            name,  # the stringname of the callable Python reference
+            *,
+            op=None,  # the function variant of the operation, populated as torch.<name> if None
+            torch_opinfo_name,  # the string name of the corresponding torch opinfo
+            torch_opinfo_variant='',
+            supports_nvfuser=True,
+            **kwargs):  # additional kwargs override kwargs inherited from the torch opinfo
+
+        self.torch_opinfo_name = torch_opinfo_name
+        self.torch_opinfo = _find_referenced_opinfo(torch_opinfo_name, torch_opinfo_variant)
+        self.supports_nvfuser = supports_nvfuser
+        assert isinstance(self.torch_opinfo, SpectralFuncInfo)
+
+        inherited = self.torch_opinfo._original_spectral_func_args
+        ukwargs = _inherit_constructor_args(name, op, inherited, kwargs)
+
+        super().__init__(**ukwargs)
+
 
 # Separate registry for experimental Python Reference OpInfos.
 python_ref_db = [
@@ -21317,6 +21348,57 @@ python_ref_db = [
         "_refs.where",
         torch_opinfo_name="where",
         op=lambda self, condition, other: refs.where(condition, self, other),
+    ),
+    #
+    # FFT OpInfos
+    #
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.fft",
+        torch_opinfo_name="fft.fft",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ifft",
+        torch_opinfo_name="fft.ifft",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.rfft",
+        torch_opinfo_name="fft.rfft",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.irfft",
+        torch_opinfo_name="fft.irfft",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.hfft",
+        torch_opinfo_name="fft.hfft",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ihfft",
+        torch_opinfo_name="fft.ihfft",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
     ),
 ]
 
