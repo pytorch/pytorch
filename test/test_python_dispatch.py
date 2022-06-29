@@ -1581,6 +1581,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
+                    import pdb; pdb.set_trace()
                     print ("dispatch for device, i think", func)
                     return NotImplemented
 
@@ -1783,7 +1784,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.prim.layout:
-                        return torch.sparse_csr
+                        return torch.torch.strided
                     return NotImplemented
 
             class LayoutDefaultReturn(torch.Tensor):
@@ -1801,7 +1802,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             err_msg = "no implementation found for 'torch.ops.prim.layout'"
             e = LayoutNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
             # with self.assertRaisesRegex(TypeError, err_msg):
-            #     print ("aboutta")
+            print ("... aboutta")
             e.layout
 
             # e = LayoutCustomReturn(torch.randn(3, 3), use_wrapper_subclass)

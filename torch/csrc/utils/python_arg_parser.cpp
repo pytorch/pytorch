@@ -367,17 +367,21 @@ auto handle_torch_function_no_python_arg_parser(
       std::cout << "py_types.ptr" << py_types.ptr() << "\n";
       std::cout << "args" << args << "\n";
       std::cout << "kwargs" << kwargs << "\n";
-      ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
+      auto x = PyObject_CallFunctionObjArgs(
           torch_function.ptr(),
           torch_api_function,
           py_types.ptr(),
           args,
           kwargs,
-          NULL));
+          NULL);
+      ret = py::reinterpret_steal<py::object>(x);
       if (ret.ptr() == nullptr) {
         std::cout << "second check - it's a null ptr\n";
-      } else{
+      } else if (ret.ptr() == Py_NotImplemented) {
         std::cout << "second check - it's NotImplemented\n";
+      }
+      else {
+        std::cout << "second check, it's something else\n";
       }
       std::cout << "arg step 4\n";
       if (ret.ptr() != Py_NotImplemented) {

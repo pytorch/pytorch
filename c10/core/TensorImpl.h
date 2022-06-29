@@ -959,6 +959,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t get_device() const {
+    std::cout << "get_device()\n";
     if (C10_UNLIKELY(custom_device_)) {
       return device_custom().index();
     }
@@ -966,6 +967,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Device device() const {
+    std::cout << "TensorImpl.h; device\n";
     if (C10_UNLIKELY(custom_device_)) {
       return device_custom();
     }

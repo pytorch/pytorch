@@ -40,6 +40,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
+#include <iostream>
 #include <algorithm>
 #include <cstddef>
 #include <string>
@@ -689,6 +690,7 @@ inline py::object getScriptedClassOrError(const c10::NamedTypePtr& classType) {
 }
 
 inline py::object toPyObject(IValue ivalue) {
+  std::cout << "toPyObject\n";
   if (ivalue.isNone()) {
     return py::none();
   } else if (ivalue.isTensor()) {

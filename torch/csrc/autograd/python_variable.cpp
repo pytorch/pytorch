@@ -106,6 +106,7 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   auto schemaAwareToPyObject = [&](int64_t idx) -> py::object {
     const auto& arg = schema.arguments()[idx];
     auto match = [&](c10::TypeKind kind) {
+      std::cout << "schemaAwareToPYObject\n";
       const auto& t = arg.real_type();
       if (t->kind() == kind)
         return true;
@@ -1375,13 +1376,16 @@ static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
     std::cout << "has torch function\n";
-    return handle_torch_function_getter(self, "layout");
+    auto x = handle_torch_function_getter(self, "layout");
+    std::cout << "finishing has_torch_function\n";
+    return x;
+    // return handle_torch_function_getter(self, "layout");
   }
-  return THPLayout_New(THPVariable_Unpack(self).layout(), "torch.strided");
-  // std::cout << "THPVariable_Layout step 1\n";
-  // auto& self_ = THPVariable_Unpack(self);
-  // std::cout << "THPVariable_Layout step 2\n";
-  // return torch::autograd::utils::wrap(torch::getTHPLayout(self_.layout()));
+  // return THPLayout_New(THPVariable_Unpack(self).layout(), "torch.strided");
+  std::cout << "THPVariable_Layout step 1\n";
+  auto& self_ = THPVariable_Unpack(self);
+  std::cout << "THPVariable_Layout step 2\n";
+  return torch::autograd::utils::wrap(torch::getTHPLayout(self_.layout()));
   END_HANDLE_TH_ERRORS
 }
 
@@ -2114,15 +2118,28 @@ py::object torchDispatchFromTensorImpl(
 
   py::dict kwargs;
 
-  return py::reinterpret_steal<py::object>(
-      handle_torch_function_no_python_arg_parser(
-          overloaded_args,
-          args.ptr(),
-          kwargs.ptr(),
-          func_name,
-          torch_api_function,
-          module_name,
-          TorchFunctionName::TorchDispatch));
+  auto x = handle_torch_function_no_python_arg_parser(
+      overloaded_args,
+      args.ptr(),
+      kwargs.ptr(),
+      func_name,
+      torch_api_function,
+      module_name,
+      TorchFunctionName::TorchDispatch);
+  
+  std::cout << "x from torchDispatchFromTensorImpl" << x << "\n";
+  
+  return py::reinterpret_steal<py::object>(x);
+
+  // return py::reinterpret_steal<py::object>(
+  //     handle_torch_function_no_python_arg_parser(
+  //         overloaded_args,
+  //         args.ptr(),
+  //         kwargs.ptr(),
+  //         func_name,
+  //         torch_api_function,
+  //         module_name,
+  //         TorchFunctionName::TorchDispatch));
 }
 
 // NOTE [dispatch_fn's type argument]
@@ -2400,7 +2417,7 @@ c10::Layout concrete_layout_fn(
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
-  std::cout << "layout step 1\n";
+  std::cout << "concrete layout step 1\n";
   auto out = torchDispatchFromTensorImpl(
       self,
       "layout",
@@ -2411,7 +2428,7 @@ c10::Layout concrete_layout_fn(
           .attr("default")
           .ptr(),
       "torch.ops.prim");
-  std::cout << "layout step 2\n";
+  std::cout << "concrete layout step 2\n";
 
   return toLayout(out.ptr());
 }

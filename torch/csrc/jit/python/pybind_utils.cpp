@@ -8,6 +8,7 @@
 
 #include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
+#include <iostream>
 
 namespace torch {
 namespace jit {
@@ -27,6 +28,7 @@ void clear_registered_instances(void* ptr) {
 }
 
 IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
+  std::cout << "in toIValue\n";
   switch (type->kind()) {
     case TypeKind::TensorType: {
       if (obj.ptr() == Py_None) {
