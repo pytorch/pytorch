@@ -1,6 +1,6 @@
-name: Setup EC2 Linux
+name: Setup EC2 Linux and workspace
 
-description: Setup EC2 Linux
+description: Setup EC2 Linux and workspace
 
 inputs:
   GITHUB_TOKEN:
@@ -9,8 +9,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Checkout PyTorch
-      uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
     - name: Setup Linux
       uses: ./.github/actions/setup-linux
     - name: Chown workspace

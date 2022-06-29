@@ -46,21 +46,35 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
         uses: ./.github/actions/common-setup-ec2-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Checkout and clean PyTorch
-        uses: ./.github/actions/common-checkout
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          repository: pytorch/pytorch
-          directory: pytorch
-      - name: Checkout and clean pytorch/builder
-        uses: ./.github/actions/common-checkout
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          branch: main
-          directory: builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - name: Build Linux binary
         uses: ./.github/actions/linux-binary-build
         with:
@@ -107,6 +121,8 @@ jobs:
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
     steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
         uses: ./.github/actions/common-setup-ec2-linux
         with:
@@ -116,17 +132,29 @@ jobs:
         with:
           name: manywheel-py3_7-cuda10_2
           path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout and clean PyTorch
-        uses: ./.github/actions/common-checkout
+      - name: Checkout PyTorch
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          repository: pytorch/pytorch
-          directory: pytorch
-      - name: Checkout and clean pytorch/builder
-        uses: ./.github/actions/common-checkout
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          submodules: recursive
+          path: pytorch
+      - name: Clean PyTorch checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: pytorch
+      - name: Checkout pytorch/builder
+        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
+          ref: main
+          submodules: recursive
           repository: pytorch/builder
-          branch: main
-          directory: builder
+          path: builder
+      - name: Clean pytorch/builder checkout
+        run: |
+          # Remove any artifacts from the previous checkouts
+          git clean -fxd
+        working-directory: builder
       - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
         name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         with:
