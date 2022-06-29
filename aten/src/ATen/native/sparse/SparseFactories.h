@@ -43,18 +43,12 @@ Tensor spdiags_impl(
     TORCH_CHECK(
         (*layout == Layout::Sparse) || (*layout == Layout::SparseCsc) ||
             (*layout == Layout::SparseCsr),
-        "Only output layouts (",
-        Layout::Sparse,
-        ", ",
-        Layout::SparseCsc,
-        ", and ",
-        Layout::SparseCsr,
-        ") are supported, got ",
+        "Only output layouts (Sparse, SparseCsc, SparseCsr) are supported, got ",
         *layout);
   }
   TORCH_CHECK(
       offsets_1d.scalar_type() == at::kLong,
-      "spdiags(): Expected a LongTensor of offsets but got ",
+      "Offset Tensor must has dtype Long but got ",
       offsets_1d.scalar_type());
 
   TORCH_CHECK(
@@ -62,7 +56,7 @@ Tensor spdiags_impl(
           .eq(offsets_1d)
           .sum(-1)
           .equal(at::ones_like(offsets_1d)),
-      "spdiags(): Offset tensor contains duplicate values");
+      "Offset tensor contains duplicate values");
 
   auto nnz_per_diag = at::where(
       offsets_1d.le(0),
@@ -70,7 +64,7 @@ Tensor spdiags_impl(
       offsets_1d.add(-std::min<int64_t>(shape[1], diagonals_2d.size(1))).neg());
 
   auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
-  const auto nnz = diagonals_2d.size(0)
+  const auto nnz = diagonals_2d.size(0) > 0
       ? nnz_per_diag_cumsum.select(-1, -1).item<int64_t>()
       : int64_t{0};
   // Offsets into nnz for each diagonal
