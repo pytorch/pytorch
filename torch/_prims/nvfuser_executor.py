@@ -37,8 +37,8 @@ def to_nvfuser_template_args(args):
 
     return tree_map(to_nvfuser, args)
 
-
-@lru_cache
+# MyPy bug: https://github.com/python/mypy/issues/5107
+@lru_cache  # type: ignore[arg-type]
 def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     # PROTOTYPE nvfuser executor
     # Everything in the graph must support nvfuser
@@ -101,7 +101,7 @@ def nvfuser_execute(gm: GraphModule, *args):
     # Construction of the fusion is expensive and cached based on the GraphModule
     # and symbolic nvFuser args.
     nv_template_args = to_nvfuser_template_args(flat_args)
-    fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)
+    fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)  # type: ignore[misc]
 
     # Inputs to fusion.execute correspond to the same template/symbolic inputs marked with `fd.add_input`
     concrete_fusion_inputs = tuple(
@@ -109,6 +109,6 @@ def nvfuser_execute(gm: GraphModule, *args):
     )
 
     return tree_unflatten(
-        fusion.execute(concrete_fusion_inputs),
-        unflatten_spec,
+        fusion.execute(concrete_fusion_inputs),  # type: ignore[has-type]
+        unflatten_spec,  # type: ignore[has-type]
     )
