@@ -35,6 +35,10 @@ concurrency:
   group: linux-binary-libtorch-pre-cxx11-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   libtorch-cpu-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -54,7 +58,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -80,10 +84,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cpu
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cpu' == 'cuda' && startsWith('', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-shared-with-deps-pre-cxx11
@@ -91,6 +138,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -128,7 +187,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -198,6 +257,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -234,7 +305,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -278,6 +349,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -313,7 +396,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -339,10 +422,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cpu
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cpu' == 'cuda' && startsWith('', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-shared-without-deps-pre-cxx11
@@ -350,6 +476,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -387,7 +525,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -457,6 +595,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -493,7 +643,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -537,6 +687,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -572,7 +734,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -598,10 +760,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cpu
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cpu' == 'cuda' && startsWith('', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-static-with-deps-pre-cxx11
@@ -609,6 +814,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -646,7 +863,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -716,6 +933,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -752,7 +981,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -796,6 +1025,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -831,7 +1072,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -857,10 +1098,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cpu
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cpu' == 'cuda' && startsWith('', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cpu-static-without-deps-pre-cxx11
@@ -868,6 +1152,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -905,7 +1201,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -975,6 +1271,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1011,7 +1319,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1055,6 +1363,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1091,7 +1411,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -1117,11 +1437,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 10.2
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('10.2', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
@@ -1129,6 +1491,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1167,7 +1541,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -1248,6 +1622,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1285,7 +1671,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1329,6 +1715,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1365,7 +1763,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -1391,11 +1789,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 10.2
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('10.2', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda10_2-shared-without-deps-pre-cxx11
@@ -1403,6 +1843,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1441,7 +1893,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -1522,6 +1974,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1559,7 +2023,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1603,6 +2067,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1639,7 +2115,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -1665,11 +2141,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 10.2
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('10.2', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda10_2-static-with-deps-pre-cxx11
@@ -1677,6 +2195,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1715,7 +2245,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -1796,6 +2326,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1833,7 +2375,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1877,6 +2419,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1913,7 +2467,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -1939,11 +2493,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 10.2
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('10.2', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda10_2-static-without-deps-pre-cxx11
@@ -1951,6 +2547,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -1989,7 +2597,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2070,6 +2678,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2107,7 +2727,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2151,6 +2771,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2187,7 +2819,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -2213,11 +2845,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 11.3
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('11.3', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_3-shared-with-deps-pre-cxx11
@@ -2225,6 +2899,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2263,7 +2949,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2344,6 +3030,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2381,7 +3079,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2425,6 +3123,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2461,7 +3171,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -2487,11 +3197,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 11.3
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('11.3', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_3-shared-without-deps-pre-cxx11
@@ -2499,6 +3251,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2537,7 +3301,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2618,6 +3382,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2655,7 +3431,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2699,6 +3475,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2735,7 +3523,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -2761,11 +3549,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 11.3
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('11.3', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_3-static-with-deps-pre-cxx11
@@ -2773,6 +3603,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2811,7 +3653,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -2892,6 +3734,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -2929,7 +3783,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2973,6 +3827,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -3009,7 +3875,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -3035,11 +3901,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 11.3
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('11.3', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_3-static-without-deps-pre-cxx11
@@ -3047,6 +3955,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3085,7 +4005,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -3166,6 +4086,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3203,7 +4135,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3247,6 +4179,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -3283,7 +4227,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -3309,11 +4253,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 11.6
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('11.6', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_6-shared-with-deps-pre-cxx11
@@ -3321,6 +4307,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3359,7 +4357,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -3440,6 +4438,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3477,7 +4487,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3521,6 +4531,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -3557,7 +4579,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -3583,11 +4605,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 11.6
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('11.6', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_6-shared-without-deps-pre-cxx11
@@ -3595,6 +4659,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3633,7 +4709,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -3714,6 +4790,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3751,7 +4839,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3795,6 +4883,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -3831,7 +4931,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -3857,11 +4957,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 11.6
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('11.6', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_6-static-with-deps-pre-cxx11
@@ -3869,6 +5011,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -3907,7 +5061,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -3988,6 +5142,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4025,7 +5191,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4069,6 +5235,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -4105,7 +5283,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -4131,11 +5309,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: cuda
-          gpu_arch_version: 11.6
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'cuda' == 'cuda' && startsWith('11.6', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-cuda11_6-static-without-deps-pre-cxx11
@@ -4143,6 +5363,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4181,7 +5413,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: seemethere/download-artifact-s3@v4
@@ -4262,6 +5494,18 @@ jobs:
           # Generate test script
           docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
           docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4299,7 +5543,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4343,6 +5587,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -4379,7 +5635,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -4405,11 +5661,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: rocm
-          gpu_arch_version: 5.0
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'rocm' == 'cuda' && startsWith('5.0', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-rocm5_0-shared-with-deps-pre-cxx11
@@ -4417,6 +5715,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4586,7 +5896,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4630,6 +5940,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -4666,7 +5988,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -4692,11 +6014,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: rocm
-          gpu_arch_version: 5.0
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'rocm' == 'cuda' && startsWith('5.0', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-rocm5_0-static-with-deps-pre-cxx11
@@ -4704,6 +6068,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -4873,7 +6249,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -4917,6 +6293,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -4953,7 +6341,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -4979,11 +6367,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: rocm
-          gpu_arch_version: 5.1.1
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'rocm' == 'cuda' && startsWith('5.1.1', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-rocm5_1_1-shared-with-deps-pre-cxx11
@@ -4991,6 +6421,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5160,7 +6602,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -5204,6 +6646,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -5240,7 +6694,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Checkout PyTorch
@@ -5266,11 +6720,53 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: builder
-      - name: Build Linux binary
-        uses: ./.github/actions/linux-binary-build
-        with:
-          gpu_arch_type: rocm
-          gpu_arch_version: 5.1.1
+      - name: Set BUILD_SPLIT_CUDA
+        if: ${{ 'rocm' == 'cuda' && startsWith('5.1.1', '11') }}
+        shell: bash
+        run: |
+          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+      - name: Pull Docker image
+        run: |
+          retry () {
+              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
+          }
+          retry docker pull "${DOCKER_IMAGE}"
+      - name: Build PyTorch binary
+        run: |
+          set -x
+          mkdir -p artifacts/
+          container_name=$(docker run \
+            -e BINARY_ENV_FILE \
+            -e BUILDER_ROOT \
+            -e BUILD_ENVIRONMENT \
+            -e BUILD_SPLIT_CUDA \
+            -e DESIRED_CUDA \
+            -e DESIRED_DEVTOOLSET \
+            -e DESIRED_PYTHON \
+            -e GITHUB_ACTIONS \
+            -e GPU_ARCH_TYPE \
+            -e GPU_ARCH_VERSION \
+            -e LIBTORCH_VARIANT \
+            -e PACKAGE_TYPE \
+            -e PYTORCH_FINAL_PACKAGE_DIR \
+            -e PYTORCH_ROOT \
+            -e SKIP_ALL_TESTS \
+            --tty \
+            --detach \
+            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
+            -v "${GITHUB_WORKSPACE}/builder:/builder" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w / \
+            "${DOCKER_IMAGE}"
+          )
+          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/libtorch/build.sh"
+      - name: Chown artifacts
+        if: always()
+        shell: bash
+        run: |
+          # Ensure the working directory gets chowned back to the current user
+          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
       - uses: seemethere/upload-artifact-s3@v5
         with:
           name: libtorch-rocm5_1_1-static-with-deps-pre-cxx11
@@ -5278,6 +6774,18 @@ jobs:
           if-no-files-found: error
           path:
             ${{ runner.temp }}/artifacts/*
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/
         # Always hold for active ssh sessions
@@ -5447,7 +6955,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -5491,6 +6999,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
