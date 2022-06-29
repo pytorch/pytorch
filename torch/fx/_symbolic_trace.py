@@ -381,7 +381,7 @@ class Tracer(TracerBase):
         if self.submodule_paths:
             path = self.submodule_paths.get(mod)
             if path is None:
-                raise NameError(f'module {mod._get_name()} is not installed as a submodule')
+                raise NameError(f"module {mod._get_name()} is not installed as a submodule")
             assert isinstance(path, str)
             return path
         # O(N^2) fallback in the case that we didn't store the submodule
@@ -390,7 +390,7 @@ class Tracer(TracerBase):
             for n, p in self.root.named_modules():
                 if mod is p:
                     return n
-            raise NameError(f'module {mod._get_name()} is not installed as a submodule')
+            raise NameError(f"module {mod._get_name()} is not installed as a submodule")
 
     @compatibility(is_backward_compatible=True)
     def call_module(
