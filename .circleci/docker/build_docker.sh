@@ -51,7 +51,7 @@ if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
   # Only push if docker image doesn't exist already.
   # ECR image tags are immutable so this will avoid pushing if only just testing if the docker jobs work
   # NOTE: The only workflow that should push these images should be the docker-builds.yml workflow
-  if ! docker manifest inspect "${DOCKER_IMAGE}" >/dev/null 2>/dev/null; then
+  if ! docker manifest inspect "${image}:${tag}" >/dev/null 2>/dev/null; then
     docker push "${image}:${tag}"
   fi
 fi
