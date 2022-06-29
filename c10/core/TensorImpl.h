@@ -20,7 +20,6 @@
 #include <c10/util/irange.h>
 #include <c10/util/python_stub.h>
 #include <c10/util/safe_numerics.h>
-#include <iostream>
 
 #include <algorithm>
 #include <atomic>
@@ -553,9 +552,17 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_default();
   }
 
+  // TODO: make it non-virtual after a change to XLA
   virtual c10::SymIntArrayRef sym_sizes() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
+      return sym_sizes_custom();
+    }
     return sym_sizes_default();
   }
+
+  virtual c10::SymIntArrayRef sym_sizes_custom() const;
 
   /**
    * Return a reference to the strides of this tensor.  This reference remains
@@ -663,6 +670,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         sizes_and_strides_.size());
   }
 
+  inline c10::SymIntArrayRef sym_sizes_default() const {
+    return c10::SymIntArrayRef(
+        reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()),
+        sizes_and_strides_.size());
+  }
+
  protected:
   /**
    * Customization points for the functions above.  sizes_strides_policy_
@@ -685,12 +698,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
   }
   virtual IntArrayRef sizes_custom() const;
-  virtual c10::SymIntArrayRef sym_sizes_custom() const;
   virtual Device device_custom() const;
+  virtual Layout layout_custom() const;
 
   virtual int64_t dim_custom() const;
   virtual int64_t numel_custom() const;
-  virtual Layout layout_custom() const;
 
   // These are factored into separate functions in case subclasses
   // want to use them
@@ -702,11 +714,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return is_channels_last_3d_contiguous_;
     }
     return is_contiguous_;
-  }
-  inline c10::SymIntArrayRef sym_sizes_default() const {
-    return c10::SymIntArrayRef(
-        reinterpret_cast<const c10::SymInt*>(sizes_and_strides_.sizes_data()),
-        sizes_and_strides_.size());
   }
   inline int64_t dim_default() const {
     return sizes_and_strides_.size();
@@ -959,7 +966,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   int64_t get_device() const {
-    std::cout << "get_device()\n";
     if (C10_UNLIKELY(custom_device_)) {
       return device_custom().index();
     }
@@ -967,7 +973,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Device device() const {
-    std::cout << "TensorImpl.h; device\n";
     if (C10_UNLIKELY(custom_device_)) {
       return device_custom();
     }
@@ -975,17 +980,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Layout layout() const {
+    if (C10_UNLIKELY(custom_layout_)) {
+      return layout_custom();
+    }
+
     // NB: This method is not virtual and avoid dispatches for perf.
     // strided is also the most common layout type, so we check for
     // strided case first.
     // This keyset must also be kept in sync with the logic in
     // is_sparse() / is_sparse_csr() / is_mkldnn()
-    std::cout << "in layout!\n";
-    if (C10_UNLIKELY(custom_layout_)) {
-      std::cout << "custom layout!\n";
-      return layout_custom();
-    }
-
     constexpr auto sparse_and_sparsecsr_and_mkldnn_ks =
         c10::sparse_ks | c10::sparse_csr_ks | c10::mkldnn_ks;
     if (!key_set_.has_any(sparse_and_sparsecsr_and_mkldnn_ks)) {
@@ -998,7 +1001,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       // better performance. However, when tensor's layout depends,
       // say, on tensor attributes, one must use this execution path
       // where the corresponding tensor impl class overwrites virtual
-      // layout_custom() method.
+      // layout_impl() method.
       //
       // TODO: implement layout() as native function/method so that
       // __torch_dispatch__ users will be able to redefine the

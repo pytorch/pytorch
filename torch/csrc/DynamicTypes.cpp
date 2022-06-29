@@ -14,7 +14,6 @@
 
 #include <ATen/ATen.h>
 
-#include <iostream>
 #include <array>
 #include <memory>
 #include <sstream>
@@ -67,13 +66,10 @@ THPDtype* getTHPDtype(at::ScalarType scalarType) {
 }
 
 THPLayout* getTHPLayout(at::Layout layout) {
-  std::cout << "getTHPLayout step 1\n";
   auto thp_layout = layout_registry[static_cast<int>(layout)];
-  std::cout << "getTHPLayout step 2\n";
   if (!thp_layout) {
     throw std::invalid_argument("unsupported at::Layout");
   }
-  std::cout << "getTHPLayout step 3\n";
   return thp_layout;
 }
 

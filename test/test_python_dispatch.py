@@ -1764,7 +1764,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
     def test_layout_slow_path(self):
         for use_wrapper_subclass in [True, False]:
-            # data = torch.randn(6, 2)
+            data = torch.randn(6, 2)
 
             class LayoutNotImplemented(torch.Tensor):
                 @staticmethod
@@ -1773,7 +1773,6 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
-                    print ("dispatch..", func, func.overloadpacket, func.overloadpacket == torch.ops.prim.layout)
                     return NotImplemented
 
             class LayoutCustomReturn(torch.Tensor):
@@ -1784,7 +1783,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.prim.layout:
-                        return torch.torch.strided
+                        return torch.sparse_csr
                     return NotImplemented
 
             class LayoutDefaultReturn(torch.Tensor):
@@ -1798,18 +1797,16 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
                         return data.layout
                     return NotImplemented
 
-            print ("wrapper?", use_wrapper_subclass)
             err_msg = "no implementation found for 'torch.ops.prim.layout'"
             e = LayoutNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
-            # with self.assertRaisesRegex(TypeError, err_msg):
-            print ("... aboutta")
-            e.layout
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.layout
 
-            # e = LayoutCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
-            # self.assertEqual(e.layout, torch.sparse_csr)
+            e = LayoutCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.layout, torch.sparse_csr)
 
-            # e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
-            # self.assertEqual(e.layout, torch.strided)
+            e = LayoutDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
+            self.assertEqual(e.layout, torch.strided)
 
 if __name__ == '__main__':
     run_tests()

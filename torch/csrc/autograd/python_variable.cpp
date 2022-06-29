@@ -106,7 +106,6 @@ std::pair<py::object, py::dict> parseIValuesToPyArgsKwargs(
   auto schemaAwareToPyObject = [&](int64_t idx) -> py::object {
     const auto& arg = schema.arguments()[idx];
     auto match = [&](c10::TypeKind kind) {
-      std::cout << "schemaAwareToPYObject\n";
       const auto& t = arg.real_type();
       if (t->kind() == kind)
         return true;
@@ -1372,28 +1371,21 @@ static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
 }
 
 static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
-  std::cout << "in THPVariable_Layout \n";
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
-    std::cout << "has torch function\n";
     auto x = handle_torch_function_getter(self, "layout");
-    std::cout << "finishing has_torch_function\n";
     return x;
     // return handle_torch_function_getter(self, "layout");
   }
   // return THPLayout_New(THPVariable_Unpack(self).layout(), "torch.strided");
-  std::cout << "THPVariable_Layout step 1\n";
   auto& self_ = THPVariable_Unpack(self);
-  std::cout << "THPVariable_Layout step 2\n";
   return torch::autograd::utils::wrap(torch::getTHPLayout(self_.layout()));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPVariable_device(THPVariable* self, void* unused) {
-  std::cout << "in THPVariable_device \n";
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
-    std::cout << "has torch function\n";
     return handle_torch_function_getter(self, "device");
   }
   return THPDevice_New(THPVariable_Unpack(self).device());
@@ -2127,7 +2119,6 @@ py::object torchDispatchFromTensorImpl(
       module_name,
       TorchFunctionName::TorchDispatch);
   
-  std::cout << "x from torchDispatchFromTensorImpl" << x << "\n";
   
   return py::reinterpret_steal<py::object>(x);
 
@@ -2316,7 +2307,6 @@ c10::Device concrete_device_fn(
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
-  std::cout << "device step 1\n";
   auto out = torchDispatchFromTensorImpl(
       self,
       "device",
@@ -2327,7 +2317,6 @@ c10::Device concrete_device_fn(
           .attr("default")
           .ptr(),
       "torch.ops.prim");
-  std::cout << "device step 2\n";
 
   return toDevice(out.ptr());
 }
@@ -2417,7 +2406,6 @@ c10::Layout concrete_layout_fn(
   pybind11::gil_scoped_acquire gil;
   at::impl::MaybeSetTLSOnEntryGuard guard;
 
-  std::cout << "concrete layout step 1\n";
   auto out = torchDispatchFromTensorImpl(
       self,
       "layout",
@@ -2428,7 +2416,6 @@ c10::Layout concrete_layout_fn(
           .attr("default")
           .ptr(),
       "torch.ops.prim");
-  std::cout << "concrete layout step 2\n";
 
   return toLayout(out.ptr());
 }
