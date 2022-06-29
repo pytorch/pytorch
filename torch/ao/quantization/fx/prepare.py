@@ -16,10 +16,11 @@ from ..quantize import (
 )
 from ..observer import (
     ObserverBase,
-    PlaceholderObserver,
 )
 from ..qconfig import (
     _partial_wrapper_equals,
+    float16_dynamic_qconfig,
+    float16_static_qconfig,
     is_reuse_input_qconfig,
     QConfigAny,
 )
@@ -1330,7 +1331,8 @@ def _validate_fixed_qparams_qconfigs(model: GraphModule, qconfig_map: Dict[str, 
     """
     # TODO: handle fp16 qconfigs properly
     allowed_observer_ctrs = [
-        PlaceholderObserver.with_args(dtype=torch.float16)
+        float16_dynamic_qconfig.activation,
+        float16_static_qconfig.activation,
     ]
     for node in model.graph.nodes:
         if node.target in _FIXED_QPARAMS_OP_TO_OBSERVER:
