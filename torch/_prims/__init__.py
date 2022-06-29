@@ -2145,7 +2145,7 @@ copy_to = _make_prim(
 
 
 def _resize_meta(a: TensorLikeType, shape: ShapeType):
-    return TensorMeta(a, shape=shape, strides=utils.make_contiguous_strides_for(shape))
+    return a.resize_(shape)
 
 
 def _resize_aten(a: Tensor, shape: ShapeType) -> Tensor:
