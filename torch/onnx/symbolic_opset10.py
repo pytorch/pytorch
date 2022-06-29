@@ -626,8 +626,8 @@ class Quantized:
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
-    @symbolic_helper.parse_args("v", "i", "v", "v")
     @staticmethod
+    @symbolic_helper.parse_args("v", "i", "v", "v")
     def cat(
         g,
         q_inputs: _C.Value,
