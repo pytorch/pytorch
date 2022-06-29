@@ -1,40 +1,72 @@
 from collections import deque
 import re
 
+from torch.profiler import profile
+
 
 class Pattern:
+
+    def __init__(self, prof: profile):
+        self.prof = prof
+        self.description = "Please specify a description for pattern"
+        assert prof.profiler is not None and prof.profiler.kineto_results is not None
+        self.event_tree = prof.profiler.kineto_results.experimental_event_tree(
+        )
+
+    def report(self, event):
+        msg = f"{event.name()}\n{self.description}\n{source_code_location(event)}"
+        return msg
 
     def match(self, event):
         raise NotImplementedError
 
+    def matched_events(self):
+        matched_events = []
+        for event in EventTreeDFS(self.event_tree):
+            if self.match(event):
+                matched_events.append(event)
+        return matched_events
+
+    def root_of(self, event):
+        while event.parent:
+            event = event.parent
+        return event
+
+    def siblings_of(self, event):
+        if event.parent:
+            return event.parent.children
+        else:
+            return self.event_tree
+
+    def next_of(self, event):
+        siblings = self.siblings_of(event)
+        index = siblings.index(event)
+        if index + 1 < len(siblings):
+            return siblings[index + 1]
+        else:
+            return None
+
+    def prev_of(self, event):
+        siblings = self.siblings_of(event)
+        index = siblings.index(event)
+        if index - 1 >= 0:
+            return siblings[index - 1]
+        else:
+            return None
+
+
+# Patterns
+
 
 class NamePattern(Pattern):
 
-    def __init__(self, name):
+    def __init__(self, prof: profile, name: str):
+        super().__init__(prof)
+        self.description = f"Matched Name Event: {name}"
         self.name = name
 
     def match(self, event):
         return re.search(self.name, event.name()) is not None
-
-
-def and_(*args):
-
-    class CompositePattern(Pattern):
-
-        def match(self, event):
-            return all(pattern.match(event) for pattern in args)
-
-    return CompositePattern()
-
-
-def or_(*args):
-
-    class CompositePattern(Pattern):
-
-        def match(self, event):
-            return any(pattern.match(event) for pattern in args)
-
-    return CompositePattern()
 
 
 def EventTreeDFS(event_tree):
@@ -46,10 +78,11 @@ def EventTreeDFS(event_tree):
             stack.append(child_event)
 
 
-# TODO: Think about How can we reuse the same pattern for multiple events?
-def find_anti_pattern(prof, anti_pattern):
-    for event in EventTreeDFS(
-            prof.kineto_results.experimental_event_tree()):
-        for pattern, description in anti_pattern:
-            if pattern.match(event):
-                print(f"{event.name()} {description}")
+def source_code_location(event):
+    while (event is not None):
+        match = re.search(r"\.py\(.*\)", event.name())
+        if (match is None):
+            event = event.parent
+            continue
+        return event.name()
+    return "No source code location found"
