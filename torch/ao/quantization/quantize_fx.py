@@ -181,13 +181,13 @@ def _prepare_fx(
     is_qat: bool,
     example_inputs: Tuple[Any, ...],
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-    equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
+    _equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
     is_standalone_module: bool = False,
 ) -> ObservedGraphModule:
     r""" Internal helper function for prepare_fx
     Args:
-      `model`, `qconfig_mapping`, `prepare_custom_config`, `equalization_config`:
+      `model`, `qconfig_mapping`, `prepare_custom_config`, `_equalization_config`:
       see docs for :func:`~torch.ao.quantization.prepare_fx`
       `is_standalone_module`: a boolean flag indicates whether we are
       quantizing a standalone module or not, a standalone module
@@ -198,8 +198,8 @@ forward graph of the parent module,
     """
     if prepare_custom_config is None:
         prepare_custom_config = PrepareCustomConfig()
-    if equalization_config is None:
-        equalization_config = QConfigMapping()
+    if _equalization_config is None:
+        _equalization_config = QConfigMapping()
 
     if isinstance(prepare_custom_config, Dict):
         warnings.warn(
@@ -238,7 +238,7 @@ forward graph of the parent module,
         tracer.node_name_to_scope,
         example_inputs=example_inputs,
         prepare_custom_config=prepare_custom_config,
-        equalization_config=equalization_config,
+        _equalization_config=_equalization_config,
         backend_config_dict=backend_config_dict,
         is_standalone_module=is_standalone_module,
     )  # type: ignore[operator]
@@ -337,7 +337,7 @@ def prepare_fx(
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
     example_inputs: Tuple[Any, ...],
     prepare_custom_config: Union[PrepareCustomConfig, Dict[str, Any], None] = None,
-    equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
+    _equalization_config: Optional[Union[QConfigMapping, Dict[str, Any]]] = None,
     backend_config_dict: Optional[Dict[str, Any]] = None,
 ) -> ObservedGraphModule:
     r""" Prepare a model for post training static quantization
@@ -379,7 +379,7 @@ def prepare_fx(
                   .set_output_quantized_indexes([0]) \
                   .set_preserved_attributes(["attr1", "attr2"])
 
-      * `equalization_config`: config for specifying how to perform equalization on the model
+      * `_equalization_config`: config for specifying how to perform equalization on the model
 
       * `backend_config_dict`: a dictionary that specifies how operators are quantized
          in a backend, this includes how the operaetors are observed,
@@ -417,7 +417,7 @@ def prepare_fx(
         False,  # is_qat
         example_inputs,
         prepare_custom_config,
-        equalization_config,
+        _equalization_config,
         backend_config_dict,
     )
 
