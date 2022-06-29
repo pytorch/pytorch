@@ -25,6 +25,26 @@ def inplace_wrapper(fn: Callable) -> Callable:
 
     return wrapped_fn
 
+def pass_result_wrapper(fn: Callable) -> Callable:
+    """
+    Temporary wrapper for passes which currently do not return a PassResult.
+    This wrapper makes them return a PassResult containing the modified object
+    and True for the "modified" flag.
+
+    Args:
+        fn (Callable[Module, Any])
+
+    Returns:
+        wrapped_fn (Callable[Module, PassResult])
+    """
+
+    @wraps(fn)
+    def wrapped_fn(gm):
+        gm = fn(gm)
+        return PassResult(gm, True)
+
+    return wrapped_fn
+
 
 def _validate_pass_schedule_constraint(
     constraint: Callable[[Callable, Callable], bool], passes: List[Callable]
