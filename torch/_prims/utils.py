@@ -23,6 +23,11 @@ if torch.cuda.is_available():
         torch.long: DataType.Int,
         torch.int: DataType.Int32,
         torch.bool: DataType.Bool,
+        # Python scalars
+        complex: DataType.ComplexDouble,
+        float: DataType.Double,
+        int: DataType.Int,
+        bool: DataType.Bool,
     }
 else:
     _torch_dtype_to_nvfuser_dtype_map = {}
