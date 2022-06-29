@@ -20610,7 +20610,7 @@ python_ref_db = [
         "_refs.fmod",
         torch_opinfo_name="fmod",
         rhs_make_tensor_kwargs={'exclude_zero': True},
-        supports_rhs_python_scalar=False,
+        supports_rhs_python_scalar=True,
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.bfloat16,), device_type='cpu'),
