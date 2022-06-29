@@ -47,7 +47,7 @@ Tensor spdiags_impl(
   }
   TORCH_CHECK(
       offsets_1d.scalar_type() == at::kLong,
-      "Offset Tensor must has dtype Long but got ",
+      "Offset Tensor must have dtype Long but got ",
       offsets_1d.scalar_type());
 
   TORCH_CHECK(
