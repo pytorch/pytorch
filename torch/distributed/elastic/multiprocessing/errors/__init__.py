@@ -65,7 +65,6 @@ from torch.distributed.elastic.utils.logging import get_logger
 from .error_handler import ErrorHandler  # noqa: F401
 from .handlers import get_error_handler  # noqa: F401
 
-
 log = get_logger()
 
 
@@ -75,7 +74,6 @@ _EMPTY_ERROR_DATA = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
 T = TypeVar("T")
-
 
 @dataclass
 class ProcessFailure:
