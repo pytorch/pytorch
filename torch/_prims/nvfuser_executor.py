@@ -45,7 +45,10 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     # PROTOTYPE nvfuser executor
     # Everything in the graph must support nvfuser
     for node in gm.graph.nodes:
-        if node.op == "call_function" and getattr(node.target, "impl_nvfuser", None) is None:
+        if (
+            node.op == "call_function"
+            and getattr(node.target, "impl_nvfuser", None) is None
+        ):
             raise ValueError(
                 "All call_function nodes in the graph must support nvfuser. "
                 f"Node {node} does not support nvfuser"
@@ -103,7 +106,9 @@ def nvfuser_execute(gm: GraphModule, *args):
     fusion, unflatten_spec = make_nvfuser_fusion(gm, *nv_template_args)
 
     # Inputs to fusion.execute correspond to the same template/symbolic inputs marked with `fd.add_input`
-    concrete_fusion_inputs = tuple(arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number)))
+    concrete_fusion_inputs = tuple(
+        arg for arg in flat_args if isinstance(arg, (torch.Tensor, Number))
+    )
 
     return tree_unflatten(
         fusion.execute(concrete_fusion_inputs),
