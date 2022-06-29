@@ -65,6 +65,7 @@ jobs:
       docker-image-name: pytorch-linux-bionic-rocm5.1-py3.7
 
   linux-bionic-rocm5_1-py3_7-distributed-test:
+    if: false # https://github.com/pytorch/pytorch/issues/80529
     name: linux-bionic-rocm5.1-py3.7-distributed
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-bionic-rocm5_1-py3_7-distributed-build
