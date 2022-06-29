@@ -30,6 +30,7 @@ __all__ = [
     "hardtanh",
     "hinge_embedding_loss",
     "margin_ranking_loss",
+    "mse_loss",
     "mish",
     "relu",
     "selu",
@@ -297,6 +298,22 @@ def _check_reduction_value(reduction: str):
         raise ValueError("{} is not a valid value for reduction".format(reduction))
 
 
+def _get_string_reduction_arg(
+    size_average: Optional[bool], reduce: Optional[bool]
+) -> str:
+    if size_average is None:
+        size_average = True
+    if reduce is None:
+        reduce = True
+    if size_average and reduce:
+        ret = "mean"
+    elif reduce:
+        ret = "sum"
+    else:
+        ret = "none"
+    return ret
+
+
 def margin_ranking_loss(
     input1: TensorLikeType,
     input2: TensorLikeType,
@@ -321,6 +338,22 @@ def margin_ranking_loss(
     mul_target_input = refs.mul(neg_target, input_diff)
     add_margin = refs.add(mul_target_input, margin)
     loss = refs.maximum(add_margin, 0)
+    return _apply_loss_reduction(loss, reduction)
+
+
+def mse_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO: raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average, reduce)
+    _check_reduction_value(reduction)
+    loss = torch.pow(input - target, 2)
     return _apply_loss_reduction(loss, reduction)
 
 
