@@ -2178,7 +2178,8 @@ static inline C10_HOST_DEVICE T calc_log_ndtr(T x) {
 }
 
 template<typename T>
-static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
+static inline C10_HOST_DEVICE
+T airy_ai_forward(T x) {
     static const T AN[] = {
             +3.46538101525629032477e-01,
             +1.20075952739645805542e+01,
@@ -2354,10 +2355,29 @@ static inline C10_HOST_DEVICE T airy_ai_forward(T x) {
     }
 
     return ai;
-} // T airy_ai(T x)
+} // T airy_ai_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
+static inline C10_HOST_DEVICE
+T airy_bi_forward(T x) {
+    return x;
+} // T airy_bi_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T airy_derivative_ai_forward(T x) {
+    return x;
+} // T airy_derivative_ai_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T airy_derivative_bi_forward(T x) {
+    return x;
+} // T airy_derivative_bi_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T bessel_j0_forward(T x) {
     static const T PP[] = {
             +7.96936729297347051624e-04,
             +8.28352392107440799803e-02,
@@ -2466,10 +2486,11 @@ static inline C10_HOST_DEVICE T bessel_j0_forward(T x) {
     }
 
     return (pp / pq * std::cos(x - T(0.785398163397448309615660845819875721)) - T(5.0) / x * (qp / qq) * std::sin(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
-} // bessel_j0_forward(T x)
+} // T bessel_j0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
+static inline C10_HOST_DEVICE
+T bessel_j1_forward(T x) {
     static const T PP[] = {
             +7.62125616208173112003e-04,
             +7.31397056940917570436e-02,
@@ -2574,10 +2595,11 @@ static inline C10_HOST_DEVICE T bessel_j1_forward(T x) {
     }
 
     return (pp / pq * std::cos(x - T(2.356194490192344928846982537459627163)) - T(5.0) / x * (qp / qq) * std::sin(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
-} // bessel_j1_forward(T x)
+} // T bessel_j1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
+static inline C10_HOST_DEVICE
+T bessel_y0_forward(T x) {
     static const T PP[] = {
             +7.96936729297347051624e-04,
             +8.28352392107440799803e-02,
@@ -2689,10 +2711,11 @@ static inline C10_HOST_DEVICE T bessel_y0_forward(T x) {
     }
 
     return (pp / pq * std::sin(x - T(0.785398163397448309615660845819875721)) + T(5.0) / x * (qp / qq) * std::cos(x - T(0.785398163397448309615660845819875721))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
-} // bessel_y0_forward(T x)
+} // T bessel_y0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
+static inline C10_HOST_DEVICE
+T bessel_y1_forward(T x) {
     static const T PP[] = {
             +7.62125616208173112003e-04,
             +7.31397056940917570436e-02,
@@ -2803,10 +2826,11 @@ static inline C10_HOST_DEVICE T bessel_y1_forward(T x) {
     }
 
     return (pp / pq * std::sin(x - T(2.356194490192344928846982537459627163)) + T(5.0) / x * (qp / qq) * std::cos(x - T(2.356194490192344928846982537459627163))) * T(0.797884560802865355879892119868763737) / std::sqrt(x);
-} // bessel_y1_forward(T x)
+} // T bessel_y1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T chebyshev_polynomial_t_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -2842,15 +2866,16 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, int64_t n) {
     }
 
     return r;
-} // chebyshev_polynomial_t_forward(T x, int64_t n)
+} // T chebyshev_polynomial_t_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
 static inline C10_HOST_DEVICE T chebyshev_polynomial_t_forward(T x, T n) {
     return chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
-} // chebyshev_polynomial_t_forward(T x, T n)
+} // T chebyshev_polynomial_t_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T chebyshev_polynomial_u_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -2890,15 +2915,17 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, int64_t n) {
     }
 
     return r;
-} // chebyshev_polynomial_u_forward(T x, int64_t n)
+} // T chebyshev_polynomial_u_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_u_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T chebyshev_polynomial_u_forward(T x, T n) {
     return chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
-} // chebyshev_polynomial_u_forward(T x, T n)
+} // T chebyshev_polynomial_u_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T chebyshev_polynomial_v_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -2946,15 +2973,17 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, int64_t n) {
     }
 
     return r;
-} // chebyshev_polynomial_v_forward(T x, int64_t n)
+} // T chebyshev_polynomial_v_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_v_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T chebyshev_polynomial_v_forward(T x, T n) {
     return chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
-} // chebyshev_polynomial_v_forward(T x, T n)
+} // T chebyshev_polynomial_v_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T chebyshev_polynomial_w_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3006,15 +3035,35 @@ static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, int64_t n) {
     }
 
     return r;
-} // chebyshev_polynomial_w_forward(T x, int64_t n)
+} // T chebyshev_polynomial_w_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T chebyshev_polynomial_w_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T chebyshev_polynomial_w_forward(T x, T n) {
     return chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
-} // chebyshev_polynomial_w_forward(T x, T n)
+} // T chebyshev_polynomial_w_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T complete_elliptic_integral_e_forward(T x) {
+    return x;
+} // T complete_elliptic_integral_e_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T complete_elliptic_integral_k_forward(T x) {
+    return x;
+} // T complete_elliptic_integral_k_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T gamma_sign_forward(T x) {
+    return x;
+} // T gamma_sign_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T hermite_polynomial_h_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3038,15 +3087,17 @@ static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, int64_t n) {
     }
 
     return r;
-} // hermite_polynomial_h_forward(T x, int64_t n)
+} // T hermite_polynomial_h_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T hermite_polynomial_h_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T hermite_polynomial_h_forward(T x, T n) {
     return hermite_polynomial_h_forward(x, static_cast<int64_t>(n));
-} // hermite_polynomial_h_forward(T x, T n)
+} // T hermite_polynomial_h_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T hermite_polynomial_he_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3073,22 +3124,652 @@ static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, int64_t n) {
 } // hermite_polynomial_he_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T hermite_polynomial_he_forward(T x, T n) {
     return hermite_polynomial_he_forward(x, static_cast<int64_t>(n));
-} // hermite_polynomial_he_forward(T x, T n)
+} // T hermite_polynomial_he_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T hyperbolic_integral_chi_forward(T x) {
-    return x;
+static inline C10_HOST_DEVICE
+T hyperbolic_integral_chi_forward(T x) {
+    static const T S1[] = {
+            +1.83889230173399459482e-17,
+            -9.55485532279655569575e-17,
+            +2.04326105980879882648e-16,
+            +1.09896949074905343022e-15,
+            -1.31313534344092599234e-14,
+            +5.93976226264314278932e-14,
+            -3.47197010497749154755e-14,
+            -1.40059764613117131000e-12,
+            +9.49044626224223543299e-12,
+            -1.61596181145435454033e-11,
+            -1.77899784436430310321e-10,
+            +1.35455469767246947469e-09,
+            -1.03257121792819495123e-09,
+            -3.56699611114982536845e-08,
+            +1.44818877384267342057e-07,
+            +7.82018215184051295296e-07,
+            -5.39919118403805073710e-06,
+            -3.12458202168959833422e-05,
+            +8.90136741950727517826e-05,
+            +2.02558474743846862168e-03,
+            +2.96064440855633256972e-02,
+            +1.11847751047257036625e+00,
+    };
+
+    static const T S2[] = {
+            -1.05311574154850938805e-17,
+            +2.62446095596355225821e-17,
+            +8.82090135625368160657e-17,
+            -3.38459811878103047136e-16,
+            -8.30608026366935789136e-16,
+            +3.93397875437050071776e-15,
+            +1.01765565969729044505e-14,
+            -4.21128170307640802703e-14,
+            -1.60818204519802480035e-13,
+            +3.34714954175994481761e-13,
+            +2.72600352129153073807e-12,
+            +1.66894954752839083608e-12,
+            -3.49278141024730899554e-11,
+            -1.58580661666482709598e-10,
+            -1.79289437183355633342e-10,
+            +1.76281629144264523277e-09,
+            +1.69050228879421288846e-08,
+            +1.25391771228487041649e-07,
+            +1.16229947068677338732e-06,
+            +1.61038260117376323993e-05,
+            +3.49810375601053973070e-04,
+            +1.28478065259647610779e-02,
+            +1.03665722588798326712e+00,
+    };
+
+    static const T C1[] = {
+            -8.12435385225864036372e-18,
+            +2.17586413290339214377e-17,
+            +5.22624394924072204667e-17,
+            -9.48812110591690559363e-16,
+            +5.35546311647465209166e-15,
+            -1.21009970113732918701e-14,
+            -6.00865178553447437951e-14,
+            +7.16339649156028587775e-13,
+            -2.93496072607599856104e-12,
+            -1.40359438136491256904e-12,
+            +8.76302288609054966081e-11,
+            -4.40092476213282340617e-10,
+            -1.87992075640569295479e-10,
+            +1.31458150989474594064e-08,
+            -4.75513930924765465590e-08,
+            -2.21775018801848880741e-07,
+            +1.94635531373272490962e-06,
+            +4.33505889257316408893e-06,
+            -6.13387001076494349496e-05,
+            -3.13085477492997465138e-04,
+            +4.97164789823116062801e-04,
+            +2.64347496031374526641e-02,
+            +1.11446150876699213025e+00,
+    };
+
+    static const T C2[] = {
+            +8.06913408255155572081e-18,
+            -2.08074168180148170312e-17,
+            -5.98111329658272336816e-17,
+            +2.68533951085945765591e-16,
+            +4.52313941698904694774e-16,
+            -3.10734917335299464535e-15,
+            -4.42823207332531972288e-15,
+            +3.49639695410806959872e-14,
+            +6.63406731718911586609e-14,
+            -3.71902448093119218395e-13,
+            -1.27135418132338309016e-12,
+            +2.74851141935315395333e-12,
+            +2.33781843985453438400e-11,
+            +2.71436006377612442764e-11,
+            -2.56600180000355990529e-10,
+            -1.61021375163803438552e-09,
+            -4.72543064876271773512e-09,
+            -3.00095178028681682282e-09,
+            +7.79387474390914922337e-08,
+            +1.06942765566401507066e-06,
+            +1.59503164802313196374e-05,
+            +3.49592575153777996871e-04,
+            +1.28475387530065247392e-02,
+            +1.03665693917934275131e+00,
+    };
+
+    T a;
+    T b;
+    T c;
+    T k;
+    T m;
+    T p;
+    T q;
+    T s;
+
+    int16_t maximum_iterations;
+
+    if (x < T(0.0)) {
+        x = -x;
+    }
+
+    if (x == T(0.0)) {
+        return -std::numeric_limits<T>::infinity();
+    }
+
+    if (x >= T(8.0)) {
+        if (x < T(18.0)) {
+            a = (T(576.0) / x - T(52.0)) / T(10.0);
+
+            const T *coefficients = C1;
+
+            T chebyshev_0 = *coefficients++;
+            T chebyshev_1 = T(0.0);
+            T chebyshev_2;
+
+            uint8_t index = 22;
+
+            do {
+                chebyshev_2 = chebyshev_1;
+                chebyshev_1 = chebyshev_0;
+
+                chebyshev_0 = a * chebyshev_1 - chebyshev_2 + *coefficients++;
+            } while (index--);
+
+            return T(0.57721566490153286061) + std::log(x) + std::exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2));
+        }
+
+        if (x <= T(88.0)) {
+            a = (T(6336.0) / x - T(212.0)) / T(70.0);
+
+            const T *coefficients = C2;
+
+            T chebyshev_0 = *coefficients++;
+            T chebyshev_1 = T(0.0);
+            T chebyshev_2;
+
+            uint8_t index = 23;
+
+            do {
+                chebyshev_2 = chebyshev_1;
+                chebyshev_1 = chebyshev_0;
+
+                chebyshev_0 = a * chebyshev_1 - chebyshev_2 + *coefficients++;
+            } while (index--);
+
+            return T(0.57721566490153286061) + std::log(x) + std::exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2));
+        }
+
+        if (x > T(1000.0)) {
+            return std::numeric_limits<T>::infinity();
+        }
+
+        m = std::pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+        if (m < T(50.0)) {
+            maximum_iterations = m;
+        } else {
+            maximum_iterations = 50;
+        }
+
+        p = T(1.0);
+        q = p;
+
+        for (int n = 0; n < maximum_iterations; n++) {
+            p = p * ((T(0.5) + n) * (T(1.0) + n) * (T(1.0) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+            q = q + p;
+
+            if (std::abs(p) < T(0.0000000000001) * std::abs(q) || p == 0) {
+                break;
+            }
+        }
+
+        if (std::abs(p) > T(0.0000000000001) * std::abs(q)) {
+            a = std::numeric_limits<T>::quiet_NaN();
+        } else {
+            a = q;
+        }
+
+        m = std::pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+        if (m < T(50.0)) {
+            maximum_iterations = m;
+        } else {
+            maximum_iterations = 50;
+        }
+
+        p = T(1.0);
+        q = p;
+
+        for (int n = 0; n < maximum_iterations; n++) {
+            p = p * ((T(1.0) + n) * (T(1.0) + n) * (T(1.5) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+            q = q + p;
+
+            if (std::abs(p) < T(0.0000000000001) * std::abs(q) || p == 0) {
+                break;
+            }
+        }
+
+        if (std::abs(p) > T(0.0000000000001) * std::abs(q)) {
+            b = std::numeric_limits<T>::quiet_NaN();
+        } else {
+            b = q;
+        }
+
+        return std::sinh(x) / x * a + std::cosh(x) / (x * x) * b;
+    }
+
+    if (x >= T(88.0)) {
+        if (x > T(1000.0)) {
+            return std::numeric_limits<T>::infinity();
+        }
+
+        m = std::pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+        if (m < T(50.0)) {
+            maximum_iterations = m;
+        } else {
+            maximum_iterations = 50;
+        }
+
+        p = T(1.0);
+        q = p;
+
+        for (int n = 0; n < maximum_iterations; n++) {
+            p = p * ((T(0.5) + n) * (T(1.0) + n) * (T(1.0) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+            q = q + p;
+
+            if (std::abs(p) < T(0.0000000000001) * std::abs(q) || p == 0) {
+                break;
+            }
+        }
+
+        if (std::abs(p) > T(0.0000000000001) * std::abs(q)) {
+            a = std::numeric_limits<T>::quiet_NaN();
+        } else {
+            a = q;
+        }
+
+        m = std::pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+        if (m < T(50.0)) {
+            maximum_iterations = m;
+        } else {
+            maximum_iterations = 50;
+        }
+
+        p = T(1.0);
+        q = p;
+
+        for (int n = 0; n < maximum_iterations; n++) {
+            p = p * ((T(1.0) + n) * (T(1.0) + n) * (T(1.5) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+            q = q + p;
+
+            if (std::abs(p) < T(0.0000000000001) * std::abs(q) || p == 0) {
+                break;
+            }
+        }
+
+        if (std::abs(p) > T(0.0000000000001) * std::abs(q)) {
+            b = std::numeric_limits<T>::quiet_NaN();
+        } else {
+            b = q;
+        }
+
+        return std::sinh(x) / x * a + std::cosh(x) / (x * x) * b;
+    }
+
+    a = T(1.0);
+    s = T(1.0);
+    c = T(0.0);
+    k = T(2.0);
+
+    do {
+        a = a * (x * x / k);
+        c = c + (a / k);
+        k = k + T(1.0);
+        a = a / k;
+        s = s + (a / k);
+        k = k + T(1.0);
+    } while (std::abs(a / s) > std::numeric_limits<T>::epsilon());
+
+    return T(0.57721566490153286061) + std::log(x) + c;
 } // T hyperbolic_integral_chi_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T hyperbolic_integral_shi_forward(T x) {
-    return x;
+static inline C10_HOST_DEVICE
+T hyperbolic_integral_shi_forward(T x) {
+    static const T S1[] = {
+            +1.83889230173399459482e-17,
+            -9.55485532279655569575e-17,
+            +2.04326105980879882648e-16,
+            +1.09896949074905343022e-15,
+            -1.31313534344092599234e-14,
+            +5.93976226264314278932e-14,
+            -3.47197010497749154755e-14,
+            -1.40059764613117131000e-12,
+            +9.49044626224223543299e-12,
+            -1.61596181145435454033e-11,
+            -1.77899784436430310321e-10,
+            +1.35455469767246947469e-09,
+            -1.03257121792819495123e-09,
+            -3.56699611114982536845e-08,
+            +1.44818877384267342057e-07,
+            +7.82018215184051295296e-07,
+            -5.39919118403805073710e-06,
+            -3.12458202168959833422e-05,
+            +8.90136741950727517826e-05,
+            +2.02558474743846862168e-03,
+            +2.96064440855633256972e-02,
+            +1.11847751047257036625e+00,
+    };
+
+    static const T S2[] = {
+            -1.05311574154850938805e-17,
+            +2.62446095596355225821e-17,
+            +8.82090135625368160657e-17,
+            -3.38459811878103047136e-16,
+            -8.30608026366935789136e-16,
+            +3.93397875437050071776e-15,
+            +1.01765565969729044505e-14,
+            -4.21128170307640802703e-14,
+            -1.60818204519802480035e-13,
+            +3.34714954175994481761e-13,
+            +2.72600352129153073807e-12,
+            +1.66894954752839083608e-12,
+            -3.49278141024730899554e-11,
+            -1.58580661666482709598e-10,
+            -1.79289437183355633342e-10,
+            +1.76281629144264523277e-09,
+            +1.69050228879421288846e-08,
+            +1.25391771228487041649e-07,
+            +1.16229947068677338732e-06,
+            +1.61038260117376323993e-05,
+            +3.49810375601053973070e-04,
+            +1.28478065259647610779e-02,
+            +1.03665722588798326712e+00,
+    };
+
+    static const T C1[] = {
+            -8.12435385225864036372e-18,
+            +2.17586413290339214377e-17,
+            +5.22624394924072204667e-17,
+            -9.48812110591690559363e-16,
+            +5.35546311647465209166e-15,
+            -1.21009970113732918701e-14,
+            -6.00865178553447437951e-14,
+            +7.16339649156028587775e-13,
+            -2.93496072607599856104e-12,
+            -1.40359438136491256904e-12,
+            +8.76302288609054966081e-11,
+            -4.40092476213282340617e-10,
+            -1.87992075640569295479e-10,
+            +1.31458150989474594064e-08,
+            -4.75513930924765465590e-08,
+            -2.21775018801848880741e-07,
+            +1.94635531373272490962e-06,
+            +4.33505889257316408893e-06,
+            -6.13387001076494349496e-05,
+            -3.13085477492997465138e-04,
+            +4.97164789823116062801e-04,
+            +2.64347496031374526641e-02,
+            +1.11446150876699213025e+00,
+    };
+
+    static const T C2[] = {
+            +8.06913408255155572081e-18,
+            -2.08074168180148170312e-17,
+            -5.98111329658272336816e-17,
+            +2.68533951085945765591e-16,
+            +4.52313941698904694774e-16,
+            -3.10734917335299464535e-15,
+            -4.42823207332531972288e-15,
+            +3.49639695410806959872e-14,
+            +6.63406731718911586609e-14,
+            -3.71902448093119218395e-13,
+            -1.27135418132338309016e-12,
+            +2.74851141935315395333e-12,
+            +2.33781843985453438400e-11,
+            +2.71436006377612442764e-11,
+            -2.56600180000355990529e-10,
+            -1.61021375163803438552e-09,
+            -4.72543064876271773512e-09,
+            -3.00095178028681682282e-09,
+            +7.79387474390914922337e-08,
+            +1.06942765566401507066e-06,
+            +1.59503164802313196374e-05,
+            +3.49592575153777996871e-04,
+            +1.28475387530065247392e-02,
+            +1.03665693917934275131e+00,
+    };
+
+    int16_t maximum_iterations;
+
+    T a;
+    T b;
+    T k;
+    T m;
+    T p;
+    T q;
+    T s;
+
+    int8_t sign = 0;
+
+    if (x < T(0.0)) {
+        sign = -1;
+        x = -x;
+    }
+
+    if (x == T(0.0)) {
+        return T(0.0);
+    }
+
+    if (x >= T(8.0)) {
+        if (x < T(18.0)) {
+            a = (T(576.0) / x - T(52.0)) / T(10.0);
+
+            T *coefficients = S1;
+
+            T chebyshev_0 = *coefficients++;
+            T chebyshev_1 = 0.0;
+            T chebyshev_2;
+
+            uint8_t index = 21;
+
+            do {
+                chebyshev_2 = chebyshev_1;
+                chebyshev_1 = chebyshev_0;
+
+                chebyshev_0 = a * chebyshev_1 - chebyshev_2 + *coefficients++;
+            } while (index--);
+
+            if (sign) {
+                return -(std::exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2)));
+            } else {
+                return +(std::exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2)));
+            }
+        }
+
+        if (x <= T(88.0)) {
+            a = (T(6336.0) / x - T(212.0)) / T(70.0);
+
+            T *coefficients = S2;
+
+            T chebyshev_0 = *coefficients++;
+            T chebyshev_1 = 0.0;
+            T chebyshev_2;
+
+            uint8_t index = 22;
+
+            do {
+                chebyshev_2 = chebyshev_1;
+                chebyshev_1 = chebyshev_0;
+
+                chebyshev_0 = a * chebyshev_1 - chebyshev_2 + *coefficients++;
+            } while (index--);
+
+            if (sign) {
+                return -(std::exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2)));
+            } else {
+                return +(std::exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2)));
+            }
+        }
+
+        if (x > T(1000.0)) {
+            if (sign) {
+                return -std::numeric_limits<T>::infinity();
+            } else {
+                return +std::numeric_limits<T>::infinity();
+            }
+        }
+
+        m = std::pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+        if (m < 50) {
+            maximum_iterations = m;
+        } else {
+            maximum_iterations = 50;
+        }
+
+        p = T(1.0);
+        q = p;
+
+        for (int n = 0; n < maximum_iterations; n++) {
+            p = p * ((T(0.5) + n) * (T(1.0) + n) * (T(1.0) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+            q = q + p;
+
+            if (std::abs(p) < T(0.0000000000001) * std::abs(q) || p == T(0.0)) {
+                break;
+            }
+        }
+
+        if (std::abs(p) > T(0.0000000000001) * std::abs(q)) {
+            a = std::numeric_limits<T>::quiet_NaN();
+        } else {
+            a = q;
+        }
+
+        m = std::pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+        if (m < 50) {
+            maximum_iterations = m;
+        } else {
+            maximum_iterations = 50;
+        }
+
+        p = T(1.0);
+        q = p;
+
+        for (int n = 0; n < maximum_iterations; n++) {
+            p = p * ((T(1.0) + n) * (T(1.0) + n) * (T(1.5) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+            q = q + p;
+
+            if (std::abs(p) < T(0.0000000000001) * std::abs(q) || p == T(0.0)) {
+                break;
+            }
+        }
+
+        if (std::abs(p) > T(0.0000000000001) * std::abs(q)) {
+            b = std::numeric_limits<T>::quiet_NaN();
+        } else {
+            b = q;
+        }
+
+        if (sign) {
+            return -(std::cosh(x) / x * a + std::sinh(x) / (x * x) * b);
+        } else {
+            return +(std::cosh(x) / x * a + std::sinh(x) / (x * x) * b);
+        }
+    }
+
+    if (x >= T(88.0)) {
+        if (x > T(1000.0)) {
+            if (sign) {
+                return -std::numeric_limits<T>::infinity();
+            } else {
+                return +std::numeric_limits<T>::infinity();
+            }
+        }
+
+        m = std::pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+        if (m < 50) {
+            maximum_iterations = m;
+        } else {
+            maximum_iterations = 50;
+        }
+
+        p = T(1.0);
+        q = p;
+
+        for (int n = 0; n < maximum_iterations; n++) {
+            p = p * ((T(0.5) + n) * (T(1.0) + n) * (T(1.0) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+            q = q + p;
+
+            if (std::abs(p) < T(0.0000000000001) * std::abs(q) || p == T(0.0)) {
+                break;
+            }
+        }
+
+        if (std::abs(p) > T(0.0000000000001) * std::abs(q)) {
+            a = std::numeric_limits<T>::quiet_NaN();
+        } else {
+            a = q;
+        }
+
+        m = std::pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+        if (m < 50) {
+            maximum_iterations = m;
+        } else {
+            maximum_iterations = 50;
+        }
+
+        p = T(1.0);
+        q = p;
+
+        for (int n = 0; n < maximum_iterations; n++) {
+            p = p * ((T(1.0) + n) * (T(1.0) + n) * (T(1.5) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+            q = q + p;
+
+            if (std::abs(p) < T(0.0000000000001) * std::abs(q) || p == T(0.0)) {
+                break;
+            }
+        }
+
+        if (std::abs(p) > T(0.0000000000001) * std::abs(q)) {
+            b = std::numeric_limits<T>::quiet_NaN();
+        } else {
+            b = q;
+        }
+
+        if (sign) {
+            return -(std::cosh(x) / x * a + std::sinh(x) / (x * x) * b);
+        } else {
+            return +(std::cosh(x) / x * a + std::sinh(x) / (x * x) * b);
+        }
+    }
+
+    a = T(1.0);
+    s = T(1.0);
+    k = T(2.0);
+
+    do {
+        a = a * (x * x / k);
+        k = k + T(1.0);
+        a = a / k;
+        s = s + (a / k);
+        k = k + T(1.0);
+    } while (std::abs(a / s) > std::numeric_limits<T>::epsilon());
+
+    if (sign) {
+        return -(s * x);
+    } else {
+        return +(s * x);
+    }
 } // T hyperbolic_integral_shi_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T laguerre_polynomial_l_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3116,15 +3797,17 @@ static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     }
 
     return r;
-} // laguerre_polynomial_l_forward(T x, int64_t n)
+} // T laguerre_polynomial_l_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T laguerre_polynomial_l_forward(T x, T n) {
     return laguerre_polynomial_l_forward(x, static_cast<int64_t>(n));
-} // laguerre_polynomial_l_forward(T x, T n)
+} // T laguerre_polynomial_l_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T legendre_polynomial_p_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3156,15 +3839,17 @@ static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, int64_t n) {
     }
 
     return r;
-} // legendre_polynomial_p_forward(T x, int64_t n)
+} // T legendre_polynomial_p_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T legendre_polynomial_p_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T legendre_polynomial_p_forward(T x, T n) {
     return legendre_polynomial_p_forward(x, static_cast<int64_t>(n));
-} // legendre_polynomial_p_forward(T x, T n)
+} // T legendre_polynomial_p_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
+static inline C10_HOST_DEVICE
+T modified_bessel_i0_forward(T x) {
     static const T A[] = {
             -4.41534164647933937950e-18,
             +3.33079451882223809783e-17,
@@ -3250,10 +3935,11 @@ static inline C10_HOST_DEVICE T modified_bessel_i0_forward(T x) {
     }
 
     return std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x));
-} // modified_bessel_i0_forward(T x)
+} // T modified_bessel_i0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
+static inline C10_HOST_DEVICE
+T modified_bessel_i1_forward(T x) {
     static const T A[] = {
             +2.77791411276104639959e-18,
             -2.11142121435816608115e-17,
@@ -3346,10 +4032,11 @@ static inline C10_HOST_DEVICE T modified_bessel_i1_forward(T x) {
     }
 
     return std::exp(std::abs(x)) * (T(0.5) * (b - p)) / std::sqrt(std::abs(x));
-} // modified_bessel_i1_forward(T x)
+} // T modified_bessel_i1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
+static inline C10_HOST_DEVICE
+T modified_bessel_k0_forward(T x) {
     static const T A[] = {
             +1.37446543561352307156e-16,
             +4.25981614279661018399e-14,
@@ -3423,10 +4110,11 @@ static inline C10_HOST_DEVICE T modified_bessel_k0_forward(T x) {
     }
 
     return std::exp(-x) * (T(0.5) * (b - p)) / std::sqrt(x);
-} // modified_bessel_k0_forward(T x)
+} // T modified_bessel_k0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
+static inline C10_HOST_DEVICE
+T modified_bessel_k1_forward(T x) {
     static const T A[] = {
             -7.02386347938628759343e-18,
             -2.42744985051936593393e-15,
@@ -3501,10 +4189,23 @@ static inline C10_HOST_DEVICE T modified_bessel_k1_forward(T x) {
     }
 
     return std::exp(-x) * (T(0.5) * (b - p)) / std::sqrt(x);
-} // modified_bessel_k1_forward(T x)
+} // T modified_bessel_k1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
+static inline C10_HOST_DEVICE
+T scaled_modified_bessel_i0_forward(T x) {
+    return x;
+} // T scaled_modified_bessel_i0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T scaled_modified_bessel_i1_forward(T x) {
+    return x;
+} // T scaled_modified_bessel_i1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T scaled_modified_bessel_k0_forward(T x) {
     static const T A[] = {
             +1.37446543561352307156e-16,
             +4.25981614279661018399e-14,
@@ -3581,7 +4282,8 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_k0_forward(T x) {
 } // T scaled_modified_bessel_k0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
+static inline C10_HOST_DEVICE
+T scaled_modified_bessel_k1_forward(T x) {
     static const T A[] = {
             -7.02386347938628759343e-18,
             -2.42744985051936593393e-15,
@@ -3659,7 +4361,8 @@ static inline C10_HOST_DEVICE T scaled_modified_bessel_k1_forward(T x) {
 } // T scaled_modified_bessel_k1_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T shifted_chebyshev_polynomial_t_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3699,15 +4402,17 @@ static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, int6
     }
 
     return r;
-} // shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
+} // T shifted_chebyshev_polynomial_t_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_t_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T shifted_chebyshev_polynomial_t_forward(T x, T n) {
     return shifted_chebyshev_polynomial_t_forward(x, static_cast<int64_t>(n));
-} // shifted_chebyshev_polynomial_t_forward(T x, T n)
+} // T shifted_chebyshev_polynomial_t_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T shifted_chebyshev_polynomial_u_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3751,15 +4456,17 @@ static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, int6
     }
 
     return r;
-} // shifted_chebyshev_polynomial_u_forward(T x, int64_t n)
+} // T shifted_chebyshev_polynomial_u_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_u_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T shifted_chebyshev_polynomial_u_forward(T x, T n) {
     return shifted_chebyshev_polynomial_u_forward(x, static_cast<int64_t>(n));
-} // shifted_chebyshev_polynomial_u_forward(T x, T n)
+} // T shifted_chebyshev_polynomial_u_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T shifted_chebyshev_polynomial_v_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3807,15 +4514,17 @@ static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, int6
     }
 
     return r;
-} // shifted_chebyshev_polynomial_v_forward(T x, int64_t n)
+} // T shifted_chebyshev_polynomial_v_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_v_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T shifted_chebyshev_polynomial_v_forward(T x, T n) {
     return shifted_chebyshev_polynomial_v_forward(x, static_cast<int64_t>(n));
-} // shifted_chebyshev_polynomial_v_forward(T x, T n)
+} // T shifted_chebyshev_polynomial_v_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
+static inline C10_HOST_DEVICE
+T shifted_chebyshev_polynomial_w_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
     }
@@ -3863,15 +4572,23 @@ static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, int6
     }
 
     return r;
-} // shifted_chebyshev_polynomial_w_forward(T x, int64_t n)
+} // T shifted_chebyshev_polynomial_w_forward(T x, int64_t n)
 
 template<typename T, bool is_cuda=false>
-static inline C10_HOST_DEVICE T shifted_chebyshev_polynomial_w_forward(T x, T n) {
+static inline C10_HOST_DEVICE
+T shifted_chebyshev_polynomial_w_forward(T x, T n) {
     return shifted_chebyshev_polynomial_w_forward(x, static_cast<int64_t>(n));
-} // shifted_chebyshev_polynomial_w_forward(T x, T n)
+} // T shifted_chebyshev_polynomial_w_forward(T x, T n)
 
 template<typename T>
-static inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
+static inline C10_HOST_DEVICE
+T spence_forward(T x) {
+    return x;
+} // T spence_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T spherical_bessel_j0_forward(T x) {
     if (std::isinf(x)) {
         return T(0.0);
     }
@@ -3884,13 +4601,381 @@ static inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
 } // T spherical_bessel_j0_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T trigonometric_integral_ci_forward(T x) {
+static inline C10_HOST_DEVICE
+T spherical_bessel_j1_forward(T x) {
     return x;
+} // T spherical_bessel_j1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T spherical_bessel_y0_forward(T x) {
+    return x;
+} // T spherical_bessel_y0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T spherical_bessel_y1_forward(T x) {
+    return x;
+} // T spherical_bessel_y1_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE
+T trigonometric_integral_ci_forward(T x) {
+    static const T CN[] = {
+            +2.02524002389102268789e-11,
+            -1.35249504915790756375e-08,
+            +3.59325051419993077021e-06,
+            -4.74007206873407909465e-04,
+            +2.89159652607555242092e-02,
+            -1.00000000000000000080e+00,
+    };
+
+    static const T CD[] = {
+            +4.07746040061880559506e-12,
+            +3.06780997581887812692e-09,
+            +1.23210355685883423679e-06,
+            +3.17442024775032769882e-04,
+            +5.10028056236446052392e-02,
+            +4.00000000000000000080e+00,
+    };
+
+    static const T FN4[] = {
+            +4.23612862892216586994e+00,
+            +5.45937717161812843388e+00,
+            +1.62083287701538329132e+00,
+            +1.67006611831323023771e-01,
+            +6.81020132472518137426e-03,
+            +1.08936580650328664411e-04,
+            +5.48900223421373614008e-07,
+    };
+
+    static const T FD4[] = {
+            +8.16496634205391016773e+00,
+            +7.30828822505564552187e+00,
+            +1.86792257950184183883e+00,
+            +1.78792052963149907262e-01,
+            +7.01710668322789753610e-03,
+            +1.10034357153915731354e-04,
+            +5.48900252756255700982e-07,
+    };
+
+    static const T FN8[] = {
+            +4.55880873470465315206e-01,
+            +7.13715274100146711374e-01,
+            +1.60300158222319456320e-01,
+            +1.16064229408124407915e-02,
+            +3.49556442447859055605e-04,
+            +4.86215430826454749482e-06,
+            +3.20092790091004902806e-08,
+            +9.41779576128512936592e-11,
+            +9.70507110881952024631e-14,
+    };
+
+    static const T FD8[] = {
+            +9.17463611873684053703e-01,
+            +1.78685545332074536321e-01,
+            +1.22253594771971293032e-02,
+            +3.58696481881851580297e-04,
+            +4.92435064317881464393e-06,
+            +3.21956939101046018377e-08,
+            +9.43720590350276732376e-11,
+            +9.70507110881952025725e-14,
+    };
+
+    static const T GN4[] = {
+            +8.71001698973114191777e-02,
+            +6.11379109952219284151e-01,
+            +3.97180296392337498885e-01,
+            +7.48527737628469092119e-02,
+            +5.38868681462177273157e-03,
+            +1.61999794598934024525e-04,
+            +1.97963874140963632189e-06,
+            +7.82579040744090311069e-09,
+    };
+
+    static const T GD4[] = {
+            +1.64402202413355338886e+00,
+            +6.66296701268987968381e-01,
+            +9.88771761277688796203e-02,
+            +6.22396345441768420760e-03,
+            +1.73221081474177119497e-04,
+            +2.02659182086343991969e-06,
+            +7.82579218933534490868e-09,
+    };
+
+    static const T GN8[] = {
+            +6.97359953443276214934e-01,
+            +3.30410979305632063225e-01,
+            +3.84878767649974295920e-02,
+            +1.71718239052347903558e-03,
+            +3.48941165502279436777e-05,
+            +3.47131167084116673800e-07,
+            +1.70404452782044526189e-09,
+            +3.85945925430276600453e-12,
+            +3.14040098946363334640e-15,
+    };
+
+    static const T GD8[] = {
+            +1.68548898811011640017e+00,
+            +4.87852258695304967486e-01,
+            +4.67913194259625806320e-02,
+            +1.90284426674399523638e-03,
+            +3.68475504442561108162e-05,
+            +3.57043223443740838771e-07,
+            +1.72693748966316146736e-09,
+            +3.87830166023954706752e-12,
+            +3.14040098946363335242e-15,
+    };
+
+    int8_t sign;
+
+    if (x < T(0.0)) {
+        sign = -1;
+    } else {
+        sign = +0;
+    }
+
+    if (x < T(0.0)) {
+        x = -x;
+    }
+
+    if (x == T(0.0)) {
+        return -std::numeric_limits<T>::infinity();
+    }
+
+
+    if (x > T(1000000000.0)) {
+        if (std::isinf(x)) {
+            if (sign == -1) {
+                return std::numeric_limits<T>::quiet_NaN();
+            }
+
+            return T(0.0);
+        }
+    }
+
+    if (x > T(4.0)) {
+        if (x < T(8.0)) {
+            T fn4 = 0.0;
+            T fd4 = 0.0;
+            T gn4 = 0.0;
+            T gd4 = 0.0;
+
+            for (uint8_t index = 0; index <= 6; index++) fn4 = fn4 * (1.0 / (x * x)) + FN4[index];
+            for (uint8_t index = 0; index <= 6; index++) fd4 = fd4 * (1.0 / (x * x)) + FD4[index];
+            for (uint8_t index = 0; index <= 7; index++) gn4 = gn4 * (1.0 / (x * x)) + GN4[index];
+            for (uint8_t index = 0; index <= 6; index++) gd4 = gd4 * (1.0 / (x * x)) + GD4[index];
+
+            return fn4 / (x * fd4) * std::sin(x) - 1.0 / (x * x) * gn4 / gd4 * std::cos(x);
+        }
+
+        T fn8 = 0.0;
+        T fd8 = 0.0;
+        T gn8 = 0.0;
+        T gd8 = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) fn8 = fn8 * (1.0 / (x * x)) + FN8[index];
+        for (uint8_t index = 0; index <= 7; index++) fd8 = fd8 * (1.0 / (x * x)) + FD8[index];
+        for (uint8_t index = 0; index <= 8; index++) gn8 = gn8 * (1.0 / (x * x)) + GN8[index];
+        for (uint8_t index = 0; index <= 8; index++) gd8 = gd8 * (1.0 / (x * x)) + GD8[index];
+
+        return fn8 / (x * fd8) * std::sin(x) - T(1.0) / (x * x) * gn8 / gd8 * std::cos(x);
+    }
+
+    T cn = 0.0;
+    T cd = 0.0;
+
+    for (uint8_t index = 0; index <= 5; index++) cn = cn * (x * x) + CN[index];
+    for (uint8_t index = 0; index <= 5; index++) cd = cd * (x * x) + CD[index];
+
+    return T(0.57721566490153286061) + std::log(x) + x * x * cn / cd;
 } // T trigonometric_integral_ci_forward(T x)
 
 template<typename T>
-static inline C10_HOST_DEVICE T trigonometric_integral_si_forward(T x) {
-    return x;
+static inline C10_HOST_DEVICE
+T trigonometric_integral_si_forward(T x) {
+    static const T SN[] = {
+            -8.39167827910303881427e-11,
+            +4.62591714427012837309e-08,
+            -9.75759303843632795789e-06,
+            +9.76945438170435310816e-04,
+            -4.13470316229406538752e-02,
+            +1.00000000000000000302e+00,
+    };
+
+    static const T SD[] = {
+            +2.03269266195951942049e-12,
+            +1.27997891179943299903e-09,
+            +4.41827842801218905784e-07,
+            +9.96412122043875552487e-05,
+            +1.42085239326149893930e-02,
+            +9.99999999999999996984e-01,
+    };
+
+    static const T FN4[] = {
+            +4.23612862892216586994e+00,
+            +5.45937717161812843388e+00,
+            +1.62083287701538329132e+00,
+            +1.67006611831323023771e-01,
+            +6.81020132472518137426e-03,
+            +1.08936580650328664411e-04,
+            +5.48900223421373614008e-07,
+    };
+
+    static const T FD4[] = {
+            +8.16496634205391016773e+00,
+            +7.30828822505564552187e+00,
+            +1.86792257950184183883e+00,
+            +1.78792052963149907262e-01,
+            +7.01710668322789753610e-03,
+            +1.10034357153915731354e-04,
+            +5.48900252756255700982e-07,
+    };
+
+    static const T FN8[] = {
+            +4.55880873470465315206e-01,
+            +7.13715274100146711374e-01,
+            +1.60300158222319456320e-01,
+            +1.16064229408124407915e-02,
+            +3.49556442447859055605e-04,
+            +4.86215430826454749482e-06,
+            +3.20092790091004902806e-08,
+            +9.41779576128512936592e-11,
+            +9.70507110881952024631e-14,
+    };
+
+    static const T FD8[] = {
+            +9.17463611873684053703e-01,
+            +1.78685545332074536321e-01,
+            +1.22253594771971293032e-02,
+            +3.58696481881851580297e-04,
+            +4.92435064317881464393e-06,
+            +3.21956939101046018377e-08,
+            +9.43720590350276732376e-11,
+            +9.70507110881952025725e-14,
+    };
+
+    static const T GN4[] = {
+            +8.71001698973114191777e-02,
+            +6.11379109952219284151e-01,
+            +3.97180296392337498885e-01,
+            +7.48527737628469092119e-02,
+            +5.38868681462177273157e-03,
+            +1.61999794598934024525e-04,
+            +1.97963874140963632189e-06,
+            +7.82579040744090311069e-09,
+    };
+
+    static const T GD4[] = {
+            +1.64402202413355338886e+00,
+            +6.66296701268987968381e-01,
+            +9.88771761277688796203e-02,
+            +6.22396345441768420760e-03,
+            +1.73221081474177119497e-04,
+            +2.02659182086343991969e-06,
+            +7.82579218933534490868e-09,
+    };
+
+    static const T GN8[] = {
+            +6.97359953443276214934e-01,
+            +3.30410979305632063225e-01,
+            +3.84878767649974295920e-02,
+            +1.71718239052347903558e-03,
+            +3.48941165502279436777e-05,
+            +3.47131167084116673800e-07,
+            +1.70404452782044526189e-09,
+            +3.85945925430276600453e-12,
+            +3.14040098946363334640e-15,
+    };
+
+    static const T GD8[] = {
+            +1.68548898811011640017e+00,
+            +4.87852258695304967486e-01,
+            +4.67913194259625806320e-02,
+            +1.90284426674399523638e-03,
+            +3.68475504442561108162e-05,
+            +3.57043223443740838771e-07,
+            +1.72693748966316146736e-09,
+            +3.87830166023954706752e-12,
+            +3.14040098946363335242e-15,
+    };
+
+    int16_t sign;
+
+    if (x < T(0.0)) {
+        sign = -1;
+    } else {
+        sign = +0;
+    }
+
+    if (x < T(0.0)) {
+        x = -x;
+    }
+
+    if (x == T(0.0)) {
+        return T(0.0);
+    }
+
+
+    if (x > T(1000000000.0)) {
+        if (std::isinf(x)) {
+            if (sign == -1) {
+                return -M_PI_2;
+            } else {
+                return +M_PI_2;
+            }
+        }
+
+        return M_PI_2 - std::cos(x) / x;
+    }
+
+    if (x > T(4.0)) {
+        if (x < T(8.0)) {
+            T fn4 = 0.0;
+            T fd4 = 0.0;
+            T gn4 = 0.0;
+            T gd4 = 0.0;
+
+            for (uint8_t index = 0; index <= 6; index++) fn4 = fn4 * (T(1.0) / (x * x)) + FN4[index];
+            for (uint8_t index = 0; index <= 6; index++) fd4 = fd4 * (T(1.0) / (x * x)) + FD4[index];
+            for (uint8_t index = 0; index <= 7; index++) gn4 = gn4 * (T(1.0) / (x * x)) + GN4[index];
+            for (uint8_t index = 0; index <= 6; index++) gd4 = gd4 * (T(1.0) / (x * x)) + GD4[index];
+
+            if (sign) {
+                return -(M_PI_2 - fn4 / (x * fd4) * std::cos(x) - T(1.0) / (x * x) * gn4 / gd4 * std::sin(x));
+            } else {
+                return +(M_PI_2 - fn4 / (x * fd4) * std::cos(x) - T(1.0) / (x * x) * gn4 / gd4 * std::sin(x));
+            }
+        }
+
+        T fn8 = 0.0;
+        T fd8 = 0.0;
+        T gn8 = 0.0;
+        T gd8 = 0.0;
+
+        for (uint8_t index = 0; index <= 8; index++) fn8 = fn8 * (T(1.0) / (x * x)) + FN8[index];
+        for (uint8_t index = 0; index <= 7; index++) fd8 = fd8 * (T(1.0) / (x * x)) + FD8[index];
+        for (uint8_t index = 0; index <= 8; index++) gn8 = gn8 * (T(1.0) / (x * x)) + GN8[index];
+        for (uint8_t index = 0; index <= 8; index++) gd8 = gd8 * (T(1.0) / (x * x)) + GD8[index];
+
+        if (sign) {
+            return -(M_PI_2 - fn8 / (x * fd8) * std::cos(x) - T(1.0) / (x * x) * gn8 / gd8 * std::sin(x));
+        } else {
+            return +(M_PI_2 - fn8 / (x * fd8) * std::cos(x) - T(1.0) / (x * x) * gn8 / gd8 * std::sin(x));
+        }
+    }
+
+    T sn = 0.0;
+    T sd = 0.0;
+
+    for (uint8_t index = 0; index <= 5; index++) sn = sn * (x * x) + SN[index];
+    for (uint8_t index = 0; index <= 5; index++) sd = sd * (x * x) + SD[index];
+
+    if (sign) {
+        return -(x * sn / sd);
+    } else {
+        return +(x * sn / sd);
+    }
 } // T trigonometric_integral_si_forward(T x)
 
 C10_CLANG_DIAGNOSTIC_POP()

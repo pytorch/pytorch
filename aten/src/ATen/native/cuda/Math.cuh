@@ -1446,6 +1446,27 @@ const auto airy_ai_string = jiterator_stringify(
     } // T airy_ai(T x)
 ); // airy_ai_string
 
+const auto airy_bi_string = jiterator_stringify(
+    template<typename T>
+    T airy_bi_forward(T x) {
+        return x;
+    } // T airy_bi_forward(T x)
+); // airy_bi_string
+
+const auto airy_derivative_ai_string = jiterator_stringify(
+    template<typename T>
+    T airy_derivative_ai_forward(T x) {
+        return x;
+    } // T airy_derivative_ai_forward(T x)
+); // airy_derivative_ai_string
+
+const auto airy_derivative_bi_string = jiterator_stringify(
+    template<typename T>
+    T airy_derivative_bi_forward(T x) {
+        return x;
+    } // T airy_derivative_bi_forward(T x)
+); // airy_derivative_bi_string
+
 const auto bessel_j0_string = jiterator_stringify(
     template<typename T>
     T bessel_j0_forward(T x) {
@@ -2119,6 +2140,27 @@ const auto chebyshev_polynomial_w_string = jiterator_stringify(
     } // chebyshev_polynomial_w_forward(T x, T n)
 ); // chebyshev_polynomial_w_string
 
+const auto complete_elliptic_integral_e_string = jiterator_stringify(
+    template<typename T>
+    T complete_elliptic_integral_e_forward(T x) {
+        return x;
+    } // T complete_elliptic_integral_e_forward(T x)
+); // complete_elliptic_integral_e_string
+
+const auto complete_elliptic_integral_k_string = jiterator_stringify(
+    template<typename T>
+    T complete_elliptic_integral_k_forward(T x) {
+        return x;
+    } // T complete_elliptic_integral_k_forward(T x)
+); // complete_elliptic_integral_k_string
+
+const auto gamma_sign_string = jiterator_stringify(
+    template<typename T>
+    T gamma_sign_forward(T x) {
+        return x;
+    } // T gamma_sign_forward(T x)
+); // gamma_sign_string
+
 const auto hermite_polynomial_h_string = jiterator_stringify(
     template<typename T>
     T hermite_polynomial_h_forward(T x, int64_t n) {
@@ -2190,14 +2232,640 @@ const auto hermite_polynomial_he_string = jiterator_stringify(
 const auto hyperbolic_integral_chi_string = jiterator_stringify(
     template<typename T>
     T hyperbolic_integral_chi_forward(T x) {
-        return x;
+        static const T S1[] = {
+                +1.83889230173399459482e-17,
+                -9.55485532279655569575e-17,
+                +2.04326105980879882648e-16,
+                +1.09896949074905343022e-15,
+                -1.31313534344092599234e-14,
+                +5.93976226264314278932e-14,
+                -3.47197010497749154755e-14,
+                -1.40059764613117131000e-12,
+                +9.49044626224223543299e-12,
+                -1.61596181145435454033e-11,
+                -1.77899784436430310321e-10,
+                +1.35455469767246947469e-09,
+                -1.03257121792819495123e-09,
+                -3.56699611114982536845e-08,
+                +1.44818877384267342057e-07,
+                +7.82018215184051295296e-07,
+                -5.39919118403805073710e-06,
+                -3.12458202168959833422e-05,
+                +8.90136741950727517826e-05,
+                +2.02558474743846862168e-03,
+                +2.96064440855633256972e-02,
+                +1.11847751047257036625e+00,
+        };
+
+        static const T S2[] = {
+                -1.05311574154850938805e-17,
+                +2.62446095596355225821e-17,
+                +8.82090135625368160657e-17,
+                -3.38459811878103047136e-16,
+                -8.30608026366935789136e-16,
+                +3.93397875437050071776e-15,
+                +1.01765565969729044505e-14,
+                -4.21128170307640802703e-14,
+                -1.60818204519802480035e-13,
+                +3.34714954175994481761e-13,
+                +2.72600352129153073807e-12,
+                +1.66894954752839083608e-12,
+                -3.49278141024730899554e-11,
+                -1.58580661666482709598e-10,
+                -1.79289437183355633342e-10,
+                +1.76281629144264523277e-09,
+                +1.69050228879421288846e-08,
+                +1.25391771228487041649e-07,
+                +1.16229947068677338732e-06,
+                +1.61038260117376323993e-05,
+                +3.49810375601053973070e-04,
+                +1.28478065259647610779e-02,
+                +1.03665722588798326712e+00,
+        };
+
+        static const T C1[] = {
+                -8.12435385225864036372e-18,
+                +2.17586413290339214377e-17,
+                +5.22624394924072204667e-17,
+                -9.48812110591690559363e-16,
+                +5.35546311647465209166e-15,
+                -1.21009970113732918701e-14,
+                -6.00865178553447437951e-14,
+                +7.16339649156028587775e-13,
+                -2.93496072607599856104e-12,
+                -1.40359438136491256904e-12,
+                +8.76302288609054966081e-11,
+                -4.40092476213282340617e-10,
+                -1.87992075640569295479e-10,
+                +1.31458150989474594064e-08,
+                -4.75513930924765465590e-08,
+                -2.21775018801848880741e-07,
+                +1.94635531373272490962e-06,
+                +4.33505889257316408893e-06,
+                -6.13387001076494349496e-05,
+                -3.13085477492997465138e-04,
+                +4.97164789823116062801e-04,
+                +2.64347496031374526641e-02,
+                +1.11446150876699213025e+00,
+        };
+
+        static const T C2[] = {
+                +8.06913408255155572081e-18,
+                -2.08074168180148170312e-17,
+                -5.98111329658272336816e-17,
+                +2.68533951085945765591e-16,
+                +4.52313941698904694774e-16,
+                -3.10734917335299464535e-15,
+                -4.42823207332531972288e-15,
+                +3.49639695410806959872e-14,
+                +6.63406731718911586609e-14,
+                -3.71902448093119218395e-13,
+                -1.27135418132338309016e-12,
+                +2.74851141935315395333e-12,
+                +2.33781843985453438400e-11,
+                +2.71436006377612442764e-11,
+                -2.56600180000355990529e-10,
+                -1.61021375163803438552e-09,
+                -4.72543064876271773512e-09,
+                -3.00095178028681682282e-09,
+                +7.79387474390914922337e-08,
+                +1.06942765566401507066e-06,
+                +1.59503164802313196374e-05,
+                +3.49592575153777996871e-04,
+                +1.28475387530065247392e-02,
+                +1.03665693917934275131e+00,
+        };
+
+        T a;
+        T b;
+        T c;
+        T k;
+        T m;
+        T p;
+        T q;
+        T s;
+
+        int16_t maximum_iterations;
+
+        if (x < T(0.0)) {
+            x = -x;
+        }
+
+        if (x == T(0.0)) {
+            return -INFINITY;
+        }
+
+        if (x >= T(8.0)) {
+            if (x < T(18.0)) {
+                a = (T(576.0) / x - T(52.0)) / T(10.0);
+
+                const T *coefficients = C1;
+
+                T chebyshev_0 = *coefficients++;
+                T chebyshev_1 = T(0.0);
+                T chebyshev_2;
+
+                uint8_t index = 22;
+
+                do {
+                    chebyshev_2 = chebyshev_1;
+                    chebyshev_1 = chebyshev_0;
+
+                    chebyshev_0 = a * chebyshev_1 - chebyshev_2 + *coefficients++;
+                } while (index--);
+
+                return T(0.57721566490153286061) + log(x) + exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2));
+            }
+
+            if (x <= T(88.0)) {
+                a = (T(6336.0) / x - T(212.0)) / T(70.0);
+
+                const T *coefficients = C2;
+
+                T chebyshev_0 = *coefficients++;
+                T chebyshev_1 = T(0.0);
+                T chebyshev_2;
+
+                uint8_t index = 23;
+
+                do {
+                    chebyshev_2 = chebyshev_1;
+                    chebyshev_1 = chebyshev_0;
+
+                    chebyshev_0 = a * chebyshev_1 - chebyshev_2 + *coefficients++;
+                } while (index--);
+
+                return T(0.57721566490153286061) + log(x) + exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2));
+            }
+
+            if (x > T(1000.0)) {
+                return INFINITY;
+            }
+
+            m = pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+            if (m < T(50.0)) {
+                maximum_iterations = m;
+            } else {
+                maximum_iterations = 50;
+            }
+
+            p = T(1.0);
+            q = p;
+
+            for (int n = 0; n < maximum_iterations; n++) {
+                p = p * ((T(0.5) + n) * (T(1.0) + n) * (T(1.0) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+                q = q + p;
+
+                if (abs(p) < T(0.0000000000001) * abs(q) || p == 0) {
+                    break;
+                }
+            }
+
+            if (abs(p) > T(0.0000000000001) * abs(q)) {
+                a = NAN;
+            } else {
+                a = q;
+            }
+
+            m = pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+            if (m < T(50.0)) {
+                maximum_iterations = m;
+            } else {
+                maximum_iterations = 50;
+            }
+
+            p = T(1.0);
+            q = p;
+
+            for (int n = 0; n < maximum_iterations; n++) {
+                p = p * ((T(1.0) + n) * (T(1.0) + n) * (T(1.5) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+                q = q + p;
+
+                if (abs(p) < T(0.0000000000001) * abs(q) || p == 0) {
+                    break;
+                }
+            }
+
+            if (abs(p) > T(0.0000000000001) * abs(q)) {
+                b = NAN;
+            } else {
+                b = q;
+            }
+
+            return sinh(x) / x * a + cosh(x) / (x * x) * b;
+        }
+
+        if (x >= T(88.0)) {
+            if (x > T(1000.0)) {
+                return INFINITY;
+            }
+
+            m = pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+            if (m < T(50.0)) {
+                maximum_iterations = m;
+            } else {
+                maximum_iterations = 50;
+            }
+
+            p = T(1.0);
+            q = p;
+
+            for (int n = 0; n < maximum_iterations; n++) {
+                p = p * ((T(0.5) + n) * (T(1.0) + n) * (T(1.0) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+                q = q + p;
+
+                if (abs(p) < T(0.0000000000001) * abs(q) || p == 0) {
+                    break;
+                }
+            }
+
+            if (abs(p) > T(0.0000000000001) * abs(q)) {
+                a = NAN;
+            } else {
+                a = q;
+            }
+
+            m = pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+            if (m < T(50.0)) {
+                maximum_iterations = m;
+            } else {
+                maximum_iterations = 50;
+            }
+
+            p = T(1.0);
+            q = p;
+
+            for (int n = 0; n < maximum_iterations; n++) {
+                p = p * ((T(1.0) + n) * (T(1.0) + n) * (T(1.5) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+                q = q + p;
+
+                if (abs(p) < T(0.0000000000001) * abs(q) || p == 0) {
+                    break;
+                }
+            }
+
+            if (abs(p) > T(0.0000000000001) * abs(q)) {
+                b = NAN;
+            } else {
+                b = q;
+            }
+
+            return sinh(x) / x * a + cosh(x) / (x * x) * b;
+        }
+
+        a = T(1.0);
+        s = T(1.0);
+        c = T(0.0);
+        k = T(2.0);
+
+        do {
+            a = a * (x * x / k);
+            c = c + (a / k);
+            k = k + T(1.0);
+            a = a / k;
+            s = s + (a / k);
+            k = k + T(1.0);
+        } while (abs(a / s) > T(1.11022302462515654042e-16));
+
+        return T(0.57721566490153286061) + log(x) + c;
     } // T hyperbolic_integral_chi_forward(T x)
 ); // hyperbolic_integral_chi_string
 
 const auto hyperbolic_integral_shi_string = jiterator_stringify(
     template<typename T>
     T hyperbolic_integral_shi_forward(T x) {
-        return x;
+        static const T S1[] = {
+                +1.83889230173399459482e-17,
+                -9.55485532279655569575e-17,
+                +2.04326105980879882648e-16,
+                +1.09896949074905343022e-15,
+                -1.31313534344092599234e-14,
+                +5.93976226264314278932e-14,
+                -3.47197010497749154755e-14,
+                -1.40059764613117131000e-12,
+                +9.49044626224223543299e-12,
+                -1.61596181145435454033e-11,
+                -1.77899784436430310321e-10,
+                +1.35455469767246947469e-09,
+                -1.03257121792819495123e-09,
+                -3.56699611114982536845e-08,
+                +1.44818877384267342057e-07,
+                +7.82018215184051295296e-07,
+                -5.39919118403805073710e-06,
+                -3.12458202168959833422e-05,
+                +8.90136741950727517826e-05,
+                +2.02558474743846862168e-03,
+                +2.96064440855633256972e-02,
+                +1.11847751047257036625e+00,
+        };
+
+        static const T S2[] = {
+                -1.05311574154850938805e-17,
+                +2.62446095596355225821e-17,
+                +8.82090135625368160657e-17,
+                -3.38459811878103047136e-16,
+                -8.30608026366935789136e-16,
+                +3.93397875437050071776e-15,
+                +1.01765565969729044505e-14,
+                -4.21128170307640802703e-14,
+                -1.60818204519802480035e-13,
+                +3.34714954175994481761e-13,
+                +2.72600352129153073807e-12,
+                +1.66894954752839083608e-12,
+                -3.49278141024730899554e-11,
+                -1.58580661666482709598e-10,
+                -1.79289437183355633342e-10,
+                +1.76281629144264523277e-09,
+                +1.69050228879421288846e-08,
+                +1.25391771228487041649e-07,
+                +1.16229947068677338732e-06,
+                +1.61038260117376323993e-05,
+                +3.49810375601053973070e-04,
+                +1.28478065259647610779e-02,
+                +1.03665722588798326712e+00,
+        };
+
+        static const T C1[] = {
+                -8.12435385225864036372e-18,
+                +2.17586413290339214377e-17,
+                +5.22624394924072204667e-17,
+                -9.48812110591690559363e-16,
+                +5.35546311647465209166e-15,
+                -1.21009970113732918701e-14,
+                -6.00865178553447437951e-14,
+                +7.16339649156028587775e-13,
+                -2.93496072607599856104e-12,
+                -1.40359438136491256904e-12,
+                +8.76302288609054966081e-11,
+                -4.40092476213282340617e-10,
+                -1.87992075640569295479e-10,
+                +1.31458150989474594064e-08,
+                -4.75513930924765465590e-08,
+                -2.21775018801848880741e-07,
+                +1.94635531373272490962e-06,
+                +4.33505889257316408893e-06,
+                -6.13387001076494349496e-05,
+                -3.13085477492997465138e-04,
+                +4.97164789823116062801e-04,
+                +2.64347496031374526641e-02,
+                +1.11446150876699213025e+00,
+        };
+
+        static const T C2[] = {
+                +8.06913408255155572081e-18,
+                -2.08074168180148170312e-17,
+                -5.98111329658272336816e-17,
+                +2.68533951085945765591e-16,
+                +4.52313941698904694774e-16,
+                -3.10734917335299464535e-15,
+                -4.42823207332531972288e-15,
+                +3.49639695410806959872e-14,
+                +6.63406731718911586609e-14,
+                -3.71902448093119218395e-13,
+                -1.27135418132338309016e-12,
+                +2.74851141935315395333e-12,
+                +2.33781843985453438400e-11,
+                +2.71436006377612442764e-11,
+                -2.56600180000355990529e-10,
+                -1.61021375163803438552e-09,
+                -4.72543064876271773512e-09,
+                -3.00095178028681682282e-09,
+                +7.79387474390914922337e-08,
+                +1.06942765566401507066e-06,
+                +1.59503164802313196374e-05,
+                +3.49592575153777996871e-04,
+                +1.28475387530065247392e-02,
+                +1.03665693917934275131e+00,
+        };
+
+        int16_t maximum_iterations;
+
+        T a;
+        T b;
+        T k;
+        T m;
+        T p;
+        T q;
+        T s;
+
+        int8_t sign = 0;
+
+        if (x < T(0.0)) {
+            sign = -1;
+            x = -x;
+        }
+
+        if (x == T(0.0)) {
+            return T(0.0);
+        }
+
+        if (x >= T(8.0)) {
+            if (x < T(18.0)) {
+                a = (T(576.0) / x - T(52.0)) / T(10.0);
+
+                T *coefficients = S1;
+
+                T chebyshev_0 = *coefficients++;
+                T chebyshev_1 = 0.0;
+                T chebyshev_2;
+
+                uint8_t index = 21;
+
+                do {
+                    chebyshev_2 = chebyshev_1;
+                    chebyshev_1 = chebyshev_0;
+
+                    chebyshev_0 = a * chebyshev_1 - chebyshev_2 + *coefficients++;
+                } while (index--);
+
+                if (sign) {
+                    return -(exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2)));
+                } else {
+                    return +(exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2)));
+                }
+            }
+
+            if (x <= T(88.0)) {
+                a = (T(6336.0) / x - T(212.0)) / T(70.0);
+
+                T *coefficients = S2;
+
+                T chebyshev_0 = *coefficients++;
+                T chebyshev_1 = 0.0;
+                T chebyshev_2;
+
+                uint8_t index = 22;
+
+                do {
+                    chebyshev_2 = chebyshev_1;
+                    chebyshev_1 = chebyshev_0;
+
+                    chebyshev_0 = a * chebyshev_1 - chebyshev_2 + *coefficients++;
+                } while (index--);
+
+                if (sign) {
+                    return -(exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2)));
+                } else {
+                    return +(exp(x) / x * (T(0.5) * (chebyshev_0 - chebyshev_2)));
+                }
+            }
+
+            if (x > T(1000.0)) {
+                if (sign) {
+                    return -INFINITY;
+                } else {
+                    return +INFINITY;
+                }
+            }
+
+            m = pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+            if (m < 50) {
+                maximum_iterations = m;
+            } else {
+                maximum_iterations = 50;
+            }
+
+            p = T(1.0);
+            q = p;
+
+            for (int n = 0; n < maximum_iterations; n++) {
+                p = p * ((T(0.5) + n) * (T(1.0) + n) * (T(1.0) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+                q = q + p;
+
+                if (abs(p) < T(0.0000000000001) * abs(q) || p == T(0.0)) {
+                    break;
+                }
+            }
+
+            if (abs(p) > T(0.0000000000001) * abs(q)) {
+                a = NAN;
+            } else {
+                a = q;
+            }
+
+            m = pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+            if (m < 50) {
+                maximum_iterations = m;
+            } else {
+                maximum_iterations = 50;
+            }
+
+            p = T(1.0);
+            q = p;
+
+            for (int n = 0; n < maximum_iterations; n++) {
+                p = p * ((T(1.0) + n) * (T(1.0) + n) * (T(1.5) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+                q = q + p;
+
+                if (abs(p) < T(0.0000000000001) * abs(q) || p == T(0.0)) {
+                    break;
+                }
+            }
+
+            if (abs(p) > T(0.0000000000001) * abs(q)) {
+                b = NAN;
+            } else {
+                b = q;
+            }
+
+            if (sign) {
+                return -(cosh(x) / x * a + sinh(x) / (x * x) * b);
+            } else {
+                return +(cosh(x) / x * a + sinh(x) / (x * x) * b);
+            }
+        }
+
+        if (x >= T(88.0)) {
+            if (x > T(1000.0)) {
+                if (sign) {
+                    return -INFINITY;
+                } else {
+                    return +INFINITY;
+                }
+            }
+
+            m = pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+            if (m < 50) {
+                maximum_iterations = m;
+            } else {
+                maximum_iterations = 50;
+            }
+
+            p = T(1.0);
+            q = p;
+
+            for (int n = 0; n < maximum_iterations; n++) {
+                p = p * ((T(0.5) + n) * (T(1.0) + n) * (T(1.0) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+                q = q + p;
+
+                if (abs(p) < T(0.0000000000001) * abs(q) || p == T(0.0)) {
+                    break;
+                }
+            }
+
+            if (abs(p) > T(0.0000000000001) * abs(q)) {
+                a = NAN;
+            } else {
+                a = q;
+            }
+
+            m = pow(T(4.0) / (x * x), T(-1.0) / T(3.0));
+
+            if (m < 50) {
+                maximum_iterations = m;
+            } else {
+                maximum_iterations = 50;
+            }
+
+            p = T(1.0);
+            q = p;
+
+            for (int n = 0; n < maximum_iterations; n++) {
+                p = p * ((T(1.0) + n) * (T(1.0) + n) * (T(1.5) + n) * (T(4.0) / (x * x)) / (n + T(1.0)));
+                q = q + p;
+
+                if (abs(p) < T(0.0000000000001) * abs(q) || p == T(0.0)) {
+                    break;
+                }
+            }
+
+            if (abs(p) > T(0.0000000000001) * abs(q)) {
+                b = NAN;
+            } else {
+                b = q;
+            }
+
+            if (sign) {
+                return -(cosh(x) / x * a + sinh(x) / (x * x) * b);
+            } else {
+                return +(cosh(x) / x * a + sinh(x) / (x * x) * b);
+            }
+        }
+
+        a = T(1.0);
+        s = T(1.0);
+        k = T(2.0);
+
+        do {
+            a = a * (x * x / k);
+            k = k + T(1.0);
+            a = a / k;
+            s = s + (a / k);
+            k = k + T(1.0);
+        } while (abs(a / s) > T(1.11022302462515654042e-16));
+
+        if (sign) {
+            return -(s * x);
+        } else {
+            return +(s * x);
+        }
     } // T hyperbolic_integral_shi_forward(T x)
 ); // hyperbolic_integral_shi_string
 
@@ -2549,85 +3217,6 @@ const auto modified_bessel_k0_string = modified_bessel_i0_string + jiterator_str
     } // modified_bessel_k0_forward(T x)
 ); // modified_bessel_k0_string
 
-const auto scaled_modified_bessel_k0_string = modified_bessel_i0_string + jiterator_stringify(
-    template<typename T>
-    T scaled_modified_bessel_k0_forward(T x) {
-        static const T A[] = {
-                +1.37446543561352307156e-16,
-                +4.25981614279661018399e-14,
-                +1.03496952576338420167e-11,
-                +1.90451637722020886025e-09,
-                +2.53479107902614945675e-07,
-                +2.28621210311945178607e-05,
-                +1.26461541144692592338e-03,
-                +3.59799365153615016266e-02,
-                +3.44289899924628486886e-01,
-                -5.35327393233902768720e-01,
-        };
-
-        static const T B[] = {
-                +5.30043377268626276149e-18,
-                -1.64758043015242134646e-17,
-                +5.21039150503902756861e-17,
-                -1.67823109680541210385e-16,
-                +5.51205597852431940784e-16,
-                -1.84859337734377901440e-15,
-                +6.34007647740507060557e-15,
-                -2.22751332699166985548e-14,
-                +8.03289077536357521100e-14,
-                -2.98009692317273043925e-13,
-                +1.14034058820847496303e-12,
-                -4.51459788337394416547e-12,
-                +1.85594911495471785253e-11,
-                -7.95748924447710747776e-11,
-                +3.57739728140030116597e-10,
-                -1.69753450938905987466e-09,
-                +8.57403401741422608519e-09,
-                -4.66048989768794782956e-08,
-                +2.76681363944501510342e-07,
-                -1.83175552271911948767e-06,
-                +1.39498137188764993662e-05,
-                -1.28495495816278026384e-04,
-                +1.56988388573005337491e-03,
-                -3.14481013119645005427e-02,
-                +2.44030308206595545468e+00,
-        };
-
-        if (x == T(0.0)) {
-            return INFINITY;
-        }
-
-        if (x < T(0.0)) {
-            return NAN;
-        }
-
-        T p;
-        T q = 0.0;
-
-        if (x <= T(2.0)) {
-            T a = A[0];
-
-            for (uint8_t index = 1; index < 10; index++) {
-                p = q;
-                q = a;
-                a = (x * x - T(2.0)) * q - p + A[index];
-            }
-
-            return (T(0.5) * (a - p) - log(T(0.5) * x) * modified_bessel_i0_forward(x)) * exp(x);
-        }
-
-        T b = B[0];
-
-        for (uint8_t index = 1; index < 25; index++) {
-            p = q;
-            q = b;
-            b = (T(8.0) / x - T(2.0)) * q - p + B[index];
-        }
-
-        return T(0.5) * (b - p) / sqrt(x);
-    } // T scaled_modified_bessel_k0_forward(T x)
-); // scaled_modified_bessel_k0_string
-
 const auto modified_bessel_k1_string = modified_bessel_i1_string + jiterator_stringify(
     template<typename T>
     T modified_bessel_k1_forward(T x) {
@@ -2707,6 +3296,99 @@ const auto modified_bessel_k1_string = modified_bessel_i1_string + jiterator_str
         return exp(-x) * (T(0.5) * (b - p)) / sqrt(x);
     } // modified_bessel_k1_forward(T x)
 ); // modified_bessel_k1_string
+
+const auto scaled_modified_bessel_i0_string = jiterator_stringify(
+    template<typename T>
+    T scaled_modified_bessel_i0_forward(T x) {
+        return x;
+    } // T scaled_modified_bessel_i0_forward(T x)
+); // scaled_modified_bessel_i0_string
+
+const auto scaled_modified_bessel_i1_string = jiterator_stringify(
+    template<typename T>
+    T scaled_modified_bessel_i1_forward(T x) {
+        return x;
+    } // T scaled_modified_bessel_i1_forward(T x)
+); // scaled_modified_bessel_i1_string
+
+const auto scaled_modified_bessel_k0_string = modified_bessel_i0_string + jiterator_stringify(
+    template<typename T>
+    T scaled_modified_bessel_k0_forward(T x) {
+        static const T A[] = {
+                +1.37446543561352307156e-16,
+                +4.25981614279661018399e-14,
+                +1.03496952576338420167e-11,
+                +1.90451637722020886025e-09,
+                +2.53479107902614945675e-07,
+                +2.28621210311945178607e-05,
+                +1.26461541144692592338e-03,
+                +3.59799365153615016266e-02,
+                +3.44289899924628486886e-01,
+                -5.35327393233902768720e-01,
+        };
+
+        static const T B[] = {
+                +5.30043377268626276149e-18,
+                -1.64758043015242134646e-17,
+                +5.21039150503902756861e-17,
+                -1.67823109680541210385e-16,
+                +5.51205597852431940784e-16,
+                -1.84859337734377901440e-15,
+                +6.34007647740507060557e-15,
+                -2.22751332699166985548e-14,
+                +8.03289077536357521100e-14,
+                -2.98009692317273043925e-13,
+                +1.14034058820847496303e-12,
+                -4.51459788337394416547e-12,
+                +1.85594911495471785253e-11,
+                -7.95748924447710747776e-11,
+                +3.57739728140030116597e-10,
+                -1.69753450938905987466e-09,
+                +8.57403401741422608519e-09,
+                -4.66048989768794782956e-08,
+                +2.76681363944501510342e-07,
+                -1.83175552271911948767e-06,
+                +1.39498137188764993662e-05,
+                -1.28495495816278026384e-04,
+                +1.56988388573005337491e-03,
+                -3.14481013119645005427e-02,
+                +2.44030308206595545468e+00,
+        };
+
+        if (x == T(0.0)) {
+            return INFINITY;
+        }
+
+        if (x < T(0.0)) {
+            return NAN;
+        }
+
+        T p;
+        T q = 0.0;
+
+        if (x <= T(2.0)) {
+            T a = A[0];
+
+            for (uint8_t index = 1; index < 10; index++) {
+                p = q;
+                q = a;
+                a = (x * x - T(2.0)) * q - p + A[index];
+            }
+
+            return (T(0.5) * (a - p) - log(T(0.5) * x) * modified_bessel_i0_forward(x)) * exp(x);
+        }
+
+        T b = B[0];
+
+        for (uint8_t index = 1; index < 25; index++) {
+            p = q;
+            q = b;
+            b = (T(8.0) / x - T(2.0)) * q - p + B[index];
+        }
+
+        return T(0.5) * (b - p) / sqrt(x);
+    } // T scaled_modified_bessel_k0_forward(T x)
+); // scaled_modified_bessel_k0_string
 
 const auto scaled_modified_bessel_k1_string = modified_bessel_i1_string + jiterator_stringify(
     template<typename T>
@@ -3008,6 +3690,13 @@ const auto shifted_chebyshev_polynomial_w_string = jiterator_stringify(
     } // shifted_chebyshev_polynomial_w_forward(T x, T n)
 ); // shifted_chebyshev_polynomial_w_string
 
+const auto spence_string = jiterator_stringify(
+    template<typename T>
+    T spence_forward(T x) {
+        return x;
+    } // T spence_forward(T x)
+); // spence_string
+
 const auto spherical_bessel_j0_string = jiterator_stringify(
     template<typename T>
     T spherical_bessel_j0_forward(T x) {
@@ -3023,17 +3712,384 @@ const auto spherical_bessel_j0_string = jiterator_stringify(
     } // T spherical_bessel_j0_forward(T x)
 ); // spherical_bessel_j0_string
 
+const auto spherical_bessel_j1_string = jiterator_stringify(
+    template<typename T>
+    T spherical_bessel_j1_forward(T x) {
+        return x;
+    } // T spherical_bessel_j1_forward(T x)
+); // spherical_bessel_j1_string
+
+const auto spherical_bessel_y0_string = jiterator_stringify(
+    template<typename T>
+    T spherical_bessel_y0_forward(T x) {
+        return x;
+    } // T spherical_bessel_y0_forward(T x)
+); // spherical_bessel_y0_string
+
+const auto spherical_bessel_y1_string = jiterator_stringify(
+    template<typename T>
+    T spherical_bessel_y1_forward(T x) {
+        return x;
+    } // T spherical_bessel_y1_forward(T x)
+); // spherical_bessel_y1_string
+
 const auto trigonometric_integral_ci_string = jiterator_stringify(
     template<typename T>
     T trigonometric_integral_ci_forward(T x) {
-        return x;
+        static const T CN[] = {
+                +2.02524002389102268789e-11,
+                -1.35249504915790756375e-08,
+                +3.59325051419993077021e-06,
+                -4.74007206873407909465e-04,
+                +2.89159652607555242092e-02,
+                -1.00000000000000000080e+00,
+        };
+
+        static const T CD[] = {
+                +4.07746040061880559506e-12,
+                +3.06780997581887812692e-09,
+                +1.23210355685883423679e-06,
+                +3.17442024775032769882e-04,
+                +5.10028056236446052392e-02,
+                +4.00000000000000000080e+00,
+        };
+
+        static const T FN4[] = {
+                +4.23612862892216586994e+00,
+                +5.45937717161812843388e+00,
+                +1.62083287701538329132e+00,
+                +1.67006611831323023771e-01,
+                +6.81020132472518137426e-03,
+                +1.08936580650328664411e-04,
+                +5.48900223421373614008e-07,
+        };
+
+        static const T FD4[] = {
+                +8.16496634205391016773e+00,
+                +7.30828822505564552187e+00,
+                +1.86792257950184183883e+00,
+                +1.78792052963149907262e-01,
+                +7.01710668322789753610e-03,
+                +1.10034357153915731354e-04,
+                +5.48900252756255700982e-07,
+        };
+
+        static const T FN8[] = {
+                +4.55880873470465315206e-01,
+                +7.13715274100146711374e-01,
+                +1.60300158222319456320e-01,
+                +1.16064229408124407915e-02,
+                +3.49556442447859055605e-04,
+                +4.86215430826454749482e-06,
+                +3.20092790091004902806e-08,
+                +9.41779576128512936592e-11,
+                +9.70507110881952024631e-14,
+        };
+
+        static const T FD8[] = {
+                +9.17463611873684053703e-01,
+                +1.78685545332074536321e-01,
+                +1.22253594771971293032e-02,
+                +3.58696481881851580297e-04,
+                +4.92435064317881464393e-06,
+                +3.21956939101046018377e-08,
+                +9.43720590350276732376e-11,
+                +9.70507110881952025725e-14,
+        };
+
+        static const T GN4[] = {
+                +8.71001698973114191777e-02,
+                +6.11379109952219284151e-01,
+                +3.97180296392337498885e-01,
+                +7.48527737628469092119e-02,
+                +5.38868681462177273157e-03,
+                +1.61999794598934024525e-04,
+                +1.97963874140963632189e-06,
+                +7.82579040744090311069e-09,
+        };
+
+        static const T GD4[] = {
+                +1.64402202413355338886e+00,
+                +6.66296701268987968381e-01,
+                +9.88771761277688796203e-02,
+                +6.22396345441768420760e-03,
+                +1.73221081474177119497e-04,
+                +2.02659182086343991969e-06,
+                +7.82579218933534490868e-09,
+        };
+
+        static const T GN8[] = {
+                +6.97359953443276214934e-01,
+                +3.30410979305632063225e-01,
+                +3.84878767649974295920e-02,
+                +1.71718239052347903558e-03,
+                +3.48941165502279436777e-05,
+                +3.47131167084116673800e-07,
+                +1.70404452782044526189e-09,
+                +3.85945925430276600453e-12,
+                +3.14040098946363334640e-15,
+        };
+
+        static const T GD8[] = {
+                +1.68548898811011640017e+00,
+                +4.87852258695304967486e-01,
+                +4.67913194259625806320e-02,
+                +1.90284426674399523638e-03,
+                +3.68475504442561108162e-05,
+                +3.57043223443740838771e-07,
+                +1.72693748966316146736e-09,
+                +3.87830166023954706752e-12,
+                +3.14040098946363335242e-15,
+        };
+
+        int8_t sign;
+
+        if (x < T(0.0)) {
+            sign = -1;
+        } else {
+            sign = +0;
+        }
+
+        if (x < T(0.0)) {
+            x = -x;
+        }
+
+        if (x == T(0.0)) {
+            return -INFINITY;
+        }
+
+        if (x > T(1000000000.0)) {
+            if (isinf(x)) {
+                if (sign == -1) {
+                    return NAN;
+                }
+
+                return T(0.0);
+            }
+        }
+
+        if (x > T(4.0)) {
+            if (x < T(8.0)) {
+                T fn4 = 0.0;
+                T fd4 = 0.0;
+                T gn4 = 0.0;
+                T gd4 = 0.0;
+
+                for (uint8_t index = 0; index <= 6; index++) fn4 = fn4 * (1.0 / (x * x)) + FN4[index];
+                for (uint8_t index = 0; index <= 6; index++) fd4 = fd4 * (1.0 / (x * x)) + FD4[index];
+                for (uint8_t index = 0; index <= 7; index++) gn4 = gn4 * (1.0 / (x * x)) + GN4[index];
+                for (uint8_t index = 0; index <= 6; index++) gd4 = gd4 * (1.0 / (x * x)) + GD4[index];
+
+                return fn4 / (x * fd4) * sin(x) - 1.0 / (x * x) * gn4 / gd4 * cos(x);
+            }
+
+            T fn8 = 0.0;
+            T fd8 = 0.0;
+            T gn8 = 0.0;
+            T gd8 = 0.0;
+
+            for (uint8_t index = 0; index <= 8; index++) fn8 = fn8 * (1.0 / (x * x)) + FN8[index];
+            for (uint8_t index = 0; index <= 7; index++) fd8 = fd8 * (1.0 / (x * x)) + FD8[index];
+            for (uint8_t index = 0; index <= 8; index++) gn8 = gn8 * (1.0 / (x * x)) + GN8[index];
+            for (uint8_t index = 0; index <= 8; index++) gd8 = gd8 * (1.0 / (x * x)) + GD8[index];
+
+            return fn8 / (x * fd8) * sin(x) - T(1.0) / (x * x) * gn8 / gd8 * cos(x);
+        }
+
+        T cn = 0.0;
+        T cd = 0.0;
+
+        for (uint8_t index = 0; index <= 5; index++) cn = cn * (x * x) + CN[index];
+        for (uint8_t index = 0; index <= 5; index++) cd = cd * (x * x) + CD[index];
+
+        return T(0.57721566490153286061) + log(x) + x * x * cn / cd;
     } // T trigonometric_integral_ci_forward(T x)
 ); // trigonometric_integral_ci_string
 
 const auto trigonometric_integral_si_string = jiterator_stringify(
     template<typename T>
     T trigonometric_integral_si_forward(T x) {
-        return x;
+        static const T SN[] = {
+                -8.39167827910303881427e-11,
+                +4.62591714427012837309e-08,
+                -9.75759303843632795789e-06,
+                +9.76945438170435310816e-04,
+                -4.13470316229406538752e-02,
+                +1.00000000000000000302e+00,
+        };
+
+        static const T SD[] = {
+                +2.03269266195951942049e-12,
+                +1.27997891179943299903e-09,
+                +4.41827842801218905784e-07,
+                +9.96412122043875552487e-05,
+                +1.42085239326149893930e-02,
+                +9.99999999999999996984e-01,
+        };
+
+        static const T FN4[] = {
+                +4.23612862892216586994e+00,
+                +5.45937717161812843388e+00,
+                +1.62083287701538329132e+00,
+                +1.67006611831323023771e-01,
+                +6.81020132472518137426e-03,
+                +1.08936580650328664411e-04,
+                +5.48900223421373614008e-07,
+        };
+
+        static const T FD4[] = {
+                +8.16496634205391016773e+00,
+                +7.30828822505564552187e+00,
+                +1.86792257950184183883e+00,
+                +1.78792052963149907262e-01,
+                +7.01710668322789753610e-03,
+                +1.10034357153915731354e-04,
+                +5.48900252756255700982e-07,
+        };
+
+        static const T FN8[] = {
+                +4.55880873470465315206e-01,
+                +7.13715274100146711374e-01,
+                +1.60300158222319456320e-01,
+                +1.16064229408124407915e-02,
+                +3.49556442447859055605e-04,
+                +4.86215430826454749482e-06,
+                +3.20092790091004902806e-08,
+                +9.41779576128512936592e-11,
+                +9.70507110881952024631e-14,
+        };
+
+        static const T FD8[] = {
+                +9.17463611873684053703e-01,
+                +1.78685545332074536321e-01,
+                +1.22253594771971293032e-02,
+                +3.58696481881851580297e-04,
+                +4.92435064317881464393e-06,
+                +3.21956939101046018377e-08,
+                +9.43720590350276732376e-11,
+                +9.70507110881952025725e-14,
+        };
+
+        static const T GN4[] = {
+                +8.71001698973114191777e-02,
+                +6.11379109952219284151e-01,
+                +3.97180296392337498885e-01,
+                +7.48527737628469092119e-02,
+                +5.38868681462177273157e-03,
+                +1.61999794598934024525e-04,
+                +1.97963874140963632189e-06,
+                +7.82579040744090311069e-09,
+        };
+
+        static const T GD4[] = {
+                +1.64402202413355338886e+00,
+                +6.66296701268987968381e-01,
+                +9.88771761277688796203e-02,
+                +6.22396345441768420760e-03,
+                +1.73221081474177119497e-04,
+                +2.02659182086343991969e-06,
+                +7.82579218933534490868e-09,
+        };
+
+        static const T GN8[] = {
+                +6.97359953443276214934e-01,
+                +3.30410979305632063225e-01,
+                +3.84878767649974295920e-02,
+                +1.71718239052347903558e-03,
+                +3.48941165502279436777e-05,
+                +3.47131167084116673800e-07,
+                +1.70404452782044526189e-09,
+                +3.85945925430276600453e-12,
+                +3.14040098946363334640e-15,
+        };
+
+        static const T GD8[] = {
+                +1.68548898811011640017e+00,
+                +4.87852258695304967486e-01,
+                +4.67913194259625806320e-02,
+                +1.90284426674399523638e-03,
+                +3.68475504442561108162e-05,
+                +3.57043223443740838771e-07,
+                +1.72693748966316146736e-09,
+                +3.87830166023954706752e-12,
+                +3.14040098946363335242e-15,
+        };
+
+        int16_t sign;
+
+        if (x < T(0.0)) {
+            sign = -1;
+        } else {
+            sign = +0;
+        }
+
+        if (x < T(0.0)) {
+            x = -x;
+        }
+
+        if (x == T(0.0)) {
+            return T(0.0);
+        }
+
+        if (x > T(1000000000.0)) {
+            if (isinf(x)) {
+                if (sign == -1) {
+                    return -M_PI_2;
+                } else {
+                    return +M_PI_2;
+                }
+            }
+
+            return M_PI_2 - cos(x) / x;
+        }
+
+        if (x > T(4.0)) {
+            if (x < T(8.0)) {
+                T fn4 = 0.0;
+                T fd4 = 0.0;
+                T gn4 = 0.0;
+                T gd4 = 0.0;
+
+                for (uint8_t index = 0; index <= 6; index++) fn4 = fn4 * (T(1.0) / (x * x)) + FN4[index];
+                for (uint8_t index = 0; index <= 6; index++) fd4 = fd4 * (T(1.0) / (x * x)) + FD4[index];
+                for (uint8_t index = 0; index <= 7; index++) gn4 = gn4 * (T(1.0) / (x * x)) + GN4[index];
+                for (uint8_t index = 0; index <= 6; index++) gd4 = gd4 * (T(1.0) / (x * x)) + GD4[index];
+
+                if (sign) {
+                    return -(M_PI_2 - fn4 / (x * fd4) * cos(x) - T(1.0) / (x * x) * gn4 / gd4 * sin(x));
+                } else {
+                    return +(M_PI_2 - fn4 / (x * fd4) * cos(x) - T(1.0) / (x * x) * gn4 / gd4 * sin(x));
+                }
+            }
+
+            T fn8 = 0.0;
+            T fd8 = 0.0;
+            T gn8 = 0.0;
+            T gd8 = 0.0;
+
+            for (uint8_t index = 0; index <= 8; index++) fn8 = fn8 * (T(1.0) / (x * x)) + FN8[index];
+            for (uint8_t index = 0; index <= 7; index++) fd8 = fd8 * (T(1.0) / (x * x)) + FD8[index];
+            for (uint8_t index = 0; index <= 8; index++) gn8 = gn8 * (T(1.0) / (x * x)) + GN8[index];
+            for (uint8_t index = 0; index <= 8; index++) gd8 = gd8 * (T(1.0) / (x * x)) + GD8[index];
+
+            if (sign) {
+                return -(M_PI_2 - fn8 / (x * fd8) * cos(x) - T(1.0) / (x * x) * gn8 / gd8 * sin(x));
+            } else {
+                return +(M_PI_2 - fn8 / (x * fd8) * cos(x) - T(1.0) / (x * x) * gn8 / gd8 * sin(x));
+            }
+        }
+
+        T sn = 0.0;
+        T sd = 0.0;
+
+        for (uint8_t index = 0; index <= 5; index++) sn = sn * (x * x) + SN[index];
+        for (uint8_t index = 0; index <= 5; index++) sd = sd * (x * x) + SD[index];
+
+        if (sign) {
+            return -(x * sn / sd);
+        } else {
+            return +(x * sn / sd);
+        }
     } // T trigonometric_integral_si_forward(T x)
 ); // trigonometric_integral_si_string
 

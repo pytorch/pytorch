@@ -2804,6 +2804,15 @@
 - name: special_airy_ai(Tensor x) -> Tensor
   x: non_differentiable
 
+- name: special_airy_bi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_airy_derivative_ai(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_airy_derivative_bi(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_bessel_j0(Tensor self) -> Tensor
   self: non_differentiable
 
@@ -2854,6 +2863,15 @@
   n: non_differentiable
 
 - name: special_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_complete_elliptic_integral_e(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_complete_elliptic_integral_k(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_gamma_sign(Tensor x) -> Tensor
   x: non_differentiable
 
 - name: special_hermite_polynomial_h(Tensor x, Tensor n) -> Tensor
@@ -2914,6 +2932,12 @@
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
   self: non_differentiable
 
+- name: special_scaled_modified_bessel_i0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_scaled_modified_bessel_i1(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
   x: non_differentiable
 
@@ -2960,7 +2984,19 @@
 - name: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
   x: non_differentiable
 
+- name: special_spence(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_spherical_bessel_j0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_spherical_bessel_j1(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_spherical_bessel_y0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_spherical_bessel_y1(Tensor x) -> Tensor
   x: non_differentiable
 
 - name: special_trigonometric_integral_ci(Tensor x) -> Tensor

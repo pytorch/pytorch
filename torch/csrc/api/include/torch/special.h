@@ -634,6 +634,65 @@ inline Tensor& airy_ai_out(Tensor& y, const Tensor& x) {
   return torch::special_airy_ai_out(y, x);
 }
 
+/// Airy function Bi.
+///
+/// See https://pytorch.org/docs/master/special.html#torch.special.airy_bi.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::airy_bi(x);
+/// ```
+inline Tensor airy_bi(const Tensor& x) {
+  return torch::special_airy_bi(x);
+}
+
+inline Tensor& airy_bi_out(Tensor& y, const Tensor& x) {
+  return torch::special_airy_bi_out(y, x);
+}
+
+/// Derivative of the Airy Ai function.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.airy_derivative_ai.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::airy_derivative_ai(x);
+/// ```
+inline Tensor airy_derivative_ai(const Tensor& x) {
+  return torch::special_airy_derivative_ai(x);
+}
+
+inline Tensor& airy_derivative_ai_out(Tensor& y, const Tensor& x) {
+  return torch::special_airy_derivative_ai_out(y, x);
+}
+
+/// Derivative of the Airy Bi function.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.airy_derivative_bi.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::airy_derivative_bi(x);
+/// ```
+inline Tensor airy_derivative_bi(const Tensor& x) {
+  return torch::special_airy_derivative_bi(x);
+}
+
+inline Tensor& airy_derivative_bi_out(Tensor& y, const Tensor& x) {
+  return torch::special_airy_derivative_bi_out(y, x);
+}
+
 /// Bessel function of the first kind of order 0.
 ///
 /// See https://pytorch.org/docs/master/special.html#torch.special.bessel_j0.
@@ -892,6 +951,50 @@ inline Tensor& chebyshev_polynomial_w_out(
     const Tensor& x,
     const Scalar& n) {
   return torch::special_chebyshev_polynomial_w_out(output, x, n);
+}
+
+/// Complete elliptic integral E.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.complete_elliptic_integral_e.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::complete_elliptic_integral_e(x);
+/// ```
+inline Tensor complete_elliptic_integral_e(const Tensor& self) {
+  return torch::special_complete_elliptic_integral_e(self);
+}
+
+inline Tensor& complete_elliptic_integral_e_out(
+    Tensor& result,
+    const Tensor& self) {
+  return torch::special_complete_elliptic_integral_e_out(result, self);
+}
+
+/// Complete elliptic integral K.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.complete_elliptic_integral_k.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::complete_elliptic_integral_k(x);
+/// ```
+inline Tensor complete_elliptic_integral_k(const Tensor& self) {
+  return torch::special_complete_elliptic_integral_k(self);
+}
+
+inline Tensor& complete_elliptic_integral_k_out(
+    Tensor& result,
+    const Tensor& self) {
+  return torch::special_complete_elliptic_integral_k_out(result, self);
 }
 
 /// Physicist’s Hermite polynomial.
@@ -1182,7 +1285,47 @@ inline Tensor& modified_bessel_k1_out(Tensor& result, const Tensor& self) {
   return torch::special_modified_bessel_k1_out(result, self);
 }
 
-/// Scaled modified Bessel function of the second kind of order 0.
+/// Exponentially scaled modified Bessel function of the first kind of order 0.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_i0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_i0(x);
+/// ```
+inline Tensor scaled_modified_bessel_i0(const Tensor& x) {
+  return torch::special_scaled_modified_bessel_i0(x);
+}
+
+inline Tensor& scaled_modified_bessel_i0_out(Tensor& y, const Tensor& x) {
+  return torch::special_scaled_modified_bessel_i0_out(y, x);
+}
+
+/// Exponentially scaled modified Bessel function of the first kind of order 1.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_i1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::scaled_modified_bessel_i1(x);
+/// ```
+inline Tensor scaled_modified_bessel_i1(const Tensor& x) {
+  return torch::special_scaled_modified_bessel_i1(x);
+}
+
+inline Tensor& scaled_modified_bessel_i1_out(Tensor& y, const Tensor& x) {
+  return torch::special_scaled_modified_bessel_i1_out(y, x);
+}
+
+/// Exponentially scaled modified Bessel function of the second kind of order 0.
 ///
 /// See
 /// https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k0.
@@ -1202,7 +1345,7 @@ inline Tensor& scaled_modified_bessel_k0_out(Tensor& y, const Tensor& x) {
   return torch::special_scaled_modified_bessel_k0_out(y, x);
 }
 
-/// Scaled modified Bessel function of the second kind of order 1.
+/// Exponentially scaled modified Bessel function of the second kind of order 1.
 ///
 /// See
 /// https://pytorch.org/docs/master/special.html#torch.special.scaled_modified_bessel_k1.
@@ -1426,6 +1569,66 @@ inline Tensor& spherical_bessel_j0_out(Tensor& y, const Tensor& x) {
   return torch::special_spherical_bessel_j0_out(y, x);
 }
 
+/// Spherical Bessel function of the first kind of order 1.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_j1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_j1(x);
+/// ```
+inline Tensor spherical_bessel_j1(const Tensor& x) {
+  return torch::special_spherical_bessel_j1(x);
+}
+
+inline Tensor& spherical_bessel_j1_out(Tensor& y, const Tensor& x) {
+  return torch::special_spherical_bessel_j1_out(y, x);
+}
+
+/// Spherical Bessel function of the second kind of order 0.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_y0.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_y0(x);
+/// ```
+inline Tensor spherical_bessel_y0(const Tensor& x) {
+  return torch::special_spherical_bessel_y0(x);
+}
+
+inline Tensor& spherical_bessel_y0_out(Tensor& y, const Tensor& x) {
+  return torch::special_spherical_bessel_y0_out(y, x);
+}
+
+/// Spherical Bessel function of the second kind of order 1.
+///
+/// See
+/// https://pytorch.org/docs/master/special.html#torch.special.spherical_bessel_y1.
+///
+/// Example:
+///
+/// ```
+/// auto x = torch::randn(128, dtype=kDouble);
+///
+/// torch::special::spherical_bessel_y1(x);
+/// ```
+inline Tensor spherical_bessel_y1(const Tensor& x) {
+  return torch::special_spherical_bessel_y1(x);
+}
+
+inline Tensor& spherical_bessel_y1_out(Tensor& y, const Tensor& x) {
+  return torch::special_spherical_bessel_y1_out(y, x);
+}
+
 /// Cosine integral.
 ///
 /// See
@@ -1434,7 +1637,9 @@ inline Tensor trigonometric_integral_ci(const Tensor& self) {
   return torch::special_trigonometric_integral_ci(self);
 }
 
-inline Tensor& trigonometric_integral_ci_out(Tensor& result, const Tensor& self) {
+inline Tensor& trigonometric_integral_ci_out(
+    Tensor& result,
+    const Tensor& self) {
   return torch::special_trigonometric_integral_ci_out(result, self);
 }
 
@@ -1446,7 +1651,9 @@ inline Tensor trigonometric_integral_si(const Tensor& self) {
   return torch::special_trigonometric_integral_si(self);
 }
 
-inline Tensor& trigonometric_integral_si_out(Tensor& result, const Tensor& self) {
+inline Tensor& trigonometric_integral_si_out(
+    Tensor& result,
+    const Tensor& self) {
   return torch::special_trigonometric_integral_si_out(result, self);
 }
 } // namespace special

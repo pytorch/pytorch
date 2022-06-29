@@ -19764,7 +19764,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=lambda x: x if TEST_SCIPY else _NOTHING,
+        ref=lambda x: scipy.special.shichi(x)[1] if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -19778,7 +19778,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=lambda x: x if TEST_SCIPY else _NOTHING,
+        ref=lambda x: scipy.special.shichi(x)[0] if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
     BinaryUfuncInfo(
@@ -19961,7 +19961,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=lambda x: x if TEST_SCIPY else _NOTHING,
+        ref=lambda x: scipy.special.sici(x)[1] if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
@@ -19975,7 +19975,7 @@ op_db: List[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
-        ref=lambda x: x if TEST_SCIPY else _NOTHING,
+        ref=lambda x: scipy.special.sici(x)[0] if TEST_SCIPY else _NOTHING,
         supports_autograd=False,
     ),
 ]
