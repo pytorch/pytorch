@@ -1,13 +1,13 @@
 # mypy: ignore-errors
 
 import itertools
-from torch.fx.experimental.migrate_gradual_types.constraint_generator import BinConstraintT
+from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT
 from torch.fx.experimental.migrate_gradual_types.constraint import T, BinConstraintD, Conj, Constraint, DVar, TVar
 from torch.fx.experimental.migrate_gradual_types.constraint import Disj, TGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.constraint import DGreatestUpperBound
 from torch.fx.experimental.migrate_gradual_types.constraint import CalcConv, CalcMaxPool
 from torch.fx.experimental.migrate_gradual_types.constraint import CalcProduct, CanReshape
-from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, Prod, F
+from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, Prod, F, GetItem
 from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_precision, op_leq, op_matching
 from torch.fx.experimental.migrate_gradual_types.operation import op_consistency, op_neq
 from torch.fx.experimental.migrate_gradual_types.operation import op_mul, op_add, op_sub, op_div, op_mod
@@ -25,6 +25,11 @@ def register_transformation_rule(call_target):
         _TRANSFORMATION_RULES[call_target] = fn
         return fn
     return register
+
+
+@register_transformation_rule(GetItem)
+def transform_get_item(constraint, counter):
+    pass
 
 
 @register_transformation_rule(BinConstraintT)

@@ -202,7 +202,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     # generate a getItem constraint which will be expanded based on the
     # tensor dimension.
 
-    c2 = [GetItem(i, n.args[1], get_item_output, get_item_arg) for i in range(MAX_TENSOR_RANK + 1)]
+    c2 = [GetItem(i + 1, n.args[1], get_item_output, get_item_arg) for i in range(MAX_TENSOR_RANK)]
 
 
     # since the output is a dimension, we make sure it's a natural number

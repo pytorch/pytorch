@@ -79,6 +79,27 @@ class HFOperations(unittest.TestCase):
 
         assert s.check() == z3.sat
 
+    def test_size_getitem(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: Dyn):
+                size = x.size()
+                getitem = size[-1]
+                return getitem
+
+        b = BasicBlock()
+        print(b.forward(torch.rand(1, 2, 3)))
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        generator = ConstraintGenerator(traced)
+        new_constraints, counter = generator.generate_constraints(0)
+        print(new_constraints)
+
 
 class ComposeOperationsGradualTypes(unittest.TestCase):
 
