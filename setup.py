@@ -908,7 +908,7 @@ def configure_extension_build():
         'clean': clean,
         'install': install,
         'sdist': sdist,
-        'develop':develop,
+        'develop': develop,
     }
 
     entry_points = {
