@@ -33,6 +33,7 @@ __all__ = [
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "mish",
+    "nll_loss",
     "relu",
     "selu",
     "softplus",
@@ -347,6 +348,173 @@ def hinge_embedding_loss(
     output_self = refs.where(refs.ne(target, -1), input, 0)
     loss = refs.add(output_margin, output_self)
     return _apply_loss_reduction(loss, reduction)
+
+
+def _get_string_reduction_arg(
+    size_average: Optional[bool], reduce: Optional[bool]
+) -> str:
+    if size_average is None:
+        size_average = True
+    if reduce is None:
+        reduce = True
+    if size_average and reduce:
+        ret = "mean"
+    elif reduce:
+        ret = "sum"
+    else:
+        ret = "none"
+    return ret
+
+
+def _nll_loss_2d(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    weight: Optional[TensorLikeType],
+    reduction: str,
+    ignore_index: int,
+) -> TensorLikeType:
+    if input.ndim != 4:
+        msg = "Expected 4 dimensions for input but got {}."
+        raise ValueError(msg.format(input.ndim))
+
+    if target.ndim != 3:
+        msg = "Expected 3 dimensions for input but got {}."
+        raise ValueError(msg.format(input.ndim))
+
+    _check_reduction_value(reduction)
+
+    current_target = torch.reshape(target, [-1])
+    ignore_classes_mask = torch.eq(current_target, ignore_index)
+    if weight is None:
+        current_weight = torch.where(
+            ignore_classes_mask,
+            torch.scalar_tensor(0, dtype=input.dtype, device=input.device),
+            torch.scalar_tensor(1, dtype=input.dtype, device=input.device),
+        )
+    else:
+        ignore_class_weight = torch.scalar_tensor(
+            0, dtype=input.dtype, device=input.device
+        ).expand_as(current_target)
+        current_weight = torch.where(
+            ignore_classes_mask, ignore_class_weight, weight[current_target]
+        )
+
+    batch_size = input.shape[0]
+    height = input.shape[2]
+    width = input.shape[3]
+    extent = height * width
+    numel = batch_size * extent
+
+    bdx = torch.arange(numel) // extent
+    hdx = (torch.arange(numel) - (bdx * extent)) // width
+    wdx = torch.arange(numel) % width
+
+    loss = -input[bdx, current_target, hdx, wdx] * current_weight
+    loss = torch.reshape(loss, target.shape)
+
+    if reduction == "none":
+        return loss
+    elif reduction == "sum":
+        return torch.sum(loss)
+    else:
+        return torch.sum(loss) / torch.sum(current_weight)
+
+
+def _nll_loss_1d(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    weight: Optional[TensorLikeType],
+    reduction: str,
+    ignore_index: int,
+) -> TensorLikeType:
+    if input.ndim < 1:
+        msg = "Expected 1 or more dimension for input but got {}."
+        raise ValueError(msg.format(input.ndim))
+
+    if input.ndim != 1 and input.shape[0] != target.shape[0]:
+        msg = "Expected input batch size ({}) to match target batch size ({})."
+        raise ValueError(msg.format(input.shape[0], target.shape[0]))
+
+    _check_reduction_value(reduction)
+
+    if target.ndim <= 1:
+        current_target = target
+    else:
+        current_target = target[:, 0]
+
+    ignore_classes_mask = torch.eq(current_target, ignore_index)
+    if weight is None:
+        current_weight = torch.where(
+            ignore_classes_mask,
+            torch.scalar_tensor(0, dtype=input.dtype, device=input.device),
+            torch.scalar_tensor(1, dtype=input.dtype, device=input.device),
+        )
+    else:
+        ignore_class_weight = torch.scalar_tensor(
+            0, dtype=input.dtype, device=input.device
+        ).expand_as(current_target)
+        current_weight = torch.where(
+            ignore_classes_mask, ignore_class_weight, weight[current_target]
+        )
+
+    batch_size = input.shape[0]
+    if input.ndim == 1:
+        loss = -input[current_target] * current_weight
+    else:
+        loss = -input[torch.arange(batch_size), current_target] * current_weight
+
+    if reduction == "none":
+        return loss
+    elif reduction == "sum":
+        return torch.sum(loss)
+    else:
+        return torch.sum(loss) / torch.sum(current_weight)
+
+
+def nll_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    weight: Optional[TensorLikeType] = None,
+    size_average: Optional[bool] = None,
+    ignore_index: int = -100,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average, reduce)
+
+    if input.ndim == 1 or input.ndim == 2:
+        return _nll_loss_1d(input, target, weight, reduction, ignore_index)
+    elif input.ndim == 4:
+        return _nll_loss_2d(input, target, weight, reduction, ignore_index)
+    else:
+        # input ndim is == 3 or > 4
+        batch_size = input.shape[0]
+        num_classes = input.shape[1]
+        out_size = [batch_size] + list(input.shape[2:])
+
+        if target.shape[1:] != input.shape[2:]:
+            msg = "Expected target size {} but got {}"
+            raise ValueError(msg.format(out_size, target.shape))
+
+        # support empty batches, see #15870
+        if input.numel() > 0:
+            input = torch.reshape(input, [batch_size, num_classes, 1, -1])
+        else:
+            input = torch.reshape(input, [batch_size, num_classes, 0, 0])
+
+        if target.numel() > 0:
+            target = torch.reshape(target, [batch_size, 1, -1])
+        else:
+            target = torch.reshape(target, [batch_size, 0, 0])
+
+        if reduction == "none":
+            return _nll_loss_2d(input, target, weight, reduction, ignore_index)
+        else:
+            result = _nll_loss_2d(input, target, weight, reduction, ignore_index)
+            return torch.reshape(result, out_size)
 
 
 # tanhshrink does not use _make_elementwise_unary_reference because it does not support out
