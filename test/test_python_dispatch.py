@@ -744,7 +744,8 @@ $6 = torch._ops.aten.add_.Tensor($1, $5)''')
         with capture_logs(is_mode=True) as logs:
             with enable_torch_dispatch_mode(LoggingTensorMode(inner=None)):
                 torch.empty([])
-        self.assertExpectedInline('\n'.join(logs), """$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32, device=device(type='cpu'), pin_memory=False)""")
+        self.assertExpectedInline('\n'.join(logs), ("$0 = torch._ops.aten.empty.SymInt([], dtype=torch.float32," +
+                                                    " device=device(type='cpu'), pin_memory=False)"))
 
     def test_enable_torch_dispatch_mode_unrelated_tensors(self) -> None:
         x = torch.randn([])
