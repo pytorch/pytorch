@@ -543,51 +543,10 @@
   "torch.distributed.elastic.rendezvous.dynamic_rendezvous": [
     "get_method_name"
   ],
-  "torch.distributed.elastic.rendezvous.registry": [
-    "RendezvousHandler",
-    "RendezvousParameters",
-    "create_handler"
-  ],
-  "torch.distributed.elastic.rendezvous.utils": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Event",
-    "Optional",
-    "Thread",
-    "Tuple",
-    "Union",
-    "timedelta"
-  ],
-  "torch.distributed.elastic.timer.api": [
-    "Any",
-    "Dict",
-    "List",
-    "Optional",
-    "Set",
-    "contextmanager",
-    "getframeinfo",
-    "stack"
-  ],
-  "torch.distributed.elastic.timer.local_timer": [
-    "Any",
-    "Dict",
-    "Empty",
-    "List",
-    "RequestQueue",
-    "Set",
-    "TimerClient",
-    "TimerRequest",
-    "TimerServer",
-    "Tuple"
-  ],
   "torch.distributed.elastic.utils.api": [
     "Any",
     "List",
     "Template"
-  ],
-  "torch.distributed.elastic.utils.data.elastic_distributed_sampler": [
-    "DistributedSampler"
   ],
   "torch.distributed.elastic.utils.logging": [
     "Optional",
@@ -596,50 +555,6 @@
   "torch.distributed.elastic.utils.store": [
     "List",
     "timedelta"
-  ],
-  "torch.distributed.fsdp.flatten_params_wrapper": [
-    "Any",
-    "Dict",
-    "Generator",
-    "Iterator",
-    "List",
-    "NamedTuple",
-    "Optional",
-    "ParamOffset",
-    "Sequence",
-    "SharedParamInfo",
-    "Tensor",
-    "Tuple",
-    "Union",
-    "accumulate"
-  ],
-  "torch.distributed.fsdp.fully_sharded_data_parallel": [
-    "Any",
-    "Callable",
-    "Dict",
-    "Enum",
-    "FlatParameter",
-    "FlattenParamsWrapper",
-    "Generator",
-    "Iterable",
-    "Iterator",
-    "List",
-    "Mapping",
-    "NamedTuple",
-    "Optional",
-    "Parameter",
-    "ProcessGroup",
-    "Set",
-    "Shard",
-    "ShardedTensor",
-    "Tuple",
-    "Union",
-    "Variable",
-    "auto",
-    "cast",
-    "contextmanager",
-    "dataclass",
-    "init_from_local_shards"
   ],
   "torch.distributed.fsdp.utils": [
     "Any",
@@ -661,25 +576,6 @@
     "Tuple",
     "Type",
     "cast"
-  ],
-  "torch.distributed.launcher.api": [
-    "Any",
-    "Callable",
-    "ChildFailedError",
-    "Dict",
-    "List",
-    "LocalElasticAgent",
-    "Optional",
-    "RendezvousParameters",
-    "SignalException",
-    "Std",
-    "Tuple",
-    "Union",
-    "WorkerSpec",
-    "dataclass",
-    "field",
-    "get_logger",
-    "parse_rendezvous_endpoint"
   ],
   "torch.distributed.nn": [
     "Function",
@@ -795,19 +691,6 @@
     "Context",
     "Copy",
     "Wait"
-  ],
-  "torch.distributed.pipeline.sync.dependency": [
-    "Fork",
-    "Join",
-    "fork",
-    "join"
-  ],
-  "torch.distributed.pipeline.sync.microbatch": [
-    "Batch",
-    "NoChunk",
-    "check",
-    "gather",
-    "scatter"
   ],
   "torch.distributed.pipeline.sync.phony": [
     "get_phony"
@@ -1092,22 +975,6 @@
     "dataclass",
     "map_arg"
   ],
-  "torch.fx.graph_module": [
-    "Any",
-    "Dict",
-    "Graph",
-    "Importer",
-    "List",
-    "Optional",
-    "PackageExporter",
-    "PackageImporter",
-    "Path",
-    "PythonCode",
-    "Set",
-    "Type",
-    "Union",
-    "compatibility"
-  ],
   "torch.fx.immutable_collections": [
     "Any",
     "Context",
@@ -1173,45 +1040,8 @@
     "map_aggregate",
     "map_arg"
   ],
-  "torch.fx.passes.param_fetch": [
-    "Any",
-    "Callable",
-    "Dict",
-    "GraphModule",
-    "List",
-    "Tuple",
-    "Type",
-    "compatibility"
-  ],
-  "torch.fx.passes.shape_prop": [
-    "Any",
-    "Dict",
-    "NamedTuple",
-    "Node",
-    "Optional",
-    "Tuple",
-    "compatibility",
-    "map_aggregate"
-  ],
-  "torch.fx.passes.split_module": [
-    "Any",
-    "Callable",
-    "Dict",
-    "GraphModule",
-    "List",
-    "Optional",
-    "compatibility"
-  ],
   "torch.fx.proxy": [
     "assert_fn"
-  ],
-  "torch.hub": [
-    "HTTPError",
-    "Path",
-    "Request",
-    "tqdm",
-    "urlopen",
-    "urlparse"
   ],
   "torch.jit": [
     "Attribute",
@@ -1949,6 +1779,7 @@
     "polygamma",
     "psi",
     "round",
+    "scaled_modified_bessel_k0",
     "scaled_modified_bessel_k1",
     "shifted_chebyshev_polynomial_t",
     "shifted_chebyshev_polynomial_u",
@@ -2113,19 +1944,6 @@
     "BinaryIO",
     "IO",
     "Union"
-  ],
-  "torch.utils.tensorboard.summary": [
-    "HistogramProto",
-    "Optional",
-    "PrCurvePluginData",
-    "Summary",
-    "SummaryMetadata",
-    "TensorProto",
-    "TensorShapeProto",
-    "TextPluginData",
-    "convert_to_HWC",
-    "make_np",
-    "range"
   ],
   "torch": [
     "BFloat16Storage",
