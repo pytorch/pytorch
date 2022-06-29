@@ -19,7 +19,7 @@ runs:
       run: |
           set -ex
           ls -l
-          pushd {{ inputs.pytorch-repo-directory }} && ls -l
+          pushd ${{ inputs.pytorch-repo-directory }} && ls -l
           ls -l
           popd
           ls -l
