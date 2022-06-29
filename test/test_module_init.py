@@ -375,7 +375,7 @@ def generate_tests(test_cls, constructor_arg_db):
     }
     # no need to support kwargs for these modules even though
     # they have parameters / buffers because they are passed in
-    # already instantiated
+    # already instantiated s
     MODULES_WITHOUT_KWARGS_SUPPORT = {
         torch.nn.BCELoss,
         torch.nn.BCEWithLogitsLoss,
