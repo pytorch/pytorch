@@ -14,7 +14,7 @@ def execute(gm: GraphModule, *args, executor: str = "aten"):
     """
 
     if executor == "aten":
-        return gm.forward(*args)
+        return gm.forward(args)
     elif executor == "nvfuser":
         return nvfuser_execute(gm, *args)
 
