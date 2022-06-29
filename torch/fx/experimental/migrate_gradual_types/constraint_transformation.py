@@ -29,7 +29,38 @@ def register_transformation_rule(call_target):
 
 @register_transformation_rule(GetItem)
 def transform_get_item(constraint, counter):
-    pass
+    """
+    generate an equality of the form:
+    t = [a1, ..., an]
+    then generate constraints that check if the given index is valid
+    given this particular tensor size.
+    If the index is valid, generate a constraint to get the item
+    Note that we already handled the Dyn input case in the previous
+    step.
+    Args:
+        constraint: GetItem which assumes we are getting an item from a tensor (not Dyn)
+        counter: variable tracking
+    Returns: simplified constraints for GetItem
+
+    """
+    dims, counter = gen_tensor_dims(constraint.tensor_size, counter)
+    nat_constraints = gen_nat_constraints(dims)
+
+    try:
+        dims[constraint.index]
+        is_valid_index = T()
+    except IndexError:
+        is_valid_index = F()
+    all_constraints = [BinConstraintT(constraint.input_var, TensorType(dims), op_eq),
+                       *nat_constraints,
+                       is_valid_index]
+
+    # if the index is valid, we generate a constraint for getting an item
+    # otherwise this clause will have been UNSAT due to the wrong index
+    if is_valid_index == T():
+        all_constraints.append(BinConstraintD(constraint.res, dims[constraint.index], op_eq))
+
+    return Conj(all_constraints), counter
 
 
 @register_transformation_rule(BinConstraintT)
