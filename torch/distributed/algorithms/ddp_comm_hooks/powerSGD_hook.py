@@ -286,8 +286,8 @@ class PowerSGDState(object):
         """
         self.process_group = distributed_c10d._get_default_group()
         logger.warning(
-            "NOTE: Process group will be set to a default group (i.e. the world size).\
-                If a different group is desired, please set `self.process_group` after PowerSGD state is loaded."
+            "NOTE: Process group will be set to a default group (i.e. the world size).\n"
+            "If a different group is desired, please set `self.process_group` after PowerSGD state is loaded."
         )
         for slot, value in state.items():
             setattr(self, slot, value)

@@ -8821,14 +8821,63 @@ class DistributedTest:
             self.assertEqual(ddp_grads[0], local_model.fc.weight.grad)
             self.assertEqual(ddp_grads[1], local_model.fc.bias.grad)
 
-        def _test_hook_pickling(self, hook, hook_state):
+        def _test_hook_pickling_logs(
+            self,
+            hook,
+            hook_state,
+            restore_msg,
+        ):
+            chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
+            ddp_model = DistributedDataParallel(
+                torch.nn.Linear(1, 5).to(self.rank),
+                device_ids=[self.rank]
+            )
+            ddp_model.register_comm_hook(hook_state, hook)
+            state = {
+                'state_dict': ddp_model.state_dict(),
+                'comm_hook': hook,
+                'comm_hook_state': hook_state,
+            }
+
+            if self.rank == 0:
+                with self.assertLogs(level='WARNING') as captured:
+                    torch.save(state, chkpt_file)
+
+                # Check that the logger has only one entry
+                self.assertEqual(len(captured.records), 1)
+                # Check that the logger has an expected entry
+                self.assertRegex(
+                    captured.records[0].getMessage(),
+                    r'^NOTE: Process group .+ not serializable and excluded from a saved state\.$'
+                )
+
+            dist.barrier()
+            map_location = {'cuda:%d' % 0: 'cuda:%d' % self.rank}
+            with self.assertLogs(level='WARNING') as captured:
+                _ = torch.load(chkpt_file, map_location=map_location)
+
+            # Check that the logger has only one entry
+            self.assertEqual(len(captured.records), 1)
+
+            # Check that the logger has an expected entry
+            self.assertEqual(captured.records[0].getMessage(), restore_msg)
+
+            if self.rank == 0:
+                os.remove(chkpt_file)
+
+        def _test_hook_pickling_parity(
+            self,
+            hook,
+            hook_state,
+            optim_wrapper=None
+        ):
             torch.manual_seed(0)
             learning_rate = 0.01
             chkpt_file = tempfile.gettempdir() + "/checkpoint.pt"
             rank = self.rank
+            special_attrs = ["process_group", "subgroup", "rng"]
 
             input = torch.randn(7, 1, device=rank)
-            target = torch.randn(7, 5, device=rank)
             net = torch.nn.Linear(1, 5).to(rank)
             ddp_model = DistributedDataParallel(
                 copy.deepcopy(net),
@@ -8838,68 +8887,67 @@ class DistributedTest:
                 copy.deepcopy(net),
                 device_ids=[rank]
             )
-            optimizer = torch.optim.SGD(ddp_model.parameters(), lr=learning_rate)
+            base_optimizer = torch.optim.SGD(ddp_model.parameters(), lr=learning_rate)
+            if optim_wrapper is not None:
+                optimizer = optim_wrapper(base_optimizer)
+            else:
+                optimizer = base_optimizer
+
             ddp_model.register_comm_hook(hook_state, hook)
             ddp_model.train()
 
             for _ in range(10):
                 optimizer.zero_grad()
-                out = ddp_model(input)
-                loss = F.mse_loss(out, target)
+                loss = ddp_model(input).sum()
                 loss.backward()
                 optimizer.step()
 
             state = {
                 'state_dict': ddp_model.state_dict(),
                 'comm_hook': hook,
-                'comm_hook_state': hook_state
+                'comm_hook_state': hook_state,
+                'optimizer_state_dict': optimizer.state_dict(),
             }
 
             if rank == 0:
-                with self.assertLogs() as captured:
-                    torch.save(state, chkpt_file)
-
-                # Check that the logger has only one entry
-                self.assertEqual(len(captured.records), 1)
-                # Check that the logger has an expected entry
-                self.assertEqual(
-                    captured.records[0].getMessage(),
-                    "NOTE: Process group is not serializable and excluded from a saved state."
-                )
+                torch.save(state, chkpt_file)
 
             dist.barrier()
             map_location = {'cuda:%d' % 0: 'cuda:%d' % rank}
-            with self.assertLogs() as captured:
-                checkpoint = torch.load(chkpt_file, map_location=map_location)
-
-            # Check that the logger has only one entry
-            self.assertEqual(len(captured.records), 1)
-            # Check that the logger has an expected entry
-            self.assertEqual(
-                captured.records[0].getMessage(),
-                "NOTE: Process group will be set to a default group (i.e. the world size).\
-                If a different group is desired, please set `self.process_group` after PowerSGD state is loaded."
-            )
+            checkpoint = torch.load(chkpt_file, map_location=map_location)
 
             dummy_ddp_model.load_state_dict(checkpoint['state_dict'])
             dummy_hook = checkpoint['comm_hook']
             dummy_hook_state = checkpoint['comm_hook_state']
-            dummy_optimizer = torch.optim.SGD(dummy_ddp_model.parameters(), lr=learning_rate)
+            if optim_wrapper is not None:
+                dummy_optimizer = optim_wrapper(torch.optim.SGD(dummy_ddp_model.parameters(), lr=learning_rate))
+            else:
+                dummy_optimizer = torch.optim.SGD(dummy_ddp_model.parameters(), lr=learning_rate)
+
+            dummy_optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
             # Check that loaded function is correct
-            self.assertEqual(dummy_hook.__qualname__, hook.__qualname__)
+            self.assertEqual(dummy_hook, hook)
 
             # Check that all slots' keys were restored correctly
             self.assertEqual(hook_state.__slots__, dummy_hook_state.__slots__)
 
             # Check that all slots' attributes are restored correctly
-            # Excluding ``process_group`` and ``rng``.
+            # excluding attributes that need a special check.
             for entry in dummy_hook_state.__slots__:
-                if entry != "process_group" and entry != "rng":
+                if entry not in special_attrs:
                     self.assertEqual(getattr(dummy_hook_state, entry), getattr(hook_state, entry))
 
             # Check that ``process_group`` was set to default
             self.assertEqual(dummy_hook_state.process_group, _get_default_group())
+
+            if "subgroup" in dummy_hook_state.__slots__ and "subgroup" in special_attrs:
+                # By default a subgroup is set to the subgroup on the each node.
+                # For this single-node test environment, the intra-node process group is equivalent to
+                # the global process group. Thus, the size should be the same as the global
+                # process group size and current ranks should be equal.
+                self.assertEqual(dummy_hook_state.subgroup.size(), dist.group.WORLD.size())
+                self.assertEqual(dummy_hook_state.subgroup.rank(), dist.group.WORLD.rank())
 
             # Check that a random state was restored properly:
             # ``np.random.RandomState.get_state`` returns a tuple with entries:
@@ -8910,8 +8958,9 @@ class DistributedTest:
             # ``gauss`` - float
             #  (refer to https://github.com/numpy/numpy/blob/266aad7478bc7fbcc55eea7f942a0d373b838396/numpy/random/mtrand.pyi)
             # To make sure random state was restored properly, all entries should equal the original
-            for entry1, entry2 in zip(hook_state.rng.get_state(), dummy_hook_state.rng.get_state()):
-                np.testing.assert_array_equal(entry1, entry2)
+            if "rng" in dummy_hook_state.__slots__ and "rng" in special_attrs:
+                for entry1, entry2 in zip(hook_state.rng.get_state(), dummy_hook_state.rng.get_state()):
+                    np.testing.assert_array_equal(entry1, entry2)
 
             dummy_ddp_model.register_comm_hook(dummy_hook_state, dummy_hook)
             dummy_ddp_model.train()
@@ -8919,10 +8968,8 @@ class DistributedTest:
             for _ in range(10):
                 optimizer.zero_grad()
                 dummy_optimizer.zero_grad()
-                out_origin = ddp_model(input)
-                out_dummy = dummy_ddp_model(input)
-                loss_origin = F.mse_loss(out_origin, target)
-                loss_dummy = F.mse_loss(out_dummy, target)
+                loss_origin = ddp_model(input).sum()
+                loss_dummy = dummy_ddp_model(input).sum()
                 loss_origin.backward()
                 loss_dummy.backward()
                 optimizer.step()
@@ -8935,20 +8982,85 @@ class DistributedTest:
             if rank == 0:
                 os.remove(chkpt_file)
 
+        def _postlocalsgd_optimizer(self, base_optimizer):
+            return post_localSGD_optimizer.PostLocalSGDOptimizer(
+                optim=base_optimizer,
+                averager=averagers.PeriodicModelAverager(period=1, warmup_steps=0)
+            )
+
         @sandcastle_skip_if(
             BACKEND not in DistTestCases.backend_feature["cuda"],
             f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
         )
-        @skip_if_lt_x_gpu(int(os.environ["WORLD_SIZE"]))
-        def test_ddp_hook_pickling_powerSGD(self):
-
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_hook_pickling_powerSGD_logs(self):
             hook = powerSGD.powerSGD_hook
             powersgd_state = powerSGD.PowerSGDState(
                 process_group=None,
                 matrix_approximation_rank=1,
                 start_powerSGD_iter=4,
             )
-            self._test_hook_pickling(hook, powersgd_state)
+            restore_msg = "NOTE: Process group will be set to a default group (i.e. the world size).\n"\
+                "If a different group is desired, please set `self.process_group` after PowerSGD state is loaded."
+
+            self._test_hook_pickling_logs(hook, powersgd_state, restore_msg=restore_msg)
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["cuda"],
+            f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_hook_pickling_powerSGD_parity(self):
+            hook = powerSGD.powerSGD_hook
+            powersgd_state = powerSGD.PowerSGDState(
+                process_group=None,
+                matrix_approximation_rank=1,
+                start_powerSGD_iter=4,
+            )
+            self._test_hook_pickling_parity(hook, powersgd_state)
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["cuda"],
+            f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
+        )
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["subgroup"],
+            f"The {BACKEND} backend does not support creating subgroups on CUDA devices"
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_hook_pickling_postlocal_SGD_logs(self):
+            hook = post_localSGD.post_localSGD_hook
+            postlocalsgd_state = post_localSGD.PostLocalSGDState(
+                process_group=None,
+                subgroup=None,
+                start_localSGD_iter=0
+            )
+            restore_msg = "NOTE: Process group will be set to a default group (i.e. the world size).\n"\
+                "Subgroup will be set to a default subgroup (i.e. an intra-node subgroup)\n"\
+                "If a different group is desired, please set `self.process_group` after `PostLocalSGD`'s state is loaded."
+            self._test_hook_pickling_logs(hook, postlocalsgd_state, restore_msg=restore_msg)
+
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["cuda"],
+            f"The {BACKEND} backend does not support DDP communication hook on CUDA devices"
+        )
+        @sandcastle_skip_if(
+            BACKEND not in DistTestCases.backend_feature["subgroup"],
+            f"The {BACKEND} backend does not support creating subgroups on CUDA devices"
+        )
+        @skip_if_lt_x_gpu(2)
+        def test_ddp_hook_pickling_postlocal_SGD_parity(self):
+            hook = post_localSGD.post_localSGD_hook
+            postlocalsgd_state = post_localSGD.PostLocalSGDState(
+                process_group=None,
+                subgroup=None,
+                start_localSGD_iter=0
+            )
+            self._test_hook_pickling_parity(
+                hook,
+                postlocalsgd_state,
+                optim_wrapper=self._postlocalsgd_optimizer
+            )
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)
