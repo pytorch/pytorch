@@ -7507,6 +7507,14 @@ def reference_inputs_elementwise_ternary(op, device, dtype, requires_grad, *, sa
         yield SampleInput(a, args=(b, c))
 
 
+def _clamp_min_numpy(a, min=None):
+    return np.maximum(a, min)
+
+
+def _clamp_max_numpy(a, max=None):
+    return np.minimum(a, max)
+
+
 def _clamp_numpy(a, min=None, max=None):
     if min is None:
         return np.minimum(a, max)
@@ -8908,6 +8916,11 @@ def reference_inputs_where(op, device, dtype, requires_grad, **kwargs):
         b[0, 2] = nan
 
         yield SampleInput(a, args=(c, b))
+
+    # Python scalars type promotion
+    for scalar in (0, 0.0, 0j, False):
+        yield SampleInput(scalar, args=(c, b))
+        yield SampleInput(a, args=(c, scalar))
 
 
 def error_inputs_where(op_info, device, **kwargs):
@@ -10619,6 +10632,42 @@ op_db: List[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_reference_numerics_extremal_values',
                                      dtypes=(torch.complex64, torch.complex128)),
+                    )),
+    BinaryUfuncInfo('clamp_max',
+                    ref=_clamp_max_numpy,
+                    dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_rhs_python_scalar=False,
+                    supports_fwgrad_bwgrad=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=False),
+                    skips=(
+                        # RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='cuda'),
+                        # dispatch to lazy test failed
+                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        # test error disabled since rhs non-tensor python scalar is supported
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
+                    )),
+    BinaryUfuncInfo('clamp_min',
+                    ref=_clamp_min_numpy,
+                    dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+                    supports_forward_ad=True,
+                    supports_rhs_python_scalar=False,
+                    supports_fwgrad_bwgrad=True,
+                    rhs_make_tensor_kwargs=dict(exclude_zero=False),
+                    skips=(
+                        # RuntimeError: "min_elementwise_cuda" not implemented for 'ComplexFloat'
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='cuda'),
+                        # dispatch to lazy test failed
+                        DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
+                        # test error disabled since rhs non-tensor python scalar is supported
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors'),
                     )),
     BinaryUfuncInfo('mul',
                     aliases=('multiply',),
@@ -19840,6 +19889,20 @@ op_db: List[OpInfo] = [
         supports_autograd=False,
     ),
     UnaryUfuncInfo(
+        'special.scaled_modified_bessel_k0',
+        decorators=(
+            toleranceOverride(
+                {
+                    torch.float32: tol(atol=1e-03, rtol=1e-03),
+                    torch.float64: tol(atol=1e-05, rtol=1e-03),
+                }
+            ),
+        ),
+        dtypes=all_types_and(torch.bool),
+        ref=scipy.special.k0e if TEST_SCIPY else _NOTHING,
+        supports_autograd=False,
+    ),
+    UnaryUfuncInfo(
         'special.scaled_modified_bessel_k1',
         decorators=(
             toleranceOverride(
@@ -20246,14 +20309,13 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.logsumexp",
         torch_opinfo_name="logsumexp",
-        # nvFuser test for float32 fails with AssertionError: Dtypes torch.float64 and torch.float32 are not equal!
-        # The test with int dtype passes
+        # When keepdim=False logsumexp function uses squeeze operation
+        # that is not yet exposed in nvFuser's Python API.
         supports_nvfuser=False,
     ),
     PythonRefInfo(
         "_refs.log_softmax",
         torch_opinfo_name="log_softmax",
-        supports_nvfuser=False,
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nan_to_num",
@@ -20815,6 +20877,24 @@ python_ref_db = [
     #
     # Elementwise Ternary Reference OpInfos
     #
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.clamp_min",
+        torch_opinfo_name="clamp_min",
+        supports_nvfuser=False,
+        skips=(
+            # test error disabled since rhs non-tensor python scalar is supported
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
+    ),
+    ElementwiseBinaryPythonRefInfo(
+        "_refs.clamp_max",
+        torch_opinfo_name="clamp_max",
+        supports_nvfuser=False,
+        skips=(
+            # test error disabled since rhs non-tensor python scalar is supported
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+        ),
+    ),
     PythonRefInfo(
         "_refs.clamp",
         torch_opinfo_name="clamp",
