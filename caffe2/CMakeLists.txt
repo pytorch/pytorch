@@ -779,6 +779,12 @@ if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
 endif()
 
+if(USE_MPS OR USE_METAL)
+  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.16")
+    enable_language(OBJCXX)
+  endif()
+endif()
+
 # NOTE [ Linking AVX and non-AVX files ]
 #
 # Regardless of the CPU capabilities, we build some files with AVX2, and AVX512
@@ -1131,7 +1137,7 @@ endif()
     ${TORCH_SRC_DIR}/csrc)
 
   target_include_directories(torch_cpu PRIVATE
-    ${TORCH_ROOT}/third_party/miniz-2.0.8)
+    ${TORCH_ROOT}/third_party/miniz-2.1.0)
 
   if(USE_KINETO)
     target_include_directories(torch_cpu PRIVATE
