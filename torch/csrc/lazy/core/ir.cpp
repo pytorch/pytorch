@@ -166,6 +166,7 @@ std::string Node::ToString() const {
 
 void Node::AddOperand(NodePtr node, size_t index) {
   CHECK_LT(index, node->num_outputs());
+  node->AddUse(Use(this, operands_.size(), index));
   operands_.push_back(node);
   operands_as_outputs_.emplace_back(operands_.back().get(), index);
 }

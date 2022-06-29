@@ -7,6 +7,9 @@
 
 namespace torch {
 namespace lazy {
+
+struct Node;
+
 struct SourceLocation {
   std::string file;
   std::string function;
@@ -30,6 +33,25 @@ struct TORCH_API UserMetaData {
 struct TORCH_API MetaData {
   std::string scope;
   std::vector<SourceLocation> frame_info;
+};
+
+// Represents a use of the output of a given node.
+// If use U is within node N, it means that node U.node is using the output
+// U.index of the node N.
+struct TORCH_API Use {
+  Use(torch::lazy::Node* node, size_t operand_index, size_t index)
+      : node(node), operand_index(operand_index), index(index) {}
+
+  bool operator<(const Use& rhs) const;
+
+  std::string ToString() const;
+
+  // The node using the output of the node this use belongs to.
+  torch::lazy::Node* node = nullptr;
+  // The operand index, within node's operands, which this use refers to.
+  size_t operand_index = 0;
+  // The index within output the user node refers to.
+  size_t index = 0;
 };
 
 // TODO(whc) is this going to be used outside of in IR decompositions?

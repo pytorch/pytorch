@@ -33,6 +33,23 @@ std::ostream& operator<<(
   return stream;
 }
 
+bool Use::operator<(const Use& rhs) const {
+  if (node->op() != rhs.node->op()) {
+    return node->op() < rhs.node->op();
+  }
+  if (operand_index != rhs.operand_index) {
+    return operand_index < rhs.operand_index;
+  }
+  return index < rhs.index;
+}
+
+std::string Use::ToString() const {
+  std::stringstream ss;
+  ss << node->ToString() << ", operand_index=" << operand_index
+     << ", index=" << index;
+  return ss.str();
+}
+
 namespace {
 
 struct ScopeEntry {

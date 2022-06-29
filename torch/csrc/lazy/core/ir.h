@@ -137,6 +137,10 @@ class TORCH_API Node {
   // Gets operand at index i if index is valid, or kNullOutput otherwise.
   virtual const Output& nullable_operand(size_t i) const;
 
+  const std::set<Use>& uses() const {
+    return uses_;
+  }
+
   // Returns the hash of the dag used to look up the compiled graph
   virtual hash_t hash() const = 0;
 
@@ -174,12 +178,18 @@ class TORCH_API Node {
   // Adds node's index output number as operand.
   void AddOperand(NodePtr node, size_t index = 0);
 
+  void AddUse(Use use) {
+    uses_.insert(std::move(use));
+  }
+
   std::vector<Shape> shapes_;
   // A node holds a real reference to its operands.
   std::vector<NodePtr> operands_;
   // Outputs do not hold references on the nodes, and neither do the uses, since
   // otherwise we get into circular reference counting.
   std::vector<Output> operands_as_outputs_;
+  // We use a set for uses, as we want deterministic use sequencing.
+  std::set<Use> uses_;
 };
 
 inline std::ostream& operator<<(std::ostream& stream, const Node& node) {
