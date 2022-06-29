@@ -180,6 +180,11 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
         out_type = (
             TensorLikeType
             if is_tensor
+            else Tuple[tuple(TensorLikeType for _ in range(len(out_names)))]
+        )
+        return_type = (
+            TensorLikeType
+            if is_tensor
             else NamedTuple(
                 f"return_types_{fn.__name__}", [(o, TensorLikeType) for o in out_names]
             )
@@ -195,7 +200,6 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                 and len(result) == len(out_names)
             )
             if out is not None:
-                init_dtype = out.dtype
                 assert type(out) == type(result)
                 if is_tensor:
                     assert isinstance(out, TensorLike)
@@ -216,7 +220,7 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             else:
                 out = result
             # mypy does not see through  the definition of out_type given that it's in a different scope
-            return out if is_tensor else out_type(*out)  # type: ignore[operator]
+            return out if is_tensor else return_type(*out)  # type: ignore[operator]
 
         sig = inspect.signature(fn)
         out_param = inspect.Parameter(
@@ -225,12 +229,15 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
             default=None,
             annotation=out_type,
         )
+        # Mark that the function now returns a tuple
+        assert sig.return_annotation in (sig.empty, out_type)
         params = chain(sig.parameters.values(), (out_param,))
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+            parameters=params, return_annotation=return_type  # type: ignore[arg-type]
         )
         _fn.__annotations__ = fn.__annotations__
         _fn.__annotations__["out"] = out_type
+        _fn.__annotations__["return"] = return_type
         return _fn
 
     return _out_wrapper
