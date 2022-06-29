@@ -8,7 +8,7 @@
 namespace torch {
 namespace lazy {
 
-struct Node;
+class Node;
 
 struct SourceLocation {
   std::string file;
