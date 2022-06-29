@@ -38,7 +38,7 @@ if [ "${BUILD_LITE_INTERPRETER}" == "1" ]; then
     # libtorch_lite_ios_nightly_1.11.0.20210810.zip
     ZIPFILE="libtorch_lite_ios_1.12.0.zip"
 else
-    ZIPFILE="libtorch_ios_1.12.zip"
+    ZIPFILE="libtorch_ios_1.12.0.zip"
 fi
 cd ${ZIP_DIR}
 #for testing
