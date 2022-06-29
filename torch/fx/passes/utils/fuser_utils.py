@@ -1,13 +1,13 @@
 import copy
 from queue import SimpleQueue
-from typing import List, Dict
+from typing import List, Dict, Tuple
 
 import torch.fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.graph import Graph
 from torch.fx.node import Node
 from torch.fx.passes.tools_common import NodeList, NodeSet, legalize_graph
-from torch.fx.passes.split_utils import HolderModule
+from torch.fx.passes.utils import lift_subgraph_as_module
 
 def topo_sort(nodes: NodeList) -> NodeList:
     # sort nodes according to the topological order
@@ -72,44 +72,29 @@ def validate_partition(partition: NodeList) -> bool:
     return True
 
 
-# TODO: copied from split_by_tags's impl, refactor split_by_tags to use this function
-def copy_module_attributes(gm: GraphModule, subgraph: Graph) -> HolderModule:
-    # Loop through all module calls (call_module) and param fetches (get_attr)
-    # in this component, creating HolderModules as necessary to match the path.
-    # e.g. if in the original module there's a get_attr node fetches "conv.weight".
-    # We create a HolderModule as root -> add a HolderModule named "conv" ->
-    # make "weight" a attribute of "conv" HolderModule and point to conv.weight in
-    # the original module.
-    submodule = HolderModule({})
-    for n in subgraph.nodes:
-        if n.op not in ("call_module", "get_attr"):
-            continue
+def fuse_as_graphmodule(gm: GraphModule,
+                        nodes: NodeList,
+                        module_name: str) -> Tuple[GraphModule, Tuple[Node, ...], Tuple[Node, ...]]:
 
-        target = n.target
-        assert isinstance(target, str)
-        target_name_parts = target.split(".")
-        curr = submodule
-        orig_gm = gm
+    """
+    Fuse nodes in graph_module into a GraphModule.
 
-        for name in target_name_parts[:-1]:
-            if not hasattr(curr, name):
-                curr.add_module(name, HolderModule({}))
+    Args:
+        gm (GraphModule): target graph_module
 
-            curr = getattr(curr, name)
-            orig_gm = getattr(orig_gm, name)
+        nodes (List[Node]): list of nodes in `gm` to fuse, where the node must be topologically sorted
 
-        leaf_node_name = target_name_parts[-1]
-        leaf_node = getattr(orig_gm, leaf_node_name)
+        module_name: class name for the fused GraphModule
 
-        # Relies on custom __setattr__ magic.
-        setattr(curr, leaf_node_name, leaf_node)
+    Returns:
+        fused_gm (GraphModule): fused graph module, where its node is a copy of `nodes` in `gm`
 
-    return submodule
+        original_inputs (Tuple[Node, ...]): input nodes to `nodes` in original `gm`
 
-def fuse_partition(gm: GraphModule,
-                   nodes: NodeList,
-                   partition_name: str) -> GraphModule:
-    # returns a graph module that is a copy of `nodes` in gm
+        original_outputs (Tuple[Node, ...]): consumer nodes of `nodes` in original `gm`
+
+    """
+
     # assumption: nodes are already sorted in topo order
 
     for node in nodes:
@@ -161,7 +146,6 @@ def fuse_partition(gm: GraphModule,
                 output_mapping[node] = node_map[node]
 
     # outs contain nodes in the new subgraph
-    original_outputs = tuple(output_mapping.keys())
     outs = tuple(output_mapping.values())
 
     # Take care of the args of FX output node. If there's a single
@@ -173,54 +157,56 @@ def fuse_partition(gm: GraphModule,
     # lint to ensure correctness
     subgraph.lint()
 
-    submodule = copy_module_attributes(gm, subgraph)
+    fused_gm: GraphModule = lift_subgraph_as_module(gm, subgraph, class_name=module_name)
 
-    sub_gm = GraphModule(submodule, subgraph, class_name=partition_name)
+    # sub_gm's input nodes in the original module
+    original_inputs: Tuple[Node, ...] = tuple(node_to_placeholder.keys())
 
-    # TODO: fix this
-    sub_gm.name = partition_name
-    sub_gm.orig_inputs = tuple(node_to_placeholder.keys())
-    sub_gm.orig_outputs = original_outputs
+    # sub_gm's outputs node in the original module
+    original_outputs: Tuple[Node, ...] = tuple(output_mapping.keys())
 
-    return sub_gm
+    return fused_gm, original_inputs, original_outputs
 
-def insert_subgm(gm, sub_gm, original_nodes):
+def insert_subgm(gm: GraphModule, sub_gm: GraphModule, orig_inputs: Tuple[Node, ...], orig_outputs: Tuple[Node, ...]):
     # assign sub_gm into gm
-    setattr(gm, sub_gm.name, sub_gm)
+    setattr(gm, sub_gm.__class__.__name__, sub_gm)
 
     # Create a call_module node in main graph.
     module_node = gm.graph.call_module(
-        sub_gm.name,
-        args=sub_gm.orig_inputs,
-        kwargs=None,
-    )
-
-    orig_outputs = sub_gm.orig_outputs
+        sub_gm.__class__.__name__,
+        args=orig_inputs,
+        kwargs=None)
 
     if len(orig_outputs) == 1:
         # main_remapping[comp.orig_outputs[0]] = module_node
         orig_outputs[0].replace_all_uses_with(module_node)
     else:
-        for i, out in enumerate(orig_outputs):
+        for i, orig_output in enumerate(orig_outputs):
             # Use Proxy to record getitem access.
             proxy_out = torch.fx.Proxy(module_node)[i].node  # type: ignore[index]
+            orig_output.replace_all_uses_with(proxy_out)
 
-            out.replace_all_uses_with(proxy_out)
-
-    # erase original nodes in inversed topological order
-    for node in reversed(original_nodes):
-        gm.graph.erase_node(node)
 
     return gm
+
+def erase_nodes(gm: GraphModule, nodes: NodeList):
+
+    # erase original nodes in inversed topological order
+    for node in reversed(nodes):
+        gm.graph.erase_node(node)
+
+
 
 def fuse_by_partitions(gm: GraphModule, partitions: List[NodeList]) -> GraphModule:
     for partition_id, nodes in enumerate(partitions):
         sorted_nodes = topo_sort(nodes)
 
-        partition_name = "fused_" + str(partition_id)
-        sub_gm = fuse_partition(gm, sorted_nodes, partition_name)
+        submodule_name = "fused_" + str(partition_id)
+        sub_gm, orig_inputs, orig_outputs = fuse_as_graphmodule(gm, sorted_nodes, submodule_name)
 
-        insert_subgm(gm, sub_gm, sorted_nodes)
+        insert_subgm(gm, sub_gm, orig_inputs, orig_outputs)
+
+        erase_nodes(gm, sorted_nodes)
 
     # topological sort original gm with newly created sub_gm
     legalize_graph(gm)
