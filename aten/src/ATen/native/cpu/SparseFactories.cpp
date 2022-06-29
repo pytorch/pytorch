@@ -88,22 +88,8 @@ void _spdiags_backward_kernel_cpu(TensorIterator& iter, Tensor& grad_in) {
 }
 } // namespace
 
-Tensor spdiags_cpu(
-    const Tensor& diagonals,
-    const Tensor& offsets,
-    IntArrayRef shape,
-    c10::optional<Layout> layout) {
-  return impl::spdiags_impl(
-      diagonals, offsets, shape, layout, _spdiags_kernel_cpu);
-}
-
-Tensor spdiags_backward_cpu(
-    const Tensor& grad_out,
-    const Tensor& offsets,
-    IntArrayRef input_shape) {
-  return impl::spdiags_backward_impl(
-      grad_out, offsets, input_shape, _spdiags_backward_kernel_cpu);
-}
+REGISTER_DISPATCH(spdiags_kernel_stub, &_spdiags_kernel_cpu)
+REGISTER_DISPATCH(spdiags_backward_kernel_stub, &_spdiags_backward_kernel_cpu)
 
 } // namespace native
 } // namespace at
