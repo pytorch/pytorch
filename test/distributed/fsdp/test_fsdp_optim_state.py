@@ -493,8 +493,8 @@ class TestFSDPOptimState(FSDPTest):
             state_dict = wrapped_model.state_dict()
         self.assertEqual(optim_state_dict["state"].keys(), state_dict.keys())
         # Check that checkpointing prefix was indeed stripped.
-        for key in optim_state_dict["state"].keys():
-            self.assertFalse(_CHECKPOINT_PREFIX in key)
+        for key in optim_state_dict["state"]:
+            self.assertNotIn(_CHECKPOINT_PREFIX, key)
 
     @skip_if_lt_x_gpu(2)
     def test_full_optim_state_dict_nested_invalid(self):
