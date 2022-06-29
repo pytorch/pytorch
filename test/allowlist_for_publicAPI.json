@@ -1758,6 +1758,8 @@
     "gammaln",
     "hermite_polynomial_h",
     "hermite_polynomial_he",
+    "hyperbolic_integral_chi",
+    "hyperbolic_integral_shi",
     "i0",
     "i0e",
     "i1",
@@ -1787,6 +1789,8 @@
     "sinc",
     "softmax",
     "spherical_bessel_j0",
+    "trigonometric_integral_ci",
+    "trigonometric_integral_si",
     "xlog1py",
     "xlogy",
     "zeta"

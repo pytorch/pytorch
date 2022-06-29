@@ -25,13 +25,15 @@ Functions
 .. autofunction:: gammainc
 .. autofunction:: gammaincc
 .. autofunction:: gammaln
+.. autofunction:: hyperbolic_integral_chi
+.. autofunction:: hyperbolic_integral_shi
 .. autofunction:: i0
 .. autofunction:: i0e
 .. autofunction:: i1
 .. autofunction:: i1e
+.. autofunction:: log1p
 .. autofunction:: log_ndtr
 .. autofunction:: log_softmax
-.. autofunction:: log1p
 .. autofunction:: logit
 .. autofunction:: logsumexp
 .. autofunction:: multigammaln
@@ -44,6 +46,8 @@ Functions
 .. autofunction:: sinc
 .. autofunction:: softmax
 .. autofunction:: spherical_bessel_j0
+.. autofunction:: trigonometric_integral_ci
+.. autofunction:: trigonometric_integral_si
 .. autofunction:: xlog1py
 .. autofunction:: xlogy
 .. autofunction:: zeta

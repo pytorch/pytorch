@@ -2187,6 +2187,20 @@ const auto hermite_polynomial_he_string = jiterator_stringify(
     } // hermite_polynomial_he_forward(T x, T n)
 ); // hermite_polynomial_he_string
 
+const auto hyperbolic_integral_chi_string = jiterator_stringify(
+    template<typename T>
+    T hyperbolic_integral_chi_forward(T x) {
+        return x;
+    } // T hyperbolic_integral_chi_forward(T x)
+); // hyperbolic_integral_chi_string
+
+const auto hyperbolic_integral_shi_string = jiterator_stringify(
+    template<typename T>
+    T hyperbolic_integral_shi_forward(T x) {
+        return x;
+    } // T hyperbolic_integral_shi_forward(T x)
+); // hyperbolic_integral_shi_string
+
 const auto laguerre_polynomial_l_string = jiterator_stringify(
     template<typename T>
     T laguerre_polynomial_l_forward(T x, int64_t n) {
@@ -2929,6 +2943,20 @@ const auto spherical_bessel_j0_string = jiterator_stringify(
         return sin(x) / x;
     } // T spherical_bessel_j0_forward(T x)
 ); // spherical_bessel_j0_string
+
+const auto trigonometric_integral_ci_string = jiterator_stringify(
+    template<typename T>
+    T trigonometric_integral_ci_forward(T x) {
+        return x;
+    } // T trigonometric_integral_ci_forward(T x)
+); // trigonometric_integral_ci_string
+
+const auto trigonometric_integral_si_string = jiterator_stringify(
+    template<typename T>
+    T trigonometric_integral_si_forward(T x) {
+        return x;
+    } // T trigonometric_integral_si_forward(T x)
+); // trigonometric_integral_si_string
 
 #else // !AT_USE_JITERATOR() -- kernels must be precompiled
 

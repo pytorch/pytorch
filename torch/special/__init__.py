@@ -26,6 +26,8 @@ __all__ = [
     'gammaln',
     'hermite_polynomial_h',
     'hermite_polynomial_he',
+    'hyperbolic_integral_chi',
+    'hyperbolic_integral_shi',
     'i0',
     'i0e',
     'i1',
@@ -47,14 +49,16 @@ __all__ = [
     'polygamma',
     'psi',
     'round',
+    'scaled_modified_bessel_k1',
     'shifted_chebyshev_polynomial_t',
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
-    'scaled_modified_bessel_k1',
     'sinc',
     'softmax',
     'spherical_bessel_j0',
+    'trigonometric_integral_ci',
+    'trigonometric_integral_si',
     'xlog1py',
     'xlogy',
     'zeta',
@@ -1077,6 +1081,30 @@ Keyword args:
     {out}
 """.format(**common_args))
 
+hyperbolic_integral_chi = _add_docstr(_special.special_hyperbolic_integral_chi,
+                                      r"""
+hyperbolic_integral_chi(input, *, out=None) -> Tensor
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+hyperbolic_integral_shi = _add_docstr(_special.special_hyperbolic_integral_shi,
+                                      r"""
+hyperbolic_integral_shi(input, *, out=None) -> Tensor
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
 laguerre_polynomial_l = _add_docstr(_special.special_laguerre_polynomial_l,
                                     r"""
 laguerre_polynomial_l(input, n, *, out=None) -> Tensor
@@ -1258,6 +1286,30 @@ spherical_bessel_j0 = _add_docstr(_special.special_spherical_bessel_j0,
 spherical_bessel_j0(input, *, out=None) -> Tensor
 
 Spherical Bessel function of the first kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+trigonometric_integral_ci = _add_docstr(_special.special_trigonometric_integral_ci,
+                                        r"""
+trigonometric_integral_ci(input, *, out=None) -> Tensor
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+trigonometric_integral_si = _add_docstr(_special.special_trigonometric_integral_si,
+                                        r"""
+trigonometric_integral_si(input, *, out=None) -> Tensor
 
 """ + r"""
 Args:

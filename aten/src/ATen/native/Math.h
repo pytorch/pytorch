@@ -3078,6 +3078,16 @@ static inline C10_HOST_DEVICE T hermite_polynomial_he_forward(T x, T n) {
 } // hermite_polynomial_he_forward(T x, T n)
 
 template<typename T>
+static inline C10_HOST_DEVICE T hyperbolic_integral_chi_forward(T x) {
+    return x;
+} // T hyperbolic_integral_chi_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T hyperbolic_integral_shi_forward(T x) {
+    return x;
+} // T hyperbolic_integral_shi_forward(T x)
+
+template<typename T>
 static inline C10_HOST_DEVICE T laguerre_polynomial_l_forward(T x, int64_t n) {
     if (n < 0) {
         return T(0.0);
@@ -3795,5 +3805,15 @@ static inline C10_HOST_DEVICE T spherical_bessel_j0_forward(T x) {
 
     return std::sin(x) / x;
 } // T spherical_bessel_j0_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T trigonometric_integral_ci_forward(T x) {
+    return x;
+} // T trigonometric_integral_ci_forward(T x)
+
+template<typename T>
+static inline C10_HOST_DEVICE T trigonometric_integral_si_forward(T x) {
+    return x;
+} // T trigonometric_integral_si_forward(T x)
 
 C10_CLANG_DIAGNOSTIC_POP()

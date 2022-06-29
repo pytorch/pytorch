@@ -2876,6 +2876,12 @@
 - name: special_hermite_polynomial_he.n_scalar(Tensor x, Scalar n) -> Tensor
   x: non_differentiable
 
+- name: special_hyperbolic_integral_chi(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_hyperbolic_integral_shi(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_laguerre_polynomial_l(Tensor x, Tensor n) -> Tensor
   x: non_differentiable
   n: non_differentiable
@@ -2952,4 +2958,10 @@
   x: non_differentiable
 
 - name: special_spherical_bessel_j0(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_trigonometric_integral_ci(Tensor x) -> Tensor
+  x: non_differentiable
+
+- name: special_trigonometric_integral_si(Tensor x) -> Tensor
   x: non_differentiable
