@@ -3,6 +3,7 @@ from torch._C import _add_docstr, _special  # type: ignore[attr-defined]
 from torch._torch_docs import common_args, multi_dim_common
 
 __all__ = [
+    'airy_ai',
     'bessel_j0',
     'bessel_j1',
     'bessel_y0',
@@ -50,8 +51,10 @@ __all__ = [
     'shifted_chebyshev_polynomial_u',
     'shifted_chebyshev_polynomial_v',
     'shifted_chebyshev_polynomial_w',
+    'scaled_modified_bessel_k1',
     'sinc',
     'softmax',
+    'spherical_bessel_j0',
     'xlog1py',
     'xlogy',
     'zeta',
@@ -871,6 +874,20 @@ Example::
 
 """.format(**common_args))
 
+airy_ai = _add_docstr(_special.special_airy_ai,
+                      r"""
+airy_ai(input, *, out=None) -> Tensor
+
+Airy function :math:`\text{Ai}\left(\text{input}\right)`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
 bessel_j0 = _add_docstr(_special.special_bessel_j0,
                         r"""
 bessel_j0(input, *, out=None) -> Tensor
@@ -1162,6 +1179,20 @@ Keyword args:
     {out}
 """.format(**common_args))
 
+scaled_modified_bessel_k1 = _add_docstr(_special.special_scaled_modified_bessel_k1,
+                                        r"""
+scaled_modified_bessel_k1(input, *, out=None) -> Tensor
+
+Scaled modified Bessel function of the second kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
 shifted_chebyshev_polynomial_t = _add_docstr(_special.special_shifted_chebyshev_polynomial_t,
                                              r"""
 shifted_chebyshev_polynomial_t(input, n, *, out=None) -> Tensor
@@ -1217,6 +1248,20 @@ Chebyshev polynomial of the fourth kind :math:`W_{n}^{\ast}(\text{input})`.
 Args:
     {input}
     n (Tensor): Degree of the polynomial.
+
+Keyword args:
+    {out}
+""".format(**common_args))
+
+spherical_bessel_j0 = _add_docstr(_special.special_spherical_bessel_j0,
+                                  r"""
+spherical_bessel_j0(input, *, out=None) -> Tensor
+
+Spherical Bessel function of the first kind of order :math:`0`.
+
+""" + r"""
+Args:
+    {input}
 
 Keyword args:
     {out}

@@ -518,7 +518,7 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
       auto default_val = arg.default_value().value().toIntList();
       if (default_val.size() > 1) {
         auto all_defaults_the_same = true;
-        for (const auto& i : c10::irange(1, default_val.size())) {
+        for (const auto i : c10::irange(1, default_val.size())) {
           if (default_val[0] != default_val[i]) all_defaults_the_same = false;
         }
         if (all_defaults_the_same) {

@@ -647,15 +647,17 @@ bool is_float_or_complex_list(PyObject* obj) {
   return true;
 }
 
-static bool is_int_list_(PyObject* obj, int broadcast_size) {
+static bool is_int_list(PyObject* obj, int broadcast_size) {
   if (PyTuple_Check(obj) || PyList_Check(obj)) {
     if (PySequence_Size(obj) == 0) {
       return true;
     }
+
     auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
     if (THPUtils_checkIndex(item.ptr())) {
       return true;
     }
+
     // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
     // in an intlist argument. Even float or complex scalar tensors.
     return (
@@ -667,22 +669,33 @@ static bool is_int_list_(PyObject* obj, int broadcast_size) {
   return broadcast_size > 0 && THPUtils_checkLong(obj);
 }
 
-static bool is_int_list(PyObject* obj, int broadcast_size) {
-  return is_int_list_(obj, broadcast_size);
-}
-
 static bool is_int_or_symint(PyObject* obj) {
-  if (THPUtils_checkLong(obj)) {
-    return true;
-  }
-
-  // TODO: test if it's the Python binding for SymbolicIntNode
-  return false;
+  // THPUtils_checkIndex may call __index__ or __int__
+  // which may have side effects if obj is a symint node
+  // so we do `is_symint_node` check first
+  // TODO: maybe we should be using checkLong here?
+  return torch::is_symint_node(py::handle(obj)) || THPUtils_checkIndex(obj);
 }
 
 static bool is_int_or_symint_list(PyObject* obj, int broadcast_size) {
-  // TODO: add a check for SymbolicIntNode
-  return is_int_list_(obj, broadcast_size);
+  if (PyTuple_Check(obj) || PyList_Check(obj)) {
+    if (PySequence_Size(obj) == 0) {
+      return true;
+    }
+    auto item = py::reinterpret_steal<py::object>(PySequence_GetItem(obj, 0));
+
+    if (is_int_or_symint(item.ptr())) {
+      return true;
+    }
+    // NOTE: JIT tracer allows arbitrary scalar tensors to act as ints
+    // in an intlist argument. Even float or complex scalar tensors.
+    return (
+        jit::tracer::isTracing() && THPVariable_Check(item.ptr()) &&
+        THPVariable_Unpack(item.ptr()).sizes() == c10::IntArrayRef{});
+  }
+  // if a size is specified (e.g. IntArrayRef[2]) we also allow passing a single
+  // int
+  return broadcast_size > 0 && THPUtils_checkLong(obj);
 }
 
 // argnum is needed for raising the TypeError, it's used in the error message.
@@ -1214,7 +1227,9 @@ bool FunctionSignature::parse(
   // if there is a single positional IntArrayRef argument, i.e. expand(..),
   // view(...), allow a var-args style IntArrayRef, so expand(5,3) behaves as
   // expand((5,3))
-  if (max_pos_args == 1 && params[0].type_ == ParameterType::INT_LIST) {
+  if (max_pos_args == 1 &&
+      (params[0].type_ == ParameterType::INT_LIST ||
+       params[0].type_ == ParameterType::SYM_INT_LIST)) {
     allow_varargs_intlist = true;
   }
 
@@ -1272,7 +1287,7 @@ bool FunctionSignature::parse(
       // should avoid having complex signatures that make use of it...
     } else if (
         allow_varargs_intlist && arg_pos == 0 && !is_kwd &&
-        THPUtils_checkIndex(obj)) {
+        is_int_or_symint(obj)) {
       // take all positional arguments as this parameter
       // e.g. permute(1, 2, 3) -> permute((1, 2, 3))
       dst[i++] = args;

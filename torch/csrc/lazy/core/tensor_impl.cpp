@@ -146,6 +146,10 @@ c10::SymIntArrayRef LTCTensorImpl::sym_sizes_custom() const {
   return c10::SymIntArrayRef(sym_sizes_.data(), sym_sizes_.size());
 }
 
+c10::SymIntArrayRef LTCTensorImpl::sym_sizes() const {
+  return sym_sizes_custom();
+}
+
 void LTCTensorImpl::setup_size_properties() {
   size_t generation = tensor_->generation();
   if (generation != generation_) {

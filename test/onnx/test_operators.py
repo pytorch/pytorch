@@ -847,6 +847,16 @@ class TestOperators(TestCase):
             opset_version=11,
         )
 
+    def test_scatter_add_opset16(self):
+        data = torch.tensor([[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+        indices = torch.tensor([[0, 0], [1, 1], [0, 1]], dtype=torch.int64)
+        values = torch.tensor([[1.0, 1.1], [2.0, 2.1], [3.0, 3.1]])
+        self.assertONNX(
+            lambda data, index: data.scatter_add(1, indices, values),
+            (data, (indices, values)),
+            opset_version=16,
+        )
+
     def test_master_opset(self):
         x = torch.randn(2, 3).float()
         y = torch.randn(2, 3).float()

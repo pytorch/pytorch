@@ -20,20 +20,23 @@ from torch._refs import (
     _make_elementwise_binary_reference,
 )
 
-from typing import Optional
+from typing import Optional, Union
 
 __all__ = [
     "celu",
     "dropout",
     "elu",
-    "relu",
+    "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
     "margin_ranking_loss",
     "mish",
+    "relu",
     "selu",
     "softplus",
+    "softshrink",
     "tanhshrink",
+    "threshold",
 ]
 
 Tensor = torch.Tensor
@@ -256,6 +259,29 @@ def softplus(
     return torch.where(scaled_input > threshold, a, rhs)
 
 
+@out_wrapper
+def hardshrink(a: TensorLikeType, lambd: float = 0.5):
+    # Formula for reference,
+    # hardshrink(x) = x if x > lambd
+    #               = x if x < -lambd
+    #               = 0 otherwise
+    return refs.where(abs(a) > abs(lambd), a, 0)
+
+
+@out_wrapper
+def softshrink(a: TensorLikeType, lambd: float = 0.5):
+    # Formula for reference,
+    # softshrink(x) = x - lambd if x > lambd
+    #               = x + lambd if x < -lambd
+    #               = 0 otherwise
+    ge_mask = a > lambd
+    le_mask = a < -lambd
+    zero_mask = torch.logical_not(refs.logical_or(ge_mask, le_mask))
+    result = refs.where(ge_mask, a - lambd, a)
+    result = refs.where(le_mask, a + lambd, result)
+    return refs.where(zero_mask, 0, result)
+
+
 # Losses
 def _apply_loss_reduction(loss: TensorLikeType, reduction: str) -> TensorLikeType:
     if reduction == "sum":
@@ -330,6 +356,27 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
             "Expected a tensor input for an elementwise unary operation!"
         )
     return refs.sub(a, refs.tanh(a))
+
+
+@register_decomposition(torch.ops.aten.threshold)
+@elementwise_type_promotion_wrapper(
+    type_promoting_args=("a",),
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+)
+def threshold(
+    a: TensorLikeType,
+    threshold: NumberType,
+    value: Union[bool, int, float],
+    inplace: bool = False,
+) -> TensorLikeType:
+    """
+    Reference implementation of torch.nn.functional.threshold
+    """
+
+    if inplace:
+        raise NotImplementedError
+
+    return torch.where(a <= threshold, value, a)
 
 
 @register_decomposition(torch.ops.aten.hardtanh)
