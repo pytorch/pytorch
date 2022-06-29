@@ -265,15 +265,18 @@ def meta_conv(
         elif len(dilation) == 1:
             dilation = [dilation[0]] * len(dims)
 
+        output_padding_list: Optional[List[int]] = None
         if output_padding:
             if isinstance(output_padding, int):
-                output_padding = [output_padding] * len(dims)
+                output_padding_list = [output_padding] * len(dims)
             elif len(output_padding) == 1:
-                output_padding = [output_padding[0]] * len(dims)
+                output_padding_list = [output_padding[0]] * len(dims)
+            else:
+                output_padding_list = output_padding
 
         for i in range(len(dims)):
             # If output_padding is present, we are dealing with a transposed convolution
-            if output_padding:
+            if output_padding_list:
                 ret_shape.append(
                     _formula_transposed(
                         dims[i],
@@ -281,7 +284,7 @@ def meta_conv(
                         dilation[i],
                         kernel_size[i],
                         stride[i],
-                        output_padding[i],
+                        output_padding_list[i],
                     )
                 )
             else:
