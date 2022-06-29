@@ -255,7 +255,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -299,6 +299,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -542,7 +554,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -586,6 +598,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -829,7 +853,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -873,6 +897,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1113,7 +1149,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1157,6 +1193,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1400,7 +1448,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1444,6 +1492,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1687,7 +1747,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -1731,6 +1791,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -1971,7 +2043,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2015,6 +2087,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2258,7 +2342,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2302,6 +2386,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2545,7 +2641,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2589,6 +2685,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -2829,7 +2937,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -2873,6 +2981,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -3116,7 +3236,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3160,6 +3280,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
@@ -3403,7 +3535,7 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup EC2 Linux
-        uses: ./.github/actions/common-setup-ec2-linux
+        uses: ./.github/actions/setup-binary-build-linux
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Clone pytorch/pytorch
@@ -3447,6 +3579,18 @@ jobs:
             -w /v \
             308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/miniconda3:4.10.3 \
             bash -c '.circleci/scripts/binary_upload.sh'
+      - name: Manually hold runner for 2 hours
+        run: |
+          echo "Holding runner for 2 hours until all ssh sessions have logged out"
+          for _ in $(seq 144); do
+              # Break if no ssh session exists anymore
+              if [ "$(who)" = "" ]; then
+                break
+              fi
+              echo "."
+              sleep 500
+          done
+
       - name: Hold runner for 2 hours or until ssh sessions have drained
         # Always hold for active ssh sessions
         if: always()
