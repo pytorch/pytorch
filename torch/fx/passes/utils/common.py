@@ -5,6 +5,8 @@ from torch.fx.graph import Graph
 from torch.fx._compatibility import compatibility
 
 
+__all__ = ['HolderModule', 'lift_subgraph_as_module']
+
 @compatibility(is_backward_compatible=False)
 class HolderModule(Module):
     """
