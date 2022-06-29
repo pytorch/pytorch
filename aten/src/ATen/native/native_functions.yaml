@@ -5279,12 +5279,11 @@
 - func: _spdiags(Tensor diagonals, Tensor offsets, int[] shape, Layout? layout=None) -> Tensor
   python_module: sparse
   dispatch:
-    CPU: spdiags_cpu
-    CUDA: spdiags_cuda
+    CompositeExplicitAutograd: spdiags
 
 - func: _spdiags_backward(Tensor grad_output, Tensor offsets, int[] input_shape) -> Tensor
   dispatch:
-    SparseCPU: spdiags_backward_cpu
+    SparseCPU: spdiags_backward
 
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   device_check: NoCheck   # TensorIterator
