@@ -159,17 +159,6 @@ on:
 {%- endif %}
 {%- endmacro -%}
 
-{%- macro teardown_rocm_linux() -%}
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
-{%- endmacro -%}
-
 {%- macro checkout(submodules="recursive", deep_clone=True, directory="", repository="pytorch/pytorch", branch="", checkout_pr_head=True) -%}
       - name: Checkout !{{ 'PyTorch' if repository == "pytorch/pytorch" else repository }}
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
