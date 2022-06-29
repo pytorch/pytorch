@@ -1477,6 +1477,100 @@ class TestMPS(TestCase):
         self.assertEqual(x.to("cpu").as_strided(size=(32, 3), stride=(1, 0)), z)
 
 
+class TestLogical(TestCase):
+    def _wrap_tensor(self, x, device="cpu", dtype=None, requires_grad=False):
+        return torch.tensor(x, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def test_logical_not(self):
+        def helper(x):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            result = torch.logical_not(x)
+            result_cpu = torch.logical_not(cpu_x)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]))
+        helper(self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True))
+        helper(self._wrap_tensor([True, True, False, False]))
+        helper(self._wrap_tensor(1))
+        helper(self._wrap_tensor(0))
+        helper(self._wrap_tensor(True))
+        helper(self._wrap_tensor(False))
+
+    def test_logical_and(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_and(x, other)
+            result_cpu = torch.logical_and(cpu_x, cpu_other)
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+    def test_logical_or(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_or(x, other)
+            result_cpu = torch.logical_or(cpu_x, cpu_other)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+    def test_logical_xor(self):
+        def helper(x, other):
+            cpu_x = x
+            x = cpu_x.detach().clone().to('mps')
+
+            cpu_other = other
+            other = cpu_other.detach().clone().to('mps')
+
+            result = torch.logical_xor(x, other)
+            result_cpu = torch.logical_xor(cpu_x, cpu_other)
+
+            self.assertEqual(result, result_cpu)
+
+        helper(self._wrap_tensor([1, 1, 0, 0]), self._wrap_tensor(([1, 0, 0, 1])))
+        helper(
+            self._wrap_tensor([1, 1, 0, 0], dtype=torch.float, requires_grad=True),
+            self._wrap_tensor([1, 0, 0, 1], dtype=torch.float)
+        )
+        helper(self._wrap_tensor([True, True, False, False]), self._wrap_tensor([True, False, False, True]))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(1))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(0))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(True))
+        helper(self._wrap_tensor((1, 0, 1, 0)), self._wrap_tensor(False))
+
+
 class TestSmoothL1Loss(TestCase):
 
     def _smooth_l1_loss_helper(self, reduction="mean", requires_grad=False):
@@ -3725,6 +3819,28 @@ class TestNLLLoss(TestCase):
             self.assertEqual(neg_result, neg_result_cpu)
 
         helper((2, 8, 4, 5))
+
+    # Test flip
+    def test_flip(self):
+        def helper(shape, dims):
+            cpu_x = torch.randn(shape, device='cpu', dtype=torch.float, requires_grad=False)
+            x = cpu_x.detach().clone().to('mps')
+
+            flip_result = torch.flip(x, dims=dims)
+            flip_result_cpu = torch.flip(cpu_x, dims=dims)
+
+            self.assertEqual(flip_result, flip_result_cpu)
+
+        helper((2, 8, 4, 5), [0])
+        helper((8, 8, 4, 5), [0, 1])
+        helper((2, 8, 4, 5), (0, 1, 2, 3))
+        helper((2, 3, 3), (-1,))
+        # empty dims
+        helper((2, 8, 4, 5), [])
+        # input.numel() == 1
+        helper((1,), (0,))
+        # input.numel() == 0
+        helper((0,), (0,))
 
     # Test index select
     def test_index_select(self):
