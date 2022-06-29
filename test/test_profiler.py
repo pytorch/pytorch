@@ -1317,9 +1317,38 @@ aten::mm""")
         self.assertEqual(event_tree[1], pattern.next_of(event_tree[0]))
         self.assertEqual(event_tree[0], pattern.prev_of(event_tree[1]))
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_profiler_extra_cuda_copy_pattern(self):
+        from torch.profiler._pattern_matcher import ExtraCUDACopyPattern
 
-
-
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     with_stack=True) as prof:
+            x = torch.ones((100, 100), device="cuda")
+        self.assertEqual(len(ExtraCUDACopyPattern(prof).matched_events()), 0)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     with_stack=True) as prof:
+            x = torch.ones((100, 100)).to("cuda")
+        self.assertEqual(len(ExtraCUDACopyPattern(prof).matched_events()), 1)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     with_stack=True) as prof:
+            x = torch.zeros((100, 100)).to("cuda")
+        self.assertEqual(len(ExtraCUDACopyPattern(prof).matched_events()), 1)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     with_stack=True) as prof:
+            x = torch.empty((100, 100)).fill_(5).to("cuda")
+        self.assertEqual(len(ExtraCUDACopyPattern(prof).matched_events()), 1)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     with_stack=True) as prof:
+            x = torch.ones((100, 100)).cuda()
+        self.assertEqual(len(ExtraCUDACopyPattern(prof).matched_events()), 1)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     with_stack=True) as prof:
+            x = torch.zeros((100, 100)).cuda()
+        self.assertEqual(len(ExtraCUDACopyPattern(prof).matched_events()), 1)
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     with_stack=True) as prof:
+            x = torch.empty((100, 100)).fill_(5).cuda()
+        self.assertEqual(len(ExtraCUDACopyPattern(prof).matched_events()), 1)
 
 
 if __name__ == '__main__':

@@ -69,6 +69,31 @@ class NamePattern(Pattern):
         return re.search(self.name, event.name()) is not None
 
 
+class ExtraCUDACopyPattern(Pattern):
+
+    def __init__(self, prof: profile):
+        assert prof.with_stack
+        super().__init__(prof)
+        self.description = "Filled a CPU tensor and immediately moved it to GPU. Please initalize it on GPU."
+
+    def match(self, event):
+        if event.name() != "aten::to":
+            return False
+        # Up one level
+        event = event.parent
+        if event is None:
+            return False
+        # Check if we have a aten::fill_ in previous leaf
+        event = self.prev_of(event)
+        if event is None:
+            return False
+        while event.children:
+            event = event.children[-1]
+            if event.name() == "aten::fill_" or event.name() == "aten::zero_":
+                return True
+        return event.name() == "aten::fill_" or event.name() == "aten::zero_"
+
+
 def EventTreeDFS(event_tree):
     stack = deque(event_tree)
     while stack:
@@ -86,3 +111,10 @@ def source_code_location(event):
             continue
         return event.name()
     return "No source code location found"
+
+
+def report_all_anti_patterns(prof):
+    anti_patterns = [ExtraCUDACopyPattern(prof)]
+    for anti_pattern in anti_patterns:
+        for event in anti_pattern.matched_events():
+            print(anti_pattern.report(event))
