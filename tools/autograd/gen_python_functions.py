@@ -1113,6 +1113,8 @@ def group_overloads(
 def sort_overloads(
     grouped_overloads: Sequence[PythonSignatureGroup],
 ) -> Sequence[PythonSignatureGroup]:
+    # NB: Smaller here means lower priority
+
     def is_arg_smaller(t1: Type, t2: Type) -> bool:
         return (
             str(t1) == "Scalar"
@@ -1131,6 +1133,10 @@ def sort_overloads(
             # last in signature ordering. See discussion: https://github.com/pytorch/pytorch/issues/58087
             str(t1) == "Tensor[]"
             and str(t2).find("[]") != -1
+            or
+            # Prioritize SymIntArrayRef overload over IntArrayRef
+            str(t1) == "int[]"
+            and str(t2) == "SymInt[]"
         )
 
     def is_smaller(s1: PythonSignature, s2: PythonSignature) -> bool:

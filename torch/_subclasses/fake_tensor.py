@@ -12,6 +12,7 @@ from torch.utils._python_dispatch import TorchDispatchMode, enable_torch_dispatc
 import weakref
 import functools
 import itertools
+import contextlib
 from dataclasses import dataclass
 
 
@@ -214,9 +215,37 @@ def clone(fake_mode, func, input, memory_format=None):
         out = torch.ops.aten._to_copy(input.to("meta"), memory_format=memory_format)
         return FakeTensor(fake_mode, out, out_device)
 
-@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags)  # type: ignore[attr-defined]
+# index.Tensor data-dependent in only some conditions
+@register_op_impl(lambda func: torch.Tag.dynamic_output_shape in func.tags  # type: ignore[attr-defined]
+                  and func != aten.index.Tensor)
 def data_dep_op(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
+
+# Bool Indices get Expanded as Masks
+# See: IndexingUtils.h:expandTensors
+def check_no_bool_index_tensors(func, self, indices):
+    for index in indices:
+        if index is not None and index.dtype in (torch.bool, torch.uint8):
+            raise DynamicOutputShapeException(func)
+
+# Dont default to default device handling,
+# Since op can take in non-zero sized cpu
+# index tensors with cuda self
+@register_op_impl(aten.index.Tensor)
+def index_tensor(fake_mode, func, *args, **kwargs):
+    # dynamic shape op if indices are bool/uint8
+    check_no_bool_index_tensors(func, *args, **kwargs)
+
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    out_device = new_kwargs["input"].device
+    with in_kernel_invocation_manager(fake_mode):
+        out = func(*args, **kwargs)
+
+    return FakeTensor(fake_mode, out, out_device)
+
 
 # Meta tensors give you the ability to run PyTorch code without having to
 # actually do computation through tensors allocated on a `meta` device.
@@ -224,6 +253,13 @@ def data_dep_op(fake_mode, func, *args, **kwargs):
 # FakeTensor extends MetaTensors to also carry an additional `fake_device`
 # which tracks devices that would have been used.
 
+@contextlib.contextmanager
+def in_kernel_invocation_manager(fake_mode):
+    fake_mode.in_kernel_invocation = True
+    try:
+        yield
+    finally:
+        fake_mode.in_kernel_invocation = False
 
 class FakeTensor(torch.Tensor):
     fake_device: torch.device
@@ -251,6 +287,24 @@ class FakeTensor(torch.Tensor):
     # TODO: resolve error in default __repr__
     def __repr__(self):
         return f"FakeTensor({self.fake_device}, {self.size()}, {self.dtype})"
+
+    def new(self, *args, **kwargs):
+        # torch.Tensor.new does not go through the normal dispatcher pattern
+        # so in order to use the same pattern as normal invocation of
+        # returning meta device within the kernel we need to intercept
+        # the call here
+        out_device = self.fake_device
+        if "device" in kwargs:
+            kwarg_device = kwargs.pop("device")
+            out_device = kwarg_device if kwarg_device else out_device
+            kwargs["device"] = "meta"
+
+        with in_kernel_invocation_manager(self.fake_mode):
+            with no_dispatch():
+                meta_out = super().new(*args, **kwargs)
+
+        with no_dispatch():
+            return FakeTensor(self.fake_mode, meta_out, out_device)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -315,7 +369,7 @@ class FakeTensor(torch.Tensor):
 
             # mismatching devices of non-zero dim tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
-            raise Exception(
+            raise RuntimeError(
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
             )
 
@@ -339,8 +393,8 @@ class FakeTensor(torch.Tensor):
 
 
 class FakeTensorMode(TorchDispatchMode):
-    def __init__(self, allow_cpu_fallback=True):
-        self.allow_cpu_fallback = allow_cpu_fallback
+    def __init__(self, allow_fallback_kernels=True):
+        self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
 
         # [in_kernel_invocation]
@@ -417,16 +471,13 @@ class FakeTensorMode(TorchDispatchMode):
                 if run_impl_check(func):
                     return op_impl(self, func, *args, **kwargs)
 
-
-            self.in_kernel_invocation = True
-            try:
-                r = func(*args, **kwargs)
-            except NotImplementedError as not_implemented_error:
-                if not self.allow_cpu_fallback:
-                    raise not_implemented_error
-                r = run_cpu_fallback(func, args, kwargs, not_implemented_error)
-            finally:
-                self.in_kernel_invocation = False
+            with in_kernel_invocation_manager(self):
+                try:
+                    r = func(*args, **kwargs)
+                except NotImplementedError as not_implemented_error:
+                    if not self.allow_fallback_kernels:
+                        raise not_implemented_error
+                    r = run_fallback_kernel(func, args, kwargs, not_implemented_error)
 
             # TODO: handle non-kwarg devices
             assert func not in _device_not_kwarg_ops, f"NYI: {func}"
@@ -442,17 +493,16 @@ class FakeTensorMode(TorchDispatchMode):
     def from_tensor(self, tensor):
         return self.fake_tensor_converter(self, tensor)
 
-
-def run_cpu_fallback(func, args, kwargs, orig_not_implemented_exception):
+def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
     with no_dispatch():
-        def to_cpu(e):
+        def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                return torch.zeros_like(e, device="cpu")
+                return torch.zeros_like(e, device=e.fake_device)
             return e
 
         try:
-            args = tree_map(to_cpu, args)
-            kwargs = tree_map(to_cpu, kwargs)
+            args = tree_map(to_real_tensor, args)
+            kwargs = tree_map(to_real_tensor, kwargs)
 
             r = func(*args, **kwargs)
         except Exception as new_exception:
