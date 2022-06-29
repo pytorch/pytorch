@@ -2816,7 +2816,6 @@ class _CustomSelfNextTestDataPipe(IterDataPipe):
 class TestIterDataPipeGraphFastForward(TestCase):
 
     def _fast_forward_graph_test_helper(self, datapipe, fast_forward_fn, n_iterations=3, rng=None):
-        datapipe._snapshot_state = _SnapshotState.Deserialized
         if rng is None:
             rng = torch.Generator()
         initial_rng_state = rng.get_state()
@@ -2832,7 +2831,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
 
         # Test Case: fast forward works with list
         datapipe.reset()
-        datapipe._snapshot_state = _SnapshotState.Deserialized
+        datapipe._snapshot_state = _SnapshotState.NotStarted
         rng.set_state(initial_rng_state)
         fast_forward_fn(datapipe, n_iterations, rng)
         actual_res = list(datapipe)
@@ -2841,7 +2840,7 @@ class TestIterDataPipeGraphFastForward(TestCase):
 
         # Test Case: fast forward works with iterator
         datapipe.reset()
-        datapipe._snapshot_state = _SnapshotState.Deserialized
+        datapipe._snapshot_state = _SnapshotState.NotStarted
         rng.set_state(initial_rng_state)
         fast_forward_fn(datapipe, n_iterations, rng)
         it = iter(datapipe)
