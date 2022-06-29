@@ -68,13 +68,7 @@ void _spdiags_kernel_cpu(
 
 } // namespace
 
-Tensor spdiags_cpu(
-    const Tensor& diagonals,
-    const Tensor& offsets,
-    IntArrayRef shape,
-    c10::optional<Layout> layout) {
-  return impl::spdiags_impl(
-      diagonals, offsets, shape, layout, _spdiags_kernel_cpu);
-}
+REGISTER_DISPATCH(spdiags_kernel_stub, &_spdiags_kernel_cpu)
+
 } // namespace native
 } // namespace at
