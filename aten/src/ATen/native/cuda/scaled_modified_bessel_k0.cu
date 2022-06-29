@@ -21,23 +21,23 @@
 namespace at {
     namespace native {
         namespace {
-            const char gamma_name[] = "gamma_forward";
+            const char scaled_modified_bessel_k0_name[] = "scaled_modified_bessel_k0_forward";
 
-            void gamma_kernel_cuda(TensorIteratorBase& iterator) {
+            void scaled_modified_bessel_k0_kernel_cuda(TensorIteratorBase& iterator) {
 #if AT_USE_JITERATOR()
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "gamma_cuda", [&]() {
-                    jitted_gpu_kernel<gamma_name, scalar_t, scalar_t, 1>(iterator, gamma_string);
+                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_k0_cuda", [&]() {
+                    jitted_gpu_kernel<scaled_modified_bessel_k0_name, scalar_t, scalar_t, 1>(iterator, scaled_modified_bessel_k0_string);
                 });
 #else
-                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "gamma_cuda", [&]() {
+                AT_DISPATCH_FLOATING_TYPES(iterator.common_dtype(), "scaled_modified_bessel_k0_cuda", [&]() {
                     gpu_kernel(iterator, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-                        return gamma_forward(a);
+                        return scaled_modified_bessel_k0_forward(a);
                     });
                 });
 #endif // AT_USE_JITERATOR()
             }
         }
 
-        REGISTER_DISPATCH(special_gamma_stub, &gamma_kernel_cuda);
+        REGISTER_DISPATCH(special_scaled_modified_bessel_k0_stub, &scaled_modified_bessel_k0_kernel_cuda);
     } // namespace native
 } // namespace at
