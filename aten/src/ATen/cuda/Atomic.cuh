@@ -161,6 +161,7 @@ Atomic##NAME##IntegerImpl<DTYPE, sizeof(DTYPE)>()(address,                      
                                                       [](DTYPE a, DTYPE b) {                                           \
                                                           return OP;                                                   \
                                                       });                                                              \
+}                                                                                                                      \
 
 ATOMIC_INTEGER_IMPL(Add)
 
