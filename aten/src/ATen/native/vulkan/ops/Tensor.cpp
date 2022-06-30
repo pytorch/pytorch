@@ -254,26 +254,9 @@ vTensor::vTensor(
 }
 
 api::VulkanImage& vTensor::image(
-    api::Command::Buffer& command_buffer,
-    const api::PipelineStageFlags stage) const & {
-  //view_->transition(command_buffer, stage, api::MemoryAccessType::READ);
-
-  return view_->image_;
-}
-
-api::VulkanImage& vTensor::image(
     api::PipelineBarrier& pipeline_barrier,
     const api::PipelineStageFlags stage) const & {
   view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
-
-  return view_->image_;
-}
-
-api::VulkanImage& vTensor::image(
-    api::Command::Buffer& command_buffer,
-    const api::PipelineStageFlags stage,
-    const api::MemoryAccessFlags access) & {
-  //view_->transition(command_buffer, stage, access);
 
   return view_->image_;
 }
@@ -324,59 +307,6 @@ vTensorStorage::vTensorStorage(
 
 vTensorStorage::~vTensorStorage() {
   context_->register_image_cleanup(image_);
-}
-
-void vTensorStorage::transition(
-    api::Command::Buffer& command_buffer,
-    const api::PipelineStageFlags cur_stage,
-    const api::MemoryAccessFlags cur_access) {
-  // Get last stage access
-  api::PipelineStageFlags prev_stage = last_access_.stage;
-  api::MemoryAccessFlags prev_access = last_access_.access;
-
-  api::PipelineBarrier pipeline_barrier{};
-
-  const VkImageLayout cur_layout = image_.layout();
-  const VkImageLayout new_layout = vk_layout(cur_stage, cur_access);
-
-  const bool layout_changed = cur_layout != new_layout;
-
-  const bool read_requested = (cur_access & api::MemoryAccessType::READ) != 0;
-  const bool prev_written = (prev_access & api::MemoryAccessType::WRITE) != 0;
-
-  const bool is_RAW = read_requested && prev_written;
-
-  if (is_RAW || layout_changed) {
-    pipeline_barrier.stage.src |= vk_stage(prev_stage);
-    pipeline_barrier.stage.dst |= vk_stage(cur_stage);
-
-    const VkImageLayout cur_layout = image_.layout();
-    const VkImageLayout new_layout = vk_layout(cur_stage, cur_access);
-
-    pipeline_barrier.images.push_back(api::ImageMemoryBarrier(
-        vk_access(prev_stage, prev_access),
-        vk_access(cur_stage, cur_access),
-        cur_layout,
-        new_layout,
-        image_));
-
-    image_.set_layout(new_layout);
-  }
-
-  last_access_.stage = cur_stage;
-  last_access_.access = cur_access;
-
-  if (pipeline_barrier) {
-    if (0u == pipeline_barrier.stage.src) {
-      pipeline_barrier.stage.src = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    }
-
-    if (0u == pipeline_barrier.stage.dst) {
-      pipeline_barrier.stage.src = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    }
-
-    command_buffer.barrier(pipeline_barrier);
-  }
 }
 
 void vTensorStorage::transition(
