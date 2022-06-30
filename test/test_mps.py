@@ -1839,14 +1839,14 @@ class TestNLLLoss(TestCase):
 
         # verify if changes in shape would cause cached graph lookup problems
         helper(
-            torch.randn([7, 5, 2, 4, 6], dtype=torch.float, requires_grad=True),
-            torch.randn([7, 5, 2, 4, 6], dtype=torch.float, requires_grad=False),
+            torch.randn([7, 5, 2, 4, 6], device='cpu', dtype=torch.float, requires_grad=True),
+            torch.randn([7, 5, 2, 4, 6], device='cpu', dtype=torch.float, requires_grad=False),
             'sum',
             1.5
         )
         helper(
-            torch.randn([8, 4, 5, 7, 6], dtype=torch.float, requires_grad=True),
-            torch.randn([8, 4, 5, 7, 6], dtype=torch.float, requires_grad=False),
+            torch.randn([8, 4, 5, 7, 6], device='cpu', dtype=torch.float, requires_grad=True),
+            torch.randn([8, 4, 5, 7, 6], device='cpu', dtype=torch.float, requires_grad=False),
             'mean',
             1.5
         )
