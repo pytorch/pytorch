@@ -3603,7 +3603,6 @@ class TestSparse(TestCase):
 
                 self.assertTrue(gradcheck(gc_fn, (diags,)))
 
-
         def check_invalid(args, error):
             with self.assertRaisesRegex(RuntimeError, error):
                 torch.sparse.spdiags(*args)
