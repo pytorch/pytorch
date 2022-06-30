@@ -17928,7 +17928,7 @@ torch.cuda.synchronize()
 
     @onlyCUDA
     @largeTensorTest('18GB')
-    @largeTensorTest("40GB", "cpu")
+    @largeTensorTest('180GB', 'cpu')
     def test_pool3d_large_size_int64(self, device):
         # See https://github.com/pytorch/pytorch/issues/52822
         x = torch.randn(70, 32, 100, 100, 100, dtype=torch.half, device=device, requires_grad=True)
