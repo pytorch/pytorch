@@ -71,7 +71,7 @@ Tensor cumsum(
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_input.image(
