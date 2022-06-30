@@ -36,12 +36,6 @@ _orig_module_getattr: Callable = torch.nn.Module.__getattr__
 
 _proxyable_classes: Dict[Type, None] = {}
 
-_is_fx_tracing_flag = False
-
-
-def is_fx_tracing():
-    return _is_fx_tracing_flag
-
 
 @compatibility(is_backward_compatible=True)
 class ProxyableClassMeta(type):
@@ -626,99 +620,93 @@ class Tracer(TracerBase):
 
             A ``Graph`` representing the semantics of the passed-in ``root``.
         """
-        global _is_fx_tracing_flag
-        old_is_fx_tracing_flag = _is_fx_tracing_flag
-        _is_fx_tracing_flag = True
-        try:
-            if isinstance(root, torch.nn.Module):
-                self.root = root
+        if isinstance(root, torch.nn.Module):
+            self.root = root
 
-                assert hasattr(
-                    type(root), self.traced_func_name
-                ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
+            assert hasattr(
+                type(root), self.traced_func_name
+            ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
 
-                fn = getattr(type(root), self.traced_func_name)
-                self.submodule_paths = {mod: name for name, mod in root.named_modules()}
-            else:
-                self.root = torch.nn.Module()
-                fn = root
+            fn = getattr(type(root), self.traced_func_name)
+            self.submodule_paths = {mod: name for name, mod in root.named_modules()}
+        else:
+            self.root = torch.nn.Module()
+            fn = root
 
-            tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)
-            self.graph = Graph(tracer_cls=tracer_cls)
+        tracer_cls: Optional[Type["Tracer"]] = getattr(self, "__class__", None)
+        self.graph = Graph(tracer_cls=tracer_cls)
 
-            # When we encounter a Tensor value that's not a parameter, we look if it
-            # is some other attribute on the model. Construct a dict mapping Tensor
-            # values to the qualified name here for efficiency. This is used downstream
-            # in create_arg
-            self.tensor_attrs: Dict[Union[torch.Tensor, ScriptObject], str] = {}
+        # When we encounter a Tensor value that's not a parameter, we look if it
+        # is some other attribute on the model. Construct a dict mapping Tensor
+        # values to the qualified name here for efficiency. This is used downstream
+        # in create_arg
+        self.tensor_attrs: Dict[Union[torch.Tensor, ScriptObject], str] = {}
 
-            def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: List[str]):
-                for k, v in m.__dict__.items():
-                    if isinstance(v, (torch.Tensor, ScriptObject)):
-                        self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
-                for k, v in m.named_children():
-                    collect_tensor_attrs(v, prefix_atoms + [k])
+        def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: List[str]):
+            for k, v in m.__dict__.items():
+                if isinstance(v, (torch.Tensor, ScriptObject)):
+                    self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
+            for k, v in m.named_children():
+                collect_tensor_attrs(v, prefix_atoms + [k])
 
-            collect_tensor_attrs(self.root, [])
+        collect_tensor_attrs(self.root, [])
 
-            assert isinstance(fn, FunctionType)
+        assert isinstance(fn, FunctionType)
 
-            fn_globals = fn.__globals__  # run before it gets patched
-            fn, args = self.create_args_for_root(
-                fn, isinstance(root, torch.nn.Module), concrete_args
+        fn_globals = fn.__globals__  # run before it gets patched
+        fn, args = self.create_args_for_root(
+            fn, isinstance(root, torch.nn.Module), concrete_args
+        )
+
+        parameter_proxy_cache: Dict[
+            str, Proxy
+        ] = {}  # Reduce number of get_attr calls
+
+        # Method dispatch on parameters is not recorded unless it's directly used.
+        # Thus, we need to insert a proxy when __getattr__ requests a parameter.
+        @functools.wraps(_orig_module_getattr)
+        def module_getattr_wrapper(mod, attr):
+            attr_val = _orig_module_getattr(mod, attr)
+            return self._module_getattr(attr, attr_val, parameter_proxy_cache)
+
+        @functools.wraps(_orig_module_call)
+        def module_call_wrapper(mod, *args, **kwargs):
+            def forward(*args, **kwargs):
+                return _orig_module_call(mod, *args, **kwargs)
+
+            _autowrap_check(
+                patcher,
+                getattr(getattr(mod, "forward", mod), "__globals__", {}),
+                self._autowrap_function_ids,
+            )
+            return self.call_module(mod, forward, args, kwargs)
+
+        with _Patcher() as patcher:
+            # allow duplicate patches to support the case of nested calls
+            patcher.patch_method(
+                torch.nn.Module,
+                "__getattr__",
+                module_getattr_wrapper,
+                deduplicate=False,
+            )
+            patcher.patch_method(
+                torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False
+            )
+            _patch_wrapped_functions(patcher)
+            _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
+            for module in self._autowrap_search:
+                _autowrap_check(
+                    patcher, module.__dict__, self._autowrap_function_ids
+                )
+            self.create_node(
+                "output",
+                "output",
+                (self.create_arg(fn(*args)),),
+                {},
+                type_expr=fn.__annotations__.get("return", None),
             )
 
-            parameter_proxy_cache: Dict[
-                str, Proxy
-            ] = {}  # Reduce number of get_attr calls
-
-            # Method dispatch on parameters is not recorded unless it's directly used.
-            # Thus, we need to insert a proxy when __getattr__ requests a parameter.
-            @functools.wraps(_orig_module_getattr)
-            def module_getattr_wrapper(mod, attr):
-                attr_val = _orig_module_getattr(mod, attr)
-                return self._module_getattr(attr, attr_val, parameter_proxy_cache)
-
-            @functools.wraps(_orig_module_call)
-            def module_call_wrapper(mod, *args, **kwargs):
-                def forward(*args, **kwargs):
-                    return _orig_module_call(mod, *args, **kwargs)
-
-                _autowrap_check(
-                    patcher,
-                    getattr(getattr(mod, "forward", mod), "__globals__", {}),
-                    self._autowrap_function_ids,
-                )
-                return self.call_module(mod, forward, args, kwargs)
-
-            with _Patcher() as patcher:
-                # allow duplicate patches to support the case of nested calls
-                patcher.patch_method(
-                    torch.nn.Module,
-                    "__getattr__",
-                    module_getattr_wrapper,
-                    deduplicate=False,
-                )
-                patcher.patch_method(
-                    torch.nn.Module, "__call__", module_call_wrapper, deduplicate=False
-                )
-                _patch_wrapped_functions(patcher)
-                _autowrap_check(patcher, fn_globals, self._autowrap_function_ids)
-                for module in self._autowrap_search:
-                    _autowrap_check(
-                        patcher, module.__dict__, self._autowrap_function_ids
-                    )
-                self.create_node(
-                    "output",
-                    "output",
-                    (self.create_arg(fn(*args)),),
-                    {},
-                    type_expr=fn.__annotations__.get("return", None),
-                )
-
-            self.submodule_paths = None
-        finally:
-            _is_fx_tracing_flag = old_is_fx_tracing_flag
+        self.submodule_paths = None
         return self.graph
 
 
