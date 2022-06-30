@@ -36,7 +36,7 @@ Tensor _clamp(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY(true && true) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
@@ -116,7 +116,7 @@ Tensor& _clamp_(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY(true) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
@@ -194,7 +194,7 @@ Tensor activation(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY(true && true) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
@@ -256,7 +256,7 @@ Tensor& activation_(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY(true) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
@@ -354,7 +354,7 @@ Tensor activation_scalar(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY(true && true) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
@@ -419,7 +419,7 @@ Tensor& activation_scalar_(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY(true) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
