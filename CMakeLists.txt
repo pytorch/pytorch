@@ -291,6 +291,10 @@ if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
 endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+# Ensure that an ITT build is the default for x86 CPUs
+cmake_dependent_option(
+  USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
+  "CPU_INTEL" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
 # but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
@@ -840,6 +844,7 @@ if(NOT MSVC)
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    string(APPEND CMAKE_CXX_FLAGS " -Wconstant-conversion")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-invalid-partial-specialization")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-typedef-redefinition")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-warning-option")
