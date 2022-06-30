@@ -15,3 +15,21 @@ from .scheduler.lambda_scheduler import LambdaSL
 from .sparsifier.utils import FakeSparsity
 from .sparsifier.utils import module_to_fqn
 from .sparsifier.utils import fqn_to_module
+
+# === Experimental ===
+
+# Parametrizations
+from .experimental.pruner.parametrization import PruningParametrization
+from .experimental.pruner.parametrization import ZeroesParametrization
+from .experimental.pruner.parametrization import ActivationReconstruction
+from .experimental.pruner.parametrization import BiasHook
+
+# Pruner
+from .experimental.pruner.base_pruner import BasePruner
+
+# Data Sparsifier
+from .experimental.data_sparsifier.base_data_sparsifier import BaseDataSparsifier
+from .experimental.data_sparsifier.data_norm_sparsifier import DataNormSparsifier
+
+# Data Scheduler
+from .experimental.data_scheduler.base_data_scheduler import BaseDataScheduler

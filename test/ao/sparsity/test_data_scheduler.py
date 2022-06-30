@@ -2,15 +2,13 @@
 # Owner(s): ["module: unknown"]
 
 import logging
+from torch.ao.sparsity import BaseDataScheduler, DataNormSparsifier
 import warnings
 from torch.testing._internal.common_utils import TestCase
 from torch import nn
 import torch
 from typing import Tuple
 import copy
-
-from torch.ao.sparsity._experimental.data_scheduler import BaseDataScheduler
-from torch.ao.sparsity._experimental.data_sparsifier import DataNormSparsifier
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 

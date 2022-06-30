@@ -7,9 +7,8 @@ import logging
 
 import torch
 from torch import nn
+from torch.ao.sparsity import BasePruner, PruningParametrization, ZeroesParametrization
 from torch.nn.utils import parametrize
-
-from torch.ao.sparsity._experimental.pruner import BasePruner, PruningParametrization, ZeroesParametrization
 
 from torch.testing._internal.common_utils import TestCase
 
