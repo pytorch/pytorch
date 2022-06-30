@@ -98,8 +98,10 @@ try:
     def transform_var(tensor, counter, dimension_dict):
         """
         Transforms tensor variables to a format understood by z3
-        :param tensor: Tensor variable or a tensor type potentially with variable dimensions
-        :return: Transformed variable to a z3 format
+        Args:
+            tensor: Tensor variable or a tensor type potentially with variable dimensions
+        Returns: Transformed variable to a z3 format
+
         """
         if isinstance(tensor, TensorType):
             res = []
@@ -127,10 +129,13 @@ try:
         """
         Takes a dimension variable or a number and transforms it to a tuple
         according to our scheme
-        :param dimension: the dimension to be transformed
-        :return: A tuple and the current counter
-        """
+        Args:
+            dimension: The dimension to be transformed
+            counter: variable tracking
 
+        Returns:  tuple and the current counter
+
+        """
         if dimension == Dyn:
             counter += 1
             return D(0, z3.Int(counter)), counter
@@ -147,9 +152,13 @@ try:
 
     def transform_algebraic_expression(expr, counter, dimension_dict):
         """
-        :param expr: An expression is either a dimension variable or an algebraic-expression
-        :param counter:
-        :return:
+        Transforms an algebraic expression to z3 format
+        Args:
+            expr: An expression is either a dimension variable or an algebraic-expression
+
+
+        Returns: the transformed expression
+
         """
         assert is_algebraic_expression(expr) or is_dim(expr)
 
@@ -187,7 +196,7 @@ try:
                 c = lhs % rhs
 
             else:
-                raise NotImplementedError('opearation not yet implemented')
+                raise NotImplementedError('operation not yet implemented')
 
             return c, counter
 
@@ -197,9 +206,8 @@ try:
 
     def transform_all_constraints(traced, counter=0):
         """
-        :param traced: traced graph
-        :param solver: solver
-        :return: the satisfiability result of the constraints
+        Given a trace, generates constraints and transforms them to z3 format
+
         """
         dimension_dict = {}  # type: ignore[var-annotated]
 
