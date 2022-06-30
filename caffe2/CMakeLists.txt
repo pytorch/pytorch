@@ -2019,7 +2019,7 @@ if(BUILD_PYTHON)
 
   target_link_libraries(caffe2_pybind11_state PRIVATE
       torch_library python::python pybind::pybind11)
-  if(CAFFE2_USE_MKLDNN)
+  if(USE_MKLDNN)
       target_link_libraries(caffe2_pybind11_state PRIVATE caffe2::mkldnn)
   endif()
   if(WIN32)
