@@ -38,7 +38,7 @@ Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
     auto dst_image = v_output.image(
       command_buffer,
       vTensor::Stage::Compute,
-      vTensor::Access::Read | vTensor::Access::Write);
+      api::MemoryAccessType::READ | api::MemoryAccessType::WRITE);
 
     for (const auto& tensor : tensors) {
       const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
@@ -119,7 +119,7 @@ Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
     auto dst_image = v_output.image(
       command_buffer,
       vTensor::Stage::Transfer,
-      vTensor::Access::Write);
+      api::MemoryAccessType::WRITE);
     uvec3 src_offset{};
     uvec3 dst_offset{};
 
@@ -173,7 +173,7 @@ Tensor cat_height(const TensorList tensors, vTensor& v_output) {
     auto dst_image = v_output.image(
       command_buffer,
       vTensor::Stage::Transfer,
-      vTensor::Access::Write);
+      api::MemoryAccessType::WRITE);
 
     uvec3 src_offset{};
     uvec3 dst_offset{};
