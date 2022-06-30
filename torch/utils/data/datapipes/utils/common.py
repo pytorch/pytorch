@@ -43,9 +43,13 @@ def validate_input_col(fn: Callable, input_col: Optional[Union[int, tuple, list]
                           p.kind == inspect.Parameter.VAR_POSITIONAL]
 
     fn_name = str(fn)
+    def get_non_default_params(signature: inspect.Signature):
+        excluded_types = [inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD]
+        return [p for p in signature.parameters.values() if p.default is p.empty and p.kind not in excluded_types]
+
 
     if len(sig.parameters) > input_col_size:
-        non_default_params = [p for p in sig.parameters.values() if p.default is p.empty]
+        non_default_params = get_non_default_params(sig)
         var_pos_args = [p for p in non_default_params if p.kind == inspect.Parameter.VAR_POSITIONAL]
 
         if len(non_default_params) > input_col_size:
