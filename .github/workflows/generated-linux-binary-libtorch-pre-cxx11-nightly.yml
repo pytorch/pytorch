@@ -57,110 +57,19 @@ jobs:
   libtorch-cpu-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-with-deps-pre-cxx11-build
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cpu-shared-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cpu-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge
   libtorch-cpu-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -260,110 +169,19 @@ jobs:
   libtorch-cpu-shared-without-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-shared-without-deps-pre-cxx11-build
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cpu-shared-without-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cpu-shared-without-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge
   libtorch-cpu-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -463,110 +281,19 @@ jobs:
   libtorch-cpu-static-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-with-deps-pre-cxx11-build
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cpu-static-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cpu-static-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge
   libtorch-cpu-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -666,110 +393,19 @@ jobs:
   libtorch-cpu-static-without-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cpu-static-without-deps-pre-cxx11-build
-    runs-on: linux.4xlarge
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cpu-static-without-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cpu-static-without-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge
   libtorch-cpu-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -870,9 +506,8 @@ jobs:
   libtorch-cuda10_2-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-with-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -880,112 +515,11 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda10_2-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda10_2-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1087,9 +621,8 @@ jobs:
   libtorch-cuda10_2-shared-without-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-shared-without-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1097,112 +630,11 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda10_2-shared-without-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda10_2-shared-without-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda10_2-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1304,9 +736,8 @@ jobs:
   libtorch-cuda10_2-static-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-with-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1314,112 +745,11 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda10_2-static-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda10_2-static-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda10_2-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1521,9 +851,8 @@ jobs:
   libtorch-cuda10_2-static-without-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda10_2-static-without-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1531,112 +860,11 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda10_2-static-without-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda10_2-static-without-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda10_2-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1738,9 +966,8 @@ jobs:
   libtorch-cuda11_3-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-with-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1748,112 +975,11 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda11_3-shared-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda11_3-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda11_3-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1955,9 +1081,8 @@ jobs:
   libtorch-cuda11_3-shared-without-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-shared-without-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -1965,112 +1090,11 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda11_3-shared-without-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda11_3-shared-without-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda11_3-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2172,9 +1196,8 @@ jobs:
   libtorch-cuda11_3-static-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-with-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2182,112 +1205,11 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda11_3-static-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda11_3-static-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda11_3-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2389,9 +1311,8 @@ jobs:
   libtorch-cuda11_3-static-without-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_3-static-without-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2399,112 +1320,11 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda11_3-static-without-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda11_3-static-without-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda11_3-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2606,9 +1426,8 @@ jobs:
   libtorch-cuda11_6-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-with-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2616,112 +1435,11 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda11_6-shared-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda11_6-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda11_6-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2823,9 +1541,8 @@ jobs:
   libtorch-cuda11_6-shared-without-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-shared-without-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -2833,112 +1550,11 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda11_6-shared-without-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda11_6-shared-without-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda11_6-shared-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3040,9 +1656,8 @@ jobs:
   libtorch-cuda11_6-static-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-with-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3050,112 +1665,11 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda11_6-static-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda11_6-static-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda11_6-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3257,9 +1771,8 @@ jobs:
   libtorch-cuda11_6-static-without-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-cuda11_6-static-without-deps-pre-cxx11-build
-    runs-on: linux.4xlarge.nvidia.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3267,112 +1780,11 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
-      - name: Setup EC2 Linux
-        uses: ./.github/actions/setup-binary-build-linux
-        with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-cuda11_6-static-without-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
-        name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
-        with:
-          timeout_minutes: 10
-          max_attempts: 3
-          command: |
-            set -ex
-            pushd pytorch
-            bash .github/scripts/install_nvidia_utils_linux.sh
-            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
-            popd
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Hold runner for 2 hours or until ssh sessions have drained
-        working-directory: pytorch/
-        # Always hold for active ssh sessions
-        if: always()
-        run: .github/scripts/wait_for_ssh_to_drain.sh
-      - name: Chown workspace
-        if: always()
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "$(pwd)":/v -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-cuda11_6-static-without-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.4xlarge.nvidia.gpu
   libtorch-cuda11_6-static-without-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3474,9 +1886,8 @@ jobs:
   libtorch-rocm5_0-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-shared-with-deps-pre-cxx11-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3484,125 +1895,11 @@ jobs:
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-rocm5_0-shared-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-rocm5_0-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.rocm.gpu
   libtorch-rocm5_0-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3704,9 +2001,8 @@ jobs:
   libtorch-rocm5_0-static-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_0-static-with-deps-pre-cxx11-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3714,125 +2010,11 @@ jobs:
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-rocm5_0-static-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-rocm5_0-static-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.rocm.gpu
   libtorch-rocm5_0-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3934,9 +2116,8 @@ jobs:
   libtorch-rocm5_1_1-shared-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_1_1-shared-with-deps-pre-cxx11-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -3944,125 +2125,11 @@ jobs:
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-rocm5_1_1-shared-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-rocm5_1_1-shared-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.rocm.gpu
   libtorch-rocm5_1_1-shared-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4164,9 +2231,8 @@ jobs:
   libtorch-rocm5_1_1-static-with-deps-pre-cxx11-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs: libtorch-rocm5_1_1-static-with-deps-pre-cxx11-build
-    runs-on: linux.rocm.gpu
-    timeout-minutes: 240
-    env:
+    uses: ./.github/workflows/_linux-binary-test.yml
+    with:
       PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -4174,125 +2240,11 @@ jobs:
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
-    steps:
-      - name: Clean workspace
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-      - name: Set DOCKER_HOST
-        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
-      - name: Runner health check system info
-        if: always()
-        run: |
-          cat /etc/os-release || true
-          cat /etc/apt/sources.list.d/rocm.list || true
-          cat /opt/rocm/.info/version || true
-          whoami
-      - name: Runner health check rocm-smi
-        if: always()
-        run: |
-          rocm-smi
-      - name: Runner health check rocminfo
-        if: always()
-        run: |
-          rocminfo
-      - name: Runner health check GPU count
-        if: always()
-        run: |
-          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
-              echo "Failed to detect GPUs on the runner"
-              exit 1
-          fi
-      - name: Runner health check disconnect on failure
-        if: ${{ failure() }}
-        run: |
-          killall runsvc.sh
-      - name: Preserve github env variables for use in docker
-        run: |
-          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
-      - uses: seemethere/download-artifact-s3@v4
-        name: Download Build Artifacts
-        with:
-          name: libtorch-rocm5_1_1-static-with-deps-pre-cxx11
-          path: "${{ runner.temp }}/artifacts/"
-      - name: Checkout PyTorch
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
-          path: pytorch
-      - name: Clean PyTorch checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: pytorch
-      - name: Checkout pytorch/builder
-        uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
-        with:
-          ref: main
-          submodules: recursive
-          repository: pytorch/builder
-          path: builder
-      - name: Clean pytorch/builder checkout
-        run: |
-          # Remove any artifacts from the previous checkouts
-          git clean -fxd
-        working-directory: builder
-      - name: ROCm set GPU_FLAG
-        run: |
-          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
-      - name: Pull Docker image
-        run: |
-          retry () {
-              "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
-          }
-          retry docker pull "${DOCKER_IMAGE}"
-      - name: Test PyTorch binary
-        run: |
-          set -x
-          # shellcheck disable=SC2086,SC2090
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e BINARY_ENV_FILE \
-            -e BUILDER_ROOT \
-            -e BUILD_ENVIRONMENT \
-            -e BUILD_SPLIT_CUDA \
-            -e DESIRED_CUDA \
-            -e DESIRED_DEVTOOLSET \
-            -e DESIRED_PYTHON \
-            -e GITHUB_ACTIONS \
-            -e GPU_ARCH_TYPE \
-            -e GPU_ARCH_VERSION \
-            -e LIBTORCH_VARIANT \
-            -e PACKAGE_TYPE \
-            -e PYTORCH_FINAL_PACKAGE_DIR \
-            -e PYTORCH_ROOT \
-            -e SKIP_ALL_TESTS \
-            --tty \
-            --detach \
-            -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
-            -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
-            -w / \
-            "${DOCKER_IMAGE}"
-          )
-          docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          # Generate test script
-          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
-      - name: Kill containers, clean up images
-        if: always()
-        run: |
-          # ignore expansion of "docker ps -q" since it could be empty
-          # shellcheck disable=SC2046
-          docker stop $(docker ps -q) || true
-          # Prune all of the docker images
-          docker system prune -af
+      build_name: libtorch-rocm5_1_1-static-with-deps-pre-cxx11
+      build_environment: linux-binary-libtorch-pre-cxx11
+      runs_on: linux.rocm.gpu
   libtorch-rocm5_1_1-static-with-deps-pre-cxx11-upload:  # Uploading
     runs-on: linux.2xlarge  # self hosted runner to download ec2 artifacts
     if: ${{ github.repository_owner == 'pytorch' }}

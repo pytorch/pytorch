@@ -50,6 +50,7 @@ on:
     secrets:
       github-token:
         required: true
+        description: Github Token
 
 jobs:
   build:
