@@ -3,7 +3,7 @@ import functools
 import inspect
 import sys
 import warnings
-from typing import Optional, Set, Tuple, Union
+from typing import Any, Callable, Optional, Sequence, Set, Tuple, Union
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1130,7 +1130,7 @@ def _batchnorm_helper(g, input, weight, bias, running_mean, running_var):
 
 
 def _avgpool_helper(
-    tuple_fn,
+    tuple_fn: Callable[[Any], Sequence[int]],
     padding: Union[int, Tuple[int, ...]],
     kernel_size,
     stride,
