@@ -107,7 +107,7 @@ class CommandPool final {
   CommandPool(const CommandPool&) = delete;
   CommandPool& operator=(const CommandPool&) = delete;
 
-  CommandPool(CommandPool&&) noexcept;
+  CommandPool(CommandPool&&) = delete;
   CommandPool& operator=(CommandPool&&) = delete;
 
   ~CommandPool();
@@ -118,6 +118,7 @@ class CommandPool final {
   VkCommandPool pool_;
   CommandPoolConfig config_;
   // New Buffers
+  std::mutex mutex_;
   std::vector<VkCommandBuffer> buffers_;
   size_t in_use_;
 
