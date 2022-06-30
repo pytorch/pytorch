@@ -275,4 +275,3 @@ class PReLU(torch.nn.Module):
             float_wt, float(wt_scale), int(wt_zp), torch.quint8)
         qprelu.set_weight(qweight)
         return qprelu
-
