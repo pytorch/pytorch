@@ -38,20 +38,17 @@ c10::SmallVector<at::ScalarType> get_extra_args_types() {
 template <
   typename result_type,
   typename f_inputs_type,
+  int arity,
   typename... ExtraArgs>
-KernelDescriptor make_kernel_descriptor(
-    std::string name,
-    std::string f,
-    int nInputs,
-    int nOutputs) {
+KernelDescriptor make_kernel_descriptor(std::string name, std::string f) {
   KernelDescriptor ret;
   ret.name = std::move(name);
   ret.f = std::move(f);
   ret.f_inputs_type = c10::CppTypeToScalarType<f_inputs_type>::value;
   ret.result_type = c10::CppTypeToScalarType<result_type>::value;
   ret.extra_args_types = get_extra_args_types<ExtraArgs...>();
-  ret.nInputs = nInputs;
-  ret.nOutputs = nOutputs;
+  ret.nInputs = arity;
+  ret.nOutputs = 1;  // TODO: Support more than 1 output
   return ret;
 }
 
@@ -116,14 +113,6 @@ std::string generate_reduction_code(
     const std::string& f_inputs_type,
     const std::string& reduction_accum_type,
     const std::string& result_type,
-    bool contiguous,
-    bool vectorized,
-    int vec_size,
-    int max_threads_codegen);
-
-std::string generate_reduction_code(
-    const KernelDescriptor &desc,
-    const int vt0,
     bool contiguous,
     bool vectorized,
     int vec_size,
