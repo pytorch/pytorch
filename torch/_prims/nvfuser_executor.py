@@ -41,6 +41,7 @@ def to_nvfuser_template_args(args):
 
     return tree_map(to_nvfuser, args)
 
+
 # MyPy bug: https://github.com/python/mypy/issues/5107
 @lru_cache  # type: ignore[arg-type]
 def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
