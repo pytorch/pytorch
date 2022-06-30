@@ -70,6 +70,8 @@ Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
 
         ch_size_allprior += v_self.sizes()[1];
 
+        api::UniformParamsBuffer params(context, block);
+
         context->dispatch(
             command_buffer,
             {
@@ -88,7 +90,7 @@ Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
             src_image,
             // Object lifetime is managed by the resource pool.
             // It is OK not to keep track of the handle.
-            context->resource().pool.uniform(block).object);
+            params.buffer().package());
       }
       else {
         TORCH_CHECK(false, "Not implemented!");
