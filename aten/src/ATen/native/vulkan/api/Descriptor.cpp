@@ -201,6 +201,47 @@ Descriptor::Set& Descriptor::Set::bind(
   return *this;
 }
 
+Descriptor::Set& Descriptor::Set::bind(
+    const uint32_t binding,
+    const VulkanBuffer::Package& package) {
+  update({
+      binding,
+      shader_layout_signature_[binding],
+      {
+        .buffer = {
+          package.handle,
+          package.buffer_offset,
+          package.buffer_range,
+        },
+      },
+    });
+
+  return *this;
+}
+
+Descriptor::Set& Descriptor::Set::bind(
+    const uint32_t binding,
+    const VulkanImage::Package& package) {
+  update(Item{
+      binding,
+      shader_layout_signature_[binding],
+      {
+        .image = {
+          package.image_sampler,
+          package.image_view,
+          [](const VkDescriptorType type, const VkImageLayout layout) {
+            return (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE == type) ?
+                    VK_IMAGE_LAYOUT_GENERAL : layout;
+          }(shader_layout_signature_[binding], package.image_layout),
+        },
+      },
+    });
+
+  return *this;
+}
+
+
+
 VkDescriptorSet Descriptor::Set::handle() const {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && descriptor_set_,
