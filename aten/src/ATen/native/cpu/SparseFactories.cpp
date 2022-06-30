@@ -67,10 +67,9 @@ void _spdiags_kernel_cpu(
 }
 
 void _spdiags_backward_kernel_cpu(TensorIterator& iter, Tensor& grad_in) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(
       at::ScalarType::BFloat16,
       at::ScalarType::Half,
-      at::ScalarType::Bool,
       at::ScalarType::ComplexHalf,
       iter.dtype(),
       "spdiags_backward_cpu",
