@@ -22,11 +22,11 @@ Tensor slice_4d(const Tensor& input, const int64_t dim, const int64_t start, con
 
     const Tensor self = input.is_vulkan() ? input : input.vulkan();
     const vTensor& v_self = convert(self);
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
-      auto src_image = v_self.image(
+    if C10_LIKELY(true && true) {
+      api::VulkanImage& src_image = v_self.image(
               command_buffer,
               api::PipelineStage::Compute);
-      auto dst_image = v_output.image(
+      api::VulkanImage& dst_image = v_output.image(
         command_buffer,
         api::PipelineStage::Compute,
         api::MemoryAccessType::WRITE);
@@ -93,11 +93,11 @@ Tensor slice_width(const Tensor& input, const int64_t start, const int64_t end, 
 
     const Tensor self = input.is_vulkan() ? input : input.vulkan();
     const vTensor& v_self = convert(self);
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
-      auto src_image = v_self.image(
+    if C10_LIKELY(true && true) {
+      api::VulkanImage& src_image = v_self.image(
               command_buffer,
               api::PipelineStage::Transfer);
-      auto dst_image = v_output.image(
+      api::VulkanImage& dst_image = v_output.image(
         command_buffer,
         api::PipelineStage::Transfer,
         api::MemoryAccessType::WRITE);
@@ -153,11 +153,11 @@ Tensor slice_height(const Tensor& input, const int64_t start, const int64_t end,
 
     const Tensor self = input.is_vulkan() ? input : input.vulkan();
     const vTensor& v_self = convert(self);
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
-      auto src_image = v_self.image(
+    if C10_LIKELY(true && true) {
+      api::VulkanImage& src_image = v_self.image(
               command_buffer,
               api::PipelineStage::Transfer);
-      auto dst_image = v_output.image(
+      api::VulkanImage& dst_image = v_output.image(
         command_buffer,
         api::PipelineStage::Transfer,
         api::MemoryAccessType::WRITE);
