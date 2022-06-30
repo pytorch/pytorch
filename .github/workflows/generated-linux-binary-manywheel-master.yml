@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - master
+      - zainr/*
     tags:
       - 'ciflow/trunk/*'
   workflow_dispatch:
