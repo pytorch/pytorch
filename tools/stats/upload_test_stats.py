@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
-    upload_to_rockset,
+    upload_to_s3,
     unzip,
 )
 
@@ -207,8 +207,17 @@ if __name__ == "__main__":
 
     # For PRs, only upload a summary of test_runs. This helps lower the
     # volume of writes we do to Rockset.
-    upload_to_rockset("test_run_summary", summarize_test_cases(test_cases))
+    upload_to_s3(
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        "test_run_summary",
+        summarize_test_cases(test_cases),
+    )
+
+    # upload_to_rockset("test_run_summary", summarize_test_cases(test_cases))
 
     if args.head_branch == "master":
         # For master jobs, upload everytihng.
-        upload_to_rockset("test_run", test_cases)
+        upload_to_s3(
+            args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
+        )
