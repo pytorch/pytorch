@@ -22,7 +22,9 @@ __all__ = ["fft", "ifft", "rfft", "irfft", "hfft", "ihfft"]
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
 
 
-def _apply_norm(x: TensorLike, norm: NormType, signal_numel: int, forward: bool):
+def _apply_norm(
+    x: TensorLike, norm: NormType, signal_numel: int, forward: bool
+) -> TensorLikeType:
     if norm == "ortho":
         return prims.mul(x, 1 / math.sqrt(signal_numel))
 
@@ -52,7 +54,9 @@ def _promote_type_fft(
     return dtype
 
 
-def _promote_tensor_fft(t: TensorLikeType, require_complex: bool = False):
+def _promote_tensor_fft(
+    t: TensorLikeType, require_complex: bool = False
+) -> TensorLikeType:
     cur_type = t.dtype
     new_type = _promote_type_fft(cur_type, require_complex, t.device)
     if cur_type == new_type:
@@ -139,7 +143,7 @@ def _fft_c2c(
     dim: int,
     norm: NormType,
     forward: bool,
-):
+) -> TensorLikeType:
     if not input.dtype.is_complex:
         raise RuntimeError(
             f"{func_name} expects a complex input tensor, but got {input.dtype}"
