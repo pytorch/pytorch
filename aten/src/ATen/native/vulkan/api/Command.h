@@ -45,6 +45,12 @@ struct Command final {
     void copy(
         const api::VulkanBuffer::Package source,
         const api::VulkanBuffer::Package destination);
+    void copy_image(
+        const api::VulkanImage&,
+        const api::VulkanImage&,
+        const api::utils::uvec3&,
+        const api::utils::uvec3&,
+        const api::utils::uvec3&);
     void dispatch(const utils::uvec3& global_work_group);
 
    private:
