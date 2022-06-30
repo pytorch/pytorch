@@ -1,7 +1,7 @@
 import typing as t
 
-import torch
-import torch.fx
+from torch.nn import Module
+from torch.fx.node import Node
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.fx.passes.tools_common import CALLABLE_NODE_OPS
 
@@ -167,7 +167,7 @@ class NvFuserOperatorSupport(OperatorSupport):
         super().__init__(support_dict)
 
     def is_node_supported(
-        self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
+        self, submodules: t.Mapping[str, Module], node: Node
     ) -> bool:
 
         # nvFuser FX subgraph should be purely functional

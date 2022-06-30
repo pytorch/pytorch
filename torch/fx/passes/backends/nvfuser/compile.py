@@ -18,20 +18,18 @@ def aten_to_dtype(self, dtype: torch.dtype, **kwargs):
         raise RuntimeError("No support for other to.dtype() formats other than to.dtype(self, dtype)")
     return torch._prims.convert_element_type(self, dtype)
 
-decomp = decomposition_table
-
 # decomposition_table currently contains both aten2aten and aten2prim decomposition
 # this is a hack to seperate them, as we only need aten2prim decomposition for nvfuser-supported aten graph lowering
 aten2aten_decomp = {}
 aten2prim_decomp = {}
+
 for op, decomp_fn in decomposition_table.items():
-    if "ref" in decomp_fn.__name__:
+    if "torch._refs" in decomp_fn.__module__:
         aten2prim_decomp[op] = decomp_fn
     else:
         aten2aten_decomp[op] = decomp_fn
 
 aten2prim_decomp[torch.ops.aten.to.dtype] = aten_to_dtype
-
 
 class NvFuserBackend:
     def __init__(self):
@@ -52,7 +50,7 @@ class NvFuserBackend:
             prim_module = self.prim_decomp_cache[graph_module]
         else:
             prim_graph = torch.fx.Graph()
-            DecompositionInterpreter(graph_module, prim_graph, decomposition_table=decomp).run(*args, **kwargs)
+            DecompositionInterpreter(graph_module, prim_graph, decomposition_table=aten2prim_decomp).run(*args, **kwargs)
             prim_module = torch.fx.GraphModule(graph_module, prim_graph)
             self.prim_decomp_cache[graph_module] = prim_module
 
@@ -61,7 +59,7 @@ class NvFuserBackend:
         # invokes trace executor for running the prim graph
         return execute(prim_module, *args, executor="nvfuser")
 
-    def compile(self, graph_module: torch.fx.GraphModule):
+    def compile(self, graph_module: GraphModule) -> GraphModule:
         # entry function for nvFuser bsackend
         logging.debug("Compiling graph_module: ", graph_module.code)
 
@@ -80,9 +78,13 @@ class NvFuserBackend:
         for node in fused_graph_module.graph.nodes:
             # TODO: use a better way to identify fused submodule
             if "fused_" in node.name:
-                module = getattr(fused_graph_module, node.name)
-                setattr(module, "_wrapped_call", self.lower_to_prims_and_execute)
+                fused_module = getattr(fused_graph_module, node.name)
+                fused_module._wrapped_call = self.lower_to_prims_and_execute
                 num_partitions += 1
         # print(num_partitions)
 
         return fused_graph_module
+
+    def __call__(self, graph_module: GraphModule, _) -> GraphModule:
+        # wrap self.compile as __call__ function to fit the interface for AOTAutograd's fw_compiler
+        return self.compile(graph_module)
