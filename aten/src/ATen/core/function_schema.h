@@ -359,7 +359,20 @@ struct FunctionSchema {
           return aliasInfo && aliasInfo->isWrite();
         });
   }
+  bool is_mutable(int index) const {
+    TORCH_INTERNAL_ASSERT(
+        index < arguments().size() && index >= 0,
+        "Invalid index for schema.");
+    const AliasInfo* aliasInfo = arguments()[index].alias_info();
+    return aliasInfo && aliasInfo->isWrite();
+  }
+  bool is_mutable(c10::string_view name) const {
+    c10::optional<int> index = argumentIndexWithName(name);
+    TORCH_INTERNAL_ASSERT(
+        index != c10::nullopt, "Schema has no argument named ", name);
 
+    return is_mutable(*index);
+  }
   c10::optional<int> argumentIndexWithName(c10::string_view name) const {
     for (const auto i : c10::irange(arguments().size())) {
       if(name == arguments()[i].name())
