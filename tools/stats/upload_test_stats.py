@@ -218,8 +218,6 @@ if __name__ == "__main__":
         summarize_test_cases(test_cases),
     )
 
-    # upload_to_rockset("test_run_summary", summarize_test_cases(test_cases))
-
     if args.head_branch == "master":
         # For master jobs, upload everytihng.
         upload_to_s3(
