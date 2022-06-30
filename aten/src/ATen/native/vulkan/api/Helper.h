@@ -16,8 +16,8 @@ namespace helper {
 
 void copy_texture_to_texture(
     api::Command::Buffer& command_buffer,
-    api::VulkanImage::Package& src_image,
-    api::VulkanImage::Package& dst_image,
+    api::VulkanImage& src_image,
+    api::VulkanImage& dst_image,
     api::utils::uvec3 copy_extents,
     api::utils::uvec3 src_offset,
     api::utils::uvec3 dst_offset);

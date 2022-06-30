@@ -1,6 +1,7 @@
 #include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
+#include <ATen/native/vulkan/ops/Utils.h>
 #include <c10/util/irange.h>
 
 namespace at {
@@ -10,6 +11,7 @@ namespace ops {
 namespace {
 
 using namespace api::utils;
+using namespace at::native::vulkan::ops;
 
 vTensor pack_weights(
     const Tensor& weight_arg) {
@@ -43,24 +45,26 @@ vTensor pack_weights(
       weight.options(),
   };
 
-  api::MemoryMap mapping(
-      v_weight.host_buffer(command_buffer, api::MemoryAccessType::WRITE),
-      api::MemoryAccessType::WRITE);
+  api::StagingBuffer staging(context, v_weight.buffer_bytes());
+  {
+    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
-  float* dst_weight_ptr = mapping.template data<float>();
+    float* dst_weight_ptr = mapping.template data<float>();
 
-  memset(dst_weight_ptr, 0, v_weight.nbytes());
+    memset(dst_weight_ptr, 0, v_weight.nbytes());
 
-  for (const auto src_h : c10::irange(src_kh_sz)) {
-    for (const auto src_w : c10::irange(src_kw_sz)) {
-      int64_t dst_plane = 2*(src_h%2) + (src_w%2);
-      int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
-      memcpy(
-          dst_weight_ptr + dst_plane * dst_plane_sz + dst_index,
-          src_weight_ptr + src_h * src_kw_sz + src_w,
-          sizeof(float));
+    for (const auto src_h : c10::irange(src_kh_sz)) {
+      for (const auto src_w : c10::irange(src_kw_sz)) {
+        int64_t dst_plane = 2*(src_h%2) + (src_w%2);
+        int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+        memcpy(
+            dst_weight_ptr + dst_plane * dst_plane_sz + dst_index,
+            src_weight_ptr + src_h * src_kw_sz + src_w,
+            sizeof(float));
+      }
     }
   }
+  utils::pack_staging_to_vtensor(staging.buffer(), v_weight);
 
   return v_weight;
 }
@@ -106,24 +110,26 @@ vTensor pack_biases(
         bias_arg->options(),
     };
 
-    api::MemoryMap mapping(
-        v_bias.host_buffer(command_buffer, api::MemoryAccessType::WRITE),
-        api::MemoryAccessType::WRITE);
+    api::StagingBuffer staging(context, v_bias.buffer_bytes());
+    {
+      api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
-    float* dst_bias_ptr = mapping.template data<float>();
+      float* dst_bias_ptr = mapping.template data<float>();
 
-    memset(dst_bias_ptr, 0, v_bias.nbytes());
+      memset(dst_bias_ptr, 0, v_bias.nbytes());
 
-    for (const auto src_h : c10::irange(src_kh_sz)) {
-      for (const auto src_w : c10::irange(src_kw_sz)) {
-        int64_t dst_plane = 2*(src_h%2) + (src_w%2);
-        int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
-        memcpy(
-            dst_bias_ptr + dst_plane * dst_plane_sz + dst_index,
-            src_bias_ptr + src_h * src_kw_sz + src_w,
-            sizeof(float));
+      for (const auto src_h : c10::irange(src_kh_sz)) {
+        for (const auto src_w : c10::irange(src_kw_sz)) {
+          int64_t dst_plane = 2*(src_h%2) + (src_w%2);
+          int64_t dst_index = (src_h/2)*dst_kw_sz + (src_w/2);
+          memcpy(
+              dst_bias_ptr + dst_plane * dst_plane_sz + dst_index,
+              src_bias_ptr + src_h * src_kw_sz + src_w,
+              sizeof(float));
+        }
       }
     }
+    utils::pack_staging_to_vtensor(staging.buffer(), v_bias);
 
     return v_bias;
   }
@@ -134,19 +140,21 @@ vTensor pack_biases(
         weight_arg.options(),
     };
 
-    api::MemoryMap mapping(
-        v_bias.host_buffer(command_buffer, api::MemoryAccessType::WRITE),
-        api::MemoryAccessType::WRITE);
+    api::StagingBuffer staging(context, v_bias.buffer_bytes());
+    {
+      api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
-    float* data_ptr = mapping.template data<float>();
+      float* data_ptr = mapping.template data<float>();
 
-    memset(
-        data_ptr,
-        // 2's complement integers and IEEE-754 floating point numbers both
-        // have identical bit representations for 0, so can use memset which
-        // only accepts uint8_t parameter.
-        0,
-        v_bias.nbytes());
+      memset(
+          data_ptr,
+          // 2's complement integers and IEEE-754 floating point numbers both
+          // have identical bit representations for 0, so can use memset which
+          // only accepts uint8_t parameter.
+          0,
+          v_bias.nbytes());
+    }
+    utils::pack_staging_to_vtensor(staging.buffer(), v_bias);
 
     return v_bias;
   }
@@ -257,9 +265,9 @@ Tensor context_run(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if (v_input.has_image() &&
-        packed_v_weight.has_image() &&
-        packed_v_bias.has_image()) {
+    if (true &&
+        true &&
+        true) {
       if (unpacked_bias && unpacked_bias->defined()) {
         const struct {
           uvec3 size;
