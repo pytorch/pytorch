@@ -88,13 +88,14 @@ __global__ static void post_sum_div_kernel(
     const int64_t segment_count,
     bool is_initial_set,
     scalar_t initial) {
+  auto type_has_nan = !std::is_integral<scalar_t>::value; 
   CUDA_KERNEL_LOOP(index, segment_count) {
     CUDA_KERNEL_ASSERT(lengths_data[index] >= 0);
     if (lengths_data[index] == 0) {
       if (is_initial_set) {
         output_data[index] = initial;
       } else {
-        output_data[index] = NAN;
+        output_data[index] = type_has_nan ? NAN : 0;
       }
     } else if (!at::_isnan(output_data[index])) {
       output_data[index] = output_data[index] / lengths_data[index];
@@ -133,6 +134,8 @@ __global__ void segment_reduce_forward_kernel(
   index_t offset_start = lengths_cumsum_data[offset_idx];
   index_t offset_end = lengths_cumsum_data[offset_idx + 1];
 
+  auto type_has_nan = !std::is_integral<scalar_t>::value; 
+
   // ===== step2: apply reduction
   for (index_t j = offset_start; j < offset_end; ++j) {
     int64_t data_index = outer_idx * data_stride_axis * data_size_axis
@@ -159,7 +162,7 @@ __global__ void segment_reduce_forward_kernel(
   int64_t lengths_idx = outer_idx * lengths_stride_axis * segment_count + dim_idx;
   CUDA_KERNEL_ASSERT(lengths_data[lengths_idx] >= 0);
   if (lengths_data[lengths_idx] == 0 && !is_initial_set &&
-      reduction == SegmentReductionType::MEAN) {
+      reduction == SegmentReductionType::MEAN && type_has_nan) {
     initial_value = static_cast<scalar_t>(NAN);
   } else if (
       reduction == SegmentReductionType::MEAN && lengths_data[lengths_idx] > 0 &&
@@ -334,7 +337,7 @@ Tensor _segment_reduce_lengths_offsets_backward_cuda_kernel(
 
         // TODO: Switch to TensorIterator for better maintainablility and
         // readability
-        AT_DISPATCH_FLOATING_TYPES_AND2(
+        AT_DISPATCH_ALL_TYPES_AND2(
             kBFloat16,
             kHalf,
             data_contig.scalar_type(),
@@ -461,7 +464,7 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
       lengths_or_offsets.scalar_type(), "_segment_reduce_cuda_kernel1", ([&] {
         auto* offsets_data_ptr = offsets.data_ptr<index_t>();
         auto* lengths_data_ptr = lengths.data_ptr<index_t>();
-        AT_DISPATCH_FLOATING_TYPES_AND2(
+        AT_DISPATCH_ALL_TYPES_AND2(
             at::ScalarType::Half,
             at::ScalarType::BFloat16,
             data.scalar_type(),
@@ -475,13 +478,17 @@ Tensor _segment_reduce_lengths_offsets_cuda_kernel(
               if (initial.has_value()) {
                 initial_value = initial.value().to<scalar_t>();
               } else if (reduction == SegmentReductionType::MAX) {
-                initial_value = -std::numeric_limits<scalar_t>::infinity();
+                initial_value = std::numeric_limits<scalar_t>::has_infinity ?
+                                -std::numeric_limits<scalar_t>::infinity() :
+                                std::numeric_limits<scalar_t>::lowest();
               } else if (
                   reduction == SegmentReductionType::MEAN ||
                   reduction == SegmentReductionType::SUM) {
                 initial_value = 0;
               } else if (reduction == SegmentReductionType::MIN) {
-                initial_value = std::numeric_limits<scalar_t>::infinity();
+                initial_value = std::numeric_limits<scalar_t>::has_infinity ?
+                                std::numeric_limits<scalar_t>::infinity() :
+                                std::numeric_limits<scalar_t>::max();
               } else if (reduction == SegmentReductionType::PROD) {
                 initial_value = 1;
               }

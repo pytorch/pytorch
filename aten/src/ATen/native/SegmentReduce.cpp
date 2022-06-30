@@ -53,8 +53,9 @@ void _segment_reduce_lengths_cpu_kernel1(
   auto data_size_axis = data.size(axis);
   auto output_stride_axis = output.stride(axis);
   auto output_size_axis = output.size(axis);
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND2(
       kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", [&]() {
+        auto type_has_nan = !std::is_integral<scalar_t>::value; 
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.data_ptr<scalar_t>();
         for (const auto outer_idx : c10::irange(outer_offset)) {
@@ -78,13 +79,17 @@ void _segment_reduce_lengths_cpu_kernel1(
               if (initial.has_value()) {
                 initial_value = initial.value().to<scalar_t>();
               } else if (reduction == SegmentReductionType::MAX) {
-                initial_value = -std::numeric_limits<scalar_t>::infinity();
+                initial_value = std::numeric_limits<scalar_t>::has_infinity ?
+                                -std::numeric_limits<scalar_t>::infinity() :
+                                std::numeric_limits<scalar_t>::lowest();
               } else if (
                   reduction == SegmentReductionType::MEAN ||
                   reduction == SegmentReductionType::SUM) {
                 initial_value = 0;
               } else if (reduction == SegmentReductionType::MIN) {
-                initial_value = std::numeric_limits<scalar_t>::infinity();
+                initial_value = std::numeric_limits<scalar_t>::has_infinity ?
+                                std::numeric_limits<scalar_t>::infinity() :
+                                std::numeric_limits<scalar_t>::max();
               } else if (reduction == SegmentReductionType::PROD) {
                 initial_value = 1;
               }
@@ -115,7 +120,7 @@ void _segment_reduce_lengths_cpu_kernel1(
               TORCH_CHECK(segment_length >= 0);
 
               if (segment_length == 0 && !initial.has_value() &&
-                  reduction == SegmentReductionType::MEAN) {
+                  reduction == SegmentReductionType::MEAN && type_has_nan) {
                 initial_value = static_cast<scalar_t>(NAN);
               } else if (
                   reduction == SegmentReductionType::MEAN &&
@@ -209,7 +214,7 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
   auto output_size_axis = output_contig.size(axis);
   // TODO: Switch to TensorIterator for better maintainablility and
   // readability
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND2(
       kBFloat16,
       kHalf,
       data_contig.scalar_type(),

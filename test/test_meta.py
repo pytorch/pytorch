@@ -422,7 +422,7 @@ meta_function_expected_failures = {
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
     torch.polar: {f32, f64},  # aten::polar.out
     torch.repeat_interleave: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::repeat_interleave.Tensor
-    torch.segment_reduce: {bf16, f16, f32, f64},  # aten::segment_reduce
+    torch.segment_reduce: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::segment_reduce
     torch.searchsorted: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::searchsorted.Tensor, aten::searchsorted.Tensor_out
     torch.symeig: {f32, f64},
     torch.take: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::take, aten::take.out
@@ -646,7 +646,7 @@ meta_dispatch_expected_failures = {
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.searchsorted.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
-    aten.segment_reduce.default: {bf16, f16, f32, f64},
+    aten.segment_reduce.default: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     aten.take.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.take.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.tensordot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},

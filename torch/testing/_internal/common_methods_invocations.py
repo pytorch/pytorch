@@ -19580,7 +19580,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         'segment_reduce',
         variant_test_name='lengths',
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
@@ -19599,7 +19599,7 @@ op_db: List[OpInfo] = [
     OpInfo(
         'segment_reduce',
         variant_test_name='offsets',
-        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
