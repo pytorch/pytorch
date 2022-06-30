@@ -11665,6 +11665,8 @@ op_db: List[OpInfo] = [
     OpInfo('diag_embed',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
            supports_out=False,
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_diag_embed),
@@ -11740,6 +11742,8 @@ op_db: List[OpInfo] = [
                     ref=np.remainder,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                    # https://github.com/pytorch/pytorch/issues/80411
+                    gradcheck_fast_mode=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=None,
@@ -12137,6 +12141,8 @@ op_db: List[OpInfo] = [
            ],
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_stft,
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
@@ -12148,6 +12154,8 @@ op_db: List[OpInfo] = [
     OpInfo('istft',
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_istft,
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
@@ -12677,6 +12685,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_lstsq,
            error_inputs_func=error_inputs_lstsq,
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12958,8 +12968,6 @@ op_db: List[OpInfo] = [
            aten_name='linalg_lu_factor',
            op=torch.linalg.lu_factor,
            dtypes=floating_and_complex_types(),
-           # https://github.com/pytorch/pytorch/issues/80411
-           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
@@ -12978,6 +12986,9 @@ op_db: List[OpInfo] = [
            aten_name='linalg_lu',
            op=torch.linalg.lu,
            dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/pytorch/issues/80411
+           # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
@@ -12985,6 +12996,8 @@ op_db: List[OpInfo] = [
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            skips=(skipCPUIfNoLapack,),
@@ -13034,6 +13047,8 @@ op_db: List[OpInfo] = [
            op=torch.linalg.lu_solve,
            aten_name='linalg_lu_solve',
            dtypes=floating_and_complex_types(),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
@@ -13807,6 +13822,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_conv_transpose3d,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -13970,6 +13987,8 @@ op_db: List[OpInfo] = [
     OpInfo('nn.functional.pad',
            variant_test_name='constant',
            aten_name='constant_pad_nd',
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
@@ -14040,6 +14059,8 @@ op_db: List[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half),
            sample_inputs_func=sample_inputs_nn_unfold,
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False,
@@ -14338,7 +14359,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool2d',
            aten_name='max_pool2d',
-           supports_autograd=True,
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            # Vmap is not happy with non-contiguous (channels_last) inputs
            check_batched_gradgrad=False,
            supports_out=False,
@@ -14352,7 +14374,8 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_pool3d',
            aten_name='max_pool3d',
-           supports_autograd=True,
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -14497,6 +14520,8 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes', device_type='cuda', active_if=not SM53OrLater),
                DecorateInfo(unittest.skip("Skipped!"), 'TestNNCOpInfo', 'test_nnc_correctness', dtypes=(torch.bfloat16,)),
            ),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -15217,6 +15242,8 @@ op_db: List[OpInfo] = [
     OpInfo('dist',
            op=torch.dist,
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_out=False,
            supports_forward_ad=True,
            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
@@ -15267,6 +15294,8 @@ op_db: List[OpInfo] = [
                     # unsupported on CPU.
                     backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
                     backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
+                    # https://github.com/pytorch/pytorch/issues/80411
+                    gradcheck_fast_mode=True,
                     supports_inplace_autograd=False,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -15387,6 +15416,8 @@ op_db: List[OpInfo] = [
         "rot90",
         dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half),
         error_inputs_func=error_inputs_rot90,
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -15774,6 +15805,8 @@ op_db: List[OpInfo] = [
     OpInfo('slice_scatter',
            dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_slice_scatter,
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -16336,6 +16369,8 @@ op_db: List[OpInfo] = [
            op=torch.svd,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_svd,
+           # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
@@ -16355,6 +16390,8 @@ op_db: List[OpInfo] = [
            op=torch.linalg.svd,
            aten_name='linalg_svd',
            dtypes=floating_and_complex_types(),
+           # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
@@ -16388,6 +16425,8 @@ op_db: List[OpInfo] = [
                *args, **kwargs
            ),
            dtypes=floating_types(),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_out=False,
            check_batched_grad=False,
            check_batched_gradgrad=False,
@@ -16410,6 +16449,8 @@ op_db: List[OpInfo] = [
                *args, **kwargs
            ),
            dtypes=floating_types(),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_out=False,
            check_batched_forward_grad=False,
            check_batched_grad=False,
@@ -17482,6 +17523,8 @@ op_db: List[OpInfo] = [
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                  # https://github.com/pytorch/pytorch/issues/80411
+                  gradcheck_fast_mode=True,
                   supports_out=False,
                   supports_forward_ad=True,
                   supports_fwgrad_bwgrad=True,
@@ -17567,6 +17610,8 @@ op_db: List[OpInfo] = [
     ShapeFuncInfo('tile',
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                  # https://github.com/pytorch/pytorch/issues/80411
+                  gradcheck_fast_mode=True,
                   supports_out=False,
                   supports_forward_ad=True,
                   supports_fwgrad_bwgrad=True,
@@ -17732,6 +17777,8 @@ op_db: List[OpInfo] = [
     OpInfo('mT',
            op=lambda x: x.mT,
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -17744,6 +17791,8 @@ op_db: List[OpInfo] = [
            op=lambda x: x.mH,
            aliases=('adjoint',),
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -17769,6 +17818,8 @@ op_db: List[OpInfo] = [
     OpInfo('kron',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+           gradcheck_fast_mode=True,
            supports_inplace_autograd=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -18417,6 +18468,8 @@ op_db: List[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_forward_mode_AD"),
             DecorateInfo(unittest.expectedFailure, 'TestGradients', "test_inplace_forward_mode_AD"),),
         gradcheck_wrapper=wrapper_set_seed,
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
@@ -18814,6 +18867,8 @@ op_db: List[OpInfo] = [
         identity=1,
         nan_policy='propagate',
         supports_multiple_dims=False,
+        # https://github.com/pytorch/pytorch/issues/80411
+        gradcheck_fast_mode=True,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -18973,6 +19028,8 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -18990,6 +19047,8 @@ op_db: List[OpInfo] = [
         dtypes=all_types_and_complex_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.float16, torch.bfloat16),
         method_variant=None,
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -19305,6 +19364,8 @@ op_db: List[OpInfo] = [
                          device_type='cpu', dtypes=[torch.half]),
         ),
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False),
@@ -19416,6 +19477,8 @@ op_db: List[OpInfo] = [
         ref=_NOTHING,
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        # Runs very slowly on slow gradcheck - alternatively reduce input sizes
+        gradcheck_fast_mode=True,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
