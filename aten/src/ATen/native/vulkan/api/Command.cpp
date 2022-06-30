@@ -136,13 +136,13 @@ void Command::Buffer::barrier(const PipelineBarrier& barrier) {
   barriers_.stage.src |= barrier.stage.src;
   barriers_.stage.dst |= barrier.stage.dst;
 
-  barriers_.buffers.insert(
-      barriers_.buffers.end(),
+  barriers_.buffer_barriers.insert(
+      barriers_.buffer_barriers.end(),
       barrier.buffers.begin(),
       barrier.buffers.end());
 
-  barriers_.images.insert(
-      barriers_.images.end(),
+  barriers_.image_barriers.insert(
+      barriers_.image_barriers.end(),
       barrier.images.begin(),
       barrier.images.end());
 }
@@ -250,41 +250,16 @@ void Command::Buffer::barrier() {
   if (barriers_.stage) {
     c10::SmallVector<VkBufferMemoryBarrier, 4u> buffer_memory_barriers;
 
-    for (const Resource::Buffer::Barrier& barrier : barriers_.buffers) {
-      buffer_memory_barriers.push_back({
-            VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-            nullptr,
-            barrier.memory.src,
-            barrier.memory.dst,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            barrier.object.handle,
-            barrier.object.offset,
-            barrier.object.range,
-          });
+    for (const api::BufferMemoryBarrier& memory_barrier
+         : barriers_.buffer_barriers) {
+      buffer_memory_barriers.push_back(memory_barrier.handle);
     }
 
     c10::SmallVector<VkImageMemoryBarrier, 4u> image_memory_barriers;
 
-    for (const Resource::Image::Barrier& barrier : barriers_.images) {
-      image_memory_barriers.push_back({
-            VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-            nullptr,
-            barrier.memory.src,
-            barrier.memory.dst,
-            barrier.layout.src,
-            barrier.layout.dst,
-            VK_QUEUE_FAMILY_IGNORED,
-            VK_QUEUE_FAMILY_IGNORED,
-            barrier.object.handle,
-            {
-              VK_IMAGE_ASPECT_COLOR_BIT,
-              0u,
-              VK_REMAINING_MIP_LEVELS,
-              0u,
-              VK_REMAINING_ARRAY_LAYERS,
-            },
-          });
+    for (const api::ImageMemoryBarrier& memory_barrier
+         : barriers_.image_barriers) {
+      image_memory_barriers.push_back(memory_barrier.handle);
     }
 
     vkCmdPipelineBarrier(
@@ -321,8 +296,8 @@ inline Command::Buffer::Barrier::Stage::operator bool() const {
 
 inline void Command::Buffer::Barrier::reset() {
   stage = {};
-  buffers.clear();
-  images.clear();
+  buffer_barriers.clear();
+  image_barriers.clear();
 }
 
 Command::Pool::Pool(const GPU& gpu)
