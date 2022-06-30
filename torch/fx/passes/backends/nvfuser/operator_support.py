@@ -104,12 +104,12 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten.where": None,
             "torch.ops.aten.lerp": None,
             "torch.ops.aten.addcmul": None,
-            "torch.ops.aten.native_dropout": None,
+            # "torch.ops.aten.native_dropout": None,    # missing refs for aten.rank_like
             "torch.ops.aten.dropout": None,
-            "torch.ops.aten.native_dropout_backward": None,
+            # "torch.ops.aten.native_dropout_backward": None,   # missing refs for aten.type_as
             "torch.ops.aten.instance_norm": None,
             "torch.ops.aten._batch_norm_impl_index": None,
-            "torch.ops.aten.native_batch_norm": None,
+            # "torch.ops.aten.native_batch_norm": None,     # missing refs for aten.var
             "torch.ops.aten.batch_norm": None,
             "torch.ops.aten.cudnn_batch_norm": None,
             "torch.ops.aten._batch_norm_impl_index_backward": None,
@@ -124,7 +124,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             # "torch.ops.aten._softmax": None,
             "torch.ops.aten._log_softmax_backward_data": None,
             "torch.ops.aten._softmax_backward_data": None,
-            "torch.ops.aten.var.dim": None,
+            # "torch.ops.aten.var.dim": None,       # missing refs
             "torch.ops.aten.std.dim": None,
             "torch.ops.aten.sum.dim_IntList": None,
             "torch.ops.aten.mean.dim": None,
@@ -133,7 +133,7 @@ class NvFuserOperatorSupport(OperatorSupport):
             "torch.ops.aten._autocast_to_reduced_precision": None,
             "torch.ops.aten._autocast_to_full_precision": None,
             "torch.ops.aten.to.dtype": None,
-            "torch.ops.aten.type_as": None,
+            # "torch.ops.aten.type_as": None,       # missing refs
             "torch.ops.aten.linear": None,
             "torch.ops.aten.gelu": None,
             "torch.ops.aten.gelu_backward": None,
