@@ -3591,7 +3591,8 @@ struct to_ir {
                 << "enumerate expected kwarg name 'start', got '"
                 << attributes[0].name().name() << "'";
           }
-          start_index = emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
+          start_index =
+              emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
         }
 
         std::vector<Value*> range_inputs;
