@@ -2,18 +2,12 @@ import torch
 import torch._prims as prims
 import torch._refs as refs
 import torch._prims.utils as utils
-from torch._prims.utils import (
-    TensorLike,
-    TensorLikeType,
-    ShapeType,
-    DimsType,
-    DimsSequenceType,
-)
+from torch._prims.utils import TensorLike, TensorLikeType, ShapeType, DimsType
 from torch._prims.wrappers import (
     out_wrapper,
 )
 
-from typing import Union, Tuple, Iterable, Sequence, Optional, NamedTuple
+from typing import Union, Tuple, Optional, Iterable, Sequence, NamedTuple
 from typing_extensions import Literal
 import math
 
@@ -39,11 +33,15 @@ __all__ = [
 ]
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
+_NORM_VALUES = {None, "forward", "backward", "ortho"}
 
 
 def _apply_norm(
     x: TensorLike, norm: NormType, signal_numel: int, forward: bool
 ) -> TensorLikeType:
+    if norm not in _NORM_VALUES:
+        raise RuntimeError(f"Invalid normalization mode: {norm}")
+
     if norm == "ortho":
         return prims.mul(x, 1 / math.sqrt(signal_numel))
 
@@ -330,7 +328,7 @@ def _fftn_c2c(
 def fftn(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = None,
+    dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
@@ -342,7 +340,7 @@ def fftn(
 def ifftn(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = None,
+    dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
@@ -354,7 +352,7 @@ def ifftn(
 def rfftn(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = None,
+    dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     if input.dtype.is_complex:
@@ -372,7 +370,7 @@ def rfftn(
 def ihfftn(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = None,
+    dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     if input.dtype.is_complex:
@@ -406,7 +404,7 @@ def _canonicalize_fft_c2r_shape_and_dim_args(
     fname: str,
     input: TensorLikeType,
     s: Optional[ShapeType],
-    dim: Optional[DimsSequenceType],
+    dim: Optional[DimsType],
 ) -> _CanonicalizeC2rReturn:
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
     if len(shape) == 0:
@@ -431,7 +429,7 @@ def _canonicalize_fft_c2r_shape_and_dim_args(
 def irfftn(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = None,
+    dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     shape, dim, last_dim_size = _canonicalize_fft_c2r_shape_and_dim_args(
@@ -447,7 +445,7 @@ def irfftn(
 def hfftn(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = None,
+    dim: Optional[DimsType] = None,
     norm: NormType = None,
 ) -> TensorLikeType:
     shape, dim, last_dim_size = _canonicalize_fft_c2r_shape_and_dim_args(
@@ -467,7 +465,7 @@ def hfftn(
 def fft2(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = (-2, -1),
+    dim: Optional[DimsType] = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return fftn(input, s=s, dim=dim, norm=norm)
@@ -477,7 +475,7 @@ def fft2(
 def ifft2(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = (-2, -1),
+    dim: Optional[DimsType] = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return ifftn(input, s=s, dim=dim, norm=norm)
@@ -487,7 +485,7 @@ def ifft2(
 def rfft2(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = (-2, -1),
+    dim: Optional[DimsType] = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return rfftn(input, s=s, dim=dim, norm=norm)
@@ -497,7 +495,7 @@ def rfft2(
 def irfft2(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = (-2, -1),
+    dim: Optional[DimsType] = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return irfftn(input, s=s, dim=dim, norm=norm)
@@ -507,7 +505,7 @@ def irfft2(
 def hfft2(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = (-2, -1),
+    dim: Optional[DimsType] = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return hfftn(input, s=s, dim=dim, norm=norm)
@@ -517,7 +515,7 @@ def hfft2(
 def ihfft2(
     input: TensorLikeType,
     s: Optional[ShapeType] = None,
-    dim: Optional[DimsSequenceType] = (-2, -1),
+    dim: Optional[DimsType] = (-2, -1),
     norm: NormType = None,
 ) -> TensorLikeType:
     return ihfftn(input, s=s, dim=dim, norm=norm)
