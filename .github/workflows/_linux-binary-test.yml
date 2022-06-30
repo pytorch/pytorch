@@ -47,6 +47,10 @@ on:
         required: true
         type: string
         description: Desired python version
+      runs_on:
+        required: true
+        type: string
+        description: Hardware to run this job on. Valid values are linux.4xlarge, linux.4xlarge.nvidia.gpu, and linux.rocm.gpu
 
 jobs:
   build:
@@ -78,24 +82,78 @@ jobs:
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
-      - name: List the env
-        shell: bash
-        run: env
+      # Setup the environment for non-ROCm builds
       - name: Checkout PyTorch
+        if: ${{ inputs.GPU_ARCH_TYPE != 'rocm' }}
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@master
       - name: Setup Linux
+        if: ${{ inputs.GPU_ARCH_TYPE != 'rocm' }}
         uses: ./.github/actions/setup-linux
       - name: Chown workspace
+        if: ${{ inputs.GPU_ARCH_TYPE != 'rocm' }}
         uses: ./.github/actions/chown-workspace
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        if: ${{ inputs.GPU_ARCH_TYPE != 'rocm' }}
         uses: ./.github/actions/setup-ssh
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
       - name: Clean workspace
+        if: ${{ inputs.GPU_ARCH_TYPE != 'rocm' }}
         shell: bash
         run: |
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
+      # End of non-ROCm setup
+
+      # Setup the environment for ROCm builds
+      - name: Clean workspace
+        if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' }}
+        run: |
+          rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+      - name: Set DOCKER_HOST
+        if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' }}
+        run: echo "DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock" >> "${GITHUB_ENV}"
+      - name: Runner health check system info
+        if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' && always() }}
+        run: |
+          cat /etc/os-release || true
+          cat /etc/apt/sources.list.d/rocm.list || true
+          cat /opt/rocm/.info/version || true
+          whoami
+      - name: Runner health check rocm-smi
+        if: ${{ inputs.GPU_ARCH_TYPE == 'rocm'  && always()}}
+        run: |
+          rocm-smi
+      - name: Runner health check rocminfo
+        if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' && always()}}
+        run: |
+          rocminfo
+      - name: Runner health check GPU count
+        if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' && always() }}
+        run: |
+          ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
+          if [[ "x$ngpu" != "x2" && "x$ngpu" != "x4" ]]; then
+              echo "Failed to detect GPUs on the runner"
+              exit 1
+          fi
+      - name: Runner health check disconnect on failure
+        if: ${{ failure() && inputs.GPU_ARCH_TYPE == 'rocm' }}
+        run: |
+          killall runsvc.sh
+      - name: Preserve github env variables for use in docker
+        if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' }}
+        run: |
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+      # End of ROCm setup
+
+      - uses: seemethere/download-artifact-s3@v4
+        name: Download Build Artifacts
+        with:
+          name: ${{ inputs.build_name }}
+          path: "${{ runner.temp }}/artifacts/"
+
 
       - name: Checkout PyTorch to pytorch dir
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
@@ -112,7 +170,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          ref: main
           submodules: recursive
           repository: pytorch/builder
           path: builder
@@ -122,22 +180,36 @@ jobs:
           git clean -fxd
         working-directory: builder
 
-      - name: Set BUILD_SPLIT_CUDA
-        if: ${{ inputs.GPU_ARCH_TYPE }}' == 'cuda' && startsWith('${{ inputs.GPU_ARCH_VERSION }}', '11') }}
-        shell: bash
+      - name: ROCm set GPU_FLAG
+        if: ${{ inputs.GPU_ARCH_TYPE == 'rocm' }}
         run: |
-          echo "BUILD_SPLIT_CUDA='ON'" >> "$GITHUB_ENV"
+          echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd --device=/dev/dri --group-add video --group-add daemon" >> "${GITHUB_ENV}"
+
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        uses: nick-fields/retry@71062288b76e2b6214ebde0e673ce0de1755740a
+        if: ${{ inputs.GPU_ARCH_TYPE == 'cuda' }}
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          command: |
+            set -ex
+            pushd pytorch
+            bash .github/scripts/install_nvidia_utils_linux.sh
+            echo "GPU_FLAG=--gpus all" >> "${GITHUB_ENV}"
+            popd
+
       - name: Pull Docker image
         run: |
           retry () {
               "$@"  || (sleep 1 && "$@") || (sleep 2 && "$@")
           }
           retry docker pull "${DOCKER_IMAGE}"
-      - name: Build PyTorch binary
+      - name: Test PyTorch binary
         run: |
           set -x
-          mkdir -p artifacts/
+          # shellcheck disable=SC2086,SC2090
           container_name=$(docker run \
+            ${GPU_FLAG:-} \
             -e BINARY_ENV_FILE \
             -e BUILDER_ROOT \
             -e BUILD_ENVIRONMENT \
@@ -157,26 +229,14 @@ jobs:
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
             -v "${GITHUB_WORKSPACE}/builder:/builder" \
-            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -v "${RUNNER_TEMP}/artifacts:/final_pkgs" \
             -w / \
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /builder/${{ inputs.PACKAGE_TYPE }}/build.sh"
-      - name: Chown artifacts
-        if: always()
-        shell: bash
-        run: |
-          # Ensure the working directory gets chowned back to the current user
-          docker run --rm -v "${RUNNER_TEMP}/artifacts:/v" -w /v "${ALPINE_IMAGE}" chown -R "$(id -u):$(id -g)" .
-
-      - uses: seemethere/upload-artifact-s3@v5
-        with:
-          name: ${{ inputs.build_name }}
-          retention-days: 14
-          if-no-files-found: error
-          path:
-            ${{ runner.temp }}/artifacts/*
+          # Generate test script
+          docker exec -t -w "${PYTORCH_ROOT}" -e OUTPUT_SCRIPT="/run.sh" "${container_name}" bash -c "bash .circleci/scripts/binary_linux_test.sh"
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash -x /run.sh"
 
       - name: Hold runner for 2 hours or until ssh sessions have drained
         working-directory: pytorch/

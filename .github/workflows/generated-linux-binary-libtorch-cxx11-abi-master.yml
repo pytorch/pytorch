@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-binary-manywheel
+name: linux-binary-libtorch-cxx11-abi
 
 on:
   push:
@@ -19,7 +19,7 @@ env:
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
-  BUILD_ENVIRONMENT: linux-binary-manywheel
+  BUILD_ENVIRONMENT: linux-binary-libtorch-cxx11-abi
   BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -28,40 +28,40 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: linux-binary-manywheel-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-binary-libtorch-cxx11-abi-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 jobs:
-  manywheel-py3_7-cuda10_2-build:
+  libtorch-cpu-shared-with-deps-cxx11-abi-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: manywheel
+      PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda10_2
-      build_environment: linux-binary-manywheel
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  manywheel-py3_7-cuda10_2-test:  # Testing
+  libtorch-cpu-shared-with-deps-cxx11-abi-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
-    needs: manywheel-py3_7-cuda10_2-build
+    needs: libtorch-cpu-shared-with-deps-cxx11-abi-build
     uses: ./.github/workflows/_linux-binary-test.yml
     with:
-      PACKAGE_TYPE: manywheel
+      PACKAGE_TYPE: libtorch
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
-      DESIRED_CUDA: cu102
-      GPU_ARCH_VERSION: 10.2
-      GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      DESIRED_PYTHON: "3.7"
-      build_name: manywheel-py3_7-cuda10_2
-      build_environment: linux-binary-manywheel
-      runs_on: linux.4xlarge.nvidia.gpu
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/libtorch-cxx11-builder:cpu
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: cxx11-abi
+      build_name: libtorch-cpu-shared-with-deps-cxx11-abi
+      build_environment: linux-binary-libtorch-cxx11-abi
+      runs_on: linux.4xlarge
