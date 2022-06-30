@@ -17,4 +17,4 @@ jobs:
     name: choose a step
     steps:
       - name: Running ${{ inputs.action-name}}
-        uses: ${{ inputs.action-name}}
+        uses: ./.github/actions/zainr-action
