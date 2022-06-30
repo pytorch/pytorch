@@ -1504,13 +1504,14 @@ Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  auto cast_values = promoteValues(TypePromotion::default_op_config, {v1, v2});
+  std::vector<Val*> operands = {v1, v2};
+  auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
+  auto cast_values = promoteValues(operands, common_dtype);
   v1 = cast_values[0];
   v2 = cast_values[1];
 
   TORCH_CHECK(c->getDataType().value() == DataType::Bool);
-  auto out_dtype =
-      promote_type(v1->getDataType().value(), v2->getDataType().value());
+  auto out_dtype = common_dtype;
   auto out_vtype =
       promote_type(v1->getValType().value(), v2->getValType().value());
   // Even when v1 and v2 are scalar, the output is a tensor if the

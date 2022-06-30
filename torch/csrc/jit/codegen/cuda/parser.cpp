@@ -15,6 +15,8 @@
 
 #include <ATen/native/Activation.h>
 
+#include <c10/util/CallOnce.h>
+
 #include <unordered_map>
 #include <utility>
 
@@ -825,7 +827,7 @@ class IrParser {
   }
 
   static void initRegistry() {
-    std::call_once(once_flag_, []() {
+    c10::call_once(once_flag_, []() {
       std::lock_guard<std::mutex> lock(parser_mutex_);
       registerJitOperator();
     });
@@ -3469,7 +3471,7 @@ class IrParser {
       cached_registry_lookup_; // NOLINT
 
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-  static std::once_flag once_flag_;
+  static c10::once_flag once_flag_;
 };
 std::unordered_set<Symbol> IrParser::parser_symbol_set_; // NOLINT
 std::unordered_set<Symbol> IrParser::parser_skip_set_; // NOLINT
@@ -3480,7 +3482,7 @@ std::unordered_map<const FunctionSchema*, const IrParser::RegistrationEntry*>
     IrParser::cached_registry_lookup_; // NOLINT
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
-std::once_flag IrParser::once_flag_;
+c10::once_flag IrParser::once_flag_;
 
 ProfileIValueOp* insertProfileIValueOp(
     Node* node,

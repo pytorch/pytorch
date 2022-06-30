@@ -66,6 +66,10 @@ if [[ "$TEST_CONFIG" == *crossref* ]]; then
   export PYTORCH_TEST_WITH_CROSSREF=1
 fi
 
+if [[ "$TEST_CONFIG" == *dynamo* ]]; then
+  export PYTORCH_TEST_WITH_DYNAMO=1
+fi
+
 # TODO: this condition is never true, need to fix this.
 if [[ -n "$PR_NUMBER" ]] && [[ -z "$CI_MASTER" || "$CI_MASTER" == "false" ]]; then
   # skip expensive checks when on PR and CI_MASTER flag is not set
