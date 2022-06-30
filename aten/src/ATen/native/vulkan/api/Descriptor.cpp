@@ -154,55 +154,6 @@ Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
 
 Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
-    const Resource::Buffer::Object& buffer) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && descriptor_set_,
-      "This descriptor set is in an invalid state! "
-      "Potential reason: This descriptor set is moved from.");
-
-  update({
-      binding,
-      shader_layout_signature_[binding],
-      {
-        .buffer = {
-          buffer.handle,
-          buffer.offset,
-          buffer.range,
-        },
-      },
-    });
-
-  return *this;
-}
-
-Descriptor::Set& Descriptor::Set::bind(
-    const uint32_t binding,
-    const Resource::Image::Object& image) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && descriptor_set_,
-      "This descriptor set is in an invalid state! "
-      "Potential reason: This descriptor set is moved from.");
-
-  update(Item{
-      binding,
-      shader_layout_signature_[binding],
-      {
-        .image = {
-          image.sampler,
-          image.view,
-          [](const VkDescriptorType type, const VkImageLayout layout) {
-            return (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE == type) ?
-                    VK_IMAGE_LAYOUT_GENERAL : layout;
-          }(shader_layout_signature_[binding], image.layout),
-        },
-      },
-    });
-
-  return *this;
-}
-
-Descriptor::Set& Descriptor::Set::bind(
-    const uint32_t binding,
     const VulkanBuffer::Package& package) {
   update({
       binding,
