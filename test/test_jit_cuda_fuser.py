@@ -4812,6 +4812,7 @@ class TestCudaFuser(JitTestCase):
 
             self.assertGraphContainsExactly(t_cpu_jit.graph_for(x), FUSION_GUARD, 0)
 
+    @unittest.skipIf(True, "expand current disabled")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
