@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import torch
 from torch.fx._compatibility import compatibility
@@ -284,7 +284,10 @@ def _update_weight_fused_dtypes(weight, name, node):
 
 
 @compatibility(is_backward_compatible=False)
-def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> Dict:
+def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="",
+                     use_tensor_view: bool = False,
+                     is_compute_node: Callable[[Node], bool] = None) -> Dict:
+
     """Recursively Serializes a graph module (fx_module) to a dictionary which is later exported to JSON.
     It also adds all weights the provided weights dictionary by qualified_name.
     Dictionary Schema:
@@ -333,13 +336,14 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
     def get_node_info(node):
         tensor_meta = get_tensor_meta(node)
         node_rep = {
-            "shape": serialize_shape(tensor_meta.shape),
             "dtype": str(tensor_meta.dtype),
             "requires_grad": str(tensor_meta.requires_grad),
-            "stride": serialize_stride(tensor_meta.stride),
             "is_quantized": tensor_meta.is_quantized,
         }
-
+        # Include shape and stride if not using tensor_views, or if node isn't compute.
+        if not (use_tensor_view and is_compute_node and is_compute_node(node)):
+            node_rep["shape"] = serialize_shape(tensor_meta.shape)
+            node_rep["stride"] = serialize_stride(tensor_meta.stride)
         if tensor_meta.is_quantized:
             node_rep["qscheme"] = str(tensor_meta.qparams["qscheme"])
 
@@ -381,7 +385,8 @@ def serialize_module(fx_module: GraphModule, weights: Dict, name_prefix="") -> D
         if node.op == "call_module":
             if isinstance(submodules[node.target], GraphModule):
                 serialized_module = serialize_module(
-                    getattr(fx_module, node.target), weights, node.target
+                    getattr(fx_module, node.target), weights, node.target,
+                    use_tensor_view=use_tensor_view, is_compute_node=is_compute_node
                 )
                 serialized_dict["modules"][node.target] = serialized_module
             else:
