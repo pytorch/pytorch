@@ -9470,6 +9470,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: glu_out
+    MPS: glu_out_mps
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   structured_delegate: glu.out
@@ -9481,12 +9482,14 @@
   dispatch:
     CPU: glu_backward_cpu_out
     CUDA: glu_backward_cuda_out
+    MPS: glu_backward_mps_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+    MPS: glu_backward_mps
 
 - func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
   python_module: nn
