@@ -1339,8 +1339,9 @@ void initJITBindings(PyObject* module) {
       .def(py::init<std::string>())
       .def(py::init([](const py::object& buffer) {
         auto writer_func = [=](const void* data, size_t size) {
-          auto bytes = py::bytes(reinterpret_cast<const char*>(data), size);
-          buffer.attr("write")(std::move(bytes));
+          auto memory_view = py::memoryview::from_memory(
+              reinterpret_cast<const char*>(data), size);
+          buffer.attr("write")(std::move(memory_view));
           return size;
         };
         return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
