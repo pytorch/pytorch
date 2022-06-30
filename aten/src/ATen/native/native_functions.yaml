@@ -3987,6 +3987,7 @@
     MkldnnCPU: mkldnn_prelu
     CPU: prelu_cpu
     CUDA: prelu_cuda
+    QuantizedCPU: prelu_quantized_cpu
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   variants: function, method
@@ -9469,6 +9470,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: glu_out
+    MPS: glu_out_mps
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   structured_delegate: glu.out
@@ -9480,12 +9482,14 @@
   dispatch:
     CPU: glu_backward_cpu_out
     CUDA: glu_backward_cuda_out
+    MPS: glu_backward_mps_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+    MPS: glu_backward_mps
 
 - func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
   python_module: nn
@@ -12834,6 +12838,19 @@
 - func: special_modified_bessel_k1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: special_modified_bessel_k1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_scaled_modified_bessel_k0.out
+  variants: function
+
+- func: special_scaled_modified_bessel_k0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_scaled_modified_bessel_k0_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
