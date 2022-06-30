@@ -49,6 +49,9 @@ class Context final {
   Descriptor descriptor_;
   Resource resource_;
   QueryPool querypool_;
+  // Memory Management
+  std::vector<VulkanBuffer> buffers_to_clear_;
+  std::vector<VulkanImage> images_to_clear_;
 
  public:
 
@@ -105,6 +108,15 @@ class Context final {
     return querypool_;
   }
 
+  // Memory Management
+  void register_buffer_cleanup(VulkanBuffer& buffer) {
+    buffers_to_clear_.emplace_back(std::move(buffer));
+  }
+
+  void register_image_cleanup(VulkanImage& image) {
+    images_to_clear_.emplace_back(std::move(image));
+  }
+
   // GPU RPC
 
   template<typename... Arguments>
@@ -136,6 +148,29 @@ class Context final {
     return queue_.handle;
   }
 
+};
+
+class UniformParamsBuffer final {
+ private:
+  api::Context* context_p_;
+  VulkanBuffer vulkan_buffer_;
+ public:
+  template<typename Block>
+  UniformParamsBuffer(Context* context_p, const Block& block)
+    : context_p_(context_p),
+      vulkan_buffer_(
+                    context_p_->adapter_ptr()->vma().create_params_buffer(block)) {
+        }
+  UniformParamsBuffer(const UniformParamsBuffer&) = delete;
+  UniformParamsBuffer& operator=(const UniformParamsBuffer&) = delete;
+  UniformParamsBuffer(UniformParamsBuffer&&) = delete;
+  UniformParamsBuffer& operator=(UniformParamsBuffer&&) = delete;
+  ~UniformParamsBuffer() {
+      context_p_->register_buffer_cleanup(vulkan_buffer_);
+    }
+  VulkanBuffer& buffer() {
+      return vulkan_buffer_;
+    }
 };
 
 bool available();
