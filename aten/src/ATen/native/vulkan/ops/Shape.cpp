@@ -33,12 +33,12 @@ Tensor view_internal(
         // synchronization if necessary.
         v_self.buffer(
             command_buffer,
-            vTensor::Stage::Transfer),
+            api::PipelineStage::Transfer),
         // Write-only access bypasses synchronization but inserts appropriate
         // barriers if necessary.
         v_output.buffer(
             command_buffer,
-            vTensor::Stage::Transfer,
+            api::PipelineStage::Transfer,
             api::MemoryAccessType::WRITE));
   }
   command_pool.submit(context->gpu().queue, command_buffer);
