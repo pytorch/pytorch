@@ -149,7 +149,7 @@ class Context final {
     }
   }
 
-  Descriptor::Set submit_compute_prologue(
+  DescriptorSet submit_compute_prologue(
       CommandBuffer&,
       const ShaderLayout::Signature&,
       const ShaderSource&,
@@ -157,7 +157,7 @@ class Context final {
 
   void submit_compute_epilogue(
       CommandBuffer&,
-      const Descriptor::Set&,
+      const DescriptorSet&,
       const PipelineBarrier&,
       const utils::uvec3&);
 
@@ -257,7 +257,7 @@ template<
     size_t...Indices,
     typename ...Arguments>
 inline void bind(
-    Descriptor::Set& descriptor_set,
+    DescriptorSet& descriptor_set,
     const std::index_sequence<Indices...>,
     Arguments&&...arguments) {
   C10_UNUSED const int _[]{
@@ -283,7 +283,7 @@ inline void Context::submit_compute_job(
   set_cmd();
 
   // Factor out template parameter independent code to minimize code bloat.
-  Descriptor::Set descriptor_set = submit_compute_prologue(
+  DescriptorSet descriptor_set = submit_compute_prologue(
       cmd_,
       shader_layout_signature,
       shader_descriptor,
