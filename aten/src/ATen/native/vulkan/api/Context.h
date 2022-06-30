@@ -76,13 +76,9 @@ class Context final {
  private:
   // Construction and destruction order matters.  Do not move members around.
   VkInstance instance_;
-  size_t adapter_i_;
+  Adapter* adapter_p_;
   VkDevice device_;
   Adapter::Queue queue_;
-  ShaderLayoutCache shader_layout_cache_;
-  ShaderCache shader_cache_;
-  PipelineLayoutCache pipeline_layout_cache_;
-  ComputePipelineCache pipeline_cache_;
   ThreadContext threadcontext_;
 };
 
@@ -98,7 +94,7 @@ Context* context();
 
 inline GPU Context::gpu() {
   // A GPU is simply a (physical device, logical device, device queue) trio.
-  const Adapter* p_adapter = runtime()->get_adapter_p(adapter_i_);
+  const Adapter* p_adapter = adapter_p_;
   return {
     instance_,
     p_adapter,
@@ -109,19 +105,19 @@ inline GPU Context::gpu() {
 }
 
 inline ShaderLayoutCache& Context::shader_layout_cache() {
-  return shader_layout_cache_;
+  return adapter_p_->shader_layout_cache();
 }
 
 inline ShaderCache& Context::shader_cache() {
-  return shader_cache_;
+  return adapter_p_->shader_cache();
 }
 
 inline PipelineLayoutCache& Context::pipeline_layout_cache() {
-  return pipeline_layout_cache_;
+  return adapter_p_->pipeline_layout_cache();
 }
 
 inline ComputePipelineCache& Context::pipeline_cache() {
-  return pipeline_cache_;
+  return adapter_p_->compute_pipeline_cache();
 }
 
 inline Command& Context::command() {
