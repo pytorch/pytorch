@@ -448,7 +448,11 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-
+        if qscheme != torch.per_tensor_symmetric and qscheme != torch.per_tensor_affine:
+            raise NotImplementedError(
+                "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
+                    and torch.per_tensor_affine."
+            )
         # For x86 quantized kernels, we need to ensure that the vpmaddubsw
         # instruction does not overflow. We allow for a reduce_range argument to
         # observers that reduces the quantized range to (0,127) or (-64, 63).
@@ -464,11 +468,6 @@ class MinMaxObserver(UniformQuantizationObserverBase):
             factory_kwargs=factory_kwargs,
             eps=eps,
         )
-        if qscheme != torch.per_tensor_symmetric and self.qscheme != torch.per_tensor_affine:
-            raise NotImplementedError(
-                "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
-                    and torch.per_tensor_affine."
-            )
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         self.register_buffer("min_val", torch.tensor(float("inf"), **factory_kwargs))
         self.register_buffer("max_val", torch.tensor(float("-inf"), **factory_kwargs))
@@ -566,7 +565,7 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
-        if qscheme != torch.per_tensor_symmetric and self.qscheme != torch.per_tensor_affine:
+        if qscheme != torch.per_tensor_symmetric and qscheme != torch.per_tensor_affine:
             raise NotImplementedError(
                 "MovingAverageMinMaxObserver's qscheme only support \
                     torch.per_tensor_symmetric and torch.per_tensor_affine."
@@ -640,7 +639,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if qscheme != torch.per_channel_symmetric and self.qscheme != torch.per_channel_affine:
+        if qscheme != torch.per_channel_symmetric and qscheme != torch.per_channel_affine:
             raise NotImplementedError(
                 "PerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric and torch.per_channel_affine."
@@ -829,7 +828,7 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         eps=torch.finfo(torch.float32).eps,
         **kwargs
     ) -> None:
-        if qscheme != torch.per_channel_symmetric and self.qscheme != torch.per_channel_affine:
+        if qscheme != torch.per_channel_symmetric and qscheme != torch.per_channel_affine:
             raise NotImplementedError(
                 "MovingAveragePerChannelMinMaxObserver's qscheme only support \
                     torch.per_channel_symmetric and torch.per_channel_affine."
@@ -914,7 +913,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if qscheme != torch.per_tensor_symmetric and self.qscheme != torch.per_tensor_affine:
+        if qscheme != torch.per_tensor_symmetric and qscheme != torch.per_tensor_affine:
             raise NotImplementedError(
                 "HistogramObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."
