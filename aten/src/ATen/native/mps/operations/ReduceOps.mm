@@ -856,7 +856,7 @@ Tensor std_var_common_impl_mps(
     string bessel_corrected = (use_correction && correction_value) ? "unbiased " : "biased ";
     string use_dim_info = (use_dim) ? "use_dim=1:" + to_string(dim_value.size()) : "use_dim=0";
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
-    string key = op_key + use_dim_info + ":" + keepdim_info + ":" + string([ns_key UTF8String]) + ":" + native_mps::getMPSTypeString(input_t.scalar_type()) + ":" + bessel_corrected;
+    string key = op_key + use_dim_info + ":" + keepdim_info + ":" + string([ns_key UTF8String]) + ":" + native_mps::getTensorsStringKey(input_t) + ":" + bessel_corrected;
 
     CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
     // Initialize once if configuration not found in cache
