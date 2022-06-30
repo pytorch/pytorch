@@ -1588,8 +1588,12 @@ void initJITBindings(PyObject* module) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
+          bool allow_numbers_as_tensors =
+            symbol.is_aten() && torch::should_allow_numbers_as_tensors(symbol.toUnqualString());
+
           auto func = py::cpp_function(
-              [operations, symbol](py::args args, py::kwargs kwargs) {
+              [operations, symbol, allow_numbers_as_tensors](py::args args, py::kwargs kwargs) {
+                ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                 return _get_operation_for_overload_or_packet(
                     operations, symbol, args, kwargs, false);
               },
