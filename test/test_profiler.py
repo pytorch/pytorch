@@ -1157,9 +1157,13 @@ class TestTorchTidyProfiler(TestCase):
             torch._C._autograd._ExtraFields_TorchOp)
 
         # The alpha scalar has a [] size
-        self.assertEqual(node.extra_fields.inputs.shapes, [[4, 4], [4, 1], []])
-        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'float', 'Scalar'])
-        self.assertEqual(node.extra_fields.inputs.strides, [[12, 3], [1, 1], []])
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'float', 'Scalar'])
+        self.assertEqual(input_info.layouts, [torch.strided, torch.strided, None])
+        shape_info = [x.shape if x else None for x in input_info.tensor_metadata]
+        stride_info = [x.stride if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(shape_info, [[4, 4], [4, 1], None])
+        self.assertEqual(stride_info, [[12, 3], [1, 1], None])
 
     def test_scalar_ins(self):
         x = torch.ones(5, 5)
@@ -1173,9 +1177,11 @@ class TestTorchTidyProfiler(TestCase):
         self.assertIsNotNone(node)
 
         # The second argument to the add gets promotoed to a zerodim Tensor
-        self.assertEqual(node.extra_fields.inputs.dtypes, ['float', 'double', 'Scalar'])
-        self.assertEqual(node.extra_fields.inputs.shapes, [[5, 5], [], []])
-        self.assertEqual(node.extra_fields.inputs.ivalues, [None, None, alpha])
+        input_info = node.extra_fields.inputs
+        self.assertEqual(input_info.dtypes, ['float', 'double', 'Scalar'])
+        shape_info = [x.shape if x else None for x in input_info.tensor_metadata]
+        self.assertEqual(shape_info, [[5, 5], [], None])
+        self.assertEqual(input_info.ivalues, [None, None, alpha])
 
 
 class TestExperimentalUtils(TestCase):

@@ -83,10 +83,21 @@ struct EventFieldsVisitor {
         .debugHandle(op_event.debug_handle_)
         .setAsync(op_event.is_async_);
 
-    auto& shapes = op_event.inputs_.shapes_;
-    if (!shapes.empty()) {
-      kineto_event_.get().shapes(shapes);
+    auto& metadata = op_event.inputs_.tensor_metadata_;
+    if (!metadata.empty()) {
+      std::vector<std::vector<int64_t>> shapes;
+      for(auto& tensor_metadata : metadata) {
+        shapes.emplace_back();
+        if(tensor_metadata){
+          auto& last_shape = shapes.back();
+          for (auto s: tensor_metadata->sizes_and_strides_.sizes_arrayref()){
+            // TODO: Someday support Symbolic Ints
+            last_shape.emplace_back(s.expect_int());
+          }
+        }
+      }
       annotations_.emplace_back("Input Dims", shapesToStr(shapes));
+      kineto_event_.get().shapes(shapes);
     }
 
     auto& dtypes = op_event.inputs_.dtypes_;

@@ -37,48 +37,40 @@ void InputOutputEncoder::push(c10::ArrayRef<const c10::IValue> values) {
 void InputOutputEncoder::push(const at::Tensor& t) {
   if (t.defined()) {
     tags_.emplace_back(Tag::Tensor);
-    const auto& sizes = t.sizes();
-    const auto dim = sizes.size();
-    const auto strides = t.strides();
+    const auto dim = t.dim();
     TORCH_CHECK(
         dim <= std::numeric_limits<uint32_t>::max(),
         "Cannot profile Tensors of size > uint32 max. Got dim: ",
         dim);
 
     tensor_metadata_.emplace_back(
-        /*ptr_=*/(void*)t.unsafeGetTensorImpl(),
+        /*ptr_*/ t.unsafeGetTensorImpl(),
         /*dtype_=*/t.scalar_type(),
         /*dim_=*/(uint32_t)dim,
+        /*sizes_and_strides_*/ t.unsafeGetTensorImpl()->sizes_and_strides(),
         /*layout_=*/t.layout());
-    tensor_sizes_.emplace_list(sizes);
-    tensor_strides_.emplace_list(strides);
   } else {
     tags_.emplace_back(Tag::UndefinedTensor);
   }
 }
+
+// /*UNSAFE_tensor_impl_ptr_*/ t.unsafeGetTensorImpl(),
+// /*UNSAFE_storage_impl_ptr_*/ t.storage().unsafeGetStorageImpl(),
 
 // This is a custom-iterator-like getter to obtain input shapes and dtypes.
 auto InputOutputEncoder::getNextShapesAndDtypes() {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
-          tensor_size_it = tensor_sizes_.begin(),
-          ivals_it = ivalues_.begin(),
-          tensor_strides_it = tensor_strides_.begin()]() mutable {
+          ivals_it = ivalues_.begin()]() mutable {
     struct Inputs out;
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
-      out.shapes_.emplace_back();
-      out.strides_.emplace_back();
       switch (*tag_it) {
         case Tag::Tensor: {
           out.ivalues_.emplace_back();
           const auto& md = *tensor_metadata_it++;
-          for (const auto _ : c10::irange(md.dim_)) {
-            (void)_; // Suppress unused variable warning
-            out.shapes_.back().push_back(*tensor_size_it++);
-            out.strides_.back().push_back(*tensor_strides_it++);
-          }
+          out.tensor_metadata_.emplace_back(md);
           out.dtypes_.emplace_back(scalarTypeToTypeMeta(md.dtype_).name());
         } break;
 
@@ -88,23 +80,24 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
           }
           out.dtypes_.emplace_back("TensorList");
           out.ivalues_.emplace_back();
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::Scalar:
           out.dtypes_.emplace_back("Scalar");
           out.ivalues_.emplace_back(*ivals_it++);
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
           out.ivalues_.emplace_back();
           out.dtypes_.emplace_back();
+          out.tensor_metadata_.emplace_back();
           break;
 
         case Tag::TERMINATOR:
           // This marks the end of this op.
-          out.shapes_.pop_back();
-          out.strides_.pop_back();
           terminate = true;
           break;
 
@@ -120,8 +113,6 @@ auto InputOutputEncoder::getNextShapesAndDtypes() {
 void InputOutputEncoder::clear() {
   tags_.clear();
   tensor_metadata_.clear();
-  tensor_sizes_.clear();
-  tensor_strides_.clear();
   ivalues_.clear();
 }
 
@@ -439,12 +430,76 @@ struct ResultGreater {
   }
 };
 
+/*
+void calculate_unique_tensor_ids(std::vector<result_ptr_t>& sorted_results) {
+  // Go through the result vectors
+  // For Torch Ops, check if (TensorImpl*, StorageImpl*) is already in the map
+  // For allocator events with negative allocation sizes,
+
+  // Do I need to track both TensorImpl and StorageImpl?
+
+  struct UniqueTensorInfo {
+    c10::StorageImpl* storage_impl_;
+    size_t unique_tensor_id_;
+  };
+
+  size_t cur_unique_tensor_id = 1;
+
+  std::unordered_set<void*> valid_storage_impls;
+  std::unordered_map<void*, UniqueTensorInfo> unique_tensor_map;
+
+  for (auto& res : sorted_results) {
+    if (auto torch_op =
+            c10::get_if<ExtraFields<EventType::TorchOp>>(&res->extra_fields_)) {
+      auto& metadata_vec = torch_op->inputs_.tensor_metadata_;
+      for (auto& metadata : metadata_vec) {
+        if (!metadata) {
+          continue;
+        }
+        auto tensor_impl = metadata->UNSAFE_tensor_impl_ptr_;
+        auto storage_impl = metadata->UNSAFE_storage_impl_ptr_;
+        if (!tensor_impl || !storage_impl) {
+          continue;
+        }
+        if (valid_storage_impls.find(storage_impl) ==
+            valid_storage_impls.end()) {
+          valid_storage_impls.insert(storage_impl);
+          cur_unique_tensor_id++;
+          unique_tensor_map[tensor_impl] = {storage_impl, cur_unique_tensor_id};
+          metadata->unique_tensor_id_ = cur_unique_tensor_id;
+          continue;
+        }
+        auto it = unique_tensor_map.find(tensor_impl);
+        if (it == unique_tensor_map.end()) {
+          cur_unique_tensor_id++;
+          unique_tensor_map[tensor_impl] = {storage_impl, cur_unique_tensor_id};
+          metadata->unique_tensor_id_ = cur_unique_tensor_id;
+        } else {
+          metadata->unique_tensor_id_ = it->second.unique_tensor_id_;
+        }
+      }
+    } else if (
+        auto alloc_op = c10::get_if<ExtraFields<EventType::Allocation>>(
+            &res->extra_fields_)) {
+      if (alloc_op->alloc_size_ < 0) {
+        // For deallocations, clear relevant pointers
+        valid_storage_impls.erase(alloc_op->ptr_);
+        unique_tensor_map.erase(alloc_op->ptr_);
+      }
+    }
+  }
+}
+*/
+
 void build_tree(std::vector<std::shared_ptr<Result>>& events) {
   set_autograd_evaluate(events);
   std::stable_sort(
       events.begin(), events.end(), [](const auto& a, const auto& b) {
         return a->start_time_ns_ < b->start_time_ns_;
       });
+
+  // Needs both TorchOp and Allocation events in order.
+  //calculate_unique_tensor_ids(events);
 
   using op_fields = ExtraFields<EventType::TorchOp>;
   ska::flat_hash_map<uint64_t, std::shared_ptr<Result>> stacks;

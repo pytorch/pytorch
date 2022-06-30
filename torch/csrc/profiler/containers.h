@@ -67,14 +67,6 @@ class AppendOnlyList {
     return next_++;
   }
 
-  T* emplace_list(c10::ArrayRef<T> arg_list) {
-    // TODO: Optimize this frther at a future date
-    for (const auto& i : arg_list) {
-      emplace_back(i);
-    }
-    return next_;
-  }
-
   void clear() {
     buffer_.clear();
     buffer_last_ = buffer_.before_begin();

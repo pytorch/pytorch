@@ -569,6 +569,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return strides_default();
   }
 
+  /*
+   * Returns the optimized SizeAndStride object for performance critical copies
+   * of tensor sizes and strides.
+   */
+  impl::SizesAndStrides sizes_and_strides() const {
+    if (C10_UNLIKELY(
+            sizes_strides_policy_ >=
+            static_cast<uint8_t>(SizesStridesPolicy::CustomStrides))) {
+      auto ss = impl::SizesAndStrides();
+      ss.set_sizes(sizes_custom());
+      ss.set_strides(SymIntArrayRef::fromIntArrayRef(strides_custom()));
+      return ss;
+    }
+    return sizes_and_strides_;
+  }
+
   /**
    * Return the size of a tensor at some dimension, wrapping the dimension if
    * necessary.
