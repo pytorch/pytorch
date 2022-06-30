@@ -326,6 +326,8 @@ def register_ref_decomposition(aten_op, **kwargs):
             aten_op, [decomposition_table, ref_decomposition_table], **kwargs
         )(f)
 
+        return f
+
     return decomposition_decorator
 
 
