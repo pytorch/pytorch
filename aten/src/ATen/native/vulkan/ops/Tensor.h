@@ -180,12 +180,12 @@ class vTensor final {
     predictability of usage and efficiency.
   */
 
-  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const &;
-  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
+  api::VulkanBuffer::Package buffer(api::Command::Buffer&, Stage::Flags) const &;
+  api::VulkanBuffer::Package buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
   bool has_image() const;
-  Image::Object image(api::Command::Buffer&, Stage::Flags) const &;
-  Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
+  api::VulkanImage::Package image(api::Command::Buffer&, Stage::Flags) const &;
+  api::VulkanImage::Package image(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
 
   /*
     Metadata
@@ -248,20 +248,20 @@ class vTensor final {
       Buffer
     */
 
-    Buffer& buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
+    api::VulkanBuffer& buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
     /*
       Image
     */
 
     bool has_image() const;
-    Image& image(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
+    api::VulkanImage& image(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
 
     /*
       Host
     */
 
-    Buffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
+    api::VulkanBuffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
     vTensor::Memory& wait() const;
 
     /*
@@ -339,12 +339,12 @@ class vTensor final {
 
    private:
     // Accessors / Lazy Allocation
-    Buffer& buffer() const;
-    Buffer& buffer(CMD&, Stage::Flags, Access::Flags) const;
-    Image& image() const;
-    Image& image(CMD&, Stage::Flags, Access::Flags) const;
-    Buffer& staging() const;
-    Buffer& staging(CMD&, Stage::Flags, Access::Flags) const;
+    api::VulkanBuffer& buffer() const;
+    api::VulkanBuffer& buffer(CMD&, Stage::Flags, Access::Flags) const;
+    api::VulkanImage& image() const;
+    api::VulkanImage& image(CMD&, Stage::Flags, Access::Flags) const;
+    api::VulkanBuffer& staging() const;
+    api::VulkanBuffer& staging(CMD&, Stage::Flags, Access::Flags) const;
     Fence& fence(Access::Flags) const;
 
     // Validation
@@ -352,14 +352,14 @@ class vTensor final {
 
    private:
     // Resources
-    mutable Buffer buffer_;
-    mutable Image image_;
-    mutable Buffer staging_;
+    mutable api::VulkanBuffer buffer_;
+    mutable api::VulkanImage image_;
+    mutable api::VulkanBuffer staging_;
+    mutable Memory staging_memory_;
     mutable Fence fence_;
 
     // Context
     api::Context* context_;
-    api::Resource::Pool* pool_;
 
     // State
     mutable State state_;
