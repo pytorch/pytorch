@@ -232,5 +232,56 @@ try:
 
         return transformed
 
+
+    def transform_all_constraints_trace_time(tracer_root, graph, node, counter=0):
+        """
+        Takes a node and a graph and generates two sets of constraints.
+        One set constraints the node's constraints and another set
+        constraints the negation of the node's constraints
+        Args:
+            tracer_root: the root for getting the module instances
+            graph: the graph so far in the tracing process
+            node: node that represents a conditional
+            counter: variable tracking
+
+        Returns:
+
+        """
+        dimension_dict = {}  # type: ignore[var-annotated]
+
+        generator = ConstraintGenerator(tracer_root, graph)
+        new_constraints, counter = generator.generate_constraints(counter)
+
+        # we know the constraint is a conjunction where the last constraint is about the conditional
+        # so remove the last constraint
+        new_constraints.conjucts = new_constraints.conjucts[:-1]
+
+        condition_constraint, counter = generator.generate_constraints_node(node, counter)
+
+        # transform precision, matching, consistency till obtaining a fixed point
+        old_c = None
+        while old_c != new_constraints:
+            old_c = new_constraints
+            new_constraints, counter = transform_constraint(new_constraints, counter)
+
+        condition_constraint = condition_constraint[0]
+
+        # transform the condition constraint
+        old_c = None
+        while old_c != condition_constraint:
+            old_c = condition_constraint
+            condition_constraint, counter = transform_constraint(condition_constraint, counter)
+
+        transformed, counter = transform_to_z3(new_constraints, counter, dimension_dict)
+        transformed_condition_constraint, counter = transform_to_z3(condition_constraint, counter, dimension_dict)
+
+        negation_transformed_condition_constraint = z3.Not(transformed_condition_constraint)
+        # print(transformed_condition_constraint)
+        # print(negation_of_constraint)
+
+        return z3.And([transformed, transformed_condition_constraint]), \
+            z3.And([transformed, negation_transformed_condition_constraint])
+
+
 except ImportError:
     HAS_Z3 = False

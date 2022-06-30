@@ -5,7 +5,8 @@ from typing import Callable, Dict
 from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
     Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem
-from torch.fx.experimental.migrate_gradual_types.operation import op_eq, op_matching, op_consistency, op_leq, op_precision
+from torch.fx.experimental.migrate_gradual_types.operation import \
+    op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt
 from torch.fx.node import Target, Node
 from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar, gen_tvar
 
@@ -226,12 +227,17 @@ def mul_inference_rule(n: Node, symbols, constraints, counter):
     else:
         raise NotImplementedError('Case not yet implemented')
 
-# TODO
+
 @register_inference_rule(operator.gt)
 def gt_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
     assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
-    return [], counter
+
+    # This node will not have been used later!!! (add an assert about this)
+
+    e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
+    e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
+    return [BinConstraintD(e1, e2, op_gt)], counter
 
 # TODO
 @register_inference_rule(operator.lt)
