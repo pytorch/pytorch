@@ -3,6 +3,7 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Adapter.h>
 
 namespace at {
 namespace native {
@@ -32,7 +33,7 @@ struct RuntimeConfiguration final {
 
 class Runtime final {
  public:
-  explicit Runtime(const RuntimeConfiguration config);
+  explicit Runtime(const RuntimeConfiguration);
 
   // Do not allow copying. There should be only one global instance of this class.
   Runtime(const Runtime&) = delete;
@@ -43,8 +44,14 @@ class Runtime final {
 
   ~Runtime();
 
+  using DeviceMapping = std::pair<PhysicalDevice, int32_t>;
+
  private:
+  RuntimeConfiguration config_;
+
   VkInstance instance_;
+
+  std::vector<DeviceMapping> device_mappings_;
   std::vector<Adapter> adapters_;
   uint32_t default_adapter_i_;
 
@@ -70,10 +77,16 @@ class Runtime final {
   }
 
   inline Adapter* get_adapter_p(uint32_t i) {
+    TORCH_CHECK(
+        i >= 0 && i < adapters_.size(),
+        "Pytorch Vulkan Runtime: Adapter at index ", i, " is not available!");
     return &adapters_[i];
   }
 
   inline Adapter& get_adapter(uint32_t i) {
+    TORCH_CHECK(
+        default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
+        "Pytorch Vulkan Runtime: Adapter at index ", i, " is not available!");
     return adapters_[i];
   }
 
@@ -81,8 +94,8 @@ class Runtime final {
     return default_adapter_i_;
   }
 
-  using Selector = std::function<uint32_t (const std::vector<Adapter>&)>;
-  uint32_t init_adapter(const Selector& selector);
+  using Selector = std::function<uint32_t (const std::vector<Runtime::DeviceMapping>&)>;
+  uint32_t create_adapter(const Selector&);
 };
 
 // The global runtime is retrieved using this function, where it is declared as
