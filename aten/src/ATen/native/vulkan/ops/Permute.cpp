@@ -19,7 +19,7 @@ Tensor permute_4d(const Tensor& input, const uvec4& in_size, const uvec4& out_si
 
     auto dst_image = v_output.image(
       command_buffer,
-      vTensor::Stage::Compute,
+      api::PipelineStage::Compute,
       api::MemoryAccessType::READ | api::MemoryAccessType::WRITE);
 
     const Tensor self = input.is_vulkan() ? input : input.vulkan();
@@ -27,7 +27,7 @@ Tensor permute_4d(const Tensor& input, const uvec4& in_size, const uvec4& out_si
     if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       auto src_image = v_self.image(
               command_buffer,
-              vTensor::Stage::Compute);
+              api::PipelineStage::Compute);
 
       const struct Block final {
         uvec3 size;                // output texture size
