@@ -71,7 +71,8 @@ py::object toPyObject(IValue ivalue);
 // See also torch::should_allow_numbers_as_tensors
 class ToIValueAllowNumbersAsTensors {
   bool old_;
-public:
+
+ public:
   ToIValueAllowNumbersAsTensors(bool enable);
   ~ToIValueAllowNumbersAsTensors();
 };

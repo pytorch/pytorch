@@ -24,7 +24,6 @@ ToIValueAllowNumbersAsTensors::~ToIValueAllowNumbersAsTensors() {
   allow_numbers_as_tensors = old_;
 }
 
-
 // This is a hack to remove instances deleted in C++ from the PyBind cache
 // C++->Python. We need this because otherwise we may get the old Python object
 // if C++ creates a new object at the memory location of the deleted object.
