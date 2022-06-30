@@ -17,12 +17,27 @@ from typing import Union, Tuple, Iterable, Sequence, Optional, NamedTuple
 from typing_extensions import Literal
 import math
 
-__all__ = ["fft", "ifft", "rfft", "irfft", "hfft", "ihfft", "fftn", "ifftn"]
+__all__ = [
+    "fft",
+    "ifft",
+    "rfft",
+    "irfft",
+    "hfft",
+    "ihfft",
+    "fftn",
+    "ifftn",
+    "rfftn",
+    "irfftn",
+    "hfftn",
+    "ihfftn",
+]
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
 
 
-def _apply_norm(x: TensorLike, norm: NormType, signal_numel: int, forward: bool):
+def _apply_norm(
+    x: TensorLike, norm: NormType, signal_numel: int, forward: bool
+) -> TensorLikeType:
     if norm == "ortho":
         return prims.mul(x, 1 / math.sqrt(signal_numel))
 
@@ -52,7 +67,9 @@ def _promote_type_fft(
     return dtype
 
 
-def _promote_tensor_fft(t: TensorLikeType, require_complex: bool = False):
+def _promote_tensor_fft(
+    t: TensorLikeType, require_complex: bool = False
+) -> TensorLikeType:
     cur_type = t.dtype
     new_type = _promote_type_fft(cur_type, require_complex, t.device)
     if cur_type == new_type:
@@ -139,7 +156,7 @@ def _fft_c2c(
     dim: int,
     norm: NormType,
     forward: bool,
-):
+) -> TensorLikeType:
     if not input.dtype.is_complex:
         raise RuntimeError(
             f"{func_name} expects a complex input tensor, but got {input.dtype}"
@@ -279,7 +296,7 @@ def _canonicalize_fft_shape_and_dim_args(
     return _ShapeAndDims(shape=ret_shape, dims=ret_dims)
 
 
-def _prod(xs: Iterable[int]):
+def _prod(xs: Iterable[int]) -> int:
     prod = 1
     for x in xs:
         prod *= x
@@ -325,3 +342,116 @@ def ifftn(
     (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
     x = _promote_tensor_fft(input, require_complex=True)
     return _fftn_c2c("ifftn", x, shape, dim, norm, forward=False)
+
+
+@out_wrapper
+def rfftn(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsSequenceType] = None,
+    norm: NormType = None,
+) -> TensorLikeType:
+    if input.dtype.is_complex:
+        raise RuntimeError(
+            f"rfftn expects a real-valued input tensor, but got {input.dtype}"
+        )
+    shape, dim = _canonicalize_fft_shape_and_dim_args(input, s, dim)
+    input = _promote_tensor_fft(input, require_complex=False)
+    input = _resize_fft_input(input, dim, shape)
+    out = prims.fft_r2c(input, dim=dim, onesided=True)
+    return _apply_norm(out, norm=norm, signal_numel=_prod(shape), forward=True)
+
+
+@out_wrapper
+def ihfftn(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsSequenceType] = None,
+    norm: NormType = None,
+) -> TensorLikeType:
+    if input.dtype.is_complex:
+        raise RuntimeError(
+            f"ihfftn expects a real-valued input tensor, but got {input.dtype}"
+        )
+    shape, dim = _canonicalize_fft_shape_and_dim_args(input, s, dim)
+    if len(shape) == 0:
+        raise RuntimeError("ihfftn must transform at least one axis")
+    input = _promote_tensor_fft(input, require_complex=False)
+    input = _resize_fft_input(input, dim, shape)
+
+    tmp = prims.fft_r2c(input, dim=dim[-1:], onesided=True)
+
+    if len(dim) == 1:
+        tmp = _apply_norm(tmp, norm=norm, signal_numel=shape[0], forward=False)
+        return prims.conj(tmp)
+
+    tmp = prims.conj_physical(tmp)
+    tmp = prims.fft_c2c(tmp, dim=dim[:-1], forward=False)
+    return _apply_norm(tmp, norm=norm, signal_numel=_prod(shape), forward=False)
+
+
+class _CanonicalizeC2rReturn(NamedTuple):
+    shape: Tuple[int, ...]
+    dim: Tuple[int, ...]
+    last_dim_size: int
+
+
+def _canonicalize_fft_c2r_shape_and_dim_args(
+    fname: str,
+    input: TensorLikeType,
+    s: Optional[ShapeType],
+    dim: Optional[DimsSequenceType],
+) -> _CanonicalizeC2rReturn:
+    (shape, dim) = _canonicalize_fft_shape_and_dim_args(input, s, dim)
+    if len(shape) == 0:
+        raise RuntimeError(f"{fname} must transform at least one axis")
+
+    if s is None or s[-1] == -1:
+        last_dim_size = 2 * (input.shape[dim[-1]] - 1)
+    else:
+        last_dim_size = shape[-1]
+
+    if last_dim_size < 1:
+        raise RuntimeError(f"Invalid number of data points ({last_dim_size}) specified")
+
+    shape_list = list(shape)
+    shape_list[-1] = last_dim_size // 2 + 1
+    return _CanonicalizeC2rReturn(
+        shape=tuple(shape_list), dim=dim, last_dim_size=last_dim_size
+    )
+
+
+@out_wrapper
+def irfftn(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsSequenceType] = None,
+    norm: NormType = None,
+) -> TensorLikeType:
+    shape, dim, last_dim_size = _canonicalize_fft_c2r_shape_and_dim_args(
+        "irfftn", input, s, dim
+    )
+    input = _promote_tensor_fft(input, require_complex=True)
+    input = _resize_fft_input(input, dim, shape)
+    out = prims.fft_c2r(input, dim=dim, last_dim_size=last_dim_size)
+    return _apply_norm(out, norm, _prod(out.shape[d] for d in dim), forward=False)
+
+
+@out_wrapper
+def hfftn(
+    input: TensorLikeType,
+    s: Optional[ShapeType] = None,
+    dim: Optional[DimsSequenceType] = None,
+    norm: NormType = None,
+) -> TensorLikeType:
+    shape, dim, last_dim_size = _canonicalize_fft_c2r_shape_and_dim_args(
+        "hfftn", input, s, dim
+    )
+    input = _promote_tensor_fft(input, require_complex=True)
+    input = _resize_fft_input(input, dim, shape)
+
+    tmp = prims.fft_c2c(input, dim=dim[:-1], forward=True) if len(dim) > 1 else input
+    tmp = _apply_norm(tmp, norm, _prod(shape[:-1]), forward=True)
+    tmp = prims.conj_physical(tmp)
+    out = prims.fft_c2r(tmp, dim=dim[-1:], last_dim_size=last_dim_size)
+    return _apply_norm(out, norm, last_dim_size, forward=True)

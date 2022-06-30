@@ -21350,6 +21350,38 @@ python_ref_db = [
             DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
         ),
     ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.rfftn",
+        torch_opinfo_name="fft.rfftn",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.irfftn",
+        torch_opinfo_name="fft.irfftn",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.hfftn",
+        torch_opinfo_name="fft.hfftn",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
+    SpectralFuncPythonRefInfo(
+        "_refs.fft.ihfftn",
+        torch_opinfo_name="fft.ihfftn",
+        supports_nvfuser=False,
+        skips=(
+            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
+        ),
+    ),
 ]
 
 # Common operator groupings
