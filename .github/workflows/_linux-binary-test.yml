@@ -1,4 +1,4 @@
-name: linux-binary-build
+name: linux-binary-test
 
 on:
   workflow_call:
@@ -47,9 +47,6 @@ on:
         required: true
         type: string
         description: Desired python version
-    secrets:
-      github-token:
-        required: true
 
 jobs:
   build:
@@ -76,7 +73,7 @@ jobs:
       AWS_DEFAULT_REGION: us-east-1
       BINARY_ENV_FILE: /tmp/env
       BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
-      GITHUB_TOKEN: ${{ secrets.github-token }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -93,7 +90,7 @@ jobs:
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
         uses: ./.github/actions/setup-ssh
         with:
-          github-secret: ${{ secrets.github-token }}
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
       - name: Clean workspace
         shell: bash
         run: |
@@ -115,7 +112,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: zhouzhuojie/checkout@05b13c9a0d21f08f6d5e64a1d5042246d13619d9
         with:
-          ref: main
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           submodules: recursive
           repository: pytorch/builder
           path: builder
