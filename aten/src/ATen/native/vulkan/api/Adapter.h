@@ -177,6 +177,18 @@ class Adapter final {
     return vma_;
   }
 
+  // Command Buffer Submission
+
+  void submit_cmd(
+      const Queue&,
+      const VkCommandBuffer,
+      const VkFence fence = VK_NULL_HANDLE);
+
+  void submit_cmds(
+      const Adapter::Queue&,
+      const std::vector<VkCommandBuffer>&,
+      const VkFence fence = VK_NULL_HANDLE);
+
   // Miscellaneous
 
   inline utils::uvec3 local_work_group_size() const {
