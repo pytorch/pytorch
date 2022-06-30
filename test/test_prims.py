@@ -128,8 +128,7 @@ class TestPrims(TestCase):
     @onlyCUDA
     @skipCUDAIfRocm
     def test_nvfuser_executor_cached_noncontiguous(self, device):
-        # This test is to ensure that when the nvfuser's internal
-        # runtime checks for contiguity and caching are working
+        # This test is to ensure that nvfuser computes correct results for noncontiguous tensors
         from torch.fx.experimental.proxy_tensor import make_fx
         from torch._prims.context import TorchRefsMode
         from torch._prims.executor import execute
