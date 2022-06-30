@@ -4,7 +4,7 @@ from torch.utils._pytree import tree_map, tree_flatten
 from functools import partial
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._mode_utils import no_dispatch
-from torch._subclasses.meta_utils import MetaConverter
+from torch._subclasses.meta_utils import MetaConverter, WeakTensorRefKey
 from typing import Union, Callable
 from torch._ops import OpOverload
 from torch.overrides import TorchFunctionMode
@@ -83,8 +83,8 @@ def _is_tensor_constructor(func: OpOverload):
 
 # Similar to `MetaConverter`, this is a class for converting
 # multiple tensors into fake tensors which share the same view/storage
-# structure. Like `MetaConverter`, it will keep alive all
-# tensors that are converted to FakeTensors.
+# structure. Like `MetaConverter`, it uses `WeakTensorRefKey` to
+# hold a weak reference for all memoized tensors.
 class FakeTensorConverter(object):
     tensor_memo: weakref.WeakValueDictionary
     meta_converter: MetaConverter
@@ -97,11 +97,28 @@ class FakeTensorConverter(object):
         self.meta_converter = MetaConverter()
 
     def _get_memo(self, t):
-        if t in self.tensor_memo:
-            out = self.tensor_memo[t]
+        if WeakTensorRefKey(t) in self.tensor_memo:
+            out = self.tensor_memo[WeakTensorRefKey(t)]
             out._fix_weakref()
             return out
         return None
+
+    def set_tensor_memo(self, t, v):
+        th = WeakTensorRefKey(t)
+
+        # hold a weak ref to self, otherwise it will be kept alive
+        # by the del_ten closure
+        self_weak_ref = weakref.ref(self)
+
+        def del_ten():
+            self_ref = self_weak_ref()
+            if self_ref is None:
+                return
+            # on shutdown, th may not be in memo
+            self_ref.tensor_memo.pop(th, None)
+
+        weakref.finalize(t, del_ten)
+        self.tensor_memo[th] = v
 
     def from_real_tensor(self, fake_mode, t):
         maybe_memo = self._get_memo(t)
@@ -119,7 +136,7 @@ class FakeTensorConverter(object):
             out = FakeTensor(fake_mode, self.meta_converter(t), existing_device)
         if type(t) is torch.nn.Parameter:
             out = torch.nn.Parameter(out, requires_grad=out.requires_grad)  # type: ignore[assignment]
-        self.tensor_memo[t] = out
+        self.set_tensor_memo(t, out)
         return out
 
     def from_meta_and_device(self, fake_mode, t, device):
@@ -127,7 +144,7 @@ class FakeTensorConverter(object):
         if maybe_memo is not None:
             return maybe_memo
         out = FakeTensor(fake_mode, t, device)
-        self.tensor_memo[t] = out
+        self.set_tensor_memo(t, out)
         return out
 
     def __call__(self, fake_mode, t, device=None):
@@ -494,10 +511,20 @@ class FakeTensorMode(TorchDispatchMode):
         return self.fake_tensor_converter(self, tensor)
 
 def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
+    # these should all be supported, just to be safe
+    # avoid fallback for operators which inplace modify metadata
+    # because the input fake tensors would be umodified
+    if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
+        raise orig_not_implemented_exception
+
     with no_dispatch():
+        inp_impls = {}
+
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                return torch.zeros_like(e, device=e.fake_device)
+                out = torch.zeros_like(e, device=e.fake_device)
+                inp_impls[id(out)] = e
+                return out
             return e
 
         try:
@@ -513,22 +540,26 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
 
         for e in tree_flatten((args, kwargs))[0]:
             if isinstance(e, torch.Tensor):
-                tensor_impls.add(e)
                 storages.add(e.storage()._cdata)
 
         # TODO: also check metadata change on inputs
         # proper aliasing/metadata relationship between outputs and inputs will
-        # not be set up, bc of conversion to cpu, error on reused impls
+        # not be set up, bc of conversion to device, unless we can reuse an
+        # input impl
         for e in tree_flatten(r)[0]:
-            if e in tensor_impls or (
+            if id(e) not in inp_impls and (
                 isinstance(e, torch.Tensor) and e.storage()._cdata in storages
             ):
                 raise orig_not_implemented_exception
 
-    # we're only converting these to MetaTensors now, not Fake Tensors,
-    # and the cpu inputs should be temporary. just convert outputs to meta
-    # and continue
-    return tree_map(MetaConverter(), r)
+    # the outputs which are are not reused from impls will be converted
+    # to fake tensors later
+    meta_converter = MetaConverter()
+
+    def map_out(e):
+        return inp_impls.get(id(e), meta_converter(e))
+
+    return tree_map(map_out, r)
 
 
 # Just for use to allow copying a module to fake tensors,
