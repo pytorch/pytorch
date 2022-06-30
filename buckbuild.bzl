@@ -3,8 +3,6 @@
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
 load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
-load("//tools/build_defs:fb_python_binary.bzl", "fb_python_binary")
-load("//tools/build_defs:fb_python_library.bzl", "fb_python_library")
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
 load("//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode")
@@ -24,6 +22,10 @@ load(
     "jit_core_headers",
     "jit_core_sources",
     "libtorch_profiler_sources",
+)
+load(
+    ":pt_ops.bzl",
+    "USED_PT_BACKENDS",
 )
 load(
     ":pt_template_srcs.bzl",
@@ -118,20 +120,22 @@ C10 = "//c10:c10" if IS_OSS else "//xplat/caffe2/c10:c10"
 
 # a dictionary maps third party library name to fbsource and oss target
 THIRD_PARTY_LIBS = {
-    "FP16": ["//third-party/FP16:FP16", "//third_party:FP16"],
-    "FXdiv": ["//third-party/FXdiv:FXdiv", "//third_party:FXdiv"],
+    "FP16": ["//xplat/third-party/FP16:FP16", "//third_party:FP16"],
+    "FXdiv": ["//xplat/third-party/FXdiv:FXdiv", "//third_party:FXdiv"],
     "XNNPACK": ["//xplat/third-party/XNNPACK:XNNPACK", "//third_party:XNNPACK"],
-    "clog": ["//third-party/clog:clog", "//third_party:clog"],
+    "clog": ["//xplat/third-party/clog:clog", "//third_party:clog"],
     "cpuinfo": ["//third-party/cpuinfo:cpuinfo", "//third_party:cpuinfo"],
     "flatbuffers-api": ["//third-party/flatbuffers:flatbuffers-api", "//third_party:flatbuffers-api"],
     "flatc": ["//third-party/flatbuffers:flatc", "//third_party:flatc"],
     "fmt": ["//third-party/fmt:fmt", "//third_party:fmt"],
     "glog": ["//third-party/glog:glog", "//third_party:glog"],
+    "gmock": ["//xplat/third-party/gmock:gtest", "//third_party:gmock"],
+    "gtest": ["//xplat/third-party/gmock:gmock", "//third_party:gtest"],
     "kineto": ["//xplat/kineto/libkineto:libkineto", "//third_party:libkineto"],
     "omp": ["//xplat/third-party/linker_lib:omp", "//third_party:no-op"],
-    "psimd": ["//third-party/psimd:psimd", "//third_party:psimd"],
-    "pthreadpool": ["//third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
-    "pthreadpool_header": ["//third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
+    "psimd": ["//xplat/third-party/psimd:psimd", "//third_party:psimd"],
+    "pthreadpool": ["//xplat/third-party/pthreadpool:pthreadpool", "//third_party:pthreadpool"],
+    "pthreadpool_header": ["//xplat/third-party/pthreadpool:pthreadpool_header", "//third_party:pthreadpool_header"],
     "pyyaml": ["//third-party/pyyaml:pyyaml", "//third_party:pyyaml"],
     "rt": ["//xplat/third-party/linker_lib:rt", "//third_party:rt"],
     "ruy": ["//third-party/ruy:ruy_xplat_lib", "//third_party:ruy_lib"],
@@ -234,12 +238,6 @@ def get_pt_preprocessor_flags():
     if _is_build_mode_dev():
         PT_PREPROCESSOR_FLAGS.append("-DENABLE_PYTORCH_NON_PRODUCTION_BUILDS")
     return PT_PREPROCESSOR_FLAGS
-
-USED_PT_BACKENDS = [
-    "CPU",
-    "QuantizedCPU",
-    "SparseCPU",  # brings ~20 kb size regression
-]
 
 # This needs to be kept in sync with https://github.com/pytorch/pytorch/blob/release/1.9/torchgen/gen.py#L892
 PT_BACKEND_HEADERS = [
@@ -416,7 +414,7 @@ def gen_aten_files(
         name = name,
         default_outs = ["."],
         outs = get_aten_generated_files(backends),
-        cmd = "$(exe {}:gen_aten_bin) ".format(ROOT) + " ".join([
+        cmd = "$(exe {}torchgen:gen) ".format(ROOT_PATH) + " ".join([
             "--source-path $(location {}:aten_src_path)/aten/src/ATen".format(ROOT),
             "--install_dir $OUT",
         ] + extra_params),
@@ -442,7 +440,7 @@ def gen_aten_unboxing_files(
         name = genrule_name,
         default_outs = ["."],
         outs = get_unboxing_generated_files(),
-        cmd = "$(exe {}:gen_unboxing_bin) ".format(ROOT) + " ".join([
+        cmd = "$(exe {}tools:gen_unboxing_bin) ".format(ROOT_PATH) + " ".join([
             "--source-path $(location {}:aten_src_path)/aten/src/ATen".format(ROOT),
             "--install_dir $OUT",
         ] + extra_params),
@@ -515,7 +513,7 @@ def pt_operator_query_codegen(
     # @lint-ignore BUCKLINT
     fb_native.genrule(
         name = oplist_dir_name,
-        cmd = ("$(exe {}:gen_oplist) ".format(ROOT) +
+        cmd = ("$(exe {}tools:gen_oplist) ".format(ROOT_PATH) +
                "--model_file_list_path $(@query_outputs 'attrfilter(labels, pt_operator_library, deps(set({deps})))') " +
                ("" if enforce_traced_op_list else "--allow_include_all_overloads ") +
                "--output_dir $OUT ").format(deps = " ".join(["\"{}\"".format(d) for d in deps])),
@@ -620,7 +618,7 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = [], apple
         outs = get_generate_code_bin_outs(),
         default_outs = ["."],
         bash = "mkdir -p tools && " +
-               "$(exe {}tools/setup_helpers:generate_code_bin) ".format(ROOT_PATH) + " ".join(
+               "$(exe {}tools:generate_code_bin) ".format(ROOT_PATH) + " ".join(
             # Mobile build only needs libtorch - skip python bindings for now, except
             # for ovrsource, which needs Python bindings.
             (["--subset libtorch"] if not is_arvr_mode() else []) + [
@@ -630,7 +628,7 @@ def gen_aten_libtorch_files(name, extra_params = [], compatible_with = [], apple
             ] + extra_params,
         ),
         cmd_exe = "@powershell -Command New-Item -Path tools -ItemType Directory -Force; " +
-                  "$(exe {}tools/setup_helpers:generate_code_bin) ".format(ROOT_PATH) + " ".join(
+                  "$(exe {}tools:generate_code_bin) ".format(ROOT_PATH) + " ".join(
             # Mobile build only needs libtorch - skip python bindings for now, except
             # for ovrsource, which needs Python bindings.
             (["--subset libtorch"] if not is_arvr_mode() else []) + [
@@ -950,7 +948,7 @@ def define_buck_targets(
             "torch/csrc/api/include/torch/version.h.in",
             "version.txt",
         ],
-        cmd = "$(exe {}tools/setup_helpers:gen-version-header) ".format(ROOT_PATH) + " ".join([
+        cmd = "$(exe {}tools:gen-version-header) ".format(ROOT_PATH) + " ".join([
             "--template-path",
             "torch/csrc/api/include/torch/version.h.in",
             "--version-path",
@@ -995,28 +993,13 @@ def define_buck_targets(
         ],
     )
 
-    fb_python_library(
-        name = "substitutelib",
-        srcs = ["tools/substitute.py"],
-        base_module = "",
-    )
-
-    fb_python_binary(
-        name = "substitute",
-        main_module = "tools.substitute",
-        visibility = ["PUBLIC"],
-        deps = [
-            ":substitutelib",
-        ],
-    )
-
     # @lint-ignore BUCKLINT
     fb_native.genrule(
         name = "generate_aten_config",
         srcs = [
             "aten/src/ATen/Config.h.in",
         ],
-        cmd = "$(exe :substitute) " + " ".join([
+        cmd = "$(exe {}tools:substitute) ".format(ROOT_PATH) + " ".join([
             "--install_dir",
             "$OUT",
             "--input-file",
@@ -1070,79 +1053,6 @@ def define_buck_targets(
             "Config.h": ["Config.h"],
         },
         default_outs = ["."],
-    )
-
-    fb_python_binary(
-        name = "gen_aten_bin",
-        main_module = "torchgen.gen",
-        visibility = [
-            "PUBLIC",
-        ],
-        deps = [
-            ROOT_PATH + "torchgen:torchgen",
-        ],
-    )
-
-    fb_python_binary(
-        name = "gen_unboxing_bin",
-        main_module = "tools.jit.gen_unboxing",
-        visibility = [
-            "PUBLIC",
-        ],
-        deps = [
-            ROOT_PATH + "tools/jit:jit",
-        ],
-    )
-
-    fb_python_library(
-        name = "gen_oplist_lib",
-        srcs = subdir_glob([
-            ("tools/code_analyzer", "gen_oplist.py"),
-            ("tools/code_analyzer", "gen_op_registration_allowlist.py"),
-        ]),
-        base_module = "",
-        tests = [
-            ":gen_oplist_test",
-        ],
-        deps = [
-            third_party("pyyaml"),
-            ROOT_PATH + "tools/lite_interpreter:gen_selected_mobile_ops_header",
-            ROOT_PATH + "torchgen:torchgen",
-        ],
-    )
-
-    fb_python_library(
-        name = "gen_operators_yaml_lib",
-        srcs = subdir_glob([
-            ("tools/code_analyzer", "gen_operators_yaml.py"),
-            ("tools/code_analyzer", "gen_op_registration_allowlist.py"),
-        ]),
-        base_module = "",
-        tests = [
-            ":gen_operators_yaml_test",
-        ],
-        deps = [
-            third_party("pyyaml"),
-            ROOT_PATH + "torchgen:torchgen",
-        ],
-    )
-
-    fb_python_binary(
-        name = "gen_oplist",
-        main_module = "gen_oplist",
-        visibility = ["PUBLIC"],
-        deps = [
-            ":gen_oplist_lib",
-        ],
-    )
-
-    fb_python_binary(
-        name = "gen_operators_yaml",
-        main_module = "gen_operators_yaml",
-        visibility = ["PUBLIC"],
-        deps = [
-            ":gen_operators_yaml_lib",
-        ],
     )
 
     gen_aten_files(
