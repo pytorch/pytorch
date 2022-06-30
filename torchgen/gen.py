@@ -2545,11 +2545,14 @@ def main() -> None:
     functions_keys = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeExplicitAutograd,
-        DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
     }
+    if options.static_dispatch_backend:
+        functions_keys |= {
+            DispatchKey.CompositeImplicitAutograd,
+            DispatchKey.CompositeExplicitAutograd,
+            DispatchKey.CompositeExplicitAutogradNonFunctional,
+        }
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
 
