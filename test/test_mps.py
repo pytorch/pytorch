@@ -5682,7 +5682,19 @@ class TestRNNMPS(TestCase):
 
         cpu_output, _ = rnn(input, (hx, cx))
 
-        device = torch.device("mps")
+        rnn = rnn.to(device)
+        input = input.to(device)
+        hx = hx.to(device)
+        cx = cx.to(device)
+        output, _ = rnn(input, (hx, cx))
+        self.assertEqual(cpu_output, output)
+
+        # test batch_first
+        rnn = nn.LSTM(1, 4, 2, device="cpu", batch_first=True)
+        input = torch.randn(3, 2, 1, device="cpu")
+        hx = torch.zeros(2, 3, 4, device="cpu")
+        cx = torch.zeros(2, 3, 4, device="cpu")
+        cpu_output, _ = rnn(input, (hx, cx))
         rnn = rnn.to(device)
         input = input.to(device)
         hx = hx.to(device)
