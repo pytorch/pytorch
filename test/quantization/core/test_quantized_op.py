@@ -2144,21 +2144,24 @@ class TestQuantizedOps(TestCase):
             torch.testing.assert_close(out.dequantize(), ref.dequantize())
             self.assertNotEqual(out.stride(), sorted(out.stride()))
 
-    @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=1, max_dims=5,
-                                              min_side=1, max_side=4),
-                       qparams=hu.qparams()),
-           dim=st.integers(-1, 5))
     @override_qengines
-    def test_mean(self, X, dim):
-        X, (scale, zero_point, torch_type) = X
-        assume(dim < X.ndim)
-        qX = torch.quantize_per_tensor(torch.tensor(X).float(), scale, zero_point, torch_type)
-
-        Y = torch.mean(qX.dequantize(), dim)
-        Y = torch.quantize_per_tensor(Y, scale, zero_point, torch_type).dequantize()
-        qY = torch.mean(qX, dim)
-
-        self.assertEqual(Y, qY.dequantize())
+    def test_mean(self):
+        scale_list = (1, 0.25)
+        zero_point_list = (0, 2)
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4), (4, 4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        dims = ((), (-1,), (0,), (1,), (2,), (3,), (0, 1), (1, 2), (3, 4))
+        test_cases = itertools.product(scale_list, zero_point_list, shapes, dtypes, dims)
+        op = torch.mean
+        for scale, zp, shape, dtype, dim in test_cases:
+            if not all([d < len(shape) for d in dim]):
+                continue
+            X = torch.randn(*shape) * 10
+            qX = torch.quantize_per_tensor(X, scale, zp, dtype)
+            Y = op(qX.dequantize(), dim)
+            Y = torch.quantize_per_tensor(Y, scale, zp, dtype).dequantize()
+            qY = op(qX, dim)
+            self.assertEqual(Y, qY.dequantize())
 
     @skipIfNoQNNPACK
     @given(keep=st.booleans())
@@ -2176,6 +2179,28 @@ class TestQuantizedOps(TestCase):
             YQ = torch.quantize_per_tensor(Y, scale=0.2, zero_point=0, dtype=torch.quint8)
             MQ = XQ.mean((2, 3), keepdim=keep)
             self.assertTrue(torch.equal(MQ, YQ))
+
+    @override_qengines
+    def test_std(self):
+        scale_list = (1, 0.25)
+        zero_point_list = (0, 2)
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4), (4, 4, 4, 4, 4))
+        dtypes = (torch.quint8, torch.qint8)
+        dims = ((), (-1,), (0,), (1,), (2,), (3,), (0, 1), (1, 2), (3, 4))
+        unbiased_list = (True, False)
+        keep_dim_list = (True, False)
+        test_cases = itertools.product(scale_list, zero_point_list, shapes,
+                                       dtypes, dims, unbiased_list, keep_dim_list)
+        op = torch.std
+        for scale, zp, shape, dtype, dim, unbiased, keep_dim in test_cases:
+            if not all([d < len(shape) for d in dim]):
+                continue
+            X = torch.randn(*shape) * 10
+            qX = torch.quantize_per_tensor(X, scale, zp, dtype)
+            Y = op(qX.dequantize(), dim, unbiased, keep_dim)
+            Y = torch.quantize_per_tensor(Y, scale, zp, dtype).dequantize()
+            qY = op(qX, dim, unbiased, keep_dim)
+            self.assertEqual(Y, qY.dequantize())
 
     """Tests the correctness of the quantized equal op."""
     @given(X=hu.tensor(shapes=hu.array_shapes(1, 5, 1, 5),
@@ -2711,7 +2736,7 @@ class TestQuantizedOps(TestCase):
                 torch.nn.LSTM: torch.nn.quantizable.LSTM
             },
             'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.LSTM: torch.nn.quantizable.LSTM
+                torch.nn.quantizable.LSTM: torch.nn.quantized.LSTM
             }
         }
 
@@ -2752,6 +2777,7 @@ class TestQuantizedOps(TestCase):
                     lstm, prepare_custom_config_dict=custom_module_config)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
+                assert type(lstm_prepared[0]) == torch.nn.quantizable.LSTM
 
                 # Calibrate
                 y = lstm_prepared(x)
@@ -2760,6 +2786,7 @@ class TestQuantizedOps(TestCase):
                 # Quantize
                 lstm_quantized = torch.ao.quantization.convert(
                     lstm_prepared, convert_custom_config_dict=custom_module_config)
+                assert type(lstm_quantized[0]) == torch.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
                 snr = _snr(y, qy)
@@ -2823,7 +2850,7 @@ class TestQuantizedOps(TestCase):
                 torch.nn.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
             },
             'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
+                torch.nn.quantizable.MultiheadAttention: torch.nn.quantized.MultiheadAttention
             }
         }
 
