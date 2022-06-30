@@ -324,7 +324,7 @@ VulkanOpContext conv2d_transpose_context_create(
 }
 
 void conv2d_transpose_sliding_window(
-    const api::Shader::Descriptor& shader,
+    const api::ShaderSource& shader,
     vTensor& v_output,
     const vTensor& v_input,
     const vTensor& packed_v_weight,
