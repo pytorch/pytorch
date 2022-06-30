@@ -290,7 +290,7 @@ inline void Command::Buffer::Bound::reset() {
   descriptor_set = VK_NULL_HANDLE;
 }
 
-inline Command::Buffer::Barrier::Stage::operator bool() const {
+inline Command::Buffer::Barrier::Stages::operator bool() const {
   return (0u != src) || (0u != dst);
 }
 
