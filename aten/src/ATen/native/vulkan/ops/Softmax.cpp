@@ -15,8 +15,7 @@ Tensor softmax_internal(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float,
-    const api::ShaderSource& shader_descriptor,
-    const std::string& op_name) {
+    const api::ShaderSource& shader_descriptor) {
   TORCH_CHECK(
       input_arg.dim() == 4,
       "Vulkan softmax expects 4-dimensional input!");
@@ -25,6 +24,8 @@ Tensor softmax_internal(
       dim == 1,
       "Vulkan softmax expects dim == 1 (channel)");
 
+  api::Context* const context = api::context();
+
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
   const IntArrayRef v_input_sizes = v_input.sizes();
@@ -32,8 +33,6 @@ Tensor softmax_internal(
   TORCH_CHECK(
       v_input_sizes[Layout::Activation4D::batch] == 1,
       "Vulkan softmax expects batch dim == 1");
-
-  api::Context* const context = api::context();
 
   c10::SmallVector<int64_t, 4u> output_sizes{
     v_input_sizes[Layout::Activation4D::batch],
@@ -55,54 +54,46 @@ Tensor softmax_internal(
   };
   const api::utils::uvec3 local_work_group_size = {8, 8, 1};
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+  const struct Block final {
+    uvec3 iextents;
+    int last_texel_end_offset;
+  } block {
+    v_input.extents(),
+    safe_downcast<int32_t>(
+        (v_input_sizes[Layout::Activation4D::channels] - 1) % 4
+    )
+  };
 
-    if C10_LIKELY(true) {
-      const struct Block final {
-        uvec3 iextents;
-        int last_texel_end_offset;
-      } block {
-        v_input.extents(),
-        safe_downcast<int32_t>(
-            (v_input_sizes[Layout::Activation4D::channels] - 1) % 4
-        )
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      api::UniformParamsBuffer params(context, block);
-
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          shader_descriptor,
-          global_work_group_size,
-          local_work_group_size,
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              api::PipelineStage::Compute,
-              api::MemoryAccessType::WRITE),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_input.image(
-              command_buffer,
-              api::PipelineStage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          params.buffer().package());
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader layout signature
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      global_work_group_size,
+      // local work group size
+      local_work_group_size,
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      v_input.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
 }
@@ -111,14 +102,16 @@ Tensor softmax(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float) {
-  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(softmax), "_softmax");
+  return softmax_internal(
+      input_arg, dim, half_to_float, VK_KERNEL(softmax));
 }
 
 Tensor log_softmax(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float) {
-  return softmax_internal(input_arg, dim, half_to_float, VK_KERNEL(log_softmax), "_log_softmax");
+  return softmax_internal(
+      input_arg, dim, half_to_float, VK_KERNEL(log_softmax));
 }
 
 #ifdef USE_VULKAN_API

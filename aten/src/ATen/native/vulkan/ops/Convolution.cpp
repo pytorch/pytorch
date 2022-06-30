@@ -54,7 +54,6 @@ Conv2dMethod determine_method(
 
 vTensor pack_weights_dw(
     api::Context* const context,
-    api::Command::Buffer& command_buffer,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -116,7 +115,6 @@ vTensor pack_weights_dw(
 
 vTensor pack_weights_2d(
     api::Context* const context,
-    api::Command::Buffer& command_buffer,
     const Tensor& weight) {
   /* Source */
   const IntArrayRef src_filter = weight.sizes();
@@ -191,20 +189,17 @@ vTensor pack_weights(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   const Tensor weight = weight_arg.contiguous();
 
   if (conv_method == Conv2dDepthwise) {
     return pack_weights_dw(
         context,
-        command_buffer,
         weight);
   }
 
   return pack_weights_2d(
       context,
-      command_buffer,
       weight);
 }
 
@@ -216,7 +211,6 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   const int64_t src_w = weight.size(Layout::Filter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
@@ -441,107 +435,97 @@ void conv2d_sliding_window(
     const float packed_output_min,
     const float packed_output_max,
     const IntArrayRef unpacked_filter,
-    const Conv2dMethod method_,
-    const std::string& op_name) {
-  bool valid = C10_LIKELY(true && true && true);
-  TORCH_CHECK(valid, "Not Implemented!")
-
+    const Conv2dMethod method_) {
   api::Context* const context = api::context();
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    const struct Block final {
-      uvec3 extents;
-      int32_t ic4;
-      ivec4 kernel;
-      ivec2 ikernel;
-      ivec2 stride;
-      ivec2 padding;
-      ivec2 dilate;
-      vec2 clamp;
-      ivec4 src_filter;
-    } block {
-      v_output.extents(),
-      safe_downcast<int32_t>(packed_filter[Layout::Filter::input]),
-      {
-        safe_downcast<int32_t>(packed_filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(packed_filter[Layout::Filter::height]),
-        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
-        safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
-      },
-      {
-        safe_downcast<int32_t>(unpacked_filter[Layout::Filter::width]),
-        safe_downcast<int32_t>(unpacked_filter[Layout::Filter::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_stride[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_stride[Layout::Parameter::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_padding[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_padding[Layout::Parameter::height]),
-      },
-      {
-        safe_downcast<int32_t>(packed_dilation[Layout::Parameter::width]),
-        safe_downcast<int32_t>(packed_dilation[Layout::Parameter::height]),
-      },
-      {
-        packed_output_min,
-        packed_output_max,
-      },
+  const struct Block final {
+    uvec3 extents;
+    int32_t ic4;
+    ivec4 kernel;
+    ivec2 ikernel;
+    ivec2 stride;
+    ivec2 padding;
+    ivec2 dilate;
+    vec2 clamp;
+    ivec4 src_filter;
+  } block {
+    v_output.extents(),
+    safe_downcast<int32_t>(packed_filter[Layout::Filter::input]),
+    {
+      safe_downcast<int32_t>(packed_filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(packed_filter[Layout::Filter::height]),
+      safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::width]),
+      safe_downcast<int32_t>(v_input.sizes()[Layout::Activation4D::height]),
+    },
+    {
+      safe_downcast<int32_t>(unpacked_filter[Layout::Filter::width]),
+      safe_downcast<int32_t>(unpacked_filter[Layout::Filter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_stride[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_stride[Layout::Parameter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_padding[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_padding[Layout::Parameter::height]),
+    },
+    {
+      safe_downcast<int32_t>(packed_dilation[Layout::Parameter::width]),
+      safe_downcast<int32_t>(packed_dilation[Layout::Parameter::height]),
+    },
+    {
+      packed_output_min,
+      packed_output_max,
+    },
+  };
+
+  uvec3 global_size = v_output.extents();
+  if (method_ == Conv2dPointwise) {
+    global_size = {
+      safe_downcast<uint32_t>(div_up(v_output.sizes()[Layout::Filter::width], INT64_C(2))),
+      safe_downcast<uint32_t>(div_up(v_output.sizes()[Layout::Filter::height], INT64_C(2))),
+      v_output.extents().data[2u]
     };
-
-    uvec3 global_size = v_output.extents();
-    if (method_ == Conv2dPointwise) {
-      global_size = {
-        safe_downcast<uint32_t>(div_up(v_output.sizes()[Layout::Filter::width], INT64_C(2))),
-        safe_downcast<uint32_t>(div_up(v_output.sizes()[Layout::Filter::height], INT64_C(2))),
-        v_output.extents().data[2u]
-      };
-    }
-
-    api::UniformParamsBuffer params(context, block);
-
-    context->dispatch(
-        command_buffer,
-        {
-          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        },
-        shader,
-        global_size,
-        adaptive_work_group_size(global_size),
-        // Write-only access bypasses synchronization but inserts appropriate
-        // barriers if necessary.
-        v_output.image(
-            command_buffer,
-            api::PipelineStage::Compute,
-            api::MemoryAccessType::WRITE),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
-        v_input.image(
-            command_buffer,
-            api::PipelineStage::Compute),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
-        packed_v_weight.image(
-            command_buffer,
-            api::PipelineStage::Compute),
-        // Read-only access is implied on const tensors and triggers an async
-        // synchronization if necessary.
-        packed_v_bias.image(
-            command_buffer,
-            api::PipelineStage::Compute),
-        // Object lifetime is managed by the resource pool.
-        // It is OK not to keep track of the handle.
-        params.buffer().package());
   }
-  command_pool.submit(context->gpu().queue, command_buffer);
+
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_compute_job(
+      // shader layout signature
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      shader,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      global_size,
+      // local work group size
+      adaptive_work_group_size(global_size),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      v_input.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      packed_v_weight.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      packed_v_bias.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 }
 
 Tensor conv2d_context_run(
@@ -596,8 +580,7 @@ Tensor conv2d_context_run(
         packed_output_min,
         packed_output_max,
         unpacked_filter,
-        method_,
-        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d_dw)");
+        method_);
       break;
     case Conv2dPointwise:
       conv2d_sliding_window(
@@ -613,8 +596,7 @@ Tensor conv2d_context_run(
         packed_output_min,
         packed_output_max,
         unpacked_filter,
-        method_,
-        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d_pw_2x2)");
+        method_);
       break;
     default:
       conv2d_sliding_window(
@@ -630,8 +612,7 @@ Tensor conv2d_context_run(
         packed_output_min,
         packed_output_max,
         unpacked_filter,
-        method_,
-        "prepacked::conv2d_clamp_run (conv2d_sliding_window::conv2d)");
+        method_);
       break;
   }
 
