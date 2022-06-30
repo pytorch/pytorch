@@ -78,6 +78,8 @@
 
 namespace torch {
 
+bool should_allow_numbers_as_tensors(const std::string& name);
+
 enum class ParameterType {
   TENSOR,
   SCALAR,
