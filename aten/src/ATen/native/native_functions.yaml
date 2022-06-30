@@ -3987,7 +3987,6 @@
     MkldnnCPU: mkldnn_prelu
     CPU: prelu_cpu
     CUDA: prelu_cuda
-    QuantizedCPU: prelu_quantized_cpu
 
 - func: prelu_backward(Tensor grad_output, Tensor self, Tensor weight) -> (Tensor, Tensor)
   variants: function, method
