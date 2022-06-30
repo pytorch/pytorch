@@ -4120,13 +4120,13 @@ Tensor linalg_det_backward(
     return at::linalg_lu_solve(
         LU_, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
-    // If we want to compute higher-order gradients, we need to recompute the LU
-    // decomposition so that autograd computes the correct gradients wrt to A
-    // (cf. solve_backward)
-    auto non_singular =
-        [](const Tensor& A, const Tensor& d, const Tensor& /*grad*/) {
-          return at::linalg_solve(A.mH(), d);
-        };
+    //// If we want to compute higher-order gradients, we need to recompute the LU
+    //// decomposition so that autograd computes the correct gradients wrt to A
+    //// (cf. solve_backward)
+    //auto non_singular =
+    //    [](const Tensor& A, const Tensor& d, const Tensor& /*grad*/) {
+    //      return at::linalg_solve(A.mH(), d);
+    //    };
 
     // The derivative may be then computed explicitly by noting that the
     // gradient of the derivative of the determinant is given in terms of the
@@ -4142,11 +4142,17 @@ Tensor linalg_det_backward(
       return (U * D.unsqueeze(-2)).matmul(Vh);
     };
 
-    // We could use the singular formula for all inputs but we try to filter out
-    // some inputs via the masking, as computing an SVD is about 100 times
-    // slower than computing an lu_solve on GPU
-    return masked_fmap(
-        det.abs() < 100. * eps, singular, non_singular, A, d, grad);
+    // TODO investigate this further
+    // We should write the following, but the derivative of scatter-gather
+    // (used in index and index_put in masked_fmap) is buggy in some cuda version.
+    // For now, we just use the slower but more accurate formula
+    //
+    // // We could use the singular formula for all inputs but we try to filter out
+    // // some inputs via the masking, as computing an SVD is about 100 times
+    // // slower than computing an lu_solve on GPU
+    // return masked_fmap(
+    //     det.abs() < 100. * eps, singular, non_singular, A, d, grad);
+    return singular(A, d, grad);
   }
 }
 
