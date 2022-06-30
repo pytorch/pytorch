@@ -2,10 +2,12 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Exception.h>
 #include <caffe2/serialize/versions.h>
 #include <flatbuffers/flatbuffers.h>
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -775,6 +777,20 @@ flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
       jit_sources,
       jit_constants);
 }
+
+void save_mobile_module_to_func(
+    const mobile::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  auto buffer = save_mobile_module_to_bytes(module);
+  writer_func(buffer.data(), buffer.size());
+}
+
+bool register_flatbuffer_serializer() {
+  _save_mobile_module_to = save_mobile_module_to_func;
+  return true;
+}
+
+const bool kFlatbufferSerializerRegistered = register_flatbuffer_serializer();
 
 } // namespace jit
 } // namespace torch
