@@ -871,7 +871,7 @@ TORCH_IMPL_FUNC(gelu_out_mps) (
                                                                   getMPSDataType(self.scalar_type()),
                                                                   getMPSShape(self));
 
-          MPSGraphTensor* outputTensor =  normcdf(mpsGraph, inputTensor);
+          MPSGraphTensor* outputTensor = normcdf(mpsGraph, inputTensor);
           outputTensor = [mpsGraph multiplicationWithPrimaryTensor:outputTensor
                                                    secondaryTensor:inputTensor
                                                               name:nil];
@@ -1265,6 +1265,212 @@ TORCH_IMPL_FUNC(elu_backward_out_mps) (
   }
 
 }
+
+TORCH_IMPL_FUNC(glu_out_mps) (
+    const Tensor& self, const int64_t dim, const Tensor& output
+  ) {
+  using namespace mps;
+  TORCH_CHECK(output.is_mps());
+
+  // Empty output
+  if(output.numel() == 0)
+    return;
+
+  // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
+  // can't be evenly halved, but give a nicer error message here.
+  TORCH_CHECK(self.dim() > 0, "glu does not support 0-dimensional tensors");
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  const int64_t nIn = self.size(wrap_dim);
+  TORCH_CHECK(nIn % 2 == 0, "Halving dimension must be even, but dimension ",
+              wrap_dim, " is size ", nIn);
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor *inputTensor_ = nil;
+    MPSGraphTensor *outputTensor_ = nil;
+  };
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    string key = "glu_out_mps" + getTensorsStringKey({self}) + ":" + to_string(dim);;
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    if(!cachedGraph) {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+
+        CachedGraph *newCachedGraph = nil;
+
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
+                                                                  getMPSDataType(self.scalar_type()),
+                                                                  getMPSShape(self));
+          NSArray<MPSGraphTensor *> * outputTensorsArray = [mpsGraph splitTensor:inputTensor
+                                                                       numSplits:2
+                                                                            axis:wrap_dim
+                                                                            name:nil];
+          MPSGraphTensor* firstHalf = outputTensorsArray[0];
+          MPSGraphTensor* secondHalf = [mpsGraph sigmoidWithTensor:outputTensorsArray[1]
+                                              name:nil];
+
+          MPSGraphTensor* outputTensor = [mpsGraph multiplicationWithPrimaryTensor:firstHalf
+                                                   secondaryTensor:secondHalf
+                                                              name:nil];
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+
+    Placeholder selfPlaceholder   = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output);
+
+    // Create dictionary of inputs and outputs
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData()
+    };
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()
+    };
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+
+  }
+
+}
+
+Tensor& glu_backward_mps_out (
+    const Tensor& grad_output, const Tensor& self, const int64_t dim, Tensor& grad_input
+  ) {
+  using namespace mps;
+
+  // Empty output
+  if(grad_input.numel() == 0)
+    return grad_input;
+
+  // this can't pass anyway because a 0-dimensional tensor has "size" 1, which
+  // can't be evenly halved, but give a nicer error message here.
+  TORCH_CHECK(self.dim() > 0, "glu does not support 0-dimensional tensors");
+  auto wrap_dim = maybe_wrap_dim(dim, self.dim());
+  const int64_t nIn = self.size(wrap_dim);
+  TORCH_CHECK(nIn % 2 == 0, "Halving dimension must be even, but dimension ",
+              wrap_dim, " is size ", nIn);
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor *gradOutputTensor_ = nil;
+    MPSGraphTensor *inputTensor_ = nil;
+    MPSGraphTensor *gradInputTensor_ = nil;
+  };
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  MPSStream* stream = getCurrentMPSStream();
+
+  @autoreleasepool {
+    string key = "glu_backward_mps_out" + getTensorsStringKey({grad_output, self}) + ":" + to_string(dim);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    if(!cachedGraph) {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+
+        CachedGraph *newCachedGraph = nil;
+
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
+                                                                  getMPSDataType(self.scalar_type()),
+                                                                  getMPSShape(self));
+          MPSGraphTensor* gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph,
+                                                                  getMPSDataType(grad_output.scalar_type()),
+                                                                  getMPSShape(grad_output));
+          NSArray<MPSGraphTensor *> * inputTensorsArray = [mpsGraph splitTensor:inputTensor
+                                                                      numSplits:2
+                                                                           axis:wrap_dim
+                                                                           name:nil];
+
+          // first half
+          MPSGraphTensor* sigmoidOutputTensor = [mpsGraph sigmoidWithTensor:inputTensorsArray[1]
+                                                                         name:nil];
+          MPSGraphTensor* firstHalfOutputTensor = [mpsGraph multiplicationWithPrimaryTensor : sigmoidOutputTensor
+                                                            secondaryTensor : gradOutputTensor
+                                                                       name : nil];
+
+          // second half
+          MPSGraphTensor* one_val = [mpsGraph constantWithScalar:1.0
+                                                           shape:@[@1]
+                                                        dataType:getMPSDataType(self.scalar_type())];
+
+          MPSGraphTensor* secondHalfOutputTensor = [mpsGraph subtractionWithPrimaryTensor : one_val
+                                                                secondaryTensor : sigmoidOutputTensor
+                                                                           name : nil];
+          secondHalfOutputTensor = [mpsGraph multiplicationWithPrimaryTensor : secondHalfOutputTensor
+                                                                   secondaryTensor : sigmoidOutputTensor
+                                                                              name : nil];
+          secondHalfOutputTensor = [mpsGraph multiplicationWithPrimaryTensor : secondHalfOutputTensor
+                                                                   secondaryTensor : inputTensorsArray[0]
+                                                                              name : nil];
+          secondHalfOutputTensor = [mpsGraph multiplicationWithPrimaryTensor : secondHalfOutputTensor
+                                                                   secondaryTensor : gradOutputTensor
+                                                                              name : nil];
+
+          MPSGraphTensor* outputTensor = [mpsGraph concatTensor : firstHalfOutputTensor
+                                                     withTensor : secondHalfOutputTensor
+                                                      dimension : wrap_dim
+                                                           name : nil];
+          newCachedGraph->gradInputTensor_ = outputTensor;
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->gradOutputTensor_ = gradOutputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+
+    Placeholder gradInputPlaceholder   = Placeholder(cachedGraph->gradInputTensor_, grad_input);
+    Placeholder selfPlaceholder   = Placeholder(cachedGraph->inputTensor_, self);
+    Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
+
+    // Create dictionary of inputs and outputs
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
+      selfPlaceholder.getMPSGraphTensor() : selfPlaceholder.getMPSGraphTensorData(),
+      gradOutputPlaceholder.getMPSGraphTensor() : gradOutputPlaceholder.getMPSGraphTensorData()
+    };
+
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
+      gradInputPlaceholder.getMPSGraphTensor() : gradInputPlaceholder.getMPSGraphTensorData(),
+    };
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+
+  }
+  return grad_input;
+
+}
+
+Tensor glu_backward_mps (const Tensor& grad_output,
+   const Tensor& self,
+   const int64_t dim) {
+
+  Tensor grad_input = at::native::empty_mps(
+                      self.sizes(),
+                      self.scalar_type(),
+                      c10::nullopt,
+                      kMPS,
+                      c10::nullopt,
+                      c10::nullopt);
+  grad_input = glu_backward_mps_out(grad_output, self, dim, grad_input);
+  return grad_input;
+}
+
 
 TORCH_IMPL_FUNC(softplus_out_mps) (
   const Tensor& self,
