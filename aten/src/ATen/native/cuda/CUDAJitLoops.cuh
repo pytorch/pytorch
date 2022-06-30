@@ -265,11 +265,8 @@ static void jitted_gpu_kernel_impl(
   //   the same compute capability
   static std::mutex jiterator_mutex;
   static std::vector<JittedKernelVariantCache> device_caches(c10::cuda::device_count());
-
-  constexpr int nInputs = arity;
-  constexpr int nOutputs = 1;  // TODO: Support more than 1 output
   static const auto desc = at::cuda::jit::make_kernel_descriptor<
-    result_type, f_inputs_type, ExtraArgs...>(name, f, nInputs, nOutputs);
+    result_type, f_inputs_type, arity, ExtraArgs...>(name, f);
 
   auto &cache = device_caches[iter.device().index()];
   auto extra_args_array = tuple_to_array(extra_args);
