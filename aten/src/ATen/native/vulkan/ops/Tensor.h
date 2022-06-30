@@ -167,6 +167,14 @@ class vTensor final {
   }
 };
 
+void add_buffer_barrier(
+    api::PipelineBarrier&,
+    const api::VulkanBuffer&,
+    const api::PipelineStageFlags,
+    const api::MemoryAccessFlags,
+    const api::PipelineStageFlags,
+    const api::MemoryAccessFlags);
+
 using vTensorImpl = VulkanOpaqueTensorImpl<vTensor>;
 void verify(const TensorOptions& options);
 
