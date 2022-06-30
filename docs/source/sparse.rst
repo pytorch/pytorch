@@ -599,7 +599,6 @@ Torch functions specific to sparse Tensors
     smm
     sparse.softmax
     sparse.log_softmax
-    sparse.spdiags
 
 Other functions
 +++++++++++++++
