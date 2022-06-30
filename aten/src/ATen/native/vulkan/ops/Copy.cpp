@@ -28,7 +28,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
               //   command buffer prevents an expensive queue submission.
               convert(src).buffer(
                   command_buffer,
-                  vTensor::Stage::Transfer),
+                  api::PipelineStage::Transfer),
               // - Write-only access never triggers a sync as the contents will be
               //   overwritten regardless.  Having said that, appropriate barriers
               //   are inserted automatically if WAR or WAW hazards are detected.
@@ -36,7 +36,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
               //   prevents an expensive queue submission.
               v_self.buffer(
                   command_buffer,
-                  vTensor::Stage::Transfer,
+                  api::PipelineStage::Transfer,
                   api::MemoryAccessType::WRITE));
         }
         command_pool.submit(context->gpu().queue, command_buffer);

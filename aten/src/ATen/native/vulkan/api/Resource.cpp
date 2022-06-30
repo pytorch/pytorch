@@ -323,7 +323,7 @@ VulkanImage::VulkanImage(
       allocator_, &image_create_info, &alloc_create_info,
       &(handles_.image), &allocation_, nullptr));
 
-  // Image View
+  // Image vTensorStorage
 
   const VkComponentMapping component_mapping{
     VK_COMPONENT_SWIZZLE_IDENTITY,  // r
