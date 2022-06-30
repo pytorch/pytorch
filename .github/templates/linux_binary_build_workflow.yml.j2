@@ -52,10 +52,7 @@ jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:
     if: ${{ github.repository_owner == 'pytorch' }}
-    runs-on: linux.4xlarge
-    timeout-minutes: !{{ common.timeout_minutes }}
-    !{{ upload.binary_env(config) }}
     uses: ./.github/workflows/_linux-binary-build.yml
-    with:
-      package_type:
+    with:!{{ upload.binary_env_as_input(config) }}
+
 {%- endfor %}

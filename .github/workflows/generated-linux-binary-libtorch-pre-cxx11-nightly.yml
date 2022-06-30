@@ -1,0 +1,318 @@
+# @generated DO NOT EDIT MANUALLY
+
+# Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: linux-binary-libtorch-pre-cxx11
+
+on:
+  push:
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    branches:
+      - nightly
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/binaries/*'
+      - 'ciflow/binaries_libtorch/*'
+  workflow_dispatch:
+
+env:
+  # Needed for conda builds
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  ANACONDA_USER: pytorch
+  AWS_DEFAULT_REGION: us-east-1
+  BINARY_ENV_FILE: /tmp/env
+  BUILD_ENVIRONMENT: linux-binary-libtorch-pre-cxx11
+  BUILDER_ROOT: /builder
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  PYTORCH_FINAL_PACKAGE_DIR: /artifacts
+  PYTORCH_ROOT: /pytorch
+  SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+  SKIP_ALL_TESTS: 1
+concurrency:
+  group: linux-binary-libtorch-pre-cxx11-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  libtorch-cpu-shared-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cpu-shared-without-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-without-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cpu-static-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cpu-static-without-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-without-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda10_2-shared-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu102
+      GPU_ARCH_VERSION: 10.2
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda10_2-shared-without-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu102
+      GPU_ARCH_VERSION: 10.2
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-without-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda10_2-static-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu102
+      GPU_ARCH_VERSION: 10.2
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda10_2-static-without-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu102
+      GPU_ARCH_VERSION: 10.2
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-without-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda11_3-shared-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu113
+      GPU_ARCH_VERSION: 11.3
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda11_3-shared-without-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu113
+      GPU_ARCH_VERSION: 11.3
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-without-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda11_3-static-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu113
+      GPU_ARCH_VERSION: 11.3
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda11_3-static-without-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu113
+      GPU_ARCH_VERSION: 11.3
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-without-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda11_6-shared-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda11_6-shared-without-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-without-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda11_6-static-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-cuda11_6-static-without-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu116
+      GPU_ARCH_VERSION: 11.6
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-without-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-rocm5_0-shared-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-rocm5_0-static-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-rocm5_1_1-shared-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: shared-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
+  libtorch-rocm5_1_1-static-with-deps-pre-cxx11-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      LIBTORCH_VARIANT: static-with-deps
+      DESIRED_DEVTOOLSET: pre-cxx11
