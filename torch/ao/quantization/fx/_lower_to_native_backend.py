@@ -83,6 +83,7 @@ def is_default_node(node, modules):
         torch.nn.InstanceNorm3d,
         torch.nn.LayerNorm,
         torch.nn.Dropout,
+        torch.nn.PReLU,
         torch.nn.BatchNorm2d,
         torch.nn.BatchNorm3d,
         torch.nn.intrinsic.BNReLU2d,
@@ -238,6 +239,7 @@ SPECIAL_PATTERN_LOWER_MODULE_MAP = {
     nn.LayerNorm: nnq.LayerNorm,
     nn.Dropout: nnq.Dropout,
     nn.Softmax: nnq.Softmax,
+    nn.PReLU: nnq.PReLU,
     nni.BNReLU2d: nniq.BNReLU2d,
     nni.BNReLU3d: nniq.BNReLU3d,
 }

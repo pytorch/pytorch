@@ -5782,6 +5782,28 @@ class TestQuantizeFxOps(QuantizationTestCase):
     def test_leaky_relu(self):
         self._test_activation_impl(nn.LeakyReLU, F.leaky_relu, nnq.LeakyReLU, torch.ops.quantized.leaky_relu)
 
+    def test_prelu(self):
+        class M(torch.nn.Module):
+            def __init__(self, num_param: int):
+                super(M, self).__init__()
+                self.op = torch.nn.PReLU(num_parameters=num_param)
+
+            def forward(self, input):
+                return self.op(input)
+
+        X = [[torch.randn(4, 4, 4, 4, dtype=torch.float)]]
+        options = itertools.product([1, 4], self.static_quant_types, [True, False])
+        quantized_nodes = {
+            # is_reference
+            True: ns.call_module(torch.nn.PReLU),
+            False: ns.call_module(torch.nn.quantized.PReLU),
+        }
+
+        for num_parameter, quant_type, is_reference in options:
+            self.checkGraphModeFxOp(
+                M(num_parameter), X, quant_type, quantized_nodes[is_reference],
+                is_reference=is_reference)
+
     def _test_norm_impl(
             self, float_module, float_op, op_args, data, quantized_module, quantized_op,
             skip_op_arg_for_functional=False):
