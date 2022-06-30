@@ -127,6 +127,31 @@ class TestPrims(TestCase):
 
     @onlyCUDA
     @skipCUDAIfRocm
+    def test_nvfuser_executor_cached_noncontiguous(self, device):
+        # This test is to ensure that when the nvfuser's internal
+        # runtime checks for contiguity and caching are working
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch._prims.context import TorchRefsMode
+        from torch._prims.executor import execute
+
+        a = torch.randn(3, 3, device=device)
+
+        def func(a):
+            return torch.sigmoid(a)
+
+        with TorchRefsMode.push():
+            gm = make_fx(func)(a)
+
+        # First run to create the cache
+        execute(gm, a, executor="nvfuser")
+
+        # a.mT is noncontiguous, but it shouldn't affect correctness
+        expected = execute(gm, a.mT, executor="aten")
+        actual = execute(gm, a.mT, executor="nvfuser")
+        self.assertEqual(expected, actual)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
     @dtypes(torch.float32)
     @parametrize("correction", [0, 1])
     def test_var(self, device, dtype, correction):
