@@ -11,7 +11,9 @@ namespace {
 
 using namespace api::utils;
 
-Tensor pad2d(const Tensor& self_arg, IntArrayRef padding, const api::Shader::Descriptor& shader_descriptor,
+Tensor pad2d(
+    const Tensor& self_arg, IntArrayRef padding,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   const int pad_dim = padding.size();
   const IntArrayRef input_size = self_arg.sizes();
