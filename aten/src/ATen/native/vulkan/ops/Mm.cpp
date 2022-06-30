@@ -44,7 +44,7 @@ vTensor pack_weights(
   };
 
   api::MemoryMap mapping(
-      v_weight.host_buffer(command_buffer, vTensor::Access::Write),
+      v_weight.host_buffer(command_buffer, api::MemoryAccessType::WRITE),
       api::MemoryAccessType::WRITE);
 
   float* dst_weight_ptr = mapping.template data<float>();
@@ -107,7 +107,7 @@ vTensor pack_biases(
     };
 
     api::MemoryMap mapping(
-        v_bias.host_buffer(command_buffer, vTensor::Access::Write),
+        v_bias.host_buffer(command_buffer, api::MemoryAccessType::WRITE),
         api::MemoryAccessType::WRITE);
 
     float* dst_bias_ptr = mapping.template data<float>();
@@ -135,7 +135,7 @@ vTensor pack_biases(
     };
 
     api::MemoryMap mapping(
-        v_bias.host_buffer(command_buffer, vTensor::Access::Write),
+        v_bias.host_buffer(command_buffer, api::MemoryAccessType::WRITE),
         api::MemoryAccessType::WRITE);
 
     float* data_ptr = mapping.template data<float>();
@@ -297,7 +297,7 @@ Tensor context_run(
             v_output.image(
                 command_buffer,
                 vTensor::Stage::Compute,
-                vTensor::Access::Write),
+                api::MemoryAccessType::WRITE),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
             v_input.image(
@@ -348,7 +348,7 @@ Tensor context_run(
             v_output.image(
                 command_buffer,
                 vTensor::Stage::Compute,
-                vTensor::Access::Write),
+                api::MemoryAccessType::WRITE),
             // Read-only access is implied on const tensors and triggers an async
             // synchronization if necessary.
             v_input.image(
