@@ -1,6 +1,6 @@
 name: Setup Linux
 
-description: Zain's compostie action
+description: Zain's 2nd compostie action
 
 inputs:
   pytorch-repo-directory:
@@ -10,7 +10,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Running zainr-action
+    - name: Running zainr-action-the-second, first step
       shell: bash
       run: |
-          echo "The first action"
+          echo "I'm in the second composite action"

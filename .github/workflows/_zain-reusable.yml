@@ -1,0 +1,20 @@
+name: pull
+
+on:
+  workflow_call:
+    inputs:
+      action-name:
+        required: true
+        type: string
+        description: action
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  the-job:
+    name: choose a step
+    steps:
+      - name: Running ${{ inputs.action-name}}
+        uses: ${{ inputs.action-name}}
