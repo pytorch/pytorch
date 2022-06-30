@@ -39,7 +39,7 @@ class Context final {
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
 
-  Context(Context&&) = default;
+  Context(Context&&) = delete;
   Context& operator=(Context&&) = delete;
 
   ~Context();
@@ -58,12 +58,13 @@ class Context final {
   FencePool fences_;
   QueryPool querypool_;
   // Command buffers submission
+  std::mutex cmd_mutex_;
   CommandBuffer cmd_;
   uint32_t submit_count_;
-  VulkanFence fence_;
-  std::vector<VkCommandBuffer> cmd_submit_list_;
   // Memory Management
+  std::mutex buffer_clearlist_mutex_;
   std::vector<VulkanBuffer> buffers_to_clear_;
+  std::mutex image_clearlist_mutex_;
   std::vector<VulkanImage> images_to_clear_;
 
  public:
@@ -128,10 +129,12 @@ class Context final {
 
   // Memory Management
   void register_buffer_cleanup(VulkanBuffer& buffer) {
+    std::lock_guard<std::mutex> bufferlist_lock(buffer_clearlist_mutex_);
     buffers_to_clear_.emplace_back(std::move(buffer));
   }
 
   void register_image_cleanup(VulkanImage& image) {
+    std::lock_guard<std::mutex> imagelist_lock(image_clearlist_mutex_);
     images_to_clear_.emplace_back(std::move(image));
   }
 
@@ -146,7 +149,7 @@ class Context final {
     }
   }
 
-  DescriptorSet submit_compute_prologue(
+  Descriptor::Set submit_compute_prologue(
       CommandBuffer&,
       const ShaderLayout::Signature&,
       const ShaderSource&,
@@ -154,20 +157,11 @@ class Context final {
 
   void submit_compute_epilogue(
       CommandBuffer&,
-      const DescriptorSet&,
+      const Descriptor::Set&,
       const PipelineBarrier&,
       const utils::uvec3&);
 
  public:
-
-  template<typename... Arguments>
-  void dispatch(
-      Command::Buffer& command_buffer,
-      const ShaderLayout::Signature& shader_layout_signature,
-      const ShaderSource& shader_descriptor,
-      const utils::uvec3& global_work_group,
-      const utils::uvec3& local_work_group_size,
-      Arguments&&... arguments);
 
   template<typename... Arguments>
   void submit_compute_job(
@@ -283,6 +277,9 @@ inline void Context::submit_compute_job(
     const utils::uvec3& local_work_group_size,
     const VkFence fence_handle,
     Arguments&&... arguments) {
+  // Serialize recording to the shared command buffer
+  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_);
+
   set_cmd();
 
   // Factor out template parameter independent code to minimize code bloat.
@@ -310,6 +307,13 @@ inline void Context::submit_compute_job(
     submit_cmd_to_gpu(fence_handle);
   }
 
+  // If a fence was passed, then assume that the host intends to sync with
+  // the GPU, implying there will be imminent calls to fence.wait() and flush().
+  // We therefore release cmd_mutex_ without unlocking to prevent more dispatches
+  // from being recorded until we have flushed the Context.
+  if (fence_handle != VK_NULL_HANDLE) {
+    cmd_lock.release();
+  }
 }
 
 } // namespace api
