@@ -528,7 +528,8 @@ class TestSparseCompressed(TestCase):
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
         # FIXME: remove in followup once integer support is landed for segment_reduce
-        if (layout == torch.sparse_csr and not dtype.is_floating_point):
+        if (layout == torch.sparse_csr and not dtype.is_floating_point
+                and op.name in ('_masked.mean', '_masked.amax', '_masked.amin')):
             self.skipTest(f"{op.name} does not support input with {layout} layout")
 
         require_mask = isinstance(op, ReductionOpInfo) and '_masked.' in op.name
