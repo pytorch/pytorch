@@ -640,7 +640,7 @@ class ComputeFunction:
 
             return f"""
 // aten::{f.func}
-TORCH_API inline {sig.decl()} {{
+inline {sig.decl()} {{
     return at::_ops::{f.func.name.unambiguous_name()}::call({exprs_str});
 }}
 """
@@ -731,7 +731,7 @@ class ComputeRedispatchFunction:
 
             return f"""
 // aten::{f.func}
-TORCH_API inline {sig.decl(is_redispatching_fn=True)} {{
+inline {sig.decl(is_redispatching_fn=True)} {{
     return at::_ops::{f.func.name.unambiguous_name()}::redispatch({exprs_str});
 }}
 """
