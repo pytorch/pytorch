@@ -20986,9 +20986,6 @@ python_ref_db = [
         "_refs.constant_pad_nd",
         torch_opinfo_name="constant_pad_nd",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     PythonRefInfo(
         "_refs.dsplit",
@@ -21290,145 +21287,91 @@ python_ref_db = [
         "_refs.fft.fft",
         torch_opinfo_name="fft.fft",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft",
         torch_opinfo_name="fft.ifft",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft",
         torch_opinfo_name="fft.rfft",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft",
         torch_opinfo_name="fft.irfft",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft",
         torch_opinfo_name="fft.hfft",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft",
         torch_opinfo_name="fft.ihfft",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fftn",
         torch_opinfo_name="fft.fftn",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifftn",
         torch_opinfo_name="fft.ifftn",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfftn",
         torch_opinfo_name="fft.rfftn",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfftn",
         torch_opinfo_name="fft.irfftn",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfftn",
         torch_opinfo_name="fft.hfftn",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfftn",
         torch_opinfo_name="fft.ihfftn",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.fft2",
         torch_opinfo_name="fft.fft2",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ifft2",
         torch_opinfo_name="fft.ifft2",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.rfft2",
         torch_opinfo_name="fft.rfft2",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.irfft2",
         torch_opinfo_name="fft.irfft2",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.hfft2",
         torch_opinfo_name="fft.hfft2",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     SpectralFuncPythonRefInfo(
         "_refs.fft.ihfft2",
         torch_opinfo_name="fft.ihfft2",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
-        ),
     ),
     PythonRefInfo(
         "_refs.fft.fftshift",
