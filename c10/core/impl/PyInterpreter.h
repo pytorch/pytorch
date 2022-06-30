@@ -1,8 +1,8 @@
 #pragma once
 
 #include <c10/core/Device.h>
-#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/Layout.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
@@ -149,7 +149,7 @@ struct C10_API PyInterpreter {
       dim_sig* dim_fn,
       strides_sig* strides,
       sizes_sig* sizes,
-      sym_sizes_sig* sym_sizes)
+      sym_sizes_sig* sym_sizes,
       layout_sig* layout)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
@@ -233,11 +233,11 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ c10::SymIntArrayRef sym_sizes(
       const TensorImpl* self) const {
     return (*sym_sizes_fn_)(this, self);
+  }
 
-  __ubsan_ignore_function__ c10::Layout layout(
-      const TensorImpl* self) const {
+  __ubsan_ignore_function__ c10::Layout layout(const TensorImpl* self) const {
     return (*layout_fn_)(this, self);
-}
+  }
 
   // Disarm this PyInterpreter, making all of its methods noops.
   // Because the function pointers are raw pointers (not atomics),
