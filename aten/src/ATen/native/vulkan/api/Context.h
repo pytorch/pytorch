@@ -21,6 +21,7 @@ struct ContextConfig final {
   uint32_t cmdSubmitFrequency;
   CommandPoolConfig cmdPoolConfig;
   DescriptorPoolConfig descriptorPoolConfig;
+  QueryPoolConfig queryPoolConfig;
 };
 
 //
@@ -55,7 +56,10 @@ class Context final {
   CommandPool command_pool_;
   DescriptorPool descriptor_pool_;
   FencePool fences_;
+  // Diagnostics
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
   QueryPool querypool_;
+#endif
   // Command buffers submission
   std::mutex cmd_mutex_;
   CommandBuffer cmd_;
@@ -111,9 +115,18 @@ class Context final {
     return fences_;
   }
 
+  // Diagnostics
+
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
   inline QueryPool& querypool() {
     return querypool_;
   }
+
+  inline void reset_querypool() {
+    set_cmd();
+    querypool_.reset(cmd_);
+  }
+#endif
 
   // Memory Management
   void register_buffer_cleanup(VulkanBuffer& buffer) {

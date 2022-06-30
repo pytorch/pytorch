@@ -28,8 +28,15 @@ struct ShaderSource final {
     } spirv;
   } src_code;
 
+#ifdef USE_VULKAN_GPU_DIAGNOSTICS
+  std::string kernel_name;
+  explicit ShaderSource(std::string name, const char* glsl);
+  explicit ShaderSource(
+      std::string name, const uint32_t* spirv, uint32_t bytes);
+#else
   explicit ShaderSource(const char* glsl);
   explicit ShaderSource(const uint32_t* spirv, uint32_t bytes);
+#endif /* USE_VULKAN_GPU_DIAGNOSTICS */
 };
 
 class ShaderLayout final {

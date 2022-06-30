@@ -223,6 +223,32 @@ void CommandBuffer::copy_texture_to_texture(
   state_ = CommandBuffer::State::RECORDING;
 }
 
+void CommandBuffer::write_timestamp(
+    const VkQueryPool querypool, const uint32_t idx) const {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::RECORDING,
+      "Vulkan CommandBuffer: called copy_texture_to_texture() on a command buffer whose state "
+      "is not RECORDING.");
+
+  vkCmdWriteTimestamp(
+      handle_,
+      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+      querypool,
+      idx);
+}
+
+void CommandBuffer::reset_querypool(
+    const VkQueryPool querypool,
+    const uint32_t first_idx,
+    const uint32_t count) const {
+  TORCH_CHECK(
+      state_ == CommandBuffer::State::RECORDING,
+      "Vulkan CommandBuffer: called copy_texture_to_texture() on a command buffer whose state "
+      "is not RECORDING.");
+
+  vkCmdResetQueryPool(handle_, querypool, first_idx, count);
+}
+
 VkCommandBuffer CommandBuffer::get_submit_handle() {
   TORCH_CHECK(
       state_ == CommandBuffer::State::READY,

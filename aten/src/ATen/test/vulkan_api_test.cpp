@@ -166,13 +166,14 @@ namespace {
 
 class VulkanAPITest : public ::testing::Test {
 public:
-#if defined (__ANDROID__)  // to avoid `Undefined symbols for architecture arm64` error
-    static void SetUpTestSuite() {
-      at::native::vulkan::api::context()->querypool().enable();
+#if USE_VULKAN_GPU_DIAGNOSTICS && defined (__ANDROID__)
+    void SetUp() {
+      at::native::vulkan::api::context()->reset_querypool();
     }
 
-    static void TearDownTestSuite() {
-      at::native::vulkan::api::context()->querypool().disable(false);
+    void TearDown() {
+      at::native::vulkan::api::context()->querypool().extract_results();
+      at::native::vulkan::api::context()->querypool().print_results();
     }
 #endif
 };
