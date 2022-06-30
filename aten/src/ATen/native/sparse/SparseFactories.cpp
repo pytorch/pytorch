@@ -108,8 +108,9 @@ Tensor spdiags_backward(
   auto grad_in_options = grad_out.options().layout(Layout::Strided);
   // zeros since we are only going to se the non-zero elements
   Tensor grad_in = at::zeros({n_diag, n_col_in}, grad_in_options);
-  auto grad_out_coo =
-      grad_out.layout() == Layout::Sparse ? grad_out : grad_out.to_sparse();
+  auto grad_out_coo = grad_out.layout() == Layout::Sparse
+      ? grad_out.coalesce()
+      : grad_out.to_sparse();
 
   auto grad_out_values = sparse::get_sparse_impl(grad_out_coo)->values_;
   auto grad_out_indices = sparse::get_sparse_impl(grad_out_coo)->indices_;
