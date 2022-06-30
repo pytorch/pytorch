@@ -17,18 +17,9 @@ Tensor permute_4d(const Tensor& input, const uvec4& in_size, const uvec4& out_si
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), "aten::permute (permute_4d)");
 
-    auto dst_image = v_output.image(
-      command_buffer,
-      api::PipelineStage::Compute,
-      api::MemoryAccessType::READ | api::MemoryAccessType::WRITE);
-
     const Tensor self = input.is_vulkan() ? input : input.vulkan();
     const vTensor& v_self = convert(self);
-    if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
-      auto src_image = v_self.image(
-              command_buffer,
-              api::PipelineStage::Compute);
-
+    if C10_LIKELY(true && true) {
       const struct Block final {
         uvec3 size;                // output texture size
         uint32_t fill_0;           // dummy
@@ -63,10 +54,15 @@ Tensor permute_4d(const Tensor& input, const uvec4& in_size, const uvec4& out_si
           context->gpu().adapter->local_work_group_size(),
           // Read/Write access bypasses synchronization but inserts appropriate
           // barriers if necessary.
-          dst_image,
+          v_output.image(
+              command_buffer,
+              api::PipelineStage::Compute,
+              api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
-          src_image,
+          v_self.image(
+              command_buffer,
+              api::PipelineStage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           params.buffer().package());
