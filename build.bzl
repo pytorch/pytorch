@@ -25,7 +25,7 @@ def define_targets(rules):
             ":caffe2_headers",
             "@com_github_glog//:glog",
             "//c10",
-            "//third_party/miniz-2.0.8:miniz",
+            "//third_party/miniz-2.1.0:miniz",
         ],
     )
 
@@ -46,7 +46,7 @@ def define_targets(rules):
     ] + rules.glob(["aten/src/ATen/templates/*"])
 
     gen_aten_cmd = " ".join([
-        "$(location //torchgen:gen)",
+        "$(execpath //torchgen:gen)",
         "--install_dir=$(RULEDIR)",
         "--source-path aten/src/ATen",
     ] + (["--static_dispatch_backend CPU"] if rules.is_cpu_static_dispatch_build() else []))
@@ -99,7 +99,7 @@ def define_targets(rules):
         ],
         tools = ["//tools/setup_helpers:generate_code"],
         outs = GENERATED_AUTOGRAD_CPP + GENERATED_AUTOGRAD_PYTHON + GENERATED_TESTING_PY,
-        cmd = "$(location //tools/setup_helpers:generate_code) " +
+        cmd = "$(execpath //tools/setup_helpers:generate_code) " +
               "--gen-dir=$(RULEDIR) " +
               "--native-functions-path $(location :native_functions.yaml) " +
               "--tags-path=$(location :tags.yaml) " +
@@ -119,7 +119,7 @@ def define_targets(rules):
             ":version.txt",
         ],
         outs = ["torch/csrc/api/include/torch/version.h"],
-        cmd = "$(location //tools/setup_helpers:gen_version_header) " +
+        cmd = "$(execpath //tools/setup_helpers:gen_version_header) " +
               "--template-path $(location :torch/csrc/api/include/torch/version.h.in) " +
               "--version-path $(location :version.txt) --output-path $@ ",
         tools = ["//tools/setup_helpers:gen_version_header"],

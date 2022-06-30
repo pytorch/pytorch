@@ -50,4 +50,4 @@ jobs:
           git config --global user.name "PyTorch MergeBot"
           git config --global user.email "pytorchmergebot@users.noreply.github.com"
 
-          python .github/scripts/update_commit_hash.py --repo-name "${REPO_NAME}" --branch "${BRANCH}"
+          python .github/scripts/update_commit_hashes.py --repo-name "${REPO_NAME}" --branch "${BRANCH}"

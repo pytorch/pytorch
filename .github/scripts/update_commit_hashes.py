@@ -64,7 +64,13 @@ def approve_pr(pr_number: str) -> None:
 
 def make_comment(pr_number: str) -> None:
     params = {"body": "@pytorchbot merge -g"}
-    git_api(f"/repos/{OWNER}/{REPO}/issues/{pr_number}/comments", params, post=True)
+    # comment with pytorchbot because pytorchmergebot gets ignored
+    git_api(
+        f"/repos/{OWNER}/{REPO}/issues/{pr_number}/comments",
+        params,
+        post=True,
+        token=PYTORCHBOT_TOKEN,
+    )
 
 
 def main() -> None:
@@ -75,7 +81,7 @@ def main() -> None:
 
     # query to see if a pr already exists
     params = {
-        "q": f"is:pr is:open in:title author:pytorchmergebot repo:pytorch/pytorch {args.repo_name} hash update"
+        "q": f"is:pr is:open in:title author:pytorchmergebot repo:{OWNER}/{REPO} {args.repo_name} hash update"
     }
     response = git_api("/search/issues", params)
     if response["total_count"] != 0:
@@ -91,16 +97,15 @@ def main() -> None:
         capture_output=True,
         cwd=f"{args.repo_name}",
     ).stdout.decode("utf-8")
-    with open(f".github/{args.repo_name}_commit_hash.txt", "w") as f:
-        f.write(hash.strip())
+    with open(f".github/ci_commit_pins/{args.repo_name}.txt", "w") as f:
+        f.write(hash)
     git_diff = subprocess.run(
-        f"git diff --exit-code .github/{args.repo_name}_commit_hash.txt".split()
+        f"git diff --exit-code .github/ci_commit_pins/{args.repo_name}.txt".split()
     )
     if git_diff.returncode == 1:
         # if there was an update, push to branch
         subprocess.run(f"git checkout -b {branch_name}".split())
-        subprocess.run(f"git add .github/{args.repo_name}_commit_hash.txt".split())
-        subprocess.run(f"git add .github/{args.repo_name}_commit_hash.txt".split())
+        subprocess.run(f"git add .github/ci_commit_pins/{args.repo_name}.txt".split())
         subprocess.run(
             "git commit -m".split() + [f"update {args.repo_name} commit hash"]
         )
