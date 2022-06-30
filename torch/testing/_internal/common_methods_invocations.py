@@ -21430,6 +21430,16 @@ python_ref_db = [
             DecorateInfo(unittest.skip, "TestCommon", "test_python_ref_executor"),
         ),
     ),
+    PythonRefInfo(
+        "_refs.fft.fftshift",
+        torch_opinfo_name="fft.fftshift",
+        supports_nvfuser=False,
+    ),
+    PythonRefInfo(
+        "_refs.fft.ifftshift",
+        torch_opinfo_name="fft.ifftshift",
+        supports_nvfuser=False,
+    ),
 ]
 
 # Common operator groupings

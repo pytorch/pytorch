@@ -36,6 +36,8 @@ __all__ = [
     "irfft2",
     "hfft2",
     "ihfft2",
+    "fftshift",
+    "ifftshift",
 ]
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
@@ -521,3 +523,31 @@ def ihfft2(
     norm: NormType = None,
 ) -> TensorLikeType:
     return ihfftn(input, s=s, dim=dim, norm=norm)
+
+
+def fftshift(
+    input: TensorLikeType, dim: Optional[DimsSequenceType] = None
+) -> TensorLikeType:
+    if dim is None:
+        dims = range(input.ndim)
+    elif not isinstance(dim, Sequence):
+        dims = (dim,)
+    else:
+        dims = dim
+
+    shift = [input.shape[d] // 2 for d in dims]
+    return refs.roll(input, shift, dims)
+
+
+def ifftshift(
+    input: TensorLikeType, dim: Optional[DimsSequenceType] = None
+) -> TensorLikeType:
+    if dim is None:
+        dims = range(input.ndim)
+    elif not isinstance(dim, Sequence):
+        dims = (dim,)
+    else:
+        dims = dim
+
+    shift = [(input.shape[d] + 1) // 2 for d in dims]
+    return refs.roll(input, shift, dims)
