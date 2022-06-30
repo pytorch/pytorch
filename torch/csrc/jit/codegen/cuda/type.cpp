@@ -21,13 +21,12 @@ DataType indexModeToDtype(KernelIndexMode index_mode) {
 
 bool isFloatingPointType(DataType dtype) {
   switch (dtype) {
-    case DataType::Bool:
-      return false;
     case DataType::Double:
     case DataType::Float:
     case DataType::Half:
     case DataType::BFloat16:
       return true;
+    case DataType::Bool:
     case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
@@ -78,10 +77,9 @@ bool isIntegralType(DataType dtype) {
     case DataType::Int32:
       return true;
     case DataType::Null:
-      TORCH_CHECK(
-          false, "Null type is not a valid argument to isFloatingPoint");
+      TORCH_CHECK(false, "Null type is not a valid argument to isIntegralType");
     default:
-      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+      TORCH_CHECK(false, "Type not supported in isIntegralType");
   }
 }
 
