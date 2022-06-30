@@ -170,8 +170,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Transpose")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_reduceL2(self):
         class ReduceModule(torch.nn.Module):
@@ -189,7 +188,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL2")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_reduceL1(self):
         class NormModule(torch.nn.Module):
@@ -207,7 +206,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
 
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::ReduceL1")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice(self):
         class NarrowModule(torch.nn.Module):
@@ -226,8 +225,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Slice")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice_index_exceeds_dim(self):
         class SliceIndexExceedsDimModule(torch.nn.Module):
@@ -249,8 +247,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Slice")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_slice_negative_index(self):
         class SliceNegativeIndexModule(torch.nn.Module):
@@ -274,7 +271,6 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Slice")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
 
     def test_constant_fold_gather(self):
         class GatherModule(torch.nn.Module):
@@ -313,8 +309,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Unsqueeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_unsqueeze_multi_axies(self):
         class PReluModel(torch.nn.Module):
@@ -336,8 +331,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Unsqueeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 4)
+        self.assertEqual(len(list(graph.nodes())), 5)
 
     def test_constant_fold_squeeze_without_axes(self):
         class SqueezeModule(torch.nn.Module):
@@ -354,8 +348,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Squeeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 2)
+        self.assertEqual(len(list(graph.nodes())), 4)
 
     def test_constant_fold_squeeze_with_axes(self):
         class SqueezeAxesModule(torch.nn.Module):
@@ -373,8 +366,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Squeeze")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_concat(self):
         class ConcatModule(torch.nn.Module):
@@ -410,8 +402,7 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         for node in graph.nodes():
             self.assertNotEqual(node.kind(), "onnx::Concat")
             self.assertNotEqual(node.kind(), "onnx::Cast")
-            self.assertNotEqual(node.kind(), "onnx::Constant")
-        self.assertEqual(len(list(graph.nodes())), 1)
+        self.assertEqual(len(list(graph.nodes())), 2)
 
     def test_constant_fold_lstm(self):
         class GruNet(torch.nn.Module):
