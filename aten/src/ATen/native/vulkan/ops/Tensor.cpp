@@ -515,7 +515,10 @@ void vTensor::View::release() {
   context_->register_image_cleanup(image_);
   context_->register_buffer_cleanup(buffer_);
   if (staging_) {
-      context_->register_buffer_cleanup(staging_);
+    context_->register_buffer_cleanup(staging_);
+  }
+  if (fence_) {
+    context_->fences().return_fence(fence_);
   }
 }
 
@@ -554,7 +557,7 @@ class vTensor::View::CMD final {
       const api::VulkanImage& image,
       api::VulkanBuffer& buffer);
 
-  void submit(Fence fence);
+  void submit(api::VulkanFence& fence);
 
  private:
   const View& view_;
@@ -894,11 +897,11 @@ void vTensor::View::CMD::copy_image_to_buffer(
       params.buffer().package());
 }
 
-void vTensor::View::CMD::submit(const api::Resource::Fence fence) {
+void vTensor::View::CMD::submit(api::VulkanFence& fence) {
   view_.context_->command().pool.submit(
       view_.context_->gpu().queue,
       command_buffer_,
-      fence);
+      fence.get_submit_handle());
 }
 
 api::VulkanBuffer& vTensor::View::buffer() const {
@@ -1087,9 +1090,9 @@ api::VulkanBuffer& vTensor::View::staging(
   return staging();
 }
 
-vTensor::Fence& vTensor::View::fence(const Access::Flags access) const {
-  if (access & Access::Read) {
-    fence_ = allocate_fence(&context_->resource().pool);
+api::VulkanFence& vTensor::View::fence(const Access::Flags access) const {
+  if (!fence_ && access & Access::Read) {
+    fence_ = context_->fences().get_fence();
   }
 
   return fence_;
