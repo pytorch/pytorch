@@ -237,7 +237,7 @@ struct C10_API PyInterpreter {
   __ubsan_ignore_function__ c10::Layout layout(
       const TensorImpl* self) const {
     return (*layout_fn_)(this, self);
-  }
+}
 
   // Disarm this PyInterpreter, making all of its methods noops.
   // Because the function pointers are raw pointers (not atomics),
