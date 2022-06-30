@@ -2434,6 +2434,7 @@ c10::SymIntArrayRef concrete_sym_sizes_fn(
 
   return c10::SymIntArrayRef(start, len);
   END_HANDLE_TH_ERRORS_PYBIND
+}
 
 c10::Layout concrete_layout_fn(
     const c10::impl::PyInterpreter*,
