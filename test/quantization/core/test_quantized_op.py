@@ -469,6 +469,40 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
                                  msg="F.gelu failed ({} vs {})".format(qY, qY_hat))
 
+    """Tests the correctness of the quantized::prelu op."""
+    def test_qprelu(self):
+        shapes = ((4,), (4, 4), (4, 4, 4), (4, 4, 4, 4))
+        num_params = (0, 1)  # 0: num_parameter = num_channels
+        dtypes = (torch.quint8, torch.qint8)
+        memory_formats = (torch.channels_last, torch.contiguous_format)
+        test_cases = itertools.product(shapes, num_params, dtypes, memory_formats)
+        for shape, num_param, dtype, memory_format in test_cases:
+            if memory_format == torch.channels_last and len(shape) != 4:
+                continue
+            X, scale, zero_point, torch_type = \
+                torch.randn(*shape), 0.1, 0, dtype
+            X = X.to(memory_format=memory_format)
+            num_parameter = 1 if num_param == 1 or len(shape) == 1 else shape[1]
+            W = torch.randn(num_parameter)
+            W, w_scale, w_zero_point = \
+                torch.randn(num_parameter), 0.2, 0
+
+            qX = torch.quantize_per_tensor(X, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            dqX = qX.dequantize()
+            qW = torch.quantize_per_tensor(W, scale=w_scale, zero_point=w_zero_point,
+                                           dtype=torch_type)
+            dqW = qW.dequantize()
+
+            op = torch.nn.functional.prelu
+            qop = torch.ops.quantized.prelu
+            dqY = op(dqX, dqW)
+            qY = torch.quantize_per_tensor(dqY, scale=scale, zero_point=zero_point,
+                                           dtype=torch_type)
+            qY_hat = qop(qX, qW, scale, zero_point)
+            self.assertEqual(qY.dequantize(), qY_hat.dequantize(),
+                             msg="F.prelu failed ({} vs {})".format(qY, qY_hat))
+
     """Tests the correctness of the quantized::qlayer_norm op."""
     @skipIfNoFBGEMM
     def test_qlayer_norm(self):
@@ -2706,15 +2740,6 @@ class TestQuantizedOps(TestCase):
         dtype = np.uint8
         qtype = torch.quint8
 
-        custom_module_config = {
-            'float_to_observed_custom_module_class': {
-                torch.nn.LSTM: torch.nn.quantizable.LSTM
-            },
-            'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.LSTM: torch.nn.quantized.LSTM
-            }
-        }
-
         x = np.random.randn(seq_len, batch_size, input_size)
         scale, zero_point = _calculate_dynamic_qparams(x, dtype=dtype)
         x = torch.from_numpy(x).to(torch.float)
@@ -2748,8 +2773,7 @@ class TestQuantizedOps(TestCase):
 
                 # Prepare
                 lstm.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
-                lstm_prepared = torch.ao.quantization.prepare(
-                    lstm, prepare_custom_config_dict=custom_module_config)
+                lstm_prepared = torch.ao.quantization.prepare(lstm)
                 self.assertTrue(hasattr(lstm_prepared[0], 'layers'))
                 self.assertEqual(num_layers, len(lstm_prepared[0].layers))
                 assert type(lstm_prepared[0]) == torch.nn.quantizable.LSTM
@@ -2759,8 +2783,7 @@ class TestQuantizedOps(TestCase):
                 self.assertEqual(y_ref, y)
 
                 # Quantize
-                lstm_quantized = torch.ao.quantization.convert(
-                    lstm_prepared, convert_custom_config_dict=custom_module_config)
+                lstm_quantized = torch.ao.quantization.convert(lstm_prepared)
                 assert type(lstm_quantized[0]) == torch.nn.quantized.LSTM
                 qy = lstm_quantized(qx)
 
@@ -2820,15 +2843,6 @@ class TestQuantizedOps(TestCase):
         dtype = np.uint8
         qtype = torch.quint8
 
-        custom_module_config = {
-            'float_to_observed_custom_module_class': {
-                torch.nn.MultiheadAttention: torch.nn.quantizable.MultiheadAttention
-            },
-            'observed_to_quantized_custom_module_class': {
-                torch.nn.quantizable.MultiheadAttention: torch.nn.quantized.MultiheadAttention
-            }
-        }
-
         for kdim, vdim in ((kembed_dim, vembed_dim), (None, None)):
             fp_data = [
                 torch.randn(target_seq_length, batch_size, qembed_dim),  # Q
@@ -2868,7 +2882,7 @@ class TestQuantizedOps(TestCase):
                     else:
                         mha.qconfig = torch.ao.quantization.get_default_qconfig(qengine)
                     mha_prepared = torch.ao.quantization.prepare(
-                        mha, prepare_custom_config_dict=custom_module_config)
+                        mha)
 
                     # Calibrate
                     y = mha_prepared(*fp_data)
@@ -2878,9 +2892,7 @@ class TestQuantizedOps(TestCase):
                     self.assertEqual(y_ref[1], y[1])  # Weight
 
                     # Quantize
-                    mha_quantized = torch.ao.quantization.convert(
-                        mha_prepared,
-                        convert_custom_config_dict=custom_module_config)
+                    mha_quantized = torch.ao.quantization.convert(mha_prepared)
                     qy = mha_quantized(*q_data)
 
                     # Reference result
