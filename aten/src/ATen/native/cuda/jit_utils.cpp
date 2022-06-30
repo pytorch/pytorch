@@ -1088,31 +1088,6 @@ std::string load_code_template(const std::string& path) {
 }
 
 std::string generate_reduction_code(
-    const KernelDescriptor &desc,
-    int vt0,
-    bool contiguous,
-    bool vectorized,
-    int vec_size,
-    int max_threads_codegen) {
-  TORCH_INTERNAL_ASSERT(desc.nInputs == 1);
-  TORCH_INTERNAL_ASSERT(desc.extra_args_types.size() == 0);
-
-  return generate_reduction_code(
-      desc.nOutputs,
-      desc.f,
-      desc.name,
-      vt0,
-      typeName(desc.f_inputs_type),
-      typeName(toOpMathType(desc.f_inputs_type)),
-      typeName(desc.result_type),
-      contiguous,
-      vectorized,
-      vec_size,
-      max_threads_codegen
-    );
-}
-
-std::string generate_reduction_code(
     int nOutputs,
     const std::string& func,
     const std::string& name,
