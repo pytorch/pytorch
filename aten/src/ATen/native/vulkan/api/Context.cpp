@@ -12,19 +12,15 @@ namespace api {
 
 Context::Context(const VkInstance instance, size_t adapter_i)
     : instance_(instance),
-      adapter_i_(adapter_i),
-      device_(runtime()->get_adapter(adapter_i).device_handle()),
-      queue_(runtime()->get_adapter(adapter_i).request_queue()),
-      shader_layout_cache_(device_),
-      shader_cache_(device_),
-      pipeline_layout_cache_(device_),
-      pipeline_cache_(device_),
+      adapter_p_(runtime()->get_adapter_p(adapter_i)),
+      device_(adapter_p_->device_handle()),
+      queue_(adapter_p_->request_queue()),
       threadcontext_(gpu()) {
 }
 
 Context::~Context() {
   // Let the device know the context is done with the queue
-  runtime()->get_adapter(adapter_i_).return_queue(queue_);
+  adapter_p_->return_queue(queue_);
   // Do not call flush() since all per-thread objects will be destroyed as each thread exits
 }
 

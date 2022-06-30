@@ -234,39 +234,65 @@ std::string get_queue_family_properties_str(const VkQueueFlags flags) {
 
 } // namespace
 
-Adapter::Adapter(
-    const PhysicalDevice& physical_device, const uint32_t num_queues)
-  : mutex_{},
-    physical_device_(physical_device),
-    queues_{},
-    queue_usage_{},
-    handle_(create_logical_device(
-        physical_device_, num_queues, queues_, queue_usage_)) {
+//
+// DeviceHandle
+//
+
+DeviceHandle::DeviceHandle(const VkDevice device)
+  : handle_(device) {
 }
 
-Adapter::Adapter(Adapter&& other) noexcept
-  : mutex_{},
-    physical_device_{other.physical_device_} {
-  std::lock_guard<std::mutex> lock(other.mutex_);
-
-  queues_ = std::move(other.queues_);
-  queue_usage_ = std::move(other.queue_usage_);
-  handle_ = other.handle_;
-
+DeviceHandle::DeviceHandle(DeviceHandle&& other) noexcept
+  : handle_(other.handle_) {
   other.handle_ = VK_NULL_HANDLE;
 }
 
-Adapter::~Adapter() {
+DeviceHandle::~DeviceHandle() {
   if C10_LIKELY(VK_NULL_HANDLE == handle_) {
     return;
   }
   vkDestroyDevice(handle_, nullptr);
-  handle_ = VK_NULL_HANDLE;
+}
+
+//
+// Adapter
+//
+
+Adapter::Adapter(
+    const VkInstance instance,
+    const PhysicalDevice& physical_device,
+    const uint32_t num_queues)
+  : queue_mutex_{},
+    physical_device_(physical_device),
+    queues_{},
+    queue_usage_{},
+    instance_(instance),
+    device_(create_logical_device(
+        physical_device_, num_queues, queues_, queue_usage_)),
+    shader_layout_cache_(device_.handle_),
+    shader_cache_(device_.handle_),
+    pipeline_layout_cache_(device_.handle_),
+    compute_pipeline_cache_(device_.handle_) {
+}
+
+Adapter::Adapter(Adapter&& other) noexcept
+  : queue_mutex_{},
+    physical_device_(std::move(other.physical_device_)),
+    instance_(other.instance_),
+    device_(std::move(other.device_)),
+    shader_layout_cache_(std::move(other.shader_layout_cache_)),
+    shader_cache_(std::move(other.shader_cache_)),
+    pipeline_layout_cache_(std::move(other.pipeline_layout_cache_)),
+    compute_pipeline_cache_(std::move(other.compute_pipeline_cache_)) {
+  std::lock_guard<std::mutex> lock(other.queue_mutex_);
+
+  queues_ = std::move(other.queues_);
+  queue_usage_ = std::move(other.queue_usage_);
 }
 
 Adapter::Queue Adapter::request_queue() {
   // Lock the mutex as multiple threads can request a queue at the same time
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::lock_guard<std::mutex> lock(queue_mutex_);
 
   uint32_t min_usage = UINT32_MAX;
   uint32_t min_used_i = 0;
@@ -285,7 +311,7 @@ void Adapter::return_queue(Adapter::Queue& compute_queue) {
   for (const uint32_t i : c10::irange(queues_.size())) {
     if ((queues_[i].family_index == compute_queue.family_index) &&
         (queues_[i].queue_index == compute_queue.queue_index)) {
-      std::lock_guard<std::mutex> lock(mutex_);
+      std::lock_guard<std::mutex> lock(queue_mutex_);
       queue_usage_[i] -= 1;
       break;
     }
@@ -357,7 +383,7 @@ std::string Adapter::stringize() const {
      << get_queue_family_properties_str(queue_family_props.queueFlags) << std::endl;
   }
   ss << "  }" << std::endl;
-  ss << "  VkDevice: " << handle_ << std::endl;
+  ss << "  VkDevice: " << device_.handle_ << std::endl;
   ss << "  Compute Queues [" << std::endl;
   for (const Adapter::Queue& compute_queue : queues_) {
   ss << "    Family " << compute_queue.family_index
