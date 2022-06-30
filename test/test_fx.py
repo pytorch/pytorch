@@ -45,7 +45,6 @@ from fx.test_fx_param_shape_control_flow import TestConstParamShapeInControlFlow
 
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import AnnotationsTest  # noqa: F401
-
 if sys.version_info >= (3, 7):
     from fx.test_gradual_type import TypeCheckerTest  # noqa: F401
 from typing import Any, Callable, Dict, NamedTuple, List, Optional, Tuple, Union
