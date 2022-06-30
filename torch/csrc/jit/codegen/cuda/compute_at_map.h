@@ -201,7 +201,7 @@ class TORCH_CUDA_CU_API ComputeAtMap {
       IdMappingMode mode) const;
 
   // Should be built once and never modified again.
-  const IterDomainGraph id_graph_;
+  IterDomainGraph id_graph_;
   TrivialReductionInfo trivial_reduction_info_;
 
   // Prevent needing to recompute concrete_id's in compute at map.
