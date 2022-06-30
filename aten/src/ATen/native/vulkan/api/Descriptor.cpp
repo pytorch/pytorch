@@ -117,7 +117,7 @@ void allocate_descriptor_sets(
 Descriptor::Set::Set(
     const VkDevice device,
     VkDescriptorSet descriptor_set,
-    const Shader::Layout::Signature& shader_layout_signature)
+    ShaderLayout::Signature shader_layout_signature)
   : device_(device),
     descriptor_set_(descriptor_set),
     shader_layout_signature_(shader_layout_signature),
@@ -357,19 +357,16 @@ Descriptor::Pool::~Pool() {
 }
 
 Descriptor::Set Descriptor::Pool::allocate(
-    const Shader::Layout::Object& shader_layout) {
+    const VkDescriptorSetLayout handle,
+    const ShaderLayout::Signature& signature) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_ && descriptor_pool_,
       "This descriptor pool is in an invalid state! "
       "Potential reason: This descriptor pool is moved from.");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      shader_layout,
-      "Invalid Vulkan shader layout!");
-
-  auto iterator = set_.layouts.find(shader_layout.handle);
+  auto iterator = set_.layouts.find(handle);
   if (set_.layouts.cend() == iterator) {
-    iterator = set_.layouts.insert({shader_layout.handle, {}}).first;
+    iterator = set_.layouts.insert({handle, {}}).first;
     iterator->second.pool.reserve(Configuration::kReserve);
   }
 
@@ -383,7 +380,7 @@ Descriptor::Set Descriptor::Pool::allocate(
     allocate_descriptor_sets(
         device_,
         descriptor_pool_.get(),
-        shader_layout.handle,
+        handle,
         layout.pool.data() + layout.in_use,
         Configuration::kQuantum);
   }
@@ -391,7 +388,7 @@ Descriptor::Set Descriptor::Pool::allocate(
   return Set(
       device_,
       layout.pool[layout.in_use++],
-      shader_layout.signature);
+      signature);
 }
 
 void Descriptor::Pool::purge() {
