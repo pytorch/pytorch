@@ -3058,7 +3058,23 @@ T complete_elliptic_integral_k_forward(T x) {
 template<typename T>
 static inline C10_HOST_DEVICE
 T gamma_sign_forward(T x) {
-    return x;
+    if (std::isnan(x)) {
+        return x;
+    }
+
+    if (x > T(0.0)) {
+        return T(1.0);
+    }
+
+    if (x - std::floor(x) == T(0.0)) {
+        return T(0.0);
+    }
+
+    if (int16_t(std::floor(x)) % T(2.0)) {
+        return T(-1.0);
+    }
+
+    return T(1.0);
 } // T gamma_sign_forward(T x)
 
 template<typename T>

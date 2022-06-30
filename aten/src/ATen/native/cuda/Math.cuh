@@ -2157,7 +2157,23 @@ const auto complete_elliptic_integral_k_string = jiterator_stringify(
 const auto gamma_sign_string = jiterator_stringify(
     template<typename T>
     T gamma_sign_forward(T x) {
-        return x;
+        if (isnan(x)) {
+            return x;
+        }
+
+        if (x > T(0.0)) {
+            return T(1.0);
+        }
+
+        if (x - floor(x) == T(0.0)) {
+            return T(0.0);
+        }
+
+        if (int16_t(floor(x)) % T(2.0)) {
+            return T(-1.0);
+        }
+
+        return T(1.0);
     } // T gamma_sign_forward(T x)
 ); // gamma_sign_string
 
