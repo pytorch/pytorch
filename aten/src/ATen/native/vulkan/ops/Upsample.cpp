@@ -42,7 +42,7 @@ Tensor upsample_nearest2d(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), "aten::upsample_nearest2d");
 
-    if C10_LIKELY(v_input.has_image()) {
+    if C10_LIKELY(true) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
