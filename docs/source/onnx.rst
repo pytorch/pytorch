@@ -586,8 +586,7 @@ Q: Does ONNX support implicit scalar datatype casting?
             # return y + torch.tensor([3], dtype=torch.float32)
 
     x = torch.tensor([1.0], dtype=torch.float32)
-    torch.onnx.export(ImplicitCastType(), x, "implicit_cast.onnx",
-                      example_outputs=ImplicitCastType()(x))
+    torch.onnx.export(ImplicitCastType(), x, "implicit_cast.onnx")
 
   We are trying to improve the datatype propagation in the exporter such that implicit casting
   is supported in more cases.
