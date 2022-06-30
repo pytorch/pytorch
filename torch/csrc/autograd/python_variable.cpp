@@ -2113,27 +2113,15 @@ py::object torchDispatchFromTensorImpl(
 
   py::dict kwargs;
 
-  auto x = handle_torch_function_no_python_arg_parser(
-      overloaded_args,
-      args.ptr(),
-      kwargs.ptr(),
-      func_name,
-      torch_api_function,
-      module_name,
-      TorchFunctionName::TorchDispatch);
-  
-  
-  return py::reinterpret_steal<py::object>(x);
-
-  // return py::reinterpret_steal<py::object>(
-  //     handle_torch_function_no_python_arg_parser(
-  //         overloaded_args,
-  //         args.ptr(),
-  //         kwargs.ptr(),
-  //         func_name,
-  //         torch_api_function,
-  //         module_name,
-  //         TorchFunctionName::TorchDispatch));
+  return py::reinterpret_steal<py::object>(
+      handle_torch_function_no_python_arg_parser(
+          overloaded_args,
+          args.ptr(),
+          kwargs.ptr(),
+          func_name,
+          torch_api_function,
+          module_name,
+          TorchFunctionName::TorchDispatch));
 }
 
 // NOTE [dispatch_fn's type argument]
