@@ -14,7 +14,6 @@ on:
     {%- endif %}
     branches:
       - !{{ branches }}
-      - zainr/*
     {%- if branches == "nightly" %}
     tags:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
