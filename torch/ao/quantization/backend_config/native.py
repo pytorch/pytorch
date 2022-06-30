@@ -10,14 +10,11 @@ from ._common_operator_config_utils import (
     _get_share_qparams_op_configs,
 )
 from .observation_type import ObservationType
-from ..observer import (
-    default_fixed_qparams_range_0to1_observer,
-    default_fixed_qparams_range_neg1to1_observer,
-)
 from ..fake_quantize import FixedQParamsFakeQuantize
 from ..fuser_method_mappings import (
     reverse_sequential_wrapper2,
 )
+from ..qconfig_mapping import _FIXED_QPARAMS_OP_TO_OBSERVER
 
 # ===================
 # |  DTYPE CONFIGS  |
@@ -109,6 +106,7 @@ _DEFAULT_OP_INT8_CONFIGS = [
         torch.nn.InstanceNorm3d,
         torch.nn.LayerNorm,
         torch.nn.Dropout,
+        torch.nn.PReLU,
         torch.nn.functional.elu,
         torch.nn.functional.hardswish,
         torch.nn.functional.instance_norm,
@@ -119,21 +117,7 @@ _DEFAULT_OP_INT8_CONFIGS = [
 
 def _get_fixed_qparams_op_configs(dtype_configs):
     fixed_qparams_op_configs = []
-    for fixed_qparam_op, output_observer in [
-            (torch.nn.Hardsigmoid, default_fixed_qparams_range_0to1_observer),
-            (torch.nn.functional.hardsigmoid, default_fixed_qparams_range_0to1_observer),
-            ("hardsigmoid", default_fixed_qparams_range_0to1_observer),
-            ("hardsigmoid_", default_fixed_qparams_range_0to1_observer),
-            (torch.nn.Sigmoid, default_fixed_qparams_range_0to1_observer),
-            (torch.sigmoid, default_fixed_qparams_range_0to1_observer),
-            ("sigmoid", default_fixed_qparams_range_0to1_observer),
-            ("sigmoid_", default_fixed_qparams_range_0to1_observer),
-            (torch.nn.Tanh, default_fixed_qparams_range_neg1to1_observer),
-            (torch.tanh, default_fixed_qparams_range_neg1to1_observer),
-            ("tanh", default_fixed_qparams_range_neg1to1_observer),
-            ("tanh_", default_fixed_qparams_range_neg1to1_observer),
-            (torch.nn.Softmax, default_fixed_qparams_range_0to1_observer),
-    ]:
+    for fixed_qparam_op, output_observer in _FIXED_QPARAMS_OP_TO_OBSERVER.items():
         fixed_qparams_op_configs.append({
             "pattern": fixed_qparam_op,
             "observation_type": ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT,

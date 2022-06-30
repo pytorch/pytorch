@@ -419,6 +419,9 @@ def _elementwise_meta(
         elif isinstance(arg, Number):
             scalar_type = type(arg)
 
+    if dtype is None and scalar_type is not None:
+        dtype = utils.type_to_dtype(scalar_type)
+
     # Acquires the device (if it exists) or number
     device = None
     number = None
@@ -600,11 +603,18 @@ bitwise_not = _make_elementwise_unary_prim(
 )
 
 
-def _cbrt_aten(a: torch.Tensor):
-    if a.is_complex():
-        return pow(a, (1 / 3))
-    else:
-        return torch.where(a >= 0, pow(a, (1 / 3)), -pow(-a, 1 / 3))
+def _cbrt_aten(a: torch.Tensor) -> Tensor:
+    utils.check(
+        not a.is_complex(),
+        lambda: "cbrt: Complex inputs not supported. Consider calling torch.pow(a, 1.0/3.0)",
+    )
+    # Returns the real cubic root of the number.
+    # Note that if a < 0, pow(a, (1. / 3.)) returns th complex number
+    # exp(1/3 * log(a)) = exp(1/3 * (log(abs(a)) + pi*i)) = cbrt(abs(a)) * e^{pi/3*i}
+    # which is a complex number.
+    # For more info see the section Note in
+    # https://en.cppreference.com/w/cpp/numeric/math/cbrt
+    return torch.where(a >= 0, pow(a, (1.0 / 3.0)), -pow(-a, 1.0 / 3.0))
 
 
 cbrt = _make_elementwise_unary_prim(
