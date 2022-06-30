@@ -274,6 +274,8 @@ Tensor context_run(
             },
         };
 
+        api::UniformParamsBuffer params(context, block);
+
         context->dispatch(
             command_buffer,
             {
@@ -313,7 +315,7 @@ Tensor context_run(
                 vTensor::Stage::Compute),
             // Object lifetime is managed by the resource pool.
             // It is OK not to keep track of the handle.
-            context->resource().pool.uniform(block).object);
+            params.buffer().package());
       }
       else {
         const struct {
@@ -323,6 +325,8 @@ Tensor context_run(
             v_output.extents(),
             safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
         };
+
+        api::UniformParamsBuffer params(context, block_no_bias);
 
         context->dispatch(
             command_buffer,
@@ -357,7 +361,7 @@ Tensor context_run(
                 vTensor::Stage::Compute),
             // Object lifetime is managed by the resource pool.
             // It is OK not to keep track of the handle.
-            context->resource().pool.uniform(block_no_bias).object);
+            params.buffer().package());
       }
     }
     else {
