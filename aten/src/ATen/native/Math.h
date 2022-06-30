@@ -3224,7 +3224,7 @@ T hyperbolic_integral_chi_forward(T x) {
         if (x < T(18.0)) {
             a = (T(576.0) / x - T(52.0)) / T(10.0);
 
-            T chebyshev_0 = C1;
+            T *coefficients = C1;
 
             T chebyshev_0 = *coefficients++;
             T chebyshev_1 = T(0.0);
