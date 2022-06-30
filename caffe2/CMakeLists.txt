@@ -605,6 +605,13 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
+  if(${USE_ITT})
+    list(APPEND TORCH_SRCS
+      ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
+      ${TORCH_SRC_DIR}/csrc/profiler/itt.cpp
+    )
+  endif()
+
   if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
@@ -777,12 +784,6 @@ endif()
 
 if(USE_MPS)
   list(APPEND Caffe2_CPU_SRCS ${Caffe2_MPS_SRCS})
-endif()
-
-if(USE_MPS OR USE_METAL)
-  if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.16")
-    enable_language(OBJCXX)
-  endif()
 endif()
 
 # NOTE [ Linking AVX and non-AVX files ]
