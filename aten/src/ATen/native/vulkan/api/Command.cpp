@@ -196,27 +196,19 @@ void Command::Buffer::bind(const Descriptor::Set& set) {
 }
 
 void Command::Buffer::copy(
-    const Resource::Buffer::Object source,
-    const Resource::Buffer::Object destination) {
+  const api::VulkanBuffer::Package source,
+  const api::VulkanBuffer::Package destination) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      source,
-      "Invalid Vulkan source buffer!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      destination,
-      "Invalid Vulkan destination buffer!");
 
   barrier();
 
   const VkBufferCopy buffer_copy{
     0u,
     0u,
-    std::min(source.range, destination.range),
+    std::min(source.buffer_range, destination.buffer_range),
   };
 
   vkCmdCopyBuffer(
