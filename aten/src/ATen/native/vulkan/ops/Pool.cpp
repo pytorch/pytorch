@@ -80,7 +80,7 @@ Tensor adaptive_avg_pool2d(
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(
@@ -233,7 +233,7 @@ Tensor pool2d(
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(

@@ -77,22 +77,12 @@ class vTensor final {
       api::Context* context,
       IntArrayRef sizes,
       const TensorOptions& options);
-  vTensor(
-      api::Context* context,
-      api::Resource::Pool* pool,
-      IntArrayRef sizes,
-      const TensorOptions& options);
 
   /*
     Types
   */
 
   typedef api::PipelineStage Stage;
-  typedef api::Resource::Memory::Access Access;
-  typedef api::Resource::Buffer Buffer;
-  typedef api::Resource::Fence Fence;
-  typedef api::Resource::Image Image;
-  typedef api::Resource::Memory Memory;
 
   /*
     Host access
@@ -103,7 +93,8 @@ class vTensor final {
     view_->wait_for_fence();
   }
 
-  api::VulkanBuffer& host_buffer(api::Command::Buffer&, const Access::Flags) &;
+  api::VulkanBuffer& host_buffer(
+      api::Command::Buffer&, const api::MemoryAccessFlags) &;
 
   /*
     Device access - these functions will be expensive if they trigger a buffer
@@ -122,11 +113,14 @@ class vTensor final {
   */
 
   api::VulkanBuffer::Package buffer(api::Command::Buffer&, Stage::Flags) const &;
-  api::VulkanBuffer::Package buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
+  api::VulkanBuffer::Package buffer(
+      api::Command::Buffer&, Stage::Flags, api::MemoryAccessFlags) &;
 
   bool has_image() const;
+
   api::VulkanImage::Package image(api::Command::Buffer&, Stage::Flags) const &;
-  api::VulkanImage::Package image(api::Command::Buffer&, Stage::Flags, Access::Flags) &;
+  api::VulkanImage::Package image(
+      api::Command::Buffer&, Stage::Flags, api::MemoryAccessFlags) &;
 
   /*
     Metadata
@@ -143,11 +137,15 @@ class vTensor final {
     Device
   */
 
-  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags) const && = delete;
-  Buffer::Object buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
+  api::VulkanBuffer::Package buffer(
+      api::Command::Buffer&, Stage::Flags) const && = delete;
+  api::VulkanBuffer::Package buffer(
+      api::Command::Buffer&, Stage::Flags, api::MemoryAccessFlags) && = delete;
 
-  Image::Object image(api::Command::Buffer&, Stage::Flags) const && = delete;
-  Image::Object image(api::Command::Buffer&, Stage::Flags, Access::Flags) && = delete;
+  api::VulkanImage::Package image(
+      api::Command::Buffer&, Stage::Flags) const && = delete;
+  api::VulkanImage::Package image(
+      api::Command::Buffer&, Stage::Flags, api::MemoryAccessFlags) && = delete;
 
  private:
   class View final {
@@ -155,7 +153,6 @@ class vTensor final {
     View();
     View(
         api::Context* context,
-        api::Resource::Pool* pool,
         IntArrayRef sizes,
         const TensorOptions& options);
     View(const View&) = delete;
@@ -170,20 +167,23 @@ class vTensor final {
       Buffer
     */
 
-    api::VulkanBuffer& buffer(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
+    api::VulkanBuffer& buffer(
+        api::Command::Buffer&, Stage::Flags, api::MemoryAccessFlags) const;
 
     /*
       Image
     */
 
     bool has_image() const;
-    api::VulkanImage& image(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
+    api::VulkanImage& image(
+        api::Command::Buffer&, Stage::Flags, api::MemoryAccessFlags) const;
 
     /*
       Host
     */
 
-    api::VulkanBuffer& staging(api::Command::Buffer&, Stage::Flags, Access::Flags) const;
+    api::VulkanBuffer& staging(
+        api::Command::Buffer&, Stage::Flags, api::MemoryAccessFlags) const;
 
     void wait_for_fence() const;
 
@@ -263,12 +263,12 @@ class vTensor final {
    private:
     // Accessors / Lazy Allocation
     api::VulkanBuffer& buffer() const;
-    api::VulkanBuffer& buffer(CMD&, Stage::Flags, Access::Flags) const;
+    api::VulkanBuffer& buffer(CMD&, Stage::Flags, api::MemoryAccessFlags) const;
     api::VulkanImage& image() const;
-    api::VulkanImage& image(CMD&, Stage::Flags, Access::Flags) const;
+    api::VulkanImage& image(CMD&, Stage::Flags, api::MemoryAccessFlags) const;
     api::VulkanBuffer& staging() const;
-    api::VulkanBuffer& staging(CMD&, Stage::Flags, Access::Flags) const;
-    api::VulkanFence& fence(Access::Flags) const;
+    api::VulkanBuffer& staging(CMD&, Stage::Flags, api::MemoryAccessFlags) const;
+    api::VulkanFence& fence(api::MemoryAccessFlags) const;
 
     // Validation
     void verify() const;
