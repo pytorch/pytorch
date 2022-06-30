@@ -1,586 +1,1791 @@
+load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "APPLETVOS", "CXX", "IOS", "MACOSX", "WINDOWS")
+load(
+    ":xnnpack_src_defs.bzl",
+    "HOT_SRCS",
+    "JIT_SRCS",
+    "LOGGING_SRCS",
+    "OPERATOR_SRCS",
+    "SUBGRAPH_SRCS",
+    "TABLE_SRCS",
+)
+load(
+    ":xnnpack_wrapper_defs.bzl",
+    "AARCH32_ASM_MICROKERNEL_SRCS",
+    "AARCH64_ASM_MICROKERNEL_SRCS",
+    "PROD_AARCH64_NEONFP16ARITH_MICROKERNEL_SRCS",
+    "PROD_AARCH64_NEON_MICROKERNEL_SRCS",
+    "PROD_AVX2_MICROKERNEL_SRCS",
+    "PROD_AVX512F_MICROKERNEL_SRCS",
+    "PROD_AVX512SKX_MICROKERNEL_SRCS",
+    "PROD_AVX_MICROKERNEL_SRCS",
+    "PROD_F16C_MICROKERNEL_SRCS",
+    "PROD_FMA3_MICROKERNEL_SRCS",
+    "PROD_NEONDOT_MICROKERNEL_SRCS",
+    "PROD_NEONFMA_MICROKERNEL_SRCS",
+    "PROD_NEONFP16_MICROKERNEL_SRCS",
+    "PROD_NEONV8_MICROKERNEL_SRCS",
+    "PROD_NEON_MICROKERNEL_SRCS",
+    "PROD_SCALAR_AARCH32_MICROKERNEL_SRCS",
+    "PROD_SCALAR_PORTABLE_MICROKERNEL_SRCS",
+    "PROD_SSE2_MICROKERNEL_SRCS",
+    "PROD_SSE41_MICROKERNEL_SRCS",
+    "PROD_SSE_MICROKERNEL_SRCS",
+    "PROD_SSSE3_MICROKERNEL_SRCS",
+    "PROD_XOP_MICROKERNEL_SRCS",
+)
 
-def define_xnnpack():
-    cxx_library(
-        name = "XNNPACK",
-        srcs = ["XNNPACK/src/allocator.c", "XNNPACK/src/init.c", "XNNPACK/src/memory-planner.c", "XNNPACK/src/operator-delete.c", "XNNPACK/src/runtime.c", "XNNPACK/src/subgraph.c", "XNNPACK/src/tensor.c", "XNNPACK/src/datatype-strings.c", "XNNPACK/src/operator-strings.c", "XNNPACK/src/subgraph-strings.c"],
-        deps = [":operators", ":subgraph", ":tables", ":ukernels_scalar", "//third_party:cpuinfo", "//third_party:pthreadpool", "//third_party:pthreadpool_header", ":arm_lib", ":x86_and_x86_64_lib"],
-        exported_deps = [],
-        compiler_flags = ["-w"],
-        preferred_linkage = "static",
-        exported_headers = {"xnnpack.h": "XNNPACK/include/xnnpack.h"},
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0", "-DXNN_NO_Q8_OPERATORS", "-DXNN_NO_F16_OPERATORS", "-DXNN_NO_NCHW_OPERATORS", "-DXNN_NO_QU8_OPERATORS", "-DXNN_NO_S8_OPERATORS", "-DXNN_NO_U8_OPERATORS", "-DXNN_NO_VCVT_OPERATORS", "-DXNN_NO_X32_OPERATORS", "-DXNN_NO_X8_OPERATORS", "-DXNN_NO_XX_OPERATORS"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
+# This defines XNNPACK targets for both fbsource BUCK and OSS BUCK
+# Note that the file path is relative to the BUCK file that called from, not to this bzl file.
+# So for fbsource build it points to xplat/third-party/XNNPACK/XNNPACK,
+# and for OSS it points to pytorch/third_party/XNNPACK
+def define_xnnpack(third_party, labels = [], XNNPACK_WINDOWS_AVX512F_ENABLED = False):
+    WINDOWS_FLAGS = [
+        "/D__x86_64__",
+        "/EHsc",
+        "/wd4090",  # 'function': different 'const' qualifiers
+        "/wd4146",  # unary minus operator applied to unsigned type, result still unsigned
+    ] + ([
+        "/D__AVX512F__",  # needed to avoid linkage errors
+        "-mavx2",
+        "/D__builtin_clz=__lzcnt",  # Intrinsics are spelled differently in MSVC
+        "/Drestrict=",  # MSVC doesn't understand [restrict XNN_NUM_ELEMENTS(N)] syntax
+    ] if XNNPACK_WINDOWS_AVX512F_ENABLED else [])
 
-    cxx_library(
-        name = "ukernels_scalar",
-        srcs = ["XNNPACK/wrappers/params-init.c", "XNNPACK/wrappers/u8-lut32norm/scalar.c", "XNNPACK/wrappers/xx-copy/memcpy.c", "XNNPACK/wrappers/x8-lut/gen/lut-scalar-x4.c", "XNNPACK/wrappers/x32-depthtospace2d-chw2hwc/scalar.c"],
-        deps = [":interface", "//third_party:FP16", "//third_party:FXdiv"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
+    WINDOWS_CLANG_COMPILER_FLAGS = [
+        "-Wno-error",
+        "-Wno-error=undef",
+        "-Wno-error=incompatible-pointer-types",
+        "-Wno-error=incompatible-pointer-types-discards-qualifiers",
+    ]
 
-    cxx_library(
-        name = "operators",
-        srcs = ["XNNPACK/src/operators/argmax-pooling-nhwc.c", "XNNPACK/src/operators/average-pooling-nhwc.c", "XNNPACK/src/operators/binary-elementwise-nd.c", "XNNPACK/src/operators/channel-shuffle-nc.c", "XNNPACK/src/operators/constant-pad-nd.c", "XNNPACK/src/operators/convolution-nchw.c", "XNNPACK/src/operators/convolution-nhwc.c", "XNNPACK/src/operators/deconvolution-nhwc.c", "XNNPACK/src/operators/depth-to-space-nchw2nhwc.c", "XNNPACK/src/operators/depth-to-space-nhwc.c", "XNNPACK/src/operators/fully-connected-nc.c", "XNNPACK/src/operators/global-average-pooling-ncw.c", "XNNPACK/src/operators/global-average-pooling-nwc.c", "XNNPACK/src/operators/lut-elementwise-nc.c", "XNNPACK/src/operators/max-pooling-nhwc.c", "XNNPACK/src/operators/prelu-nc.c", "XNNPACK/src/operators/resize-bilinear-nchw.c", "XNNPACK/src/operators/resize-bilinear-nhwc.c", "XNNPACK/src/operators/softmax-nc.c", "XNNPACK/src/operators/unary-elementwise-nc.c", "XNNPACK/src/operators/unpooling-nhwc.c", "XNNPACK/src/indirection.c", "XNNPACK/src/operator-run.c", "XNNPACK/src/packing.c"],
-        deps = [":interface", "//third_party:cpuinfo", "//third_party:FP16", "//third_party:FXdiv", "//third_party:clog"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-Os"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "arm_lib",
-        srcs = [],
-        deps = [":jit_memory", ":ukernels_asm_aarch32", ":ukernels_asm_aarch64", ":ukernels_neon", ":ukernels_neon_aarch64", ":ukernels_neon_dot", ":ukernels_neon_fma", ":ukernels_neon_fp16", ":ukernels_neon_fp16arith_aarch64", ":ukernels_neon_v8", ":ukernels_scalar_aarch32"],
-        exported_deps = [],
-        compiler_flags = ["-w"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "third-party/XNNPACK",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = [],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "x86_and_x86_64_lib",
-        srcs = [],
-        deps = [":ukernels_avx", ":ukernels_avx2", ":ukernels_avx512", ":ukernels_avx512skx", ":ukernels_f16c", ":ukernels_fma3", ":ukernels_sse", ":ukernels_sse2", ":ukernels_sse41", ":ukernels_ssse3", ":ukernels_xop"],
-        exported_deps = [],
-        compiler_flags = ["-w"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "third-party/XNNPACK",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = [],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "tables",
-        srcs = ["XNNPACK/src/tables/exp2-k-over-64.c", "XNNPACK/src/tables/exp2-k-over-2048.c", "XNNPACK/src/tables/exp2minus-k-over-4.c", "XNNPACK/src/tables/exp2minus-k-over-8.c", "XNNPACK/src/tables/exp2minus-k-over-16.c", "XNNPACK/src/tables/exp2minus-k-over-64.c", "XNNPACK/src/tables/exp2minus-k-over-2048.c"],
-        deps = [":interface", "//third_party:FP16", "//third_party:FXdiv", "//third_party:clog"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "subgraph",
-        srcs = ["XNNPACK/src/subgraph/abs.c", "XNNPACK/src/subgraph/add2.c", "XNNPACK/src/subgraph/argmax-pooling-2d.c", "XNNPACK/src/subgraph/average-pooling-2d.c", "XNNPACK/src/subgraph/bankers-rounding.c", "XNNPACK/src/subgraph/ceiling.c", "XNNPACK/src/subgraph/clamp.c", "XNNPACK/src/subgraph/convert.c", "XNNPACK/src/subgraph/convolution-2d.c", "XNNPACK/src/subgraph/deconvolution-2d.c", "XNNPACK/src/subgraph/depth-to-space.c", "XNNPACK/src/subgraph/depthwise-convolution-2d.c", "XNNPACK/src/subgraph/divide.c", "XNNPACK/src/subgraph/elu.c", "XNNPACK/src/subgraph/floor.c", "XNNPACK/src/subgraph/fully-connected.c", "XNNPACK/src/subgraph/global-average-pooling-2d.c", "XNNPACK/src/subgraph/hardswish.c", "XNNPACK/src/subgraph/leaky-relu.c", "XNNPACK/src/subgraph/max-pooling-2d.c", "XNNPACK/src/subgraph/maximum2.c", "XNNPACK/src/subgraph/minimum2.c", "XNNPACK/src/subgraph/multiply2.c", "XNNPACK/src/subgraph/negate.c", "XNNPACK/src/subgraph/prelu.c", "XNNPACK/src/subgraph/sigmoid.c", "XNNPACK/src/subgraph/softmax.c", "XNNPACK/src/subgraph/square-root.c", "XNNPACK/src/subgraph/square.c", "XNNPACK/src/subgraph/squared-difference.c", "XNNPACK/src/subgraph/static-constant-pad.c", "XNNPACK/src/subgraph/static-reshape.c", "XNNPACK/src/subgraph/static-resize-bilinear-2d.c", "XNNPACK/src/subgraph/subtract.c", "XNNPACK/src/subgraph/unpooling-2d.c"],
-        deps = [":interface", "//third_party:FP16", "//third_party:FXdiv", "//third_party:clog"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_avx512",
-        srcs = [],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2", "-mavx512f"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["x86", ["-mavx512f"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f32-dwconv/gen/up16x3-minmax-avx512f.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x4-minmax-avx512f.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x9-minmax-avx512f.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x25-minmax-avx512f.c", "XNNPACK/wrappers/f32-gemm/gen/1x16-minmax-avx512f-broadcast.c", "XNNPACK/wrappers/f32-gemm/gen/7x16-minmax-avx512f-broadcast.c", "XNNPACK/wrappers/f32-igemm/gen/1x16-minmax-avx512f-broadcast.c", "XNNPACK/wrappers/f32-igemm/gen/7x16-minmax-avx512f-broadcast.c", "XNNPACK/wrappers/f32-prelu/gen/avx512f-2x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vadd-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vaddc-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vdiv-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vdivc-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vmaxc-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vmin-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vminc-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vmul-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vmulc-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vrdivc-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vrsubc-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiff-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiffc-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vsub-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vsubc-minmax-avx512f-x32.c", "XNNPACK/wrappers/f32-vclamp/gen/vclamp-avx512f-x16.c", "XNNPACK/wrappers/f32-velu/gen/velu-avx512f-rr1-lut16-p3-perm-x64.c", "XNNPACK/wrappers/f32-vhswish/gen/vhswish-avx512f-x16.c", "XNNPACK/wrappers/f32-vlrelu/gen/vlrelu-avx512f-x16.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndd-avx512f-x16.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndne-avx512f-x16.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndu-avx512f-x16.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndz-avx512f-x16.c", "XNNPACK/wrappers/f32-vsigmoid/gen/vsigmoid-avx512f-rr2-lut32-p2-perm2-scalef-div-x64.c", "XNNPACK/wrappers/f32-vunary/gen/vabs-avx512f-x16.c", "XNNPACK/wrappers/f32-vunary/gen/vneg-avx512f-x16.c", "XNNPACK/wrappers/f32-vunary/gen/vsqr-avx512f-x16.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_neon_fp16arith_aarch64",
-        srcs = ["XNNPACK/wrappers/f16-dwconv/gen/up8x25-minmax-neonfp16arith-acc2.c", "XNNPACK/wrappers/f16-dwconv/gen/up16x3-minmax-neonfp16arith.c", "XNNPACK/wrappers/f16-dwconv/gen/up16x4-minmax-neonfp16arith.c", "XNNPACK/wrappers/f16-dwconv/gen/up16x9-minmax-neonfp16arith.c", "XNNPACK/wrappers/f16-gavgpool/gen/7p7x-minmax-neonfp16arith-c8.c", "XNNPACK/wrappers/f16-gavgpool/gen/7x-minmax-neonfp16arith-c8.c", "XNNPACK/wrappers/f16-gemm/gen/1x16-minmax-neonfp16arith-ld64.c", "XNNPACK/wrappers/f16-gemm/gen/6x16-minmax-neonfp16arith-ld64.c", "XNNPACK/wrappers/f16-ibilinear/gen/neonfp16arith-c8.c", "XNNPACK/wrappers/f16-igemm/gen/1x16-minmax-neonfp16arith-ld64.c", "XNNPACK/wrappers/f16-igemm/gen/6x16-minmax-neonfp16arith-ld64.c", "XNNPACK/wrappers/f16-maxpool/9p8x-minmax-neonfp16arith-c8.c", "XNNPACK/wrappers/f16-prelu/gen/neonfp16arith-2x16.c", "XNNPACK/wrappers/f16-vbinary/gen/vadd-minmax-neonfp16arith-x16.c", "XNNPACK/wrappers/f16-vbinary/gen/vaddc-minmax-neonfp16arith-x16.c", "XNNPACK/wrappers/f16-vbinary/gen/vmul-minmax-neonfp16arith-x16.c", "XNNPACK/wrappers/f16-vbinary/gen/vmulc-minmax-neonfp16arith-x16.c", "XNNPACK/wrappers/f16-vclamp/gen/vclamp-neonfp16arith-x16.c", "XNNPACK/wrappers/f16-vhswish/gen/vhswish-neonfp16arith-x16.c", "XNNPACK/wrappers/f16-vlrelu/gen/vlrelu-neonfp16arith-x16.c", "XNNPACK/wrappers/f16-vmulcaddc/gen/c8-minmax-neonfp16arith-2x.c"],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["(aarch64|arm64)", ["-march=armv8.2-a+fp16"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_avx",
-        srcs = [],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2", "-mavx"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["x86", ["-mavx"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f16-f32-vcvt/gen/vcvt-avx-int16-x16.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x25-minmax-avx.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x3-minmax-avx.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x4-minmax-avx.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x9-minmax-avx.c", "XNNPACK/wrappers/f32-f16-vcvt/gen/vcvt-avx-x24.c", "XNNPACK/wrappers/f32-gemm/gen/1x16-minmax-avx-broadcast.c", "XNNPACK/wrappers/f32-gemm/gen/5x16-minmax-avx-broadcast.c", "XNNPACK/wrappers/f32-igemm/gen/1x16-minmax-avx-broadcast.c", "XNNPACK/wrappers/f32-igemm/gen/5x16-minmax-avx-broadcast.c", "XNNPACK/wrappers/f32-prelu/gen/avx-2x16.c", "XNNPACK/wrappers/f32-qs8-vcvt/gen/vcvt-avx-x32.c", "XNNPACK/wrappers/f32-qu8-vcvt/gen/vcvt-avx-x32.c", "XNNPACK/wrappers/f32-vbinary/gen/vadd-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vaddc-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vdiv-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vdivc-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vmaxc-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vmin-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vminc-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vmul-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vmulc-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vrdivc-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vrsubc-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiff-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiffc-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vsub-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vbinary/gen/vsubc-minmax-avx-x16.c", "XNNPACK/wrappers/f32-vclamp/gen/vclamp-avx-x16.c", "XNNPACK/wrappers/f32-velu/gen/velu-avx-rr2-lut4-p4-perm-x32.c", "XNNPACK/wrappers/f32-vhswish/gen/vhswish-avx-x16.c", "XNNPACK/wrappers/f32-vlrelu/gen/vlrelu-avx-x16.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndd-avx-x16.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndne-avx-x16.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndu-avx-x16.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndz-avx-x16.c", "XNNPACK/wrappers/f32-vsigmoid/gen/vsigmoid-avx-rr2-p5-nr2-x40.c", "XNNPACK/wrappers/f32-vsqrt/gen/avx-sqrt-x8.c", "XNNPACK/wrappers/f32-vunary/gen/vabs-avx-x16.c", "XNNPACK/wrappers/f32-vunary/gen/vneg-avx-x16.c", "XNNPACK/wrappers/f32-vunary/gen/vsqr-avx-x16.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x9-minmax-fp32-avx-mul16-add16.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x25-minmax-fp32-avx-mul16-add16.c", "XNNPACK/wrappers/qc8-gemm/gen/1x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qc8-gemm/gen/2x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qc8-igemm/gen/1x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qc8-igemm/gen/2x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qs8-dwconv/gen/up16x9-minmax-fp32-avx-mul16-add16.c", "XNNPACK/wrappers/qs8-dwconv/gen/up16x25-minmax-fp32-avx-mul16-add16.c", "XNNPACK/wrappers/qs8-f32-vcvt/gen/vcvt-avx-x32.c", "XNNPACK/wrappers/qs8-gemm/gen/1x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qs8-gemm/gen/2x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qs8-igemm/gen/1x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qs8-igemm/gen/2x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-avx-mul32-ld32-x8.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-avx-mul32-ld32-x8.c", "XNNPACK/wrappers/qs8-vmul/gen/minmax-fp32-avx-mul16-ld64-x16.c", "XNNPACK/wrappers/qs8-vmulc/gen/minmax-fp32-avx-mul16-ld64-x16.c", "XNNPACK/wrappers/qu8-dwconv/gen/up16x9-minmax-fp32-avx-mul16.c", "XNNPACK/wrappers/qu8-dwconv/gen/up16x25-minmax-fp32-avx-mul16.c", "XNNPACK/wrappers/qu8-f32-vcvt/gen/vcvt-avx-x32.c", "XNNPACK/wrappers/qu8-gemm/gen/1x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qu8-gemm/gen/2x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qu8-igemm/gen/1x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qu8-igemm/gen/2x4c8-minmax-fp32-avx-ld128.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-avx-mul32-ld32-x8.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-avx-mul32-ld32-x8.c", "XNNPACK/wrappers/qu8-vmul/gen/minmax-fp32-avx-mul16-ld64-x16.c", "XNNPACK/wrappers/qu8-vmulc/gen/minmax-fp32-avx-mul16-ld64-x16.c", "XNNPACK/wrappers/x8-lut/gen/lut-avx-x64.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_sse41",
-        srcs = [],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["x86", ["-msse4.1"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f16-f32-vcvt/gen/vcvt-sse41-int16-x16.c", "XNNPACK/wrappers/f32-f16-vcvt/gen/vcvt-sse41-x8.c", "XNNPACK/wrappers/f32-prelu/gen/sse41-2x8.c", "XNNPACK/wrappers/f32-qs8-vcvt/gen/vcvt-sse41-x32.c", "XNNPACK/wrappers/f32-vlrelu/gen/vlrelu-sse41-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndd-sse41-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndne-sse41-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndu-sse41-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndz-sse41-x8.c", "XNNPACK/wrappers/f32-vsigmoid/gen/vsigmoid-sse41-rr2-lut64-p2-div-x8.c", "XNNPACK/wrappers/qc8-dwconv/gen/up8x9-minmax-fp32-sse41-mul16.c", "XNNPACK/wrappers/qc8-dwconv/gen/up8x25-minmax-fp32-sse41-mul16.c", "XNNPACK/wrappers/qc8-gemm/gen/1x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qc8-gemm/gen/3x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qc8-igemm/gen/1x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qc8-igemm/gen/3x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qs8-dwconv/gen/up8x9-minmax-fp32-sse41-mul16-add16.c", "XNNPACK/wrappers/qs8-dwconv/gen/up8x25-minmax-fp32-sse41-mul16-add16.c", "XNNPACK/wrappers/qs8-f32-vcvt/gen/vcvt-sse41-x16.c", "XNNPACK/wrappers/qs8-gavgpool/gen/7p7x-minmax-fp32-sse41-c8.c", "XNNPACK/wrappers/qs8-gavgpool/gen/7x-minmax-fp32-sse41-c8.c", "XNNPACK/wrappers/qs8-gemm/gen/1x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qs8-gemm/gen/3x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qs8-igemm/gen/1x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qs8-igemm/gen/3x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-sse41-mul16-ld64-x8.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-sse41-mul16-ld64-x8.c", "XNNPACK/wrappers/qs8-vmul/gen/minmax-fp32-sse41-mul16-ld64-x16.c", "XNNPACK/wrappers/qs8-vmulc/gen/minmax-fp32-sse41-mul16-ld64-x16.c", "XNNPACK/wrappers/qu8-dwconv/gen/up8x9-minmax-fp32-sse41-mul16.c", "XNNPACK/wrappers/qu8-dwconv/gen/up8x25-minmax-fp32-sse41-mul16.c", "XNNPACK/wrappers/qu8-f32-vcvt/gen/vcvt-sse41-x16.c", "XNNPACK/wrappers/qu8-gavgpool/gen/7p7x-minmax-fp32-sse41-c8.c", "XNNPACK/wrappers/qu8-gavgpool/gen/7x-minmax-fp32-sse41-c8.c", "XNNPACK/wrappers/qu8-gemm/gen/1x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qu8-gemm/gen/3x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qu8-igemm/gen/1x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qu8-igemm/gen/3x4c8-minmax-fp32-sse41-ld64.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-sse41-mul16-ld64-x8.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-sse41-mul16-ld64-x8.c", "XNNPACK/wrappers/qu8-vmul/gen/minmax-fp32-sse41-mul16-ld64-x16.c", "XNNPACK/wrappers/qu8-vmulc/gen/minmax-fp32-sse41-mul16-ld64-x16.c", "XNNPACK/wrappers/s8-ibilinear/gen/sse41-c16.c", "XNNPACK/wrappers/s8-maxpool/9p8x-minmax-sse41-c16.c", "XNNPACK/wrappers/s8-vclamp/sse41-x64.c", "XNNPACK/wrappers/u8-ibilinear/gen/sse41-c16.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_neon",
-        srcs = ["XNNPACK/wrappers/f16-f32-vcvt/gen/vcvt-neon-int16-x16.c", "XNNPACK/wrappers/f32-argmaxpool/4x-neon-c4.c", "XNNPACK/wrappers/f32-argmaxpool/9p8x-neon-c4.c", "XNNPACK/wrappers/f32-argmaxpool/9x-neon-c4.c", "XNNPACK/wrappers/f32-avgpool/9p8x-minmax-neon-c4.c", "XNNPACK/wrappers/f32-avgpool/9x-minmax-neon-c4.c", "XNNPACK/wrappers/f32-conv-hwc2chw/3x3s2p1c3x4-neon-2x2.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x3-minmax-neon.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x4-minmax-neon.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x9-minmax-neon.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x25-minmax-neon-acc2.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3p1-minmax-neon-2x4.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3s2p1-minmax-neon-1x4.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/5x5p2-minmax-neon-1x4.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/5x5s2p2-minmax-neon-1x4.c", "XNNPACK/wrappers/f32-f16-vcvt/gen/vcvt-neon-x8.c", "XNNPACK/wrappers/f32-gavgpool-cw/neon-x4.c", "XNNPACK/wrappers/f32-gavgpool/7p7x-minmax-neon-c4.c", "XNNPACK/wrappers/f32-gavgpool/7x-minmax-neon-c4.c", "XNNPACK/wrappers/f32-gemm/gen/1x8-minmax-neon-lane-ld64.c", "XNNPACK/wrappers/f32-gemm/gen/4x2-minmax-neon-lane-ld64.c", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-neon-lane-ld64.c", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-neon-lane-ld128.c", "XNNPACK/wrappers/f32-ibilinear-chw/gen/neon-p8.c", "XNNPACK/wrappers/f32-ibilinear/gen/neon-c8.c", "XNNPACK/wrappers/f32-igemm/gen/1x8-minmax-neon-lane-ld64.c", "XNNPACK/wrappers/f32-igemm/gen/4x2-minmax-neon-lane-ld64.c", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-neon-lane-ld64.c", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-neon-lane-ld128.c", "XNNPACK/wrappers/f32-maxpool/9p8x-minmax-neon-c4.c", "XNNPACK/wrappers/f32-pavgpool/9p8x-minmax-neon-c4.c", "XNNPACK/wrappers/f32-pavgpool/9x-minmax-neon-c4.c", "XNNPACK/wrappers/f32-prelu/gen/neon-2x8.c", "XNNPACK/wrappers/f32-qs8-vcvt/gen/vcvt-neon-x32.c", "XNNPACK/wrappers/f32-qu8-vcvt/gen/vcvt-neon-x32.c", "XNNPACK/wrappers/f32-raddstoreexpminusmax/gen/neon-rr2-lut64-p2-x8.c", "XNNPACK/wrappers/f32-rmax/neon.c", "XNNPACK/wrappers/f32-spmm/gen/32x1-minmax-neon.c", "XNNPACK/wrappers/f32-vbinary/gen/vadd-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vaddc-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmaxc-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmin-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vminc-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmul-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmulc-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vrsubc-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiff-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiffc-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsub-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsubc-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vclamp/gen/vclamp-neon-x8.c", "XNNPACK/wrappers/f32-velu/gen/velu-neon-rr2-lut16-p3-x8.c", "XNNPACK/wrappers/f32-vhswish/gen/vhswish-neon-x16.c", "XNNPACK/wrappers/f32-vlrelu/gen/vlrelu-neon-x8.c", "XNNPACK/wrappers/f32-vmulcaddc/gen/c4-minmax-neon-2x.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndd-neon-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndne-neon-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndu-neon-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndz-neon-x8.c", "XNNPACK/wrappers/f32-vsigmoid/gen/vsigmoid-neon-rr2-lut64-p2-nr2recps-x8.c", "XNNPACK/wrappers/f32-vunary/gen/vabs-neon-x8.c", "XNNPACK/wrappers/f32-vunary/gen/vneg-neon-x8.c", "XNNPACK/wrappers/f32-vunary/gen/vsqr-neon-x8.c", "XNNPACK/wrappers/qc8-dwconv/gen/up8x25-minmax-fp32-neon-mla8-ld64.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x9-minmax-fp32-neon-mla8-ld64.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x25-minmax-fp32-neon-mla8-ld64.c", "XNNPACK/wrappers/qc8-gemm/gen/1x8c2s4-minmax-fp32-neon-mlal.c", "XNNPACK/wrappers/qc8-gemm/gen/2x8c2s4-minmax-fp32-neon-mlal.c", "XNNPACK/wrappers/qc8-igemm/gen/1x8c2s4-minmax-fp32-neon-mlal.c", "XNNPACK/wrappers/qc8-igemm/gen/2x8c2s4-minmax-fp32-neon-mlal.c", "XNNPACK/wrappers/qs8-dwconv/gen/up8x25-minmax-rndnu-neon-mla8-ld64.c", "XNNPACK/wrappers/qs8-dwconv/gen/up16x9-minmax-rndnu-neon-mla8-ld64.c", "XNNPACK/wrappers/qs8-dwconv/gen/up16x25-minmax-rndnu-neon-mla8-ld64.c", "XNNPACK/wrappers/qs8-f32-vcvt/gen/vcvt-neon-x32.c", "XNNPACK/wrappers/qs8-gavgpool/gen/7p7x-minmax-rndnu-neon-c8.c", "XNNPACK/wrappers/qs8-gavgpool/gen/7x-minmax-rndnu-neon-c8.c", "XNNPACK/wrappers/qs8-gemm/gen/1x8-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qs8-gemm/gen/1x8c2s4-minmax-rndnu-neon-mlal.c", "XNNPACK/wrappers/qs8-gemm/gen/1x16-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qs8-gemm/gen/2x8c2s4-minmax-rndnu-neon-mlal.c", "XNNPACK/wrappers/qs8-igemm/gen/1x8-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qs8-igemm/gen/1x8c2s4-minmax-rndnu-neon-mlal.c", "XNNPACK/wrappers/qs8-igemm/gen/1x16-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qs8-igemm/gen/2x8c2s4-minmax-rndnu-neon-mlal.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-neon-ld64-x16.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-neon-ld64-x32.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-neon-ld64-x16.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-neon-ld64-x32.c", "XNNPACK/wrappers/qs8-vmul/gen/minmax-rndnu-neon-ld64-x16.c", "XNNPACK/wrappers/qs8-vmulc/gen/minmax-rndnu-neon-ld64-x16.c", "XNNPACK/wrappers/qu8-avgpool/9p8x-minmax-neon-c8.c", "XNNPACK/wrappers/qu8-avgpool/9x-minmax-neon-c8.c", "XNNPACK/wrappers/qu8-dwconv/gen/up8x25-minmax-rndnu-neon-mul8.c", "XNNPACK/wrappers/qu8-dwconv/gen/up16x9-minmax-rndnu-neon-mul8.c", "XNNPACK/wrappers/qu8-f32-vcvt/gen/vcvt-neon-x32.c", "XNNPACK/wrappers/qu8-gavgpool/gen/7p7x-minmax-rndnu-neon-c8.c", "XNNPACK/wrappers/qu8-gavgpool/gen/7x-minmax-rndnu-neon-c8.c", "XNNPACK/wrappers/qu8-gemm/gen/1x8-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qu8-gemm/gen/1x16-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qu8-gemm/gen/3x8-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qu8-gemm/gen/4x16-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qu8-igemm/gen/1x8-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qu8-igemm/gen/1x16-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qu8-igemm/gen/3x8-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qu8-igemm/gen/4x16-minmax-rndnu-neon-mlal-lane.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-neon-ld64-x16.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-neon-ld64-x32.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-neon-ld64-x16.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-neon-ld64-x32.c", "XNNPACK/wrappers/qu8-vmul/gen/minmax-rndnu-neon-ld64-x16.c", "XNNPACK/wrappers/qu8-vmulc/gen/minmax-rndnu-neon-ld64-x16.c", "XNNPACK/wrappers/s8-ibilinear/gen/neon-c8.c", "XNNPACK/wrappers/s8-ibilinear/gen/neon-c16.c", "XNNPACK/wrappers/s8-maxpool/9p8x-minmax-neon-c16.c", "XNNPACK/wrappers/s8-vclamp/neon-x64.c", "XNNPACK/wrappers/u8-ibilinear/gen/neon-c8.c", "XNNPACK/wrappers/u8-ibilinear/gen/neon-c16.c", "XNNPACK/wrappers/u8-maxpool/9p8x-minmax-neon-c16.c", "XNNPACK/wrappers/u8-rmax/neon.c", "XNNPACK/wrappers/u8-vclamp/neon-x64.c", "XNNPACK/wrappers/xx-fill/neon-x64.c", "XNNPACK/wrappers/xx-pad/neon.c", "XNNPACK/wrappers/x8-zip/xm-neon.c", "XNNPACK/wrappers/x8-zip/x2-neon.c", "XNNPACK/wrappers/x8-zip/x3-neon.c", "XNNPACK/wrappers/x8-zip/x4-neon.c", "XNNPACK/wrappers/x32-packx/x4-neon-st4.c", "XNNPACK/wrappers/x32-unpool/neon.c", "XNNPACK/wrappers/x32-zip/xm-neon.c", "XNNPACK/wrappers/x32-zip/x2-neon.c", "XNNPACK/wrappers/x32-zip/x3-neon.c", "XNNPACK/wrappers/x32-zip/x4-neon.c"],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["^(android-armv7|iphoneos-armv7)$", ["-march=armv7-a", "-mfpu=neon", "-mfloat-abi=softfp"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_neon_dot",
-        srcs = [],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["(aarch64|arm64)", ["-march=armv8.2-a+dotprod"]], ["^android-armv7$", ["-march=armv8.2-a+dotprod", "-mfpu=neon-fp-armv8", "-mfloat-abi=softfp"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["^((?!iphoneos-armv7).)*$", ["XNNPACK/wrappers/qc8-gemm/gen/1x8c4-minmax-fp32-neondot.c", "XNNPACK/wrappers/qc8-gemm/gen/1x16c4-minmax-fp32-neondot.c", "XNNPACK/wrappers/qc8-gemm/gen/4x8c4-minmax-fp32-neondot.c", "XNNPACK/wrappers/qc8-gemm/gen/4x16c4-minmax-fp32-neondot.c", "XNNPACK/wrappers/qc8-igemm/gen/1x8c4-minmax-fp32-neondot.c", "XNNPACK/wrappers/qc8-igemm/gen/1x16c4-minmax-fp32-neondot.c", "XNNPACK/wrappers/qc8-igemm/gen/4x8c4-minmax-fp32-neondot.c", "XNNPACK/wrappers/qc8-igemm/gen/4x16c4-minmax-fp32-neondot.c", "XNNPACK/wrappers/qs8-gemm/gen/1x8c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qs8-gemm/gen/1x16c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qs8-gemm/gen/4x8c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qs8-igemm/gen/1x8c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qs8-igemm/gen/1x16c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qs8-igemm/gen/4x8c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qs8-igemm/gen/4x16c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qu8-gemm/gen/1x8c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qu8-gemm/gen/1x16c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qu8-gemm/gen/4x8c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qu8-gemm/gen/4x16c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qu8-igemm/gen/1x8c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qu8-igemm/gen/1x16c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qu8-igemm/gen/4x8c4-minmax-rndnu-neondot.c", "XNNPACK/wrappers/qu8-igemm/gen/4x16c4-minmax-rndnu-neondot.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_neon_aarch64",
-        srcs = ["XNNPACK/wrappers/f32-conv-hwc2chw/3x3s2p1c3x4-neonfma-2x2.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3p1-minmax-neonfma-3x4.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3s2p1-minmax-neonfma-2x4-acc2.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/5x5p2-minmax-neonfma-4x4.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/5x5s2p2-minmax-neonfma-1x4-acc2.c", "XNNPACK/wrappers/f32-gemm/gen/1x8-minmax-neonfma-lane-ld64.c", "XNNPACK/wrappers/f32-gemm/gen/4x2-minmax-neonfma-lane-ld64.c", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-neonfma-lane-ld64.c", "XNNPACK/wrappers/f32-igemm/gen/1x8-minmax-neonfma-lane-ld64.c", "XNNPACK/wrappers/f32-igemm/gen/4x2-minmax-neonfma-lane-ld64.c", "XNNPACK/wrappers/f32-igemm/gen/6x8-minmax-neonfma-lane-ld64.c", "XNNPACK/wrappers/f32-spmm/gen/32x2-minmax-neonfma.c", "XNNPACK/wrappers/f32-spmm/gen/32x4-minmax-neonfma.c", "XNNPACK/wrappers/f32-vbinary/gen/vdiv-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vdivc-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vrdivc-minmax-neon-x8.c", "XNNPACK/wrappers/f32-vsqrt/gen/neon-sqrt-x4.c", "XNNPACK/wrappers/x8-lut/gen/lut-neon-tbx128x4-x64.c"],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["(aarch64|arm64)", ["-mfpu=neon-vfpv4"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_neon_v8",
-        srcs = ["XNNPACK/wrappers/f32-qs8-vcvt/gen/vcvt-neonv8-x32.c", "XNNPACK/wrappers/f32-qu8-vcvt/gen/vcvt-neonv8-x32.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndd-neonv8-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndne-neonv8-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndu-neonv8-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndz-neonv8-x8.c", "XNNPACK/wrappers/qc8-dwconv/gen/up8x25-minmax-fp32-neonv8-mla8-ld64.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x9-minmax-fp32-neonv8-mla8-ld64.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x25-minmax-fp32-neonv8-mla8-ld64.c", "XNNPACK/wrappers/qc8-gemm/gen/1x8-minmax-fp32-neonv8-mlal-lane-prfm.c", "XNNPACK/wrappers/qc8-gemm/gen/1x8-minmax-fp32-neonv8-mlal-lane.c", "XNNPACK/wrappers/qc8-gemm/gen/1x8c2s4-minmax-fp32-neonv8-mlal.c", "XNNPACK/wrappers/qc8-gemm/gen/1x8c8-minmax-fp32-neonv8-mlal.c", "XNNPACK/wrappers/qc8-gemm/gen/1x16-minmax-fp32-neonv8-mlal-lane.c", "XNNPACK/wrappers/qc8-gemm/gen/2x8c2s4-minmax-fp32-neonv8-mlal.c", "XNNPACK/wrappers/qc8-gemm/gen/2x8c8-minmax-fp32-neonv8-mlal.c", "XNNPACK/wrappers/qc8-gemm/gen/4x16-minmax-fp32-neonv8-mlal-lane.c", "XNNPACK/wrappers/qc8-igemm/gen/1x8-minmax-fp32-neonv8-mlal-lane-prfm.c", "XNNPACK/wrappers/qc8-igemm/gen/1x8-minmax-fp32-neonv8-mlal-lane.c", "XNNPACK/wrappers/qc8-igemm/gen/1x8c2s4-minmax-fp32-neonv8-mlal.c", "XNNPACK/wrappers/qc8-igemm/gen/1x8c8-minmax-fp32-neonv8-mlal.c", "XNNPACK/wrappers/qc8-igemm/gen/1x16-minmax-fp32-neonv8-mlal-lane.c", "XNNPACK/wrappers/qc8-igemm/gen/2x8c2s4-minmax-fp32-neonv8-mlal.c", "XNNPACK/wrappers/qc8-igemm/gen/2x8c8-minmax-fp32-neonv8-mlal.c", "XNNPACK/wrappers/qc8-igemm/gen/4x16-minmax-fp32-neonv8-mlal-lane.c"],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["(aarch64|arm64)", ["-march=armv8-a", "-mfpu=neon-fp-armv8"]], ["^android-armv7$", ["-march=armv8-a", "-mfpu=neon-fp-armv8", "-mfloat-abi=softfp"]], ["^iphoneos-armv7$", ["-mcpu=cyclone", "-mtune=generic"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_avx512skx",
-        srcs = [],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2", "-mavx512f", "-mavx512cd", "-mavx512bw", "-mavx512dq", "-mavx512vl"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["^(i[3-6]86|x86|x86_64|AMD64)$", ["-mavx512f", "-mavx512cd", "-mavx512bw", "-mavx512dq", "-mavx512vl"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f16-f32-vcvt/gen/vcvt-avx512skx-x16.c", "XNNPACK/wrappers/f32-f16-vcvt/gen/vcvt-avx512skx-x16.c", "XNNPACK/wrappers/f32-qs8-vcvt/gen/vcvt-avx512skx-x128.c", "XNNPACK/wrappers/f32-qu8-vcvt/gen/vcvt-avx512skx-x128.c", "XNNPACK/wrappers/qc8-dwconv/gen/up32x9-minmax-fp32-avx512skx-mul32.c", "XNNPACK/wrappers/qc8-dwconv/gen/up32x25-minmax-fp32-avx512skx-mul32.c", "XNNPACK/wrappers/qc8-gemm/gen/1x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qc8-gemm/gen/4x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qc8-igemm/gen/1x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qc8-igemm/gen/4x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qs8-dwconv/gen/up32x9-minmax-fp32-avx512skx-mul32.c", "XNNPACK/wrappers/qs8-dwconv/gen/up32x25-minmax-fp32-avx512skx-mul32.c", "XNNPACK/wrappers/qs8-f32-vcvt/gen/vcvt-avx512skx-x32.c", "XNNPACK/wrappers/qs8-gemm/gen/1x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qs8-gemm/gen/4x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qs8-igemm/gen/1x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qs8-igemm/gen/4x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-avx512skx-mul32-ld128-x16.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-avx512skx-mul32-ld128-x16.c", "XNNPACK/wrappers/qu8-dwconv/gen/up32x9-minmax-fp32-avx512skx-mul32.c", "XNNPACK/wrappers/qu8-dwconv/gen/up32x25-minmax-fp32-avx512skx-mul32.c", "XNNPACK/wrappers/qu8-f32-vcvt/gen/vcvt-avx512skx-x32.c", "XNNPACK/wrappers/qu8-gemm/gen/1x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qu8-gemm/gen/4x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qu8-igemm/gen/1x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qu8-igemm/gen/4x16c8-minmax-fp32-avx512skx.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-avx512skx-mul32-ld128-x16.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-avx512skx-mul32-ld128-x16.c", "XNNPACK/wrappers/x8-lut/gen/lut-avx512skx-vpshufb-x64.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
-        name = "ukernels_neon_fp16",
-        srcs = ["XNNPACK/wrappers/f16-f32-vcvt/gen/vcvt-neonfp16-x16.c", "XNNPACK/wrappers/f32-f16-vcvt/gen/vcvt-neonfp16-x16.c"],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
-        header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["arm", ["-mfpu=neon-fp16"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
-        visibility = ["PUBLIC"],
-    )
-
-    cxx_library(
+    fb_xplat_cxx_library(
         name = "interface",
-        srcs = [],
-        deps = [],
-        exported_deps = ["//third_party:pthreadpool_header"],
-        compiler_flags = ["-w"],
-        preferred_linkage = "static",
-        exported_headers = {"xnnpack.h": "XNNPACK/include/xnnpack.h"},
-        exported_preprocessor_flags = [],
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        exported_headers = {
+            "xnnpack.h": "XNNPACK/include/xnnpack.h",
+        },
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        labels = labels,
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        exported_deps = [
+            # Dependency only on pthreadpool interface
+            third_party("pthreadpool_header"),
+        ],
     )
 
-    cxx_library(
-        name = "ukernels_fma3",
-        srcs = [],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2", "-mfma", "-mf16c"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+    fb_xplat_cxx_library(
+        name = "operators",
+        # srcs have to include HOT_SRCS to be able to build on ARVR
+        srcs = OPERATOR_SRCS + HOT_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["^(i[3-6]86|x86|x86_64|AMD64)$", ["-mfma", "-mf16c"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f16-dwconv/gen/up8x25-minmax-fma3-acc2.c", "XNNPACK/wrappers/f16-dwconv/gen/up16x3-minmax-fma3.c", "XNNPACK/wrappers/f16-dwconv/gen/up16x4-minmax-fma3.c", "XNNPACK/wrappers/f16-dwconv/gen/up16x9-minmax-fma3.c", "XNNPACK/wrappers/f16-ibilinear/gen/fma3-c8.c", "XNNPACK/wrappers/f16-vmulcaddc/gen/c8-minmax-fma3-2x.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x25-minmax-fma3.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x3-minmax-fma3.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x4-minmax-fma3.c", "XNNPACK/wrappers/f32-dwconv/gen/up16x9-minmax-fma3.c", "XNNPACK/wrappers/f32-gemm/gen/1x16-minmax-fma3-broadcast.c", "XNNPACK/wrappers/f32-gemm/gen/1x16s4-minmax-fma3-broadcast.c", "XNNPACK/wrappers/f32-gemm/gen/4x16s4-minmax-fma3-broadcast.c", "XNNPACK/wrappers/f32-gemm/gen/5x16-minmax-fma3-broadcast.c", "XNNPACK/wrappers/f32-igemm/gen/1x16-minmax-fma3-broadcast.c", "XNNPACK/wrappers/f32-igemm/gen/1x16s4-minmax-fma3-broadcast.c", "XNNPACK/wrappers/f32-igemm/gen/4x16s4-minmax-fma3-broadcast.c", "XNNPACK/wrappers/f32-igemm/gen/5x16-minmax-fma3-broadcast.c", "XNNPACK/wrappers/f32-vhswish/gen/vhswish-fma3-x16.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-Oz",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("cpuinfo"),
+            third_party("FP16"),
+            third_party("FXdiv"),
+            third_party("clog"),
+        ],
     )
 
-    cxx_library(
+    fb_xplat_cxx_library(
+        name = "subgraph",
+        srcs = SUBGRAPH_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+            third_party("FXdiv"),
+            third_party("clog"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "tables",
+        srcs = TABLE_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+            third_party("FXdiv"),
+            third_party("clog"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
         name = "jit_memory",
-        srcs = ["XNNPACK/src/jit/aarch32-assembler.cc", "XNNPACK/src/jit/aarch64-assembler.cc", "XNNPACK/src/jit/assembler.cc", "XNNPACK/src/jit/memory.c"],
-        deps = [":interface", "//third_party:clog"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-Os"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+        # srcs have to include HOT_SRCS to be able to build on ARVR
+        srcs = JIT_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-Oz",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("clog"),
+        ],
     )
 
-    cxx_library(
-        name = "ukernels_sse2",
-        srcs = [],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+    fb_xplat_cxx_library(
+        name = "ukernels_scalar",
+        srcs = PROD_SCALAR_PORTABLE_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["x86", ["-msse2"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f16-f32-vcvt/gen/vcvt-sse2-int16-x32.c", "XNNPACK/wrappers/f32-argmaxpool/4x-sse2-c4.c", "XNNPACK/wrappers/f32-argmaxpool/9p8x-sse2-c4.c", "XNNPACK/wrappers/f32-argmaxpool/9x-sse2-c4.c", "XNNPACK/wrappers/f32-f16-vcvt/gen/vcvt-sse2-x16.c", "XNNPACK/wrappers/f32-prelu/gen/sse2-2x8.c", "XNNPACK/wrappers/f32-qs8-vcvt/gen/vcvt-sse2-x32.c", "XNNPACK/wrappers/f32-qu8-vcvt/gen/vcvt-sse2-x32.c", "XNNPACK/wrappers/f32-raddstoreexpminusmax/gen/sse2-rr2-p5-x20-acc2.c", "XNNPACK/wrappers/f32-velu/gen/velu-sse2-rr2-lut16-p3-x12.c", "XNNPACK/wrappers/f32-vlrelu/gen/vlrelu-sse2-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndd-sse2-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndne-sse2-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndu-sse2-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndz-sse2-x8.c", "XNNPACK/wrappers/f32-vsigmoid/gen/vsigmoid-sse2-rr2-lut64-p2-div-x8.c", "XNNPACK/wrappers/qc8-dwconv/gen/up8x9-minmax-fp32-sse2-mul16.c", "XNNPACK/wrappers/qc8-dwconv/gen/up8x25-minmax-fp32-sse2-mul16.c", "XNNPACK/wrappers/qc8-gemm/gen/1x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qc8-gemm/gen/3x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qc8-igemm/gen/1x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qc8-igemm/gen/3x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qs8-dwconv/gen/up8x9-minmax-fp32-sse2-mul16-add16.c", "XNNPACK/wrappers/qs8-dwconv/gen/up8x25-minmax-fp32-sse2-mul16-add16.c", "XNNPACK/wrappers/qs8-f32-vcvt/gen/vcvt-sse2-x32.c", "XNNPACK/wrappers/qs8-gavgpool/gen/7p7x-minmax-fp32-sse2-c8.c", "XNNPACK/wrappers/qs8-gavgpool/gen/7x-minmax-fp32-sse2-c8.c", "XNNPACK/wrappers/qs8-gemm/gen/1x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qs8-gemm/gen/3x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qs8-igemm/gen/1x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qs8-igemm/gen/3x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-sse2-mul16-ld64-x8.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-sse2-mul16-ld64-x8.c", "XNNPACK/wrappers/qs8-vmul/gen/minmax-fp32-sse2-mul16-ld64-x8.c", "XNNPACK/wrappers/qs8-vmulc/gen/minmax-fp32-sse2-mul16-ld64-x8.c", "XNNPACK/wrappers/qu8-avgpool/9p8x-minmax-sse2-c8.c", "XNNPACK/wrappers/qu8-avgpool/9x-minmax-sse2-c8.c", "XNNPACK/wrappers/qu8-dwconv/gen/up8x9-minmax-fp32-sse2-mul16.c", "XNNPACK/wrappers/qu8-dwconv/gen/up8x25-minmax-fp32-sse2-mul16.c", "XNNPACK/wrappers/qu8-f32-vcvt/gen/vcvt-sse2-x32.c", "XNNPACK/wrappers/qu8-gavgpool/gen/7p7x-minmax-fp32-sse2-c8.c", "XNNPACK/wrappers/qu8-gavgpool/gen/7x-minmax-fp32-sse2-c8.c", "XNNPACK/wrappers/qu8-gemm/gen/1x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qu8-gemm/gen/3x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qu8-igemm/gen/1x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qu8-igemm/gen/3x4c8-minmax-fp32-sse2-ld64.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-sse2-mul16-ld64-x8.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-sse2-mul16-ld64-x8.c", "XNNPACK/wrappers/qu8-vmul/gen/minmax-fp32-sse2-mul16-ld64-x8.c", "XNNPACK/wrappers/qu8-vmulc/gen/minmax-fp32-sse2-mul16-ld64-x8.c", "XNNPACK/wrappers/s8-ibilinear/gen/sse2-c8.c", "XNNPACK/wrappers/s8-maxpool/9p8x-minmax-sse2-c16.c", "XNNPACK/wrappers/s8-vclamp/sse2-x64.c", "XNNPACK/wrappers/u8-ibilinear/gen/sse2-c8.c", "XNNPACK/wrappers/u8-maxpool/9p8x-minmax-sse2-c16.c", "XNNPACK/wrappers/u8-rmax/sse2.c", "XNNPACK/wrappers/u8-vclamp/sse2-x64.c", "XNNPACK/wrappers/xx-fill/sse2-x64.c", "XNNPACK/wrappers/xx-pad/sse2.c", "XNNPACK/wrappers/x8-zip/xm-sse2.c", "XNNPACK/wrappers/x8-zip/x2-sse2.c", "XNNPACK/wrappers/x8-zip/x3-sse2.c", "XNNPACK/wrappers/x8-zip/x4-sse2.c", "XNNPACK/wrappers/x32-unpool/sse2.c", "XNNPACK/wrappers/x32-zip/xm-sse2.c", "XNNPACK/wrappers/x32-zip/x2-sse2.c", "XNNPACK/wrappers/x32-zip/x3-sse2.c", "XNNPACK/wrappers/x32-zip/x4-sse2.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+            third_party("FXdiv"),
+        ],
     )
 
-    cxx_library(
+    fb_xplat_cxx_library(
         name = "ukernels_sse",
-        srcs = [],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["x86", ["-msse"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f32-avgpool/9p8x-minmax-sse-c4.c", "XNNPACK/wrappers/f32-avgpool/9x-minmax-sse-c4.c", "XNNPACK/wrappers/f32-conv-hwc2chw/3x3s2p1c3x4-sse-2x2.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x3-minmax-sse.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x4-minmax-sse.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x9-minmax-sse.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x25-minmax-sse.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3p1-minmax-sse-2x4-acc2.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3s2p1-minmax-sse-1x4-acc3.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/5x5p2-minmax-sse-4x4.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/5x5s2p2-minmax-sse-2x4.c", "XNNPACK/wrappers/f32-gavgpool-cw/sse-x4.c", "XNNPACK/wrappers/f32-gavgpool/7p7x-minmax-sse-c4.c", "XNNPACK/wrappers/f32-gavgpool/7x-minmax-sse-c4.c", "XNNPACK/wrappers/f32-gemm/gen/1x8-minmax-sse-load1.c", "XNNPACK/wrappers/f32-gemm/gen/4x2c4-minmax-sse.c", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-sse-load1.c", "XNNPACK/wrappers/f32-ibilinear-chw/gen/sse-p8.c", "XNNPACK/wrappers/f32-ibilinear/gen/sse-c8.c", "XNNPACK/wrappers/f32-igemm/gen/1x8-minmax-sse-load1.c", "XNNPACK/wrappers/f32-igemm/gen/4x2c4-minmax-sse.c", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-sse-load1.c", "XNNPACK/wrappers/f32-maxpool/9p8x-minmax-sse-c4.c", "XNNPACK/wrappers/f32-pavgpool/9p8x-minmax-sse-c4.c", "XNNPACK/wrappers/f32-pavgpool/9x-minmax-sse-c4.c", "XNNPACK/wrappers/f32-rmax/sse.c", "XNNPACK/wrappers/f32-spmm/gen/32x1-minmax-sse.c", "XNNPACK/wrappers/f32-vbinary/gen/vadd-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vaddc-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vdiv-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vdivc-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmaxc-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmin-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vminc-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmul-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmulc-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vrdivc-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vrsubc-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiff-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiffc-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsub-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsubc-minmax-sse-x8.c", "XNNPACK/wrappers/f32-vclamp/gen/vclamp-sse-x8.c", "XNNPACK/wrappers/f32-vhswish/gen/vhswish-sse-x8.c", "XNNPACK/wrappers/f32-vlrelu/gen/vlrelu-sse-x8.c", "XNNPACK/wrappers/f32-vmulcaddc/gen/c4-minmax-sse-2x.c", "XNNPACK/wrappers/f32-vsqrt/gen/sse-sqrt-x4.c", "XNNPACK/wrappers/f32-vunary/gen/vabs-sse-x8.c", "XNNPACK/wrappers/f32-vunary/gen/vneg-sse-x8.c", "XNNPACK/wrappers/f32-vunary/gen/vsqr-sse-x8.c", "XNNPACK/wrappers/x32-packx/x4-sse.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-msse",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_SSE_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse"],
+        deps = [
+            ":interface",
+        ],
     )
 
-    cxx_library(
-        name = "ukernels_asm_aarch32",
-        srcs = ["XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch32-neon-cortex-a7.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch32-neon-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch32-neon-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch32-neon-ld64.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch32-neon-prfm-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch32-neon-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/4x4-aarch32-vfp-ld64.S", "XNNPACK/wrappers/f32-gemm/4x4-minmax-aarch32-vfp-ld64.S", "XNNPACK/wrappers/f32-gemm/4x8-minmax-aarch32-neon-cortex-a55.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch32-neon-cortex-a7.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch32-neon-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch32-neon-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch32-neon-ld64.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch32-neon-prfm-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch32-neon-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/4x8-minmax-aarch32-neon-cortex-a55.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-cortex-a7.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-prfm-cortex-a7.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neonv8-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neonv8-mlal-lane-ld64.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neonv8-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8-minmax-fp32-aarch32-neonv8-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8c4-minmax-fp32-aarch32-neondot-cortex-a55.S", "XNNPACK/wrappers/qc8-gemm/gen/4x8c4-minmax-fp32-aarch32-neondot-ld64.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8-minmax-fp32-aarch32-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8-minmax-fp32-aarch32-neonv8-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8-minmax-fp32-aarch32-neonv8-mlal-lane-ld64.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8-minmax-fp32-aarch32-neonv8-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8-minmax-fp32-aarch32-neonv8-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8c4-minmax-fp32-aarch32-neondot-cortex-a55.S", "XNNPACK/wrappers/qc8-igemm/gen/4x8c4-minmax-fp32-aarch32-neondot-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-cortex-a7.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-cortex-a7.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8c4-minmax-rndnu-aarch32-neondot-cortex-a55.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8c4-minmax-rndnu-aarch32-neondot-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x8c4-minmax-rndnu-aarch32-neondot-cortex-a55.S", "XNNPACK/wrappers/qs8-igemm/gen/4x8c4-minmax-rndnu-aarch32-neondot-ld64.S", "XNNPACK/wrappers/qu8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-cortex-a7.S", "XNNPACK/wrappers/qu8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qu8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qu8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-cortex-a7.S", "XNNPACK/wrappers/qu8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qu8-gemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qu8-igemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qu8-igemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qu8-igemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qu8-igemm/gen/4x8-minmax-rndnu-aarch32-neon-mlal-lane-prfm-ld64.S"],
-        deps = [":interface", ":jit_memory", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+    fb_xplat_cxx_library(
+        name = "ukernels_sse_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["^android-armv7$", ["-march=armv8.2-a+dotprod", "-mfpu=neon-fp-armv8", "-mfloat-abi=softfp"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-msse",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse"],
+        windows_srcs = PROD_SSE_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+        ],
     )
 
-    cxx_library(
+    fb_xplat_cxx_library(
+        name = "ukernels_sse2",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-msse2",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_SSE2_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse2"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse2"],
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_sse2_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-msse2",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse2"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse2"],
+        windows_srcs = PROD_SSE2_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
         name = "ukernels_ssse3",
-        srcs = [],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["x86", ["-mssse3"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3p1-minmax-ssse3-2x4-acc2.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mssse3",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_SSSE3_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mssse3"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mssse3"],
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
     )
 
-    cxx_library(
+    fb_xplat_cxx_library(
+        name = "ukernels_ssse3_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mssse3",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mssse3"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mssse3"],
+        windows_srcs = PROD_SSSE3_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_sse41",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-msse4.1",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_SSE41_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse4.1"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse4.1"],
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_sse41_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-msse4.1",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-msse4.1"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-msse4.1"],
+        windows_srcs = PROD_SSE41_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_avx",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mavx",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mavx",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_AVX_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_avx_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mavx",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mavx",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx"],
+        windows_srcs = PROD_AVX_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
         name = "ukernels_f16c",
-        srcs = [],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2", "-mf16c"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["x86", ["-mf16c"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f16-f32-vcvt/gen/vcvt-f16c-x16.c", "XNNPACK/wrappers/f16-gavgpool/gen/7p7x-minmax-f16c-c8.c", "XNNPACK/wrappers/f16-gavgpool/gen/7x-minmax-f16c-c8.c", "XNNPACK/wrappers/f16-maxpool/9p8x-minmax-f16c-c8.c", "XNNPACK/wrappers/f16-prelu/gen/f16c-2x16.c", "XNNPACK/wrappers/f16-vbinary/gen/vadd-minmax-f16c-x16.c", "XNNPACK/wrappers/f16-vbinary/gen/vaddc-minmax-f16c-x16.c", "XNNPACK/wrappers/f16-vbinary/gen/vmul-minmax-f16c-x16.c", "XNNPACK/wrappers/f16-vbinary/gen/vmulc-minmax-f16c-x16.c", "XNNPACK/wrappers/f16-vclamp/gen/vclamp-f16c-x16.c", "XNNPACK/wrappers/f16-vhswish/gen/vhswish-f16c-x16.c", "XNNPACK/wrappers/f16-vlrelu/gen/vlrelu-f16c-x16.c", "XNNPACK/wrappers/f32-f16-vcvt/gen/vcvt-f16c-x16.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mf16c",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mf16c",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_F16C_MICROKERNEL_SRCS,
+            ),
+        ],
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c"],
+        deps = [
+            ":interface",
+        ],
     )
 
-    cxx_library(
+    fb_xplat_cxx_library(
+        name = "ukernels_f16c_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mf16c",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mf16c",
+                ],
+            ),
+        ],
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mf16c"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mf16c"],
+        windows_srcs = PROD_F16C_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
         name = "ukernels_xop",
-        srcs = [],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2", "-mxop"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows-x86_64", ["-Drestrict="]], ["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/qc8-dwconv/gen/up16x9-minmax-fp32-xop-mul16-add16.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x25-minmax-fp32-xop-mul16-add16.c", "XNNPACK/wrappers/qc8-gemm/gen/1x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qc8-gemm/gen/2x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qc8-igemm/gen/1x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qc8-igemm/gen/2x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qs8-dwconv/gen/up16x9-minmax-fp32-xop-mul16-add16.c", "XNNPACK/wrappers/qs8-dwconv/gen/up16x25-minmax-fp32-xop-mul16-add16.c", "XNNPACK/wrappers/qs8-gemm/gen/1x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qs8-gemm/gen/2x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qs8-igemm/gen/1x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qs8-igemm/gen/2x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-xop-mul32-ld32-x8.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-xop-mul32-ld32-x8.c", "XNNPACK/wrappers/qu8-dwconv/gen/up16x9-minmax-fp32-xop-mul32.c", "XNNPACK/wrappers/qu8-dwconv/gen/up16x25-minmax-fp32-xop-mul32.c", "XNNPACK/wrappers/qu8-gemm/gen/1x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qu8-gemm/gen/2x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qu8-igemm/gen/1x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qu8-igemm/gen/2x4c8-minmax-fp32-xop-ld64.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-xop-mul32-ld32-x8.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-xop-mul32-ld32-x8.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mxop",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_preprocessor_flags = [
+            (
+                "windows-x86_64",
+                [
+                    "-Drestrict=",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_XOP_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mxop"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mxop"],
+        deps = [
+            ":interface",
+        ],
     )
 
-    cxx_library(
-        name = "ukernels_scalar_aarch32",
-        srcs = ["XNNPACK/wrappers/f16-f32-vcvt/gen/vcvt-scalar-x4.c", "XNNPACK/wrappers/f32-argmaxpool/4x-scalar-c1.c", "XNNPACK/wrappers/f32-argmaxpool/9p8x-scalar-c1.c", "XNNPACK/wrappers/f32-argmaxpool/9x-scalar-c1.c", "XNNPACK/wrappers/f32-avgpool/9p8x-minmax-scalar-c1.c", "XNNPACK/wrappers/f32-avgpool/9x-minmax-scalar-c1.c", "XNNPACK/wrappers/f32-conv-hwc/3x3s2p0p1c3x4-scalar-1x1.c", "XNNPACK/wrappers/f32-conv-hwc/3x3s2p1c3x4-scalar-1x1.c", "XNNPACK/wrappers/f32-conv-hwc2chw/3x3s2p1c3x4-scalar-1x1.c", "XNNPACK/wrappers/f32-dwconv/gen/up1x3-minmax-scalar-acc2.c", "XNNPACK/wrappers/f32-dwconv/gen/up1x3-scalar-acc2.c", "XNNPACK/wrappers/f32-dwconv/gen/up1x4-minmax-scalar-acc2.c", "XNNPACK/wrappers/f32-dwconv/gen/up1x4-scalar-acc2.c", "XNNPACK/wrappers/f32-dwconv/gen/up1x9-minmax-scalar-acc2.c", "XNNPACK/wrappers/f32-dwconv/gen/up1x9-scalar-acc2.c", "XNNPACK/wrappers/f32-dwconv/gen/up1x25-minmax-scalar-acc2.c", "XNNPACK/wrappers/f32-dwconv/gen/up1x25-scalar-acc2.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3p1-minmax-scalar-4x1.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/3x3s2p1-minmax-scalar-2x1-acc2.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/5x5p2-minmax-scalar-2x1-acc2.c", "XNNPACK/wrappers/f32-dwconv2d-chw/gen/5x5s2p2-minmax-scalar-2x1-acc2.c", "XNNPACK/wrappers/f32-f16-vcvt/gen/vcvt-scalar-fabsf-x2.c", "XNNPACK/wrappers/f32-gavgpool-cw/scalar-x1.c", "XNNPACK/wrappers/f32-gavgpool/7p7x-minmax-scalar-c1.c", "XNNPACK/wrappers/f32-gavgpool/7x-minmax-scalar-c1.c", "XNNPACK/wrappers/f32-gemm/gen/1x4-minmax-scalar.c", "XNNPACK/wrappers/f32-gemm/gen/1x4-relu-scalar.c", "XNNPACK/wrappers/f32-gemm/gen/1x4-scalar.c", "XNNPACK/wrappers/f32-gemm/gen/4x2-minmax-scalar.c", "XNNPACK/wrappers/f32-gemm/gen/4x2-scalar.c", "XNNPACK/wrappers/f32-gemm/gen/4x4-minmax-scalar.c", "XNNPACK/wrappers/f32-gemm/gen/4x4-relu-scalar.c", "XNNPACK/wrappers/f32-gemm/gen/4x4-scalar.c", "XNNPACK/wrappers/f32-ibilinear-chw/gen/scalar-p4.c", "XNNPACK/wrappers/f32-ibilinear/gen/scalar-c2.c", "XNNPACK/wrappers/f32-igemm/gen/1x4-minmax-scalar.c", "XNNPACK/wrappers/f32-igemm/gen/1x4-relu-scalar.c", "XNNPACK/wrappers/f32-igemm/gen/1x4-scalar.c", "XNNPACK/wrappers/f32-igemm/gen/4x2-minmax-scalar.c", "XNNPACK/wrappers/f32-igemm/gen/4x2-scalar.c", "XNNPACK/wrappers/f32-igemm/gen/4x4-minmax-scalar.c", "XNNPACK/wrappers/f32-igemm/gen/4x4-relu-scalar.c", "XNNPACK/wrappers/f32-igemm/gen/4x4-scalar.c", "XNNPACK/wrappers/f32-maxpool/9p8x-minmax-scalar-c1.c", "XNNPACK/wrappers/f32-pavgpool/9p8x-minmax-scalar-c1.c", "XNNPACK/wrappers/f32-pavgpool/9x-minmax-scalar-c1.c", "XNNPACK/wrappers/f32-prelu/gen/scalar-2x4.c", "XNNPACK/wrappers/f32-qs8-vcvt/gen/vcvt-scalar-imagic-x4.c", "XNNPACK/wrappers/f32-qu8-vcvt/gen/vcvt-scalar-imagic-x4.c", "XNNPACK/wrappers/f32-raddstoreexpminusmax/gen/scalar-rr2-p5-x4-acc2.c", "XNNPACK/wrappers/f32-rmax/scalar.c", "XNNPACK/wrappers/f32-spmm/gen/8x1-minmax-scalar.c", "XNNPACK/wrappers/f32-spmm/gen/8x2-minmax-scalar.c", "XNNPACK/wrappers/f32-spmm/gen/8x4-minmax-scalar.c", "XNNPACK/wrappers/f32-vbinary/gen/vadd-minmax-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vaddc-minmax-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vdiv-minmax-scalar-x2.c", "XNNPACK/wrappers/f32-vbinary/gen/vdivc-minmax-scalar-x2.c", "XNNPACK/wrappers/f32-vbinary/gen/vmax-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmaxc-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmin-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vminc-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmul-minmax-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vmulc-minmax-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vrdivc-minmax-scalar-x2.c", "XNNPACK/wrappers/f32-vbinary/gen/vrsubc-minmax-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiff-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsqrdiffc-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsub-minmax-scalar-x8.c", "XNNPACK/wrappers/f32-vbinary/gen/vsubc-minmax-scalar-x8.c", "XNNPACK/wrappers/f32-vclamp/gen/vclamp-scalar-x4.c", "XNNPACK/wrappers/f32-velu/gen/velu-scalar-rr2-lut16-p3-x4.c", "XNNPACK/wrappers/f32-vhswish/gen/vhswish-scalar-x4.c", "XNNPACK/wrappers/f32-vlrelu/gen/vlrelu-scalar-x4.c", "XNNPACK/wrappers/f32-vmulcaddc/gen/c1-minmax-scalar-2x.c", "XNNPACK/wrappers/f32-vrelu/gen/vrelu-scalar-x8.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndd-scalar-libm-x1.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndne-scalar-libm-x1.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndu-scalar-libm-x1.c", "XNNPACK/wrappers/f32-vrnd/gen/vrndz-scalar-libm-x1.c", "XNNPACK/wrappers/f32-vsigmoid/gen/vsigmoid-scalar-rr2-lut64-p2-div-x2.c", "XNNPACK/wrappers/f32-vsqrt/gen/scalar-sqrt-x1.c", "XNNPACK/wrappers/f32-vunary/gen/vabs-scalar-x4.c", "XNNPACK/wrappers/f32-vunary/gen/vneg-scalar-x4.c", "XNNPACK/wrappers/f32-vunary/gen/vsqr-scalar-x4.c", "XNNPACK/wrappers/qc8-dwconv/gen/up2x9-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qc8-dwconv/gen/up2x25-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qc8-gemm/gen/1x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qc8-gemm/gen/1x8-minmax-fp32-neon-mlal-lane.c", "XNNPACK/wrappers/qc8-gemm/gen/2x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qc8-igemm/gen/1x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qc8-igemm/gen/1x8-minmax-fp32-neon-mlal-lane.c", "XNNPACK/wrappers/qc8-igemm/gen/2x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qs8-dwconv/gen/up1x9-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qs8-dwconv/gen/up1x25-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qs8-f32-vcvt/gen/vcvt-scalar-x4.c", "XNNPACK/wrappers/qs8-gavgpool/gen/7p7x-minmax-fp32-scalar-imagic-c1.c", "XNNPACK/wrappers/qs8-gavgpool/gen/7x-minmax-fp32-scalar-imagic-c1.c", "XNNPACK/wrappers/qs8-gemm/gen/1x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qs8-gemm/gen/2x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qs8-igemm/gen/1x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qs8-igemm/gen/2x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-scalar-x1.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-scalar-x1.c", "XNNPACK/wrappers/qs8-vmul/gen/minmax-fp32-scalar-x4.c", "XNNPACK/wrappers/qs8-vmulc/gen/minmax-fp32-scalar-x4.c", "XNNPACK/wrappers/qu8-avgpool/9p8x-minmax-scalar-c1.c", "XNNPACK/wrappers/qu8-avgpool/9x-minmax-scalar-c1.c", "XNNPACK/wrappers/qu8-dwconv/gen/up1x9-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qu8-dwconv/gen/up1x25-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qu8-f32-vcvt/gen/vcvt-scalar-x4.c", "XNNPACK/wrappers/qu8-gavgpool/gen/7p7x-minmax-fp32-scalar-imagic-c1.c", "XNNPACK/wrappers/qu8-gavgpool/gen/7x-minmax-fp32-scalar-imagic-c1.c", "XNNPACK/wrappers/qu8-gemm/gen/1x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qu8-gemm/gen/2x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qu8-igemm/gen/1x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qu8-igemm/gen/2x2-minmax-fp32-scalar-fmagic.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-scalar-x1.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-scalar-x1.c", "XNNPACK/wrappers/qu8-vmul/gen/minmax-fp32-scalar-x4.c", "XNNPACK/wrappers/qu8-vmulc/gen/minmax-fp32-scalar-x4.c", "XNNPACK/wrappers/s8-ibilinear/gen/scalar-c1.c", "XNNPACK/wrappers/s8-maxpool/9p8x-minmax-scalar-c1.c", "XNNPACK/wrappers/s8-vclamp/scalar-x4.c", "XNNPACK/wrappers/u8-ibilinear/gen/scalar-c1.c", "XNNPACK/wrappers/u8-maxpool/9p8x-minmax-scalar-c1.c", "XNNPACK/wrappers/u8-rmax/scalar.c", "XNNPACK/wrappers/u8-vclamp/scalar-x4.c", "XNNPACK/wrappers/xx-fill/scalar-x16.c", "XNNPACK/wrappers/xx-pad/scalar.c", "XNNPACK/wrappers/x8-zip/xm-scalar.c", "XNNPACK/wrappers/x8-zip/x2-scalar.c", "XNNPACK/wrappers/x8-zip/x3-scalar.c", "XNNPACK/wrappers/x8-zip/x4-scalar.c", "XNNPACK/wrappers/x32-packx/x2-scalar.c", "XNNPACK/wrappers/x32-packx/x3-scalar.c", "XNNPACK/wrappers/x32-packx/x4-scalar.c", "XNNPACK/wrappers/x32-unpool/scalar.c", "XNNPACK/wrappers/x32-zip/xm-scalar.c", "XNNPACK/wrappers/x32-zip/x2-scalar.c", "XNNPACK/wrappers/x32-zip/x3-scalar.c", "XNNPACK/wrappers/x32-zip/x4-scalar.c"],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+    fb_xplat_cxx_library(
+        name = "ukernels_xop_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["^(android-armv7|iphoneos-armv7)$", ["-march=armv7-a", "-mfpu=neon", "-mfloat-abi=softfp"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mxop",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_preprocessor_flags = [
+            (
+                "windows-x86_64",
+                [
+                    "-Drestrict=",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mxop"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mxop"],
+        windows_srcs = PROD_XOP_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+        ],
     )
 
-    cxx_library(
-        name = "ukernels_neon_fma",
-        srcs = ["XNNPACK/wrappers/f32-dwconv/gen/up8x3-minmax-neonfma.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x4-minmax-neonfma.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x9-minmax-neonfma.c", "XNNPACK/wrappers/f32-dwconv/gen/up8x25-minmax-neonfma-acc2.c", "XNNPACK/wrappers/f32-gemm/gen/1x8s4-minmax-neonfma.c", "XNNPACK/wrappers/f32-gemm/gen/6x8s4-minmax-neonfma.c", "XNNPACK/wrappers/f32-ibilinear-chw/gen/neonfma-p8.c", "XNNPACK/wrappers/f32-ibilinear/gen/neonfma-c8.c", "XNNPACK/wrappers/f32-igemm/gen/1x8s4-minmax-neonfma.c", "XNNPACK/wrappers/f32-igemm/gen/6x8s4-minmax-neonfma.c", "XNNPACK/wrappers/f32-raddstoreexpminusmax/gen/neonfma-rr1-lut64-p2-x16.c", "XNNPACK/wrappers/f32-spmm/gen/32x1-minmax-neonfma-pipelined.c", "XNNPACK/wrappers/f32-velu/gen/velu-neonfma-rr1-lut16-p3-x16.c", "XNNPACK/wrappers/f32-velu/gen/velu-neonfma-rr1-p6-x8.c", "XNNPACK/wrappers/f32-vmulcaddc/gen/c4-minmax-neonfma-2x.c", "XNNPACK/wrappers/f32-vsigmoid/gen/vsigmoid-neonfma-rr1-lut64-p2-nr2recps-x16.c"],
-        deps = [":interface", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+    fb_xplat_cxx_library(
+        name = "ukernels_fma3",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["arm", ["-mfpu=neon-vfpv4"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mfma",
+            "-mf16c",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^(i[3-6]86|x86|x86_64|AMD64)$",
+                [
+                    "-mfma",
+                    "-mf16c",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_FMA3_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
+            "-mfma",
+            "-mf16c",
+        ],
+        windows_compiler_flags_override = WINDOWS_FLAGS + [
+            "-mfma",
+            "-mf16c",
+        ],
+        deps = [
+            ":interface",
+        ],
     )
 
-    cxx_library(
+    fb_xplat_cxx_library(
+        name = "ukernels_fma3_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mfma",
+            "-mf16c",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^(i[3-6]86|x86|x86_64|AMD64)$",
+                [
+                    "-mfma",
+                    "-mf16c",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
+            "-mfma",
+            "-mf16c",
+        ],
+        windows_compiler_flags_override = WINDOWS_FLAGS + [
+            "-mfma",
+            "-mf16c",
+        ],
+        windows_srcs = PROD_FMA3_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
         name = "ukernels_avx2",
-        srcs = [],
-        deps = [":interface"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2", "-mavx2", "-mfma", "-mf16c"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["x86", ["-mavx2", "-mfma", "-mf16c"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        platform_srcs = [["x86|x86_64|platform009", ["XNNPACK/wrappers/f16-gemm/gen/1x16-minmax-avx2-broadcast.c", "XNNPACK/wrappers/f16-gemm/gen/4x16-minmax-avx2-broadcast.c", "XNNPACK/wrappers/f16-igemm/gen/1x16-minmax-avx2-broadcast.c", "XNNPACK/wrappers/f16-igemm/gen/4x16-minmax-avx2-broadcast.c", "XNNPACK/wrappers/f32-qs8-vcvt/gen/vcvt-avx2-x64.c", "XNNPACK/wrappers/f32-qu8-vcvt/gen/vcvt-avx2-x64.c", "XNNPACK/wrappers/f32-velu/gen/velu-avx2-rr1-lut4-p4-perm-x56.c", "XNNPACK/wrappers/f32-vsigmoid/gen/vsigmoid-avx2-rr1-p5-div-x40.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x9-minmax-fp32-avx2-mul32.c", "XNNPACK/wrappers/qc8-dwconv/gen/up16x25-minmax-fp32-avx2-mul32.c", "XNNPACK/wrappers/qc8-gemm/gen/1x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qc8-gemm/gen/3x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qc8-igemm/gen/1x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qc8-igemm/gen/3x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qs8-dwconv/gen/up16x9-minmax-fp32-avx2-mul32.c", "XNNPACK/wrappers/qs8-dwconv/gen/up16x25-minmax-fp32-avx2-mul32.c", "XNNPACK/wrappers/qs8-f32-vcvt/gen/vcvt-avx2-x16.c", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qs8-gemm/gen/3x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qs8-igemm/gen/3x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qs8-vadd/gen/minmax-avx2-mul32-ld64-x16.c", "XNNPACK/wrappers/qs8-vaddc/gen/minmax-avx2-mul32-ld64-x16.c", "XNNPACK/wrappers/qu8-dwconv/gen/up16x9-minmax-fp32-avx2-mul32.c", "XNNPACK/wrappers/qu8-dwconv/gen/up16x25-minmax-fp32-avx2-mul32.c", "XNNPACK/wrappers/qu8-f32-vcvt/gen/vcvt-avx2-x16.c", "XNNPACK/wrappers/qu8-gemm/gen/1x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qu8-gemm/gen/3x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qu8-igemm/gen/1x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qu8-igemm/gen/3x8c8-minmax-fp32-avx2.c", "XNNPACK/wrappers/qu8-vadd/gen/minmax-avx2-mul32-ld64-x16.c", "XNNPACK/wrappers/qu8-vaddc/gen/minmax-avx2-mul32-ld64-x16.c", "XNNPACK/wrappers/x8-lut/gen/lut-avx2-x128.c"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mavx2",
+            "-mfma",
+            "-mf16c",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mavx2",
+                    "-mfma",
+                    "-mf16c",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_AVX2_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
+            "-mavx2",
+            "-mfma",
+            "-mf16c",
+        ],
+        windows_compiler_flags_override = WINDOWS_FLAGS + [
+            "-mavx2",
+            "-mfma",
+            "-mf16c",
+        ],
+        deps = [
+            ":interface",
+        ],
     )
 
-    cxx_library(
-        name = "ukernels_asm_aarch64",
-        srcs = ["XNNPACK/wrappers/f16-gemm/gen-inc/1x8inc-minmax-aarch64-neonfp16arith-ld64.S", "XNNPACK/wrappers/f16-gemm/gen-inc/1x16inc-minmax-aarch64-neonfp16arith-ld32.S", "XNNPACK/wrappers/f16-gemm/gen-inc/4x8inc-minmax-aarch64-neonfp16arith-ld64.S", "XNNPACK/wrappers/f16-gemm/gen-inc/4x16inc-minmax-aarch64-neonfp16arith-ld32.S", "XNNPACK/wrappers/f16-gemm/gen-inc/6x8inc-minmax-aarch64-neonfp16arith-ld64.S", "XNNPACK/wrappers/f16-gemm/gen-inc/6x16inc-minmax-aarch64-neonfp16arith-cortex-a55.S", "XNNPACK/wrappers/f16-gemm/gen-inc/6x16inc-minmax-aarch64-neonfp16arith-cortex-a75.S", "XNNPACK/wrappers/f16-gemm/gen-inc/6x16inc-minmax-aarch64-neonfp16arith-ld32.S", "XNNPACK/wrappers/f16-gemm/gen-inc/8x8inc-minmax-aarch64-neonfp16arith-ld64.S", "XNNPACK/wrappers/f16-gemm/gen/1x8-minmax-aarch64-neonfp16arith-ld64.S", "XNNPACK/wrappers/f16-gemm/gen/1x16-minmax-aarch64-neonfp16arith-ld32.S", "XNNPACK/wrappers/f16-gemm/gen/4x8-minmax-aarch64-neonfp16arith-ld64.S", "XNNPACK/wrappers/f16-gemm/gen/4x16-minmax-aarch64-neonfp16arith-ld32.S", "XNNPACK/wrappers/f16-gemm/gen/6x8-minmax-aarch64-neonfp16arith-ld64.S", "XNNPACK/wrappers/f16-gemm/gen/6x16-minmax-aarch64-neonfp16arith-cortex-a55.S", "XNNPACK/wrappers/f16-gemm/gen/6x16-minmax-aarch64-neonfp16arith-cortex-a75.S", "XNNPACK/wrappers/f16-gemm/gen/6x16-minmax-aarch64-neonfp16arith-ld32.S", "XNNPACK/wrappers/f16-gemm/gen/8x8-minmax-aarch64-neonfp16arith-ld64.S", "XNNPACK/wrappers/f16-igemm/4x16-minmax-aarch64-neonfp16arith-ld32.S", "XNNPACK/wrappers/f32-dwconv/up4x9-minmax-aarch64-neonfma-cortex-a55.S", "XNNPACK/wrappers/f32-dwconv/up4x9-minmax-aarch64-neonfma.S", "XNNPACK/wrappers/f32-gemm/gen-inc/1x8inc-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen-inc/1x8inc-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen-inc/1x8inc-minmax-aarch64-neonfma-ld64.S", "XNNPACK/wrappers/f32-gemm/gen-inc/1x8inc-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen-inc/1x12inc-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen-inc/4x8inc-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen-inc/4x8inc-minmax-aarch64-neonfma-cortex-a55.S", "XNNPACK/wrappers/f32-gemm/gen-inc/4x8inc-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen-inc/4x8inc-minmax-aarch64-neonfma-ld64.S", "XNNPACK/wrappers/f32-gemm/gen-inc/4x8inc-minmax-aarch64-neonfma-ld128.S", "XNNPACK/wrappers/f32-gemm/gen-inc/4x8inc-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen-inc/4x12inc-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen-inc/5x8inc-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen-inc/5x8inc-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen-inc/6x8inc-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen-inc/6x8inc-minmax-aarch64-neonfma-cortex-a55.S", "XNNPACK/wrappers/f32-gemm/gen-inc/6x8inc-minmax-aarch64-neonfma-cortex-a73.S", "XNNPACK/wrappers/f32-gemm/gen-inc/6x8inc-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen-inc/6x8inc-minmax-aarch64-neonfma-ld64.S", "XNNPACK/wrappers/f32-gemm/gen-inc/6x8inc-minmax-aarch64-neonfma-ld128.S", "XNNPACK/wrappers/f32-gemm/gen-inc/6x8inc-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/1x8-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/1x8-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/1x8-minmax-aarch64-neonfma-ld64.S", "XNNPACK/wrappers/f32-gemm/gen/1x8-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/1x12-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch64-neonfma-cortex-a55.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch64-neonfma-ld64.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch64-neonfma-ld128.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch64-neonfma-prfm-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/4x8-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/4x12-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/5x8-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/5x8-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-aarch64-neonfma-cortex-a55.S", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-aarch64-neonfma-cortex-a73.S", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-aarch64-neonfma-ld64.S", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-aarch64-neonfma-ld128.S", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-aarch64-neonfma-prfm-cortex-a53.S", "XNNPACK/wrappers/f32-gemm/gen/6x8-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/1x8-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/1x8-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch64-neonfma-ld64.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch64-neonfma-ld128.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch64-neonfma-prfm-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/gen/4x8-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/5x8-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/5x8-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/6x8-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/gen/6x8-minmax-aarch64-neonfma-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/gen/6x8-minmax-aarch64-neonfma-ld64.S", "XNNPACK/wrappers/f32-igemm/gen/6x8-minmax-aarch64-neonfma-ld128.S", "XNNPACK/wrappers/f32-igemm/gen/6x8-minmax-aarch64-neonfma-prfm-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/gen/6x8-minmax-aarch64-neonfma-prfm-cortex-a75.S", "XNNPACK/wrappers/f32-igemm/1x8-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/1x12-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/4x8-minmax-aarch64-neonfma-cortex-a55.S", "XNNPACK/wrappers/f32-igemm/4x12-minmax-aarch64-neonfma-cortex-a53.S", "XNNPACK/wrappers/f32-igemm/6x8-minmax-aarch64-neonfma-cortex-a55.S", "XNNPACK/wrappers/f32-igemm/6x8-minmax-aarch64-neonfma-cortex-a73.S", "XNNPACK/wrappers/qc8-gemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qc8-gemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qc8-gemm/gen/1x16c4-minmax-fp32-aarch64-neondot-ld32.S", "XNNPACK/wrappers/qc8-gemm/gen/1x16c4-minmax-fp32-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qc8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qc8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qc8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mull.S", "XNNPACK/wrappers/qc8-gemm/gen/2x8c16-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qc8-gemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qc8-gemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-gemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qc8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qc8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld32.S", "XNNPACK/wrappers/qc8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qc8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qc8-igemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qc8-igemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qc8-igemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qc8-igemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qc8-igemm/gen/2x8c16-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qc8-igemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qc8-igemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qc8-igemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qc8-igemm/gen/4x16c4-minmax-fp32-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qc8-igemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qc8-igemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-rndnu-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-rndnu-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-rndnu-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qs8-gemm/gen/1x8c8-minmax-rndnu-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-gemm/gen/1x16c4-minmax-fp32-aarch64-neondot-ld32.S", "XNNPACK/wrappers/qs8-gemm/gen/1x16c4-minmax-fp32-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/1x16c4-minmax-rndnu-aarch64-neondot-ld32.S", "XNNPACK/wrappers/qs8-gemm/gen/1x16c4-minmax-rndnu-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-fp32-aarch64-neon-mull.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mull.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c16-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-gemm/gen/2x8c16-minmax-rndnu-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8-minmax-rndnu-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x8-minmax-rndnu-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld32.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-ld32.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qs8-gemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-rndnu-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-rndnu-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-rndnu-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qs8-igemm/gen/1x8c8-minmax-rndnu-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c8-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mlal-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mlal-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mlal-prfm.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c8-minmax-rndnu-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c16-minmax-fp32-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-igemm/gen/2x8c16-minmax-rndnu-aarch64-neon-mlal.S", "XNNPACK/wrappers/qs8-igemm/gen/4x8-minmax-rndnu-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x8-minmax-rndnu-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16-minmax-fp32-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16c4-minmax-fp32-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-ld64.S", "XNNPACK/wrappers/qs8-igemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qu8-gemm/gen/4x8c4-minmax-rndnu-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qu8-gemm/gen/4x8c4-minmax-rndnu-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-cortex-a75.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-cortex-a75.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qu8-gemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qu8-igemm/gen/4x8c4-minmax-rndnu-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qu8-igemm/gen/4x8c4-minmax-rndnu-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-cortex-a53.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-cortex-a75.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-ld64.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-cortex-a53.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-cortex-a75.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16-minmax-rndnu-aarch64-neon-mlal-lane-prfm-ld64.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16c4-minmax-fp32-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16c4-minmax-fp32-aarch64-neondot-ld128.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-cortex-a55.S", "XNNPACK/wrappers/qu8-igemm/gen/4x16c4-minmax-rndnu-aarch64-neondot-ld128.S"],
-        deps = [":interface", ":jit_memory", "//third_party:FP16"],
-        exported_deps = [],
-        compiler_flags = ["-w", "-O2"],
-        preferred_linkage = "static",
-        exported_preprocessor_flags = [],
+    fb_xplat_cxx_library(
+        name = "ukernels_avx2_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
         header_namespace = "",
-        headers = subdir_glob([("XNNPACK/src", "**/*.S"), ("XNNPACK/src", "**/*.c"), ("XNNPACK/src", "**/*.h"), ("XNNPACK/include", "**/*.h")]),
-        linker_flags = [],
-        platform_compiler_flags = [["(aarch64|arm64)", ["-march=armv8.2-a+fp16+dotprod"]]],
-        platform_linker_flags = [],
-        platform_preprocessor_flags = [["windows", ["-D_WINDOWS", "-D_WIN32", "-DWIN32", "-DNOMINMAX", "-D_CRT_SECURE_NO_WARNINGS", "-D_USE_MATH_DEFINES"]], ["windows.*64$", ["-D_WIN64"]]],
-        preprocessor_flags = ["-DXNN_LOG_LEVEL=0"],
-        soname = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mavx2",
+            "-mfma",
+            "-mf16c",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mavx2",
+                    "-mfma",
+                    "-mf16c",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
         visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
+            "-mavx2",
+            "-mfma",
+            "-mf16c",
+        ],
+        windows_compiler_flags_override = WINDOWS_FLAGS + [
+            "-mavx2",
+            "-mfma",
+            "-mf16c",
+        ],
+        windows_srcs = PROD_AVX2_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_avx512",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mavx512f",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mavx512f",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_AVX512F_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx512f"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx512f"],
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_avx512_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mavx512f",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "x86",
+                [
+                    "-mavx512f",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + ["-mavx512f"],
+        windows_compiler_flags_override = WINDOWS_FLAGS + ["-mavx512f"],
+        windows_srcs = PROD_AVX512F_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_avx512skx",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mavx512f",
+            "-mavx512cd",
+            "-mavx512bw",
+            "-mavx512dq",
+            "-mavx512vl",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^(i[3-6]86|x86|x86_64|AMD64)$",
+                [
+                    "-mavx512f",
+                    "-mavx512cd",
+                    "-mavx512bw",
+                    "-mavx512dq",
+                    "-mavx512vl",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            (
+                "x86|x86_64|platform009|platform010",
+                PROD_AVX512SKX_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
+            "-mavx512f",
+            "-mavx512cd",
+            "-mavx512bw",
+            "-mavx512dq",
+            "-mavx512vl",
+        ],
+        windows_compiler_flags_override = WINDOWS_FLAGS + [
+            "-mavx512f",
+            "-mavx512cd",
+            "-mavx512bw",
+            "-mavx512dq",
+            "-mavx512vl",
+        ],
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_avx512skx_ovr_win32",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+            "-mavx512f",
+            "-mavx512cd",
+            "-mavx512bw",
+            "-mavx512dq",
+            "-mavx512vl",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^(i[3-6]86|x86|x86_64|AMD64)$",
+                [
+                    "-mavx512f",
+                    "-mavx512cd",
+                    "-mavx512bw",
+                    "-mavx512dq",
+                    "-mavx512vl",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS + [
+            "-mavx512f",
+            "-mavx512cd",
+            "-mavx512bw",
+            "-mavx512dq",
+            "-mavx512vl",
+        ],
+        windows_compiler_flags_override = WINDOWS_FLAGS + [
+            "-mavx512f",
+            "-mavx512cd",
+            "-mavx512bw",
+            "-mavx512dq",
+            "-mavx512vl",
+        ],
+        windows_srcs = PROD_AVX512SKX_MICROKERNEL_SRCS,
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_neon",
+        srcs = PROD_NEON_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^(android-armv7|iphoneos-armv7)$",
+                [
+                    "-march=armv7-a",
+                    "-mfpu=neon",
+                    "-mfloat-abi=softfp",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_neon_fma",
+        srcs = PROD_NEONFMA_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "arm",
+                [
+                    "-mfpu=neon-vfpv4",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_neon_fp16",
+        srcs = PROD_NEONFP16_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "arm",
+                [
+                    "-mfpu=neon-fp16",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_neon_v8",
+        srcs = PROD_NEONV8_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "(aarch64|arm64)",
+                [
+                    "-march=armv8-a",
+                    "-mfpu=neon-fp-armv8",
+                ],
+            ),
+            (
+                "^android-armv7$",
+                [
+                    "-march=armv8-a",
+                    "-mfpu=neon-fp-armv8",
+                    "-mfloat-abi=softfp",
+                ],
+            ),
+            (
+                "^iphoneos-armv7$",
+                [
+                    "-mcpu=cyclone",
+                    "-mtune=generic",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_neon_dot",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "(aarch64|arm64)",
+                [
+                    "-march=armv8.2-a+dotprod",
+                ],
+            ),
+            (
+                "^android-armv7$",
+                [
+                    "-march=armv8.2-a+dotprod",
+                    "-mfpu=neon-fp-armv8",
+                    "-mfloat-abi=softfp",
+                ],
+            ),
+        ],
+        platform_srcs = [
+            # excluding iphoneos-armv7, matching everything else
+            (
+                "^((?!iphoneos-armv7).)*$",
+                PROD_NEONDOT_MICROKERNEL_SRCS,
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_neon_aarch64",
+        srcs = PROD_AARCH64_NEON_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "(aarch64|arm64)",
+                [
+                    "-mfpu=neon-vfpv4",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_neon_fp16arith_aarch64",
+        srcs = PROD_AARCH64_NEONFP16ARITH_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.c"),
+            ("XNNPACK/src", "**/*.h"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "(aarch64|arm64)",
+                [
+                    "-march=armv8.2-a+fp16",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_scalar_aarch32",
+        srcs = PROD_SCALAR_AARCH32_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/src", "**/*.c"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^(android-armv7|iphoneos-armv7)$",
+                [
+                    "-march=armv7-a",
+                    "-mfpu=neon",
+                    "-mfloat-abi=softfp",
+                ],
+            ),
+        ],
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_asm_aarch32",
+        srcs = AARCH32_ASM_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "xnnpack/assembly.h"),
+            ("XNNPACK/src", "**/*.S"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "^android-armv7$",
+                [
+                    "-march=armv8.2-a+dotprod",
+                    "-mfpu=neon-fp-armv8",
+                    "-mfloat-abi=softfp",
+                ],
+            ),
+        ],
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            ":jit_memory",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "ukernels_asm_aarch64",
+        srcs = AARCH64_ASM_MICROKERNEL_SRCS,
+        headers = subdir_glob([
+            ("XNNPACK/src", "xnnpack/assembly.h"),
+            ("XNNPACK/src", "**/*.S"),
+        ]),
+        header_namespace = "",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        compiler_flags = [
+            "-O2",
+        ],
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        labels = labels,
+        platform_compiler_flags = [
+            (
+                "(aarch64|arm64)",
+                [
+                    "-march=armv8.2-a+fp16+dotprod",
+                ],
+            ),
+        ],
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+        ],
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS,
+        deps = [
+            ":interface",
+            ":jit_memory",
+            third_party("FP16"),
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "arm64_lib",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        labels = labels,
+        preferred_linkage = "static",
+        visibility = ["PUBLIC"],
+        deps = [
+            ":jit_memory",
+            ":ukernels_asm_aarch64",
+            ":ukernels_neon",
+            ":ukernels_neon_aarch64",
+            ":ukernels_neon_dot",
+            ":ukernels_neon_fma",
+            ":ukernels_neon_fp16",
+            ":ukernels_neon_fp16arith_aarch64",
+            ":ukernels_neon_v8",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "x86_and_x86_64_lib",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        labels = labels,
+        preferred_linkage = "static",
+        visibility = ["PUBLIC"],
+        deps = [
+            ":ukernels_avx",
+            ":ukernels_avx2",
+            ":ukernels_avx512",
+            ":ukernels_avx512skx",
+            ":ukernels_f16c",
+            ":ukernels_fma3",
+            ":ukernels_sse",
+            ":ukernels_sse2",
+            ":ukernels_sse41",
+            ":ukernels_ssse3",
+            ":ukernels_xop",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "x86_and_x86_64_lib_ovr_win32",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        labels = labels,
+        preferred_linkage = "static",
+        visibility = ["PUBLIC"],
+        deps = [
+            ":ukernels_avx2_ovr_win32",
+            ":ukernels_avx512_ovr_win32",
+            ":ukernels_avx512skx_ovr_win32",
+            ":ukernels_avx_ovr_win32",
+            ":ukernels_f16c_ovr_win32",
+            ":ukernels_fma3_ovr_win32",
+            ":ukernels_sse2_ovr_win32",
+            ":ukernels_sse41_ovr_win32",
+            ":ukernels_sse_ovr_win32",
+            ":ukernels_ssse3_ovr_win32",
+            ":ukernels_xop_ovr_win32",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "arm_lib",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        labels = labels,
+        preferred_linkage = "static",
+        visibility = ["PUBLIC"],
+        deps = [
+            ":jit_memory",
+            ":ukernels_asm_aarch32",
+            ":ukernels_asm_aarch64",
+            ":ukernels_neon",
+            ":ukernels_neon_aarch64",
+            ":ukernels_neon_dot",
+            ":ukernels_neon_fma",
+            ":ukernels_neon_fp16",
+            ":ukernels_neon_fp16arith_aarch64",
+            ":ukernels_neon_v8",
+            ":ukernels_scalar_aarch32",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "armv7_lib",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        labels = labels,
+        preferred_linkage = "static",
+        visibility = ["PUBLIC"],
+        deps = [
+            ":jit_memory",
+            ":ukernels_asm_aarch32",
+            ":ukernels_neon",
+            ":ukernels_neon_dot",
+            ":ukernels_neon_fma",
+            ":ukernels_neon_v8",
+            ":ukernels_scalar_aarch32",
+        ],
+    )
+
+    fb_xplat_cxx_library(
+        name = "XNNPACK",
+        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        labels = labels,
+        deps = [
+            ":operators",
+            ":subgraph",
+            ":tables",
+            ":ukernels_scalar",
+            third_party("cpuinfo"),
+            third_party("pthreadpool"),
+        ] + select({
+            "DEFAULT": [
+                ":arm_lib",
+                ":x86_and_x86_64_lib",
+            ],
+            "ovr_config//os:windows": [":x86_and_x86_64_lib_ovr_win32"] if XNNPACK_WINDOWS_AVX512F_ENABLED else [
+                ":arm_lib",
+                ":x86_and_x86_64_lib",
+            ],
+            # doesn't cover iphonesimulator-x86_64
+            "ovr_config//runtime:arm64-linux-ubuntu-neon": [":arm64_lib"],
+            "ovr_config//runtime:platform009": [":x86_and_x86_64_lib"],
+            "ovr_config//runtime:platform010": [":x86_and_x86_64_lib"],
+        }),
+        exported_headers = {
+            "xnnpack.h": "XNNPACK/include/xnnpack.h",
+        },
+        fbobjc_preprocessor_flags = [
+            "-DXNN_PRIVATE=",
+            "-DXNN_INTERNAL=",
+        ],
+        header_namespace = "",
+        headers = subdir_glob([
+            ("XNNPACK/src", "**/*.h"),
+            ("XNNPACK/include", "**/*.h"),
+        ]),
+        platforms = (APPLE, ANDROID, CXX, WINDOWS),
+        preferred_linkage = "static",
+        preprocessor_flags = [
+            "-DXNN_LOG_LEVEL=0",
+            "-DXNN_NO_Q8_OPERATORS",
+            "-DXNN_NO_F16_OPERATORS",
+            "-DXNN_NO_NCHW_OPERATORS",
+            "-DXNN_NO_QU8_OPERATORS",
+            "-DXNN_NO_S8_OPERATORS",
+            "-DXNN_NO_U8_OPERATORS",
+            "-DXNN_NO_VCVT_OPERATORS",
+            "-DXNN_NO_X32_OPERATORS",
+            "-DXNN_NO_X8_OPERATORS",
+            "-DXNN_NO_XX_OPERATORS",
+        ],
+        srcs = [
+            "XNNPACK/src/allocator.c",
+            "XNNPACK/src/init.c",
+            "XNNPACK/src/memory-planner.c",
+            "XNNPACK/src/operator-delete.c",
+            "XNNPACK/src/runtime.c",
+            "XNNPACK/src/subgraph.c",
+            "XNNPACK/src/tensor.c",
+        ] + LOGGING_SRCS,
+        visibility = ["PUBLIC"],
+        windows_clang_compiler_flags_override = (WINDOWS_FLAGS + WINDOWS_CLANG_COMPILER_FLAGS) if XNNPACK_WINDOWS_AVX512F_ENABLED else WINDOWS_FLAGS,
+        windows_compiler_flags_override = WINDOWS_FLAGS if XNNPACK_WINDOWS_AVX512F_ENABLED else [],
     )
