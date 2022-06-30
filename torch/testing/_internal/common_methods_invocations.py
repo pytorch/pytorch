@@ -1247,6 +1247,7 @@ def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_g
     with sparse csr layouts.
     """
     if op_info.supports_sparse_csr:
+        op_name = op_info.name.replace('_masked.', '')
         for sample_input in sample_inputs_masked_reduction(op_info, device, dtype, requires_grad, **kwargs):
             if not (sample_input.input.ndim == 2 and sample_input.kwargs.get('keepdim')):
                 # - sparse CSR tensors are always 2-D tensors
@@ -1259,7 +1260,7 @@ def sample_inputs_sparse_csr_masked_reduction(op_info, device, dtype, requires_g
                 new_sample = SampleInput(sample_input.input.to_sparse_csr(),
                                          args=sample_input.args, kwargs=sample_input_kwargs)
             else:
-                if op_info.name.lstrip('_masked.') in ['prod']:
+                if op_name in ['prod', 'amax', 'amin', 'mean']:
                     # reductions with non-zero reduction identity and
                     # unspecified mask is not supported for sparse CSR
                     # tensors, see torch._masked.prod implementation
@@ -16695,7 +16696,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_reduce',
-           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_out=True,
            sample_inputs_func=sample_inputs_index_reduce),
     OpInfo('__getitem__',
@@ -18948,6 +18949,7 @@ op_db: List[OpInfo] = [
         supports_sparse=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        supports_sparse_csr=True,
         ref=reference_reduction_numpy(np.amax),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -18957,12 +18959,14 @@ op_db: List[OpInfo] = [
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit'),
             # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
+            # FIXME: "_segment_reduce_lengths_cpu/cuda" not implemented for ... (used for sparse_csr inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout',
                          dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
                                  torch.int64, torch.complex64, torch.complex128)),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
+        sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
@@ -18973,6 +18977,7 @@ op_db: List[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         supports_sparse=True,
+        supports_sparse_csr=True,
         ref=reference_reduction_numpy(np.amin),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -18982,12 +18987,14 @@ op_db: List[OpInfo] = [
             # RuntimeError: Unknown builtin op: aten::iinfo
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
             # FIXME: "cuda_scatter_gather_base_kernel_func" not implemented for ... (used for sparse_coo inputs)
-            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout', device_type='cuda',
+            # FIXME: "_segment_reduce_lengths_cpu/cuda" not implemented for ... (used for sparse_csr inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout',
                          dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
                                  torch.int64, torch.complex64, torch.complex128)),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
+        sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     ReductionOpInfo(
@@ -19032,6 +19039,7 @@ op_db: List[OpInfo] = [
         method_variant=None,
         nan_policy='propagate',
         supports_out=False,
+        supports_sparse_csr=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         promotes_int_to_float=True,
@@ -19052,12 +19060,17 @@ op_db: List[OpInfo] = [
             # see https://github.com/pytorch/pytorch/issues/76227
             DecorateInfo(unittest.skip("Fails on UBSAN!"), 'TestCompositeCompliance', 'test_forward_ad',
                          device_type='cpu'),
+            # FIXME: "_segment_reduce_lengths_cpu/cuda" not implemented for ... (used for sparse_csr inputs)
+            DecorateInfo(unittest.skip("Skipped!"), 'TestMasked', 'test_mask_layout',
+                         dtypes=(torch.bool, torch.int8, torch.uint8, torch.int16, torch.int32,
+                                 torch.int64, torch.complex64, torch.complex128)),
         ),
         decorators=[
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-03, rtol=1e-03)}),
                          'TestReductions', 'test_reference_masked'),
         ],
         sample_inputs_func=sample_inputs_masked_reduction,
+        sample_inputs_sparse_csr_func=sample_inputs_sparse_csr_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation
     ),
     OpInfo(
