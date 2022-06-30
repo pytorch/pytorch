@@ -186,18 +186,6 @@ on:
 {%- endmacro -%}
 
 {%- macro teardown_ec2_linux(pytorch_directory="") -%}
-      - name: Manually hold runner for 2 hours
-        run: |
-          echo "Holding runner for 2 hours until all ssh sessions have logged out"
-          for _ in $(seq 144); do
-              # Break if no ssh session exists anymore
-              if [ "$(who)" = "" ]; then
-                break
-              fi
-              echo "."
-              sleep 500
-          done
-
       - name: Hold runner for 2 hours or until ssh sessions have drained
 {%- if pytorch_directory %}
         working-directory: !{{ pytorch_directory }}
