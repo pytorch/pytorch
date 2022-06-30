@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/Layout.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
@@ -134,6 +135,8 @@ struct C10_API PyInterpreter {
   using dim_sig = int64_t(const PyInterpreter*, const TensorImpl*);
   using strides_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
   using sizes_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
+  using sym_sizes_sig =
+      c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
   using layout_sig = c10::Layout(const PyInterpreter*, const TensorImpl*);
 
   PyInterpreter(
@@ -146,6 +149,7 @@ struct C10_API PyInterpreter {
       dim_sig* dim_fn,
       strides_sig* strides,
       sizes_sig* sizes,
+      sym_sizes_sig* sym_sizes)
       layout_sig* layout)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
@@ -156,6 +160,7 @@ struct C10_API PyInterpreter {
         dim_fn_(dim_fn),
         strides_fn_(strides),
         sizes_fn_(sizes),
+        sym_sizes_fn_(sym_sizes),
         layout_fn_(layout) {}
 
   name_sig* name_fn_;
@@ -167,6 +172,7 @@ struct C10_API PyInterpreter {
   dim_sig* dim_fn_;
   strides_sig* strides_fn_;
   sizes_sig* sizes_fn_;
+  sym_sizes_sig* sym_sizes_fn_;
   layout_sig* layout_fn_;
 
   // UBSAN suppression fixes: "call to function
@@ -223,6 +229,10 @@ struct C10_API PyInterpreter {
       const TensorImpl* self) const {
     return (*sizes_fn_)(this, self);
   }
+
+  __ubsan_ignore_function__ c10::SymIntArrayRef sym_sizes(
+      const TensorImpl* self) const {
+    return (*sym_sizes_fn_)(this, self);
 
   __ubsan_ignore_function__ c10::Layout layout(
       const TensorImpl* self) const {

@@ -411,6 +411,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_size(Tensor self) -> SymInt[]"),
+        sym_size,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
         [](Stack& stack) {
           IValue e = pop(stack);
@@ -500,7 +504,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA("aten::get_device(Tensor self) -> int"),
         [](Stack& stack) {
           RECORD_FUNCTION("get_device", c10::ArrayRef<const c10::IValue>{});
-          std::cout << "aten::get_device\n";
           auto result =
               at::get_device((std::move(peek(stack, 0, 1))).toTensor());
           drop(stack, 1);
@@ -617,7 +620,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::eq.device(Device a, Device b) -> bool"),
         [](Stack& stack) {
-          std::cout << "eq.Device\n";
           auto a = pop(stack).toDevice();
           auto b = pop(stack).toDevice();
           push(stack, a == b);
@@ -626,7 +628,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::ne.device(Device a, Device b) -> bool"),
         [](Stack& stack) {
-          std::cout << "ne.Device\n";
           auto a = pop(stack).toDevice();
           auto b = pop(stack).toDevice();
           push(stack, a != b);
@@ -867,7 +868,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::type(Device self) -> str"),
         [](Stack& stack) {
-          std::cout << "prim::type(Device)\n";
           auto d = pop(stack);
           push(
               stack, DeviceTypeName(d.toDevice().type(), /* lower_case=*/true));
@@ -1056,7 +1056,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         TORCH_SELECTIVE_SCHEMA(
             "aten::to.prim_Device(Tensor(a) self, Device? device, int? dtype=None, bool non_blocking=False, bool copy=False) -> Tensor(a|b)"),
         [](Stack& stack) {
-          std::cout << "to.prim_Device\n";
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           bool non_blocking;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -2209,7 +2208,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("aten::device(str a) -> Device"),
         [](Stack& stack) {
-          std::cout << "aten::device(str)\n";
           push(stack, c10::Device(pop(stack).toStringRef()));
         },
         aliasAnalysisFromSchema()),
@@ -2347,7 +2345,6 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs1{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::index(Device self) -> int?"),
         [](Stack& stack) {
-          std::cout << "prim::index(Device)\n";
           auto d = pop(stack).toDevice();
           if (d.has_index()) {
             push(stack, d.index());
