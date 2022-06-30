@@ -1,5 +1,4 @@
 #include <ATen/native/vulkan/api/Context.h>
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Copy.h>
 #include <ATen/vulkan/Context.h>
 
@@ -10,11 +9,9 @@ namespace native {
 namespace vulkan {
 namespace api {
 
-Context::Context(
-    const VkInstance instance, size_t adapter_i, const ContextConfig config)
+Context::Context(size_t adapter_i, const ContextConfig& config)
     : config_(config),
       // Important handles
-      instance_(instance),
       adapter_p_(runtime()->get_adapter_p(adapter_i)),
       device_(adapter_p_->device_handle()),
       queue_(adapter_p_->request_queue()),
@@ -162,8 +159,7 @@ Context* context() {
         cmd_config,  // cmdPoolConfig
         descriptor_pool_config,  // descriptorPoolConfig
       };
-      return new Context(
-          runtime()->instance(), runtime()->default_adapter_i(), config);
+      return new Context(runtime()->default_adapter_i(), config);
     }
     catch (const std::exception& e) {
       TORCH_CHECK(false, "Vulkan: Failed to initialize context! Error: ", e.what());

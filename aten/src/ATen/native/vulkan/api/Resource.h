@@ -2,9 +2,7 @@
 
 #ifdef USE_VULKAN_API
 
-#include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Allocator.h>
-#include <ATen/native/vulkan/api/Cache.h>
 #include <c10/util/hash.h>
 
 #include <stack>

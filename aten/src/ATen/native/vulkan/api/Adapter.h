@@ -7,7 +7,6 @@
 #include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ostream>
-#include <iostream>
 
 namespace at {
 namespace native {

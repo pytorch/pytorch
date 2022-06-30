@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
@@ -87,11 +86,11 @@ Tensor softmax_internal(
       // shader arguments
       v_output.image(
           pipeline_barrier,
-          api::PipelineStage::Compute,
+          api::PipelineStage::COMPUTE,
           api::MemoryAccessType::WRITE),
       v_input.image(
           pipeline_barrier,
-          api::PipelineStage::Compute),
+          api::PipelineStage::COMPUTE),
       // params buffer
       params.buffer());
 

@@ -6,6 +6,96 @@ namespace vulkan {
 namespace api {
 
 //
+// Utility Functions
+//
+
+VkAccessFlags vk_access(
+    const PipelineStageFlags stage,
+    const MemoryAccessFlags access) {
+  VkAccessFlags vk_access = 0u;
+
+  if (access & MemoryAccessType::READ) {
+    if (stage & PipelineStage::COMPUTE) {
+      vk_access |= VK_ACCESS_SHADER_READ_BIT;
+    }
+
+    if (stage & PipelineStage::HOST) {
+      vk_access |= VK_ACCESS_HOST_READ_BIT;
+    }
+
+    if (stage & PipelineStage::TRANSFER) {
+      vk_access |= VK_ACCESS_TRANSFER_READ_BIT;
+    }
+  }
+
+  if (access & MemoryAccessType::WRITE) {
+    if (stage & PipelineStage::COMPUTE) {
+      vk_access |= VK_ACCESS_SHADER_WRITE_BIT;
+    }
+
+    if (stage & PipelineStage::HOST) {
+      vk_access |= VK_ACCESS_HOST_WRITE_BIT;
+    }
+
+    if (stage & PipelineStage::TRANSFER) {
+      vk_access |= VK_ACCESS_TRANSFER_WRITE_BIT;
+    }
+  }
+
+  return vk_access;
+}
+
+VkPipelineStageFlags vk_stage(const PipelineStageFlags stage) {
+  VkPipelineStageFlags vk_stage = 0u;
+
+  if (stage & PipelineStage::COMPUTE) {
+    vk_stage |= VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+  }
+
+  if (stage & PipelineStage::HOST) {
+    vk_stage |= VK_PIPELINE_STAGE_HOST_BIT;
+  }
+
+  if (stage & PipelineStage::TRANSFER) {
+    vk_stage |= VK_PIPELINE_STAGE_TRANSFER_BIT;
+  }
+
+  return vk_stage;
+}
+
+VkImageLayout vk_layout(
+    const PipelineStageFlags stage,
+    const MemoryAccessFlags access) {
+  switch (stage) {
+
+    case PipelineStage::COMPUTE:
+      switch (access) {
+        case MemoryAccessType::READ:
+          return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        default:
+          return VK_IMAGE_LAYOUT_GENERAL;
+      } break;
+
+    case PipelineStage::TRANSFER:
+      switch (access) {
+        case MemoryAccessType::READ:
+          return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+        case MemoryAccessType::WRITE:
+          return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+
+        default:
+          TORCH_INTERNAL_ASSERT(false, "Invalid!");
+      } break;
+
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Invalid!");
+  }
+
+  return VK_IMAGE_LAYOUT_UNDEFINED;
+}
+
+//
 // PipelineLayout
 //
 
