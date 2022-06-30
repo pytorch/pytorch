@@ -1,0 +1,12 @@
+name: linux-binary-build
+
+on:
+  workflow_call:
+
+
+jobs:
+  build:
+    steps:
+      - name: Zain Prints env vars
+        shell: bash
+        run: env
