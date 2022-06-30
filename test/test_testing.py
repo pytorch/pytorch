@@ -481,7 +481,7 @@ if __name__ == '__main__':
         test_bases_count = len(get_device_type_test_bases())
         # Test without setting env var should run everything.
         env = dict(os.environ)
-        for k in ['IN_CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
+        for k in ['CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
             if k in env.keys():
                 del env[k]
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
@@ -1134,7 +1134,7 @@ class TestAssertCloseSparseCSR(TestCase):
 
     def test_mismatching_crow_indices_msg(self):
         actual_crow_indices = (0, 1, 2)
-        actual_col_indices = (1, 0)
+        actual_col_indices = (0, 1)
         actual_values = (1, 2)
         actual = torch.sparse_csr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
 
@@ -1192,7 +1192,7 @@ class TestAssertCloseSparseCSC(TestCase):
 
     def test_mismatching_ccol_indices_msg(self):
         actual_ccol_indices = (0, 1, 2)
-        actual_row_indices = (1, 0)
+        actual_row_indices = (0, 1)
         actual_values = (1, 2)
         actual = torch.sparse_csc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
 
@@ -1250,7 +1250,7 @@ class TestAssertCloseSparseBSR(TestCase):
 
     def test_mismatching_crow_indices_msg(self):
         actual_crow_indices = (0, 1, 2)
-        actual_col_indices = (1, 0)
+        actual_col_indices = (0, 1)
         actual_values = ([[1]], [[2]])
         actual = torch.sparse_bsr_tensor(actual_crow_indices, actual_col_indices, actual_values, size=(2, 2))
 
@@ -1308,7 +1308,7 @@ class TestAssertCloseSparseBSC(TestCase):
 
     def test_mismatching_ccol_indices_msg(self):
         actual_ccol_indices = (0, 1, 2)
-        actual_row_indices = (1, 0)
+        actual_row_indices = (0, 1)
         actual_values = ([[1]], [[2]])
         actual = torch.sparse_bsc_tensor(actual_ccol_indices, actual_row_indices, actual_values, size=(2, 2))
 
@@ -1774,7 +1774,6 @@ class TestImports(TestCase):
                            "torch.distributed.elastic.rendezvous",  # depps on etcd
                            "torch.backends._coreml",  # depends on pycoreml
                            "torch.contrib.",  # something weird
-                           "torch.testing._internal.common_fx2trt",  # needs fx
                            "torch.testing._internal.distributed.",  # just fails
                            ]
         # See https://github.com/pytorch/pytorch/issues/77801

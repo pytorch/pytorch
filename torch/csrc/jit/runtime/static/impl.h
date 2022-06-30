@@ -13,6 +13,7 @@
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/static/ProcessedNodeInputs.h>
+#include <torch/custom_class.h>
 #include <limits>
 
 #ifdef FBCODE_CAFFE2
@@ -55,6 +56,10 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
     default:
       return false;
   }
+}
+
+TORCH_API inline c10::Symbol getStaticRuntimeMetadataSymbol() {
+  return Symbol::attr("static_runtime::metadata");
 }
 
 TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
@@ -181,6 +186,26 @@ struct TORCH_API StaticModuleOptions {
   bool use_maybe_copy_variants{true};
   // enable TensorExpr fusion of ops at model loading time
   bool enable_tensorexpr_fusion{false};
+};
+
+/*
+  Responsible for plugging StaticRuntime metadata onto the
+  IR nodes. StaticRuntimeMetdata extends CustomClassHolder
+  which can be casted to IValue and attached to IR node.
+  This is needed to pass parent graph metadata to forked
+  graph in presence of prim::fork operator
+*/
+class TORCH_API StaticRuntimeMetadata : public torch::CustomClassHolder {
+ public:
+  explicit StaticRuntimeMetadata(const StaticModuleOptions& opts)
+      : opts_(opts) {}
+
+  const StaticModuleOptions& get_opts() {
+    return opts_;
+  }
+
+ private:
+  StaticModuleOptions opts_;
 };
 
 /// The static runime supports two execution modes.
@@ -463,6 +488,10 @@ class TORCH_API StaticModule {
       const AliasDb& alias_db,
       FastMap<const Value*, uint32_t>& value_to_index);
 
+  // Recursively traverse the graph and attach SR metadata
+  // to the prim::fork nodes as additional attributes
+  void attachNodeMetadata(Block* block);
+
   // Recurses on sub-blocks and populates the array of ProcessedNodes
   // Returns (number of nodes processed, number of blocks processed)
   size_t prepareStaticNodeInfos(
@@ -476,6 +505,8 @@ class TORCH_API StaticModule {
   void prepareForMemoryPlanner();
 
   StaticModuleOptions opts_;
+  // metadata that is stored in IR nodes as attribute
+  at::intrusive_ptr<jit::StaticRuntimeMetadata> sr_metadata_;
   std::shared_ptr<torch::jit::Graph> graph_;
   c10::optional<torch::jit::Module> module_;
   c10::optional<c10::FunctionSchema> schema_;
@@ -802,6 +833,48 @@ class TORCH_API StaticNodeInfo {
   uint16_t outputs_offset_;
 };
 
+/*
+  ProcessedNodeMetadata class wraps the possible metadata
+  for ProcessedNode. Depending upon the nature of op, processedNode
+  can have one of the below possibilities of metadata:
+  - prim::If/prim::Loop ops contains block_runners_ as their metadata
+  - prim::fork op contains TaskLauncher (std::function) responsible for
+    execution of forked subgraph
+*/
+class TORCH_API ProcessedNodeMetadata {
+ public:
+  ProcessedNodeMetadata(std::vector<BlockRunner> runners, TaskLauncher launcher)
+      : block_runners_(std::move(runners)), launcher_(std::move(launcher)) {}
+
+  ProcessedNodeMetadata() : launcher_({}) {}
+
+  // deleted copy ctor/assigment as standard containers (vector) always
+  // have copy constructors, but their instantiation is not well-formed
+  // if the contained type (BlockRunner) is not copyable
+  ProcessedNodeMetadata(const ProcessedNodeMetadata&) = delete;
+  ProcessedNodeMetadata& operator=(const ProcessedNodeMetadata&) = delete;
+
+  std::vector<BlockRunner>& block_runners() {
+    return block_runners_;
+  }
+
+  void set_block_runners(std::vector<BlockRunner> runners) {
+    block_runners_ = std::move(runners);
+  }
+
+  void set_launcher(TaskLauncher launcher) {
+    launcher_ = std::move(launcher);
+  }
+
+  TaskLauncher launcher() {
+    return launcher_;
+  }
+
+ private:
+  std::vector<BlockRunner> block_runners_;
+  TaskLauncher launcher_;
+};
+
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 class TORCH_API ProcessedNode {
  public:
@@ -814,9 +887,7 @@ class TORCH_API ProcessedNode {
         inputs_(other.inputs_),
         outputs_offset_(other.outputs_offset_),
         values_(values),
-        // TODO(T105178680): For this task, we should move
-        // block runners out of ProcessedNode.
-        block_runners_(nullptr) {}
+        meta_data_(nullptr) {}
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
@@ -908,13 +979,25 @@ class TORCH_API ProcessedNode {
   // used in debug mode
   bool verify_no_memory_overlap(bool force_check = false) const;
 
-  std::vector<BlockRunner>* block_runners() {
-    return block_runners_.get();
+  // returns pointer to ProcessedNodeMetadata or nullptr if no object is owned
+  ProcessedNodeMetadata* meta_data() {
+    return meta_data_.get();
   }
 
-  void set_block_runners(
-      std::unique_ptr<std::vector<BlockRunner>> block_runners) {
-    block_runners_ = std::move(block_runners);
+  // attach block_runner to metadata of ProcessedNode
+  void set_meta_data(std::vector<BlockRunner> block_runners) {
+    if (meta_data_ == nullptr) {
+      meta_data_ = std::make_unique<ProcessedNodeMetadata>();
+    }
+    meta_data_->set_block_runners(std::move(block_runners));
+  }
+
+  // attach TaskLauncher to metadata of ProcessedNode
+  void set_meta_data(TaskLauncher launcher) {
+    if (meta_data_ == nullptr) {
+      meta_data_ = std::make_unique<ProcessedNodeMetadata>();
+    }
+    meta_data_->set_launcher(std::move(launcher));
   }
 
  private:
@@ -928,9 +1011,10 @@ class TORCH_API ProcessedNode {
   uint16_t outputs_offset_;
   bool overlap_detected_{false};
   IValue* values_ = nullptr; // unowned
-  // For control flow; processed nodes may have sub-blocks which can
-  // be executed by op implementations.
-  std::unique_ptr<std::vector<BlockRunner>> block_runners_;
+  // Metadata for ProcessedNode.
+  // 1. prim::If/Loop nodes contains sub-blocks as metadata
+  // 2. prim::fork nodes contains custom executor for async execution
+  std::unique_ptr<ProcessedNodeMetadata> meta_data_;
 };
 
 // `StaticRuntime` is the owner of the array of IValues (used for constants,

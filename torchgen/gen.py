@@ -77,6 +77,7 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
     gen_composite_view_copy_kernel,
+    gen_symint_view_copy_kernel,
 )
 
 T = TypeVar("T")
@@ -152,6 +153,7 @@ class LineLoader(YamlLoader):
 
 
 _GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
+_GLOBAL_PARSE_TAGS_YAML_CACHE = {}
 
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
@@ -220,11 +222,13 @@ def parse_tags_yaml_struct(es: object, path: str = "<stdin>") -> Set[str]:
 
 @functools.lru_cache(maxsize=None)
 def parse_tags_yaml(path: str) -> Set[str]:
-    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
-    with open(path, "r") as f:
-        es = yaml.load(f, Loader=LineLoader)
-        valid_tags = parse_tags_yaml_struct(es, path=path)
-    return valid_tags
+    global _GLOBAL_PARSE_TAGS_YAML_CACHE
+    if path not in _GLOBAL_PARSE_TAGS_YAML_CACHE:
+        with open(path, "r") as f:
+            es = yaml.load(f, Loader=LineLoader)
+            _GLOBAL_PARSE_TAGS_YAML_CACHE[path] = parse_tags_yaml_struct(es, path=path)
+
+    return _GLOBAL_PARSE_TAGS_YAML_CACHE[path]
 
 
 def parse_native_yaml(
@@ -234,7 +238,6 @@ def parse_native_yaml(
     *,
     skip_native_fns_gen: bool = False,
 ) -> ParsedYaml:
-    # TODO: parse tags.yaml and create a tags database (a dict of tag name mapping to a Tag object)
     global _GLOBAL_PARSE_NATIVE_YAML_CACHE
     if path not in _GLOBAL_PARSE_NATIVE_YAML_CACHE:
         valid_tags = parse_tags_yaml(tags_yaml_path)
@@ -316,6 +319,7 @@ def static_dispatch_keys(backends: List[BackendIndex]) -> List[DispatchKey]:
         return [backend.dispatch_key for backend in backends] + [
             DispatchKey.CompositeImplicitAutograd,
             DispatchKey.CompositeExplicitAutograd,
+            DispatchKey.CompositeExplicitAutogradNonFunctional,
         ]
 
 
@@ -330,6 +334,8 @@ def get_static_dispatch_backend(
         return backend_index.dispatch_key
     elif f.has_composite_explicit_autograd_kernel:
         return DispatchKey.CompositeExplicitAutograd
+    elif f.has_composite_explicit_autograd_non_functional_kernel:
+        return DispatchKey.CompositeExplicitAutogradNonFunctional
     elif f.has_composite_implicit_autograd_kernel:
         return DispatchKey.CompositeImplicitAutograd
     return None
@@ -418,6 +424,8 @@ def generate_static_dispatch_fallback_call(
     exprs = translate_args_dispatcher_to_cpp(f)
     if f.has_composite_explicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeExplicitAutograd.lower()}::{name}({exprs});"
+    elif f.has_composite_explicit_autograd_non_functional_kernel:
+        return f"return {ns}::{DispatchKey.CompositeExplicitAutogradNonFunctional.lower()}::{name}({exprs});"
     elif f.has_composite_implicit_autograd_kernel:
         return f"return {ns}::{DispatchKey.CompositeImplicitAutograd.lower()}::{name}({exprs});"
     else:
@@ -500,7 +508,8 @@ class RegisterSchema:
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
-        return f"m.def({cpp_string(str(f.func))});\n"
+        tags = "{" + ", ".join([f"at::Tag::{tag}" for tag in f.tags]) + "}"
+        return f"m.def({cpp_string(str(f.func))}, {tags});\n"
 
 
 # Generates Operators.h and Operators.cpp.
@@ -1711,6 +1720,7 @@ def gen_per_operator_headers(
 def gen_headers(
     *,
     native_functions: Sequence[NativeFunction],
+    valid_tags: Set[str],
     grouped_native_functions: Sequence[Union[NativeFunction, NativeFunctionsGroup]],
     structured_native_functions: Sequence[NativeFunctionsGroup],
     static_dispatch_idx: List[BackendIndex],
@@ -1838,6 +1848,11 @@ def gen_headers(
 
     core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
 
+    def gen_tags_enum() -> Dict[str, str]:
+        return {"enum_of_valid_tags": (",\n".join([f"{tag}" for tag in valid_tags]))}
+
+    core_fm.write("enum_tag.h", gen_tags_enum)
+
 
 def gen_source_files(
     *,
@@ -1893,16 +1908,21 @@ def gen_source_files(
                     ):
                         is_registered = True
                     # TODO: this condition is a bit questionable
+                    # (It has to do with the fact that structured kernels get generated kernels
+                    # to the Meta + CompositeExplicitAutogradNonFunctional keys).
                     elif g.structured and dispatch_key in (
                         DispatchKey.Meta,
-                        DispatchKey.CompositeExplicitAutograd,
+                        DispatchKey.CompositeExplicitAutogradNonFunctional,
                     ):
                         is_registered = True
                     if not is_registered:
                         continue
 
                     headers.append(f"#include <ATen/ops/{g.root_name}_native.h>")
-                    if dispatch_key == DispatchKey.CompositeExplicitAutograd:
+                    if (
+                        dispatch_key
+                        == DispatchKey.CompositeExplicitAutogradNonFunctional
+                    ):
                         headers.append(f"#include <ATen/ops/{g.root_name}.h>")
                     if dispatch_key in functions_keys:
                         headers.append(
@@ -1915,7 +1935,7 @@ def gen_source_files(
 
             def operator_headers() -> List[str]:
                 headers = ["#include <ATen/NativeFunctions.h>"]
-                if dispatch_key == DispatchKey.CompositeExplicitAutograd:
+                if dispatch_key == DispatchKey.CompositeExplicitAutogradNonFunctional:
                     headers.append("#include <ATen/Functions.h>")
                 if dispatch_key in functions_keys:
                     headers.append(f"#include <ATen/{dispatch_key!s}Functions.h>")
@@ -2262,6 +2282,24 @@ TORCH_LIBRARY({custom_namespace}, m) {{
             )
         },
     )
+    view_copy_with_symint_pairs: List[Tuple[NativeFunction, NativeFunction]] = []
+    for g1 in view_groups:
+        for g2 in view_groups:
+            if g1.view_copy is None or g2.view_copy is None:
+                continue
+            # TODO: make this more first class in the data model
+            same_base_op = str(g1.view_copy.func.name.name) == str(
+                g2.view_copy.func.name.name
+            )
+            op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
+            op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)
+            if same_base_op and op1_not_symint and op2_symint:
+                view_copy_with_symint_pairs.append(
+                    (
+                        g1.view_copy,
+                        g2.view_copy,
+                    )
+                )
 
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
@@ -2270,7 +2308,7 @@ TORCH_LIBRARY({custom_namespace}, m) {{
     # are expected to implement kernels for these {view}_copy kernels instead.
     # The code for {view}_copy operators in core is pretty boilerplate-heavy however,
     # so we codegen the following:
-    # (1) A CompositeExplicitAutograd kernel for every {view}_copy operator.
+    # (1) A CompositeExplicitAutogradNonFunctional kernel for every {view}_copy operator.
     #     These are never explicitly invoked by the functionalization pass,
     #     but they could theoretically be called from user code (I added these kernels for completeness,
     #     since the ops are part of the public API).
@@ -2301,6 +2339,12 @@ TORCH_LIBRARY({custom_namespace}, m) {{
             ],
             "CompositeViewCopyKernel_Definitions": list(
                 mapMaybe(gen_composite_view_copy_kernel, view_groups)
+            ),
+            "SymIntViewCopyKernel_Definitions": list(
+                mapMaybe(
+                    lambda pair: gen_symint_view_copy_kernel(pair[0], pair[1]),
+                    view_copy_with_symint_pairs,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
@@ -2441,6 +2485,7 @@ def main() -> None:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
+    valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
     native_functions, backend_indices = (
         parsed_yaml.native_functions,
         parsed_yaml.backend_indices,
@@ -2502,8 +2547,12 @@ def main() -> None:
         DispatchKey.CUDA,
         DispatchKey.CompositeImplicitAutograd,
         DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
     }
+    if options.mps:
+        functions_keys.add(DispatchKey.MPS)
+
     if options.backend_whitelist:
         dispatch_keys = [
             k
@@ -2546,6 +2595,7 @@ def main() -> None:
     if "headers" in options.generate:
         gen_headers(
             native_functions=native_functions,
+            valid_tags=valid_tags,
             grouped_native_functions=grouped_native_functions,
             structured_native_functions=structured_native_functions,
             static_dispatch_idx=static_dispatch_idx,
