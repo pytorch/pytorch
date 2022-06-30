@@ -512,23 +512,23 @@ void conv2d_sliding_window(
         // barriers if necessary.
         v_output.image(
             command_buffer,
-            vTensor::Stage::Compute,
+            api::PipelineStage::Compute,
             api::MemoryAccessType::WRITE),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
         v_input.image(
             command_buffer,
-            vTensor::Stage::Compute),
+            api::PipelineStage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
         packed_v_weight.image(
             command_buffer,
-            vTensor::Stage::Compute),
+            api::PipelineStage::Compute),
         // Read-only access is implied on const tensors and triggers an async
         // synchronization if necessary.
         packed_v_bias.image(
             command_buffer,
-            vTensor::Stage::Compute),
+            api::PipelineStage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
         params.buffer().package());
