@@ -113,11 +113,11 @@ function checkout_install_torchvision() {
 
 function clone_pytorch_xla() {
   if [[ ! -d ./xla ]]; then
-    git clone --recursive --quiet -b llvm_bazel_cache https://github.com/pytorch/xla.git
-    #pushd xla
+    git clone --recursive --quiet https://github.com/pytorch/xla.git
+    pushd xla
     # pin the xla hash so that we don't get broken by changes to xla
-    #git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
-    #popd
+    git checkout "$(cat ../.github/ci_commit_pins/xla.txt)"
+    popd
   fi
 }
 
