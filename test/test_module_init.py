@@ -226,6 +226,7 @@ def build_constructor_arg_db():
             'factory_kwargs': {},
         }),
         torch.nn.quantized.MaxPool2d: ((3,), {}),
+        torch.nn.quantized.PReLU: ((0.01, 0), {}),
         torch.nn.quantized.Quantize: ((0.1, 0), {
             'dtype': torch.int16,
             'factory_kwargs': {},
@@ -370,12 +371,12 @@ def generate_tests(test_cls, constructor_arg_db):
         # See https://github.com/pytorch/pytorch/issues/55396
         torch.nn.quantized.Embedding,
         torch.nn.quantized.EmbeddingBag,
-        torch.nn.quantized.modules.rnn.LSTM,
+        torch.nn.quantized.LSTM,
         torch.nn.quantized.MultiheadAttention,
     }
     # no need to support kwargs for these modules even though
     # they have parameters / buffers because they are passed in
-    # already instantiated
+    # already instantiated s
     MODULES_WITHOUT_KWARGS_SUPPORT = {
         torch.nn.BCELoss,
         torch.nn.BCEWithLogitsLoss,
