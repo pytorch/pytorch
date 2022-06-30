@@ -119,7 +119,7 @@ Tensor spdiags_backward(
   // Precompute input row indices for each nnz
   auto row_in_indices =
       offsets_1d
-          .eq(grad_out_indices[1].sub(grad_out_indices[0]).reshape({-1, 1}))
+          .eq(grad_out_col_indices.sub(grad_out_row_indices).reshape({-1, 1}))
           .nonzero()
           .permute({1, 0})[-1];
 
