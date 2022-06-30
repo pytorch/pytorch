@@ -605,13 +605,6 @@ if(NOT INTERN_BUILD_MOBILE OR NOT BUILD_CAFFE2_MOBILE)
     )
   endif()
 
-  if(${USE_ITT})
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/itt_wrapper.cpp
-      ${TORCH_SRC_DIR}/csrc/profiler/itt.cpp
-    )
-  endif()
-
   if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     list(APPEND TORCH_SRCS
       ${TORCH_SRC_DIR}/csrc/api/src/jit.cpp
