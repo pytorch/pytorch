@@ -29,6 +29,7 @@ __all__ = [
     "hardshrink",
     "hardtanh",
     "hinge_embedding_loss",
+    "l1_loss",
     "margin_ranking_loss",
     "mse_loss",
     "mish",
@@ -312,6 +313,22 @@ def _get_string_reduction_arg(
     else:
         ret = "none"
     return ret
+
+
+def l1_loss(
+    input: TensorLikeType,
+    target: TensorLikeType,
+    size_average: Optional[bool] = None,
+    reduce: Optional[bool] = None,
+    reduction: str = "mean",
+) -> TensorLikeType:
+    if size_average is not None or reduce is not None:
+        # TODO: raise exception instead of converting value
+        # msg = "size_average and reduce args are deprecated, please use reduction argument."
+        reduction = _get_string_reduction_arg(size_average, reduce)
+    _check_reduction_value(reduction)
+    loss = torch.abs(input - target)
+    return _apply_loss_reduction(loss, reduction)
 
 
 def margin_ranking_loss(
