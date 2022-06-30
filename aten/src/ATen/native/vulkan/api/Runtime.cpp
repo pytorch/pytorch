@@ -280,6 +280,9 @@ Runtime::Runtime(const RuntimeConfiguration config)
     adapters_{},
     default_adapter_i_(UINT32_MAX),
     debug_report_callback_(create_debug_report_callback(instance_, config_)) {
+  // List of adapters will never exceed the number of physical devices
+  adapters_.reserve(device_mappings_.size());
+
   if (config.initDefaultDevice) {
     try {
       switch(config.defaultSelector) {
@@ -359,7 +362,8 @@ uint32_t Runtime::create_adapter(const Selector& selector) {
   }
   // Otherwise, create an adapter for the selected physical device
   adapter_i = utils::safe_downcast<uint32_t>(adapters_.size());
-  adapters_.emplace_back(device_mapping.first, config_.numRequestedQueues);
+  adapters_.emplace_back(
+      new Adapter(instance_, device_mapping.first, config_.numRequestedQueues));
   device_mapping.second = adapter_i;
 
   return adapter_i;
