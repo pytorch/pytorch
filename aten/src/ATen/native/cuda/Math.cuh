@@ -2248,7 +2248,7 @@ const auto hermite_polynomial_he_string = jiterator_stringify(
 const auto hyperbolic_integral_chi_string = jiterator_stringify(
     template<typename T>
     T hyperbolic_integral_chi_forward(T x) {
-        static const T C1[] = {
+        static T C1[] = {
                 -8.12435385225864036372e-18,
                 +2.17586413290339214377e-17,
                 +5.22624394924072204667e-17,
@@ -2274,7 +2274,7 @@ const auto hyperbolic_integral_chi_string = jiterator_stringify(
                 +1.11446150876699213025e+00,
         };
 
-        static const T C2[] = {
+        static T C2[] = {
                 +8.06913408255155572081e-18,
                 -2.08074168180148170312e-17,
                 -5.98111329658272336816e-17,
@@ -2324,7 +2324,7 @@ const auto hyperbolic_integral_chi_string = jiterator_stringify(
             if (x < T(18.0)) {
                 a = (T(576.0) / x - T(52.0)) / T(10.0);
 
-                const T *coefficients = C1;
+                T *coefficients = C1;
 
                 T chebyshev_0 = *coefficients++;
                 T chebyshev_1 = T(0.0);
@@ -2345,7 +2345,7 @@ const auto hyperbolic_integral_chi_string = jiterator_stringify(
             if (x <= T(88.0)) {
                 a = (T(6336.0) / x - T(212.0)) / T(70.0);
 
-                const T *coefficients = C2;
+                T *coefficients = C2;
 
                 T chebyshev_0 = *coefficients++;
                 T chebyshev_1 = T(0.0);
@@ -2503,7 +2503,7 @@ const auto hyperbolic_integral_chi_string = jiterator_stringify(
 const auto hyperbolic_integral_shi_string = jiterator_stringify(
     template<typename T>
     T hyperbolic_integral_shi_forward(T x) {
-        static const T S1[] = {
+        static T S1[] = {
                 +1.83889230173399459482e-17,
                 -9.55485532279655569575e-17,
                 +2.04326105980879882648e-16,
@@ -2528,7 +2528,7 @@ const auto hyperbolic_integral_shi_string = jiterator_stringify(
                 +1.11847751047257036625e+00,
         };
 
-        static const T S2[] = {
+        static T S2[] = {
                 -1.05311574154850938805e-17,
                 +2.62446095596355225821e-17,
                 +8.82090135625368160657e-17,
@@ -2579,7 +2579,7 @@ const auto hyperbolic_integral_shi_string = jiterator_stringify(
             if (x < T(18.0)) {
                 a = (T(576.0) / x - T(52.0)) / T(10.0);
 
-                const T *coefficients = S1;
+                T *coefficients = S1;
 
                 T chebyshev_0 = *coefficients++;
                 T chebyshev_1 = 0.0;
@@ -2604,7 +2604,7 @@ const auto hyperbolic_integral_shi_string = jiterator_stringify(
             if (x <= T(88.0)) {
                 a = (T(6336.0) / x - T(212.0)) / T(70.0);
 
-                const T *coefficients = S2;
+                T *coefficients = S2;
 
                 T chebyshev_0 = *coefficients++;
                 T chebyshev_1 = 0.0;
