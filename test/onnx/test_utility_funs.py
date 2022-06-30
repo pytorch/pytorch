@@ -640,6 +640,14 @@ class TestUtilityFuns_opset9(_BaseTestCase):
             self.assertNotEqual(node.kind(), "onnx::Shape")
         self.assertEqual(len(list(graph.nodes())), 1)
 
+    def test_constant_fold_upsample_scale_fold_as_constant(self):
+        model = torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
+        x = torch.randn(1, 32, 224, 224)
+        f = io.BytesIO()
+        torch.onnx.export(model, x, f)
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        self.assertTrue(len(onnx_model.graph.initializer) == 0)
+
     def test_verbose(self):
         class MyModule(torch.nn.Module):
             def forward(self, input):
@@ -1591,6 +1599,30 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[2].op_type, "Identity")
         self.assertEqual(graph.graph.node[3].op_type, "Gemm")
         self.assertEqual(graph.graph.node[4].op_type, "Identity")
+
+    def test_deduplicate_ignore_upsample_scale(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.upsample_1 = torch.nn.Upsample(scale_factor=2)
+                self.upsample_2 = torch.nn.Upsample(scale_factor=2)
+
+            def forward(self, x):
+                return self.upsample_1(x), self.upsample_2(x)
+
+        f = io.BytesIO()
+        x = torch.randn(1, 32, 224, 224)
+        torch.onnx.export(Model(), x, f)
+        onnx_model = onnx.load(io.BytesIO(f.getvalue()))
+        # aten::upsample converts to onnx::resize
+        resize_nodes = [n for n in onnx_model.graph.node if n.op_type == "Resize"]
+        self.assertEqual(len(resize_nodes), 2)
+        for resize_node in resize_nodes:
+            scale_node = [
+                n for n in onnx_model.graph.node if n.output[0] == resize_node.input[2]
+            ]
+            self.assertEqual(len(scale_node), 1)
+            self.assertEqual(scale_node[0].op_type, "Constant")
 
     def test_bad_symbolic_registration(self):
         _onnx_opset_version = 9
