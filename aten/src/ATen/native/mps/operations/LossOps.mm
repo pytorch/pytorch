@@ -1239,7 +1239,7 @@ Tensor& huber_loss_backward_out_mps(
                                                                                        name:nil];
                     MPSGraphTensor* outputTensor = [mpsGraph selectWithPredicateTensor: [mpsGraph lessThanOrEqualToWithPrimaryTensor: diffTensor
                                                                                                                      secondaryTensor:[mpsGraph negativeWithTensor: deltaTensor
-                                                                                                                                                          nnnname: nil]
+                                                                                                                                                             name: nil]
                                                                                                                                 name:nil]
                                                                    truePredicateTensor: firstCondTensor
                                                                   falsePredicateTensor: secondThirdTensor
