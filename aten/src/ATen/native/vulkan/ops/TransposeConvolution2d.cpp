@@ -47,11 +47,12 @@ vTensor pack_weights_2d_reverse(
       weight.options(),
   };
 
-  using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
-  Future::Payload v_weight_payload = v_weight_future.wait();
+  api::MemoryMap mapping(
+      v_weight.host_buffer(command_buffer, vTensor::Access::Write),
+      api::MemoryAccessType::WRITE);
 
-  float* const dst_weight_ptr = v_weight_payload.get();
+  float* dst_weight_ptr = mapping.template data<float>();
+
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
   for (const auto src_oc : c10::irange(src_filter[Layout::Filter::output])) {
@@ -121,13 +122,14 @@ vTensor pack_biases(
     weight.options(),
   };
 
-  using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
-  Future::Payload v_bias_payload = v_bias_future.wait();
+  api::MemoryMap mapping(
+      v_bias.host_buffer(command_buffer, vTensor::Access::Write),
+      api::MemoryAccessType::WRITE);
+
+  float* dst_bias_ptr = mapping.template data<float>();
 
   if (bias) {
     const float* const src_bias_ptr = bias->contiguous().data_ptr<float>();
-    float* const dst_bias_ptr = v_bias_payload.get();
 
     memset(dst_bias_ptr, 0, v_bias.nbytes());
     for (const auto i : c10::irange(src_w)) {
@@ -138,7 +140,7 @@ vTensor pack_biases(
   }
   else {
     memset(
-        v_bias_payload.get(),
+        dst_bias_ptr,
         // 2's complement integers and IEEE-754 floating point numbers both
         // have identical bit representations for 0, so can use memset which
         // only accepts uint8_t parameter.

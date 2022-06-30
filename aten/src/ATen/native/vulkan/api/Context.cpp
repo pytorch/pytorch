@@ -42,23 +42,6 @@ void Context::flush() {
   images_to_clear_.clear();
 }
 
-void Context::wait(const at::Tensor& src) {
-  // wait only if Vulkan tensor
-  if (at::kVulkan == src.device().type()) {
-    api::Command::Pool& command_pool = command().pool;
-    api::Command::Buffer& command_buffer = command_pool.stream();
-
-    using Future = ops::vTensor::Future<const void, ops::vTensor::Access::Read>;
-    const ops::vTensor& v_src = ops::convert(src);
-    const Future v_src_future = v_src.host<const void>(command_buffer);
-
-    // This wait() is a no-op if data is not out of sync.  More often than
-    // not though, waits here are expected as the GPU catches up with
-    // compute submitted from CPU.
-    v_src_future.wait();
-  }
-}
-
 bool available() {
   return context();
 }
