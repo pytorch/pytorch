@@ -1037,6 +1037,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_not_out
+    MPS: logical_not_out_mps
 
 - func: logical_xor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1054,6 +1055,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_xor_out
+    MPS: logical_xor_out_mps
 
 - func: logical_and(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1071,6 +1073,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_and_out
+    MPS: logical_and_out_mps
 
 - func: logical_or(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -1088,6 +1091,7 @@
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: logical_or_out
+    MPS: logical_or_out_mps
 
 - func: blackman_window(int window_length, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
@@ -12830,6 +12834,19 @@
 - func: special_modified_bessel_k1.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   dispatch:
     CPU, CUDA: special_modified_bessel_k1_out
+  python_module: special
+  structured_inherits: TensorIteratorBase
+  structured: True
+  variants: function
+
+- func: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
+  python_module: special
+  structured_delegate: special_scaled_modified_bessel_k0.out
+  variants: function
+
+- func: special_scaled_modified_bessel_k0.out(Tensor x, *, Tensor(a!) out) -> Tensor(a!)
+  dispatch:
+    CPU, CUDA: special_scaled_modified_bessel_k0_out
   python_module: special
   structured_inherits: TensorIteratorBase
   structured: True
