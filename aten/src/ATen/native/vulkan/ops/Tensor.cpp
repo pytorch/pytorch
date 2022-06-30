@@ -599,7 +599,7 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
   filter_access(transition.first.buffer.access);
   filter_access(transition.first.staging.access);
 
-  api::Pipeline::Barrier barrier{};
+  api::PipelineBarrier barrier{};
 
   if (transition.second.staging) {
     const State::Bundle::Buffer from = transition.first.staging;
