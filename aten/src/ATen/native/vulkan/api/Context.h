@@ -47,7 +47,6 @@ class Context final {
   // Resource Pools
   Command command_;
   Descriptor descriptor_;
-  Resource resource_;
   FencePool fences_;
   QueryPool querypool_;
   // Memory Management
@@ -99,10 +98,6 @@ class Context final {
 
   inline Descriptor& descriptor() {
     return descriptor_;
-  }
-
-  inline Resource& resource() {
-    return resource_;
   }
 
   inline FencePool& fences() {
