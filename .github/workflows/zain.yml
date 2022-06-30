@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - zainr/*
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
