@@ -16695,7 +16695,7 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
     OpInfo('index_reduce',
-           dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           dtypes=all_types_and(torch.float16, torch.bfloat16),
            supports_out=True,
            sample_inputs_func=sample_inputs_index_reduce),
     OpInfo('__getitem__',
