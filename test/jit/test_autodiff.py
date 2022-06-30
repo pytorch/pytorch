@@ -115,3 +115,30 @@ class TestAutodiffJit(JitTestCase):
             self.assertEqual(x_s.requires_grad, x.requires_grad)
             self.assertEqual(y_s.requires_grad, y.requires_grad)
             self.assertEqual(z_s.requires_grad, z.requires_grad)
+
+
+    def test_autodiff_requires_grad_nograd(self):
+        @torch.jit.ignore
+        def python_fn(x):
+            return x.relu()
+
+        def fn(a, b, c):
+            x = a.sin().relu()
+            y = python_fn(b)
+            with torch.no_grad():
+                z = x + c
+            return x, y, z
+
+        fn_s = torch.jit.script(fn)
+
+        a = torch.rand((10, 10), requires_grad=True)
+        b = torch.rand((10, 10), requires_grad=True)
+        c = torch.rand((10, 10), requires_grad=True)
+
+        for i in range(4):
+            x_s, y_s, z_s = fn_s(a, b, c)
+            x, y, z = fn(a, b, c)
+
+            self.assertEqual(x_s.requires_grad, x.requires_grad)
+            self.assertEqual(y_s.requires_grad, y.requires_grad)
+            self.assertEqual(z_s.requires_grad, z.requires_grad)

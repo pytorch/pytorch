@@ -613,7 +613,7 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
   if (cuda::detail::canUse32BitIndexMath(result) &&
       cuda::detail::canUse32BitIndexMath(source) &&
       cuda::detail::canUse32BitIndexMath(index)) {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "index_add", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, at::ScalarType::ComplexHalf, result.scalar_type(), "index_add", [&] {
       cuda::detail::TensorInfo<scalar_t, unsigned int> selfInfo =
           cuda::detail::getTensorInfo<scalar_t, unsigned int>(self_);
       int selfAddDim = selfInfo.collapseDims(dim);
@@ -1217,7 +1217,7 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
   TORCH_CHECK(mask.scalar_type() == kByte || mask.scalar_type() == kBool,
     "expected mask dtype to be Bool but got ", mask.scalar_type());
   auto maybe_outnames = namedinference::broadcast_to_outnames(self, mask, "masked_fill_");
-  if (at::has_internal_overlap(self) == MemOverlap::YES) {
+  if (at::has_internal_overlap(self) == MemOverlap::Yes) {
     TORCH_WARN(
       "Use of masked_fill_ on expanded tensors is deprecated. "
       "Please clone() the tensor before performing this operation. "

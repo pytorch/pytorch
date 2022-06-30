@@ -552,12 +552,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return sizes_default();
   }
 
-  c10::SymIntArrayRef sym_sizes() const {
-    if (C10_UNLIKELY(
-            sizes_strides_policy_ >=
-            static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
-      return sym_sizes_custom();
-    }
+  virtual c10::SymIntArrayRef sym_sizes() const {
     return sym_sizes_default();
   }
 
@@ -582,12 +577,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * be faster
    */
   int64_t size(int64_t d) const {
-    d = maybe_wrap_dim(d, dim(), false);
     if (C10_UNLIKELY(
             sizes_strides_policy_ >=
             static_cast<uint8_t>(SizesStridesPolicy::CustomSizes))) {
-      return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
+      return size_custom(d);
     }
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
     return sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
   }
 
@@ -661,6 +656,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         sizes_and_strides_.size());
   }
 
+  inline IntArrayRef sizes_default() const {
+    return c10::IntArrayRef(
+        reinterpret_cast<const int64_t*>(sizes_and_strides_.sizes_data()),
+        sizes_and_strides_.size());
+  }
+
  protected:
   /**
    * Customization points for the functions above.  sizes_strides_policy_
@@ -673,6 +674,15 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   virtual IntArrayRef strides_custom() const;
   virtual bool is_contiguous_custom(at::MemoryFormat memory_format) const;
   // sizes_strides_policy_ >= CustomSizes
+  // Currently this method only exists to be overwritten by subclasses such as
+  // NestedTensorImpl.
+  virtual int64_t size_custom(int64_t d) const {
+    // TODO: We could add support to Python dispatch here.
+    // TODO: We could call into aten::size.int instead of
+    // sizes_custom()[d] and enable use of the dispatcher.
+    d = maybe_wrap_dim(d, dim(), /*wrap_scalar=*/false);
+    return sizes_custom()[d]; // unchecked (maybe_wrap_dim enforces bounds)
+  }
   virtual IntArrayRef sizes_custom() const;
   virtual c10::SymIntArrayRef sym_sizes_custom() const;
   virtual Device device_custom() const;
@@ -690,11 +700,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return is_channels_last_3d_contiguous_;
     }
     return is_contiguous_;
-  }
-  inline IntArrayRef sizes_default() const {
-    return c10::IntArrayRef(
-        reinterpret_cast<const int64_t*>(sizes_and_strides_.sizes_data()),
-        sizes_and_strides_.size());
   }
   inline c10::SymIntArrayRef sym_sizes_default() const {
     return c10::SymIntArrayRef(
@@ -1041,7 +1046,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * It can be expanded as needed in the future, e.g sparse Tensor.
    */
   inline bool support_as_strided() const {
-    return device().supports_as_strided();
+    return is_nested() ? false : device().supports_as_strided();
   }
 
   // ~~~~~ Autograd API ~~~~~
@@ -1310,6 +1315,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   inline bool is_empty() const {
     return numel() == 0;
   }
+
+  // if we are going to use sym sizes, we should be setting sym strides at the
+  // same time, otherwise it's very easy to misuse this API
+  void set_sym_sizes_and_strides(
+      c10::SymIntArrayRef sizes,
+      c10::SymIntArrayRef strides);
 
   /**
    * Change the size at some dimension.  This DOES NOT update strides;
@@ -2325,7 +2336,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // Customizable sizes behavior, e.g., nested tensor
     //
     // Can override: strides(), is_contiguous(), sizes(), dim(), numel()
-    CustomSizes = 2,
+    CustomSizes = 2
   };
 
   void set_sizes_strides_policy(SizesStridesPolicy policy) {
@@ -2336,6 +2347,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     custom_device_ = custom_device;
   }
 
+ protected:
   Storage storage_;
 
  private:
