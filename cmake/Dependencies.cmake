@@ -961,6 +961,19 @@ if(USE_FFMPEG)
   endif()
 endif()
 
+if(USE_ITT)
+  find_package(ITT)
+  if(ITT_FOUND)
+    include_directories(SYSTEM ${ITT_INCLUDE_DIR})
+    list(APPEND Caffe2_DEPENDENCY_LIBS ${ITT_LIBRARIES})
+    list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${ITT_LIBRARIES})
+  else()
+    message(WARNING "Not compiling with ITT. Suppress this warning with -DUSE_ITT=OFF")
+    set(USE_ITT OFF CACHE BOOL "" FORCE)
+    caffe2_update_option(USE_ITT OFF)
+  endif()
+endif()
+
 # ---[ Caffe2 depends on FP16 library for half-precision conversions
 if(NOT TARGET fp16 AND NOT USE_SYSTEM_FP16)
   set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
@@ -1104,7 +1117,7 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(USE_SYSTEM_BIND11)
+if(USE_SYSTEM_PYBIND11)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)

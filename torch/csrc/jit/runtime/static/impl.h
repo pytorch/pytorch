@@ -551,6 +551,7 @@ class TORCH_API BlockRunner {
       const StaticModule& sm,
       IValue* values,
       Block* block,
+      torch::jit::TaskLauncher* launcher,
       bool is_root_block = false);
   BlockRunner(BlockRunner&&) noexcept;
   BlockRunner& operator=(BlockRunner&&) = delete;
@@ -565,6 +566,14 @@ class TORCH_API BlockRunner {
   c10::IValue operator()(
       std::vector<c10::IValue>&& args,
       const KeywordArgs& kwargs = KeywordArgs());
+
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      const std::vector<c10::IValue>& args,
+      const KeywordArgs& kwargs);
+
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      std::vector<c10::IValue>&& args,
+      const KeywordArgs& kwargs);
 
   void benchmark(
       const std::vector<std::vector<c10::IValue>>& args_list,
@@ -691,6 +700,16 @@ class TORCH_API BlockRunner {
 
   template <typename IValueList>
   c10::IValue run_impl_record_functions(
+      IValueList&& args,
+      const KeywordArgs& kwargs);
+
+  template <typename IValueList>
+  c10::intrusive_ptr<c10::ivalue::Future> run_impl_async(
+      IValueList&& args,
+      const KeywordArgs& kwargs);
+
+  template <typename IValueList>
+  c10::intrusive_ptr<c10::ivalue::Future> run_impl_record_functions_async(
       IValueList&& args,
       const KeywordArgs& kwargs);
 
@@ -843,10 +862,12 @@ class TORCH_API StaticNodeInfo {
 */
 class TORCH_API ProcessedNodeMetadata {
  public:
-  ProcessedNodeMetadata(std::vector<BlockRunner> runners, TaskLauncher launcher)
+  ProcessedNodeMetadata(
+      std::vector<BlockRunner> runners,
+      torch::jit::TaskLauncher* launcher)
       : block_runners_(std::move(runners)), launcher_(std::move(launcher)) {}
 
-  ProcessedNodeMetadata() : launcher_({}) {}
+  ProcessedNodeMetadata() : launcher_(nullptr) {}
 
   // deleted copy ctor/assigment as standard containers (vector) always
   // have copy constructors, but their instantiation is not well-formed
@@ -862,17 +883,17 @@ class TORCH_API ProcessedNodeMetadata {
     block_runners_ = std::move(runners);
   }
 
-  void set_launcher(TaskLauncher launcher) {
-    launcher_ = std::move(launcher);
+  void set_launcher(torch::jit::TaskLauncher* launcher) {
+    launcher_ = launcher;
   }
 
-  TaskLauncher launcher() {
+  torch::jit::TaskLauncher* launcher() {
     return launcher_;
   }
 
  private:
   std::vector<BlockRunner> block_runners_;
-  TaskLauncher launcher_;
+  torch::jit::TaskLauncher* launcher_;
 };
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
@@ -887,7 +908,7 @@ class TORCH_API ProcessedNode {
         inputs_(other.inputs_),
         outputs_offset_(other.outputs_offset_),
         values_(values),
-        meta_data_(nullptr) {}
+        metadata_(nullptr) {}
 
   // These should be noexcept, but some Android build is failing
   // saying the noexcept specification doesn't match the calculated
@@ -980,24 +1001,24 @@ class TORCH_API ProcessedNode {
   bool verify_no_memory_overlap(bool force_check = false) const;
 
   // returns pointer to ProcessedNodeMetadata or nullptr if no object is owned
-  ProcessedNodeMetadata* meta_data() {
-    return meta_data_.get();
+  ProcessedNodeMetadata* metadata() {
+    return metadata_.get();
   }
 
   // attach block_runner to metadata of ProcessedNode
-  void set_meta_data(std::vector<BlockRunner> block_runners) {
-    if (meta_data_ == nullptr) {
-      meta_data_ = std::make_unique<ProcessedNodeMetadata>();
+  void set_metadata(std::vector<BlockRunner> block_runners) {
+    if (metadata_ == nullptr) {
+      metadata_ = std::make_unique<ProcessedNodeMetadata>();
     }
-    meta_data_->set_block_runners(std::move(block_runners));
+    metadata_->set_block_runners(std::move(block_runners));
   }
 
   // attach TaskLauncher to metadata of ProcessedNode
-  void set_meta_data(TaskLauncher launcher) {
-    if (meta_data_ == nullptr) {
-      meta_data_ = std::make_unique<ProcessedNodeMetadata>();
+  void set_metadata(torch::jit::TaskLauncher* launcher) {
+    if (metadata_ == nullptr) {
+      metadata_ = std::make_unique<ProcessedNodeMetadata>();
     }
-    meta_data_->set_launcher(std::move(launcher));
+    metadata_->set_launcher(launcher);
   }
 
  private:
@@ -1014,7 +1035,7 @@ class TORCH_API ProcessedNode {
   // Metadata for ProcessedNode.
   // 1. prim::If/Loop nodes contains sub-blocks as metadata
   // 2. prim::fork nodes contains custom executor for async execution
-  std::unique_ptr<ProcessedNodeMetadata> meta_data_;
+  std::unique_ptr<ProcessedNodeMetadata> metadata_;
 };
 
 // `StaticRuntime` is the owner of the array of IValues (used for constants,
@@ -1035,6 +1056,20 @@ class TORCH_API StaticRuntime {
   c10::IValue operator()(
       std::vector<c10::IValue>&& args,
       const KeywordArgs& kwargs = KeywordArgs());
+
+  // runAsync performs inline execution of graph on
+  // caller thread and async execution on taskLauncher
+  // If no custom taskLauncher is specified, execution is done
+  // on inter-op thread pool.
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      const std::vector<c10::IValue>& args,
+      const KeywordArgs& kwargs = KeywordArgs(),
+      torch::jit::TaskLauncher taskLauncher = at::launch);
+
+  c10::intrusive_ptr<c10::ivalue::Future> runAsync(
+      std::vector<c10::IValue>&& args,
+      const KeywordArgs& kwargs = KeywordArgs(),
+      torch::jit::TaskLauncher taskLauncher = at::launch);
 
   bool check_for_memory_leak(bool output_returned = true);
   bool checkOutputTensorMemoryLeaks();
@@ -1105,6 +1140,8 @@ class TORCH_API StaticRuntime {
   };
 
   std::unique_ptr<BlockRunner> block_;
+  // for execution of async operations present in graph
+  torch::jit::TaskLauncher async_task_launcher_;
   IValueArray values_;
 };
 
