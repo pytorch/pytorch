@@ -88,6 +88,10 @@ class CommandBuffer final {
       const api::utils::uvec3&);
 
   VkCommandBuffer get_submit_handle();
+
+  inline operator bool() const {
+    return VK_NULL_HANDLE != handle_;
+  }
 };
 
 struct CommandPoolConfig final {
