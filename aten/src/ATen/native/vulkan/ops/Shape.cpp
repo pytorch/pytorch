@@ -39,7 +39,7 @@ Tensor view_internal(
         v_output.buffer(
             command_buffer,
             vTensor::Stage::Transfer,
-            vTensor::Access::Write));
+            api::MemoryAccessType::WRITE));
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 
