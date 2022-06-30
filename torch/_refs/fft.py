@@ -5,26 +5,27 @@ import torch._prims.utils as utils
 from torch._prims.utils import (
     TensorLike,
     TensorLikeType,
-    ShapeType,
-    DimsType,
-    DimsSequenceType,
 )
 from torch._prims.wrappers import (
     out_wrapper,
 )
 
-from typing import Union, Tuple, Iterable, Sequence, Optional, NamedTuple
+from typing import Union, Tuple, Optional
 from typing_extensions import Literal
 import math
 
 __all__ = ["fft", "ifft", "rfft", "irfft", "hfft", "ihfft"]
 
 NormType = Union[None, Literal["forward"], Literal["backward"], Literal["ortho"]]
+_NORM_VALUES = {None, "forward", "backward", "ortho"}
 
 
 def _apply_norm(
     x: TensorLike, norm: NormType, signal_numel: int, forward: bool
 ) -> TensorLikeType:
+    if norm not in _NORM_VALUES:
+        raise RuntimeError(f"Invalid normalization mode: {norm}")
+
     if norm == "ortho":
         return prims.mul(x, 1 / math.sqrt(signal_numel))
 
