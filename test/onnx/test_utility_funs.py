@@ -641,12 +641,14 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(len(list(graph.nodes())), 1)
 
     def test_constant_fold_upsample_scale_fold_as_constant(self):
+        # upsample scale is a constant, not a model parameter,
+        # therefore should not be added as initializer after constant folding.
         model = torch.nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
         x = torch.randn(1, 32, 224, 224)
         f = io.BytesIO()
         torch.onnx.export(model, x, f)
         onnx_model = onnx.load(io.BytesIO(f.getvalue()))
-        self.assertTrue(len(onnx_model.graph.initializer) == 0)
+        self.assertEqual(len(onnx_model.graph.initializer), 0)
 
     def test_verbose(self):
         class MyModule(torch.nn.Module):
@@ -1601,6 +1603,8 @@ class TestUtilityFuns_opset9(_BaseTestCase):
         self.assertEqual(graph.graph.node[4].op_type, "Identity")
 
     def test_deduplicate_ignore_upsample_scale(self):
+        # upsample scale is a constant, not a model parameter,
+        # therefore should be ignored by shared weight deduplication.
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
