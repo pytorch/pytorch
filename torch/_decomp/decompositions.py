@@ -1162,6 +1162,7 @@ def cudnn_batch_norm_backward(
         [True, True, True],
     )
 
+
 @register_decomposition(aten.upsample_bilinear2d.vec)
 def upsample_bilinear2d_vec(
     input: Tensor,
@@ -1170,12 +1171,45 @@ def upsample_bilinear2d_vec(
     scale_factors: Optional(List(float))
     ) -> Tensor:
 
-    if (output_size is not None):
-        return output_size
-    elif (scale_factors is not None):
-        pass
+    newImage = []
 
-    return input
+	# Need to figure out how to get these values still
+    originalWidth = 10
+    originalHeight = 10
+    
+    finalWidth = 10
+    finalHeight = 10
+
+	# Start with getting image width/height
+    
+    if (output_size is not None):
+        finalWidth = output_size[0]
+        finalHeight = output_size[1]
+    elif (scale_factors is not None):
+        finalWidth = input[0] * scale_factors[0]
+        finalHeight = input[1] * scale_factors[1]
+    
+    for i in range(finalWidth):
+        for j in range(finalHeight):
+            OrigX = i / float(finalWidth) * originalWidth
+            OrigY = j / float(finalHeight) * originalHeight
+            
+            OrigIntX = int(OrigX)
+            OrigIntY = int(OrigY)
+            
+            c00 = OrigIntY * (originalWidth + 1) + OrigIntX
+            c10 = OrigIntY * (originalWidth + 1) + OrigIntX + 1
+            c01 = (OrigIntY + 1) * (originalWidth + 1) + OrigIntX
+            c11 = (OrigIntY + 1) * (originalWidth + 1) + OrigIntX + 1
+
+            positionX = OrigX - OrigIntX
+            positionY = OrigY - OrigIntY
+
+            a = c00 * (1 - positionX) + c10 * positionX
+            b = c01 * (1 - positionX) + c11 * positionX
+            newImage.append(a * (1 - positionY) + b * positionY)
+    
+    return newImage
 
 
 @register_decomposition(aten.transpose.int)
