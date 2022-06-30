@@ -1341,47 +1341,32 @@ Tensor repeat_backward(
     // tensor. Then, sum up gradients over repeated tensors along 'dim', and
     // reduce shape from 'repeat * dimsize/repeat' to 'dimsize/repeat'
     // ('input_dimsize'). Example:
-    //        Size(3, 2)                                             Size(6, 2)
-    //                                                             [[v1_0,
-    //                                                             v1_1],
-    //                                                              [v1_2,
-    //                                                              v1_3],
-    //        [[v0, v1],                   repeat(2, 1)             [v1_4,
-    //        v1_5],
-    //         [v2, v3],                  ------------->            [v2_0,
-    //         v2_1], [v4, v5]] [v2_2, v2_3],
-    //                                                              [v2_4,
-    //                                                              v2_5]]
+    //        Size(3, 2)                                      Size(6, 2)
+    //                                                      [[v1_0, v1_1],
+    //                                                       [v1_2, v1_3],
+    //        [[v0, v1],               repeat(2, 1)          [v1_4, v1_5],
+    //         [v2, v3],              ------------->         [v2_0, v2_1],
+    //         [v4, v5]]                                     [v2_2, v2_3],
+    //                                                       [v2_4, v2_5]]
     //
-    //    input grad (3, 2)            reshape (2, 3, 2)         output grad (6,
-    //    2)
-    //                                  [[[g1_0, g1_1],            [[g1_0,
-    //                                  g1_1],
-    //                                    [g1_2, g1_3],             [g1_2,
-    //                                    g1_3],
-    // [[g1_0+g2_0, g1_1+g2_1],           [g1_4, g1_5]],            [g1_4,
-    // g1_5],
-    //  [g1_0+g2_0, g1_1+g2_1],                                     [g2_0,
-    //  g2_1], [g1_0+g2_0, g1_1+g2_1]]          [[g2_0, g2_1], [g2_2, g2_3],
-    //                                    [g2_2, g2_3],             [g2_4,
-    //                                    g2_5]] [g2_4, g2_5]]]
+    //    input grad (3, 2)      reshape (2, 3, 2)         output grad (6, 2)
+    //                            [[[g1_0, g1_1],            [[g1_0, g1_1],
+    //                              [g1_2, g1_3],             [g1_2, g1_3],
+    // [[g1_0+g2_0, g1_1+g2_1],     [g1_4, g1_5]],            [g1_4, g1_5],
+    //  [g1_2+g2_2, g1_3+g2_3],     [g2_0, g2_1],            [[g2_0, g2_1],
+    //  [g1_4+g2_4, g1_5+g2_5]]     [g2_2, g2_3],             [g2_2, g2_3],
+    //                              [g2_4, g2_5]]             [g2_4, g2_5]]]
+    //
     // If gradient tensor is reshaped to [..., dimsize/repeat, repeat, ...] and
     // then sum over 'dim+1'. The gradient for input is not correctly aligned
     // with input. Example:
-    //     input grad (3, 2)            reshape (3, 2, 2)        output grad (6,
-    //     2)
-    //                                  [[[g1_0, g1_1],
-    //                                    [g1_2, g1_3]],           [[g1_0,
-    //                                    g1_1],
-    //                                                              [g1_2,
-    //                                                              g1_3],
-    // [[g1_0+g1_2, g1_1+g1_3],          [[g1_4, g1_5],             [g1_4,
-    // g1_5],
-    //  [g1_4+g2_0, g1_5+g2_1],           [g2_0, g2_1]],            [g2_0,
-    //  g2_1], [g2_2+g2_4, g2_3+g2_5]] [g2_2, g2_3],
-    //                                   [[g2_2, g2_3],             [g2_4,
-    //                                   g2_5]]
-    //                                    [g2_4, g2_5]]]
+    //  input grad (3, 2)        reshape (3, 2, 2)        output grad (6, 2)
+    //                           [[[g1_0, g1_1],           [[g1_0, g1_1],
+    //                             [g1_2, g1_3]],           [g1_2, g1_3],
+    // [[g1_0+g1_2, g1_1+g1_3],   [[g1_4, g1_5],            [g1_4, g1_5],
+    //  [g1_4+g2_0, g1_5+g2_1],    [g2_0, g2_1]],           [g2_0, g2_1],
+    //  [g2_2+g2_4, g2_3+g2_5]]   [[g2_2, g2_3],            [g2_2, g2_3],
+    //                             [g2_4, g2_5]]]           [g2_4, g2_5]]
     if (repeat != 1) {
       grad_size.push_back(repeat);
       sum_dims.push_back(grad_size.size() - 1);
