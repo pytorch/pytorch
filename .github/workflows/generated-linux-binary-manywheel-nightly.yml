@@ -2,7 +2,7 @@
 
 # Template is at:    .github/templates/linux_binary_build_workflow.yml.j2
 # Generation script: .github/scripts/generate_ci_workflows.py
-name: linux-binary-conda
+name: linux-binary-manywheel
 
 on:
   push:
@@ -14,7 +14,7 @@ on:
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
       - 'ciflow/binaries/*'
-      - 'ciflow/binaries_conda/*'
+      - 'ciflow/binaries_wheel/*'
   workflow_dispatch:
 
 env:
@@ -23,7 +23,7 @@ env:
   ANACONDA_USER: pytorch
   AWS_DEFAULT_REGION: us-east-1
   BINARY_ENV_FILE: /tmp/env
-  BUILD_ENVIRONMENT: linux-binary-conda
+  BUILD_ENVIRONMENT: linux-binary-manywheel
   BUILDER_ROOT: /builder
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -32,7 +32,7 @@ env:
   SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
   SKIP_ALL_TESTS: 1
 concurrency:
-  group: linux-binary-conda-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: linux-binary-manywheel-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
 defaults:
@@ -40,207 +40,311 @@ defaults:
     shell: bash
 
 jobs:
-  conda-py3_7-cpu-build:
+  manywheel-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
-  conda-py3_7-cuda10_2-build:
+  manywheel-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
-  conda-py3_7-cuda11_3-build:
+  manywheel-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
-  conda-py3_7-cuda11_6-build:
+  manywheel-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
-  conda-py3_8-cpu-build:
+  manywheel-py3_7-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.7"
+  manywheel-py3_7-rocm5_1_1-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.7"
+  manywheel-py3_8-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
-  conda-py3_8-cuda10_2-build:
+  manywheel-py3_8-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
-  conda-py3_8-cuda11_3-build:
+  manywheel-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
-  conda-py3_8-cuda11_6-build:
+  manywheel-py3_8-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
-  conda-py3_9-cpu-build:
+  manywheel-py3_8-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.8"
+  manywheel-py3_8-rocm5_1_1-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.8"
+  manywheel-py3_9-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-  conda-py3_9-cuda10_2-build:
+  manywheel-py3_9-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-  conda-py3_9-cuda11_3-build:
+  manywheel-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-  conda-py3_9-cuda11_6-build:
+  manywheel-py3_9-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
-  conda-py3_10-cpu-build:
+  manywheel-py3_9-rocm5_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.9"
+  manywheel-py3_9-rocm5_1_1-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.9"
+  manywheel-py3_10-cpu-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
-      DOCKER_IMAGE: pytorch/conda-builder:cpu
+      DOCKER_IMAGE: pytorch/manylinux-builder:cpu
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-  conda-py3_10-cuda10_2-build:
+  manywheel-py3_10-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu102
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-  conda-py3_10-cuda11_3-build:
+  manywheel-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu113
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
-  conda-py3_10-cuda11_6-build:
+  manywheel-py3_10-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     uses: ./.github/workflows/_linux-binary-build.yml
     with:
-      PACKAGE_TYPE: conda
+      PACKAGE_TYPE: manywheel
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu116
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
-      DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
+      DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.10"
+  manywheel-py3_10-rocm5_0-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.0
+      GPU_ARCH_VERSION: 5.0
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
+      SKIP_ALL_TESTS: 1
+      DESIRED_PYTHON: "3.10"
+  manywheel-py3_10-rocm5_1_1-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_linux-binary-build.yml
+    with:
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm5.1.1
+      GPU_ARCH_VERSION: 5.1.1
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
       SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
