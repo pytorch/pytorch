@@ -137,214 +137,140 @@ void DescriptorSet::add_binding(const ResourceBinding& binding) {
   }
 }
 
-namespace {
+//
+// DescriptorSetPile
+//
 
-VkDescriptorPool create_descriptor_pool(const VkDevice device) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
-
-  const struct {
-    uint32_t capacity;
-    c10::SmallVector<VkDescriptorPoolSize, 4u> sizes;
-  } descriptor {
-    1024u,
-    {
-      /*
-        Buffers
-      */
-
-      {
-        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-        1024u,
-      },
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-        1024u,
-      },
-
-      /*
-        Images
-      */
-
-      {
-        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        1024u,
-      },
-      {
-        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-        1024u,
-      },
-    },
-  };
-
-  const VkDescriptorPoolCreateInfo descriptor_pool_create_info{
-    VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-    nullptr,
-    0u,
-    descriptor.capacity,
-    static_cast<uint32_t>(descriptor.sizes.size()),
-    descriptor.sizes.data(),
-  };
-
-  VkDescriptorPool descriptor_pool{};
-  VK_CHECK(vkCreateDescriptorPool(
-      device,
-      &descriptor_pool_create_info,
-      nullptr,
-      &descriptor_pool));
-
-  TORCH_CHECK(
-      descriptor_pool,
-      "Invalid Vulkan descriptor pool!");
-
-  return descriptor_pool;
+DescriptorSetPile::DescriptorSetPile(
+    const uint32_t pile_size,
+    const VkDescriptorSetLayout descriptor_set_layout,
+    const VkDevice device,
+    const VkDescriptorPool descriptor_pool)
+  : pile_size_{pile_size},
+    set_layout_{descriptor_set_layout},
+    device_{device},
+    pool_{descriptor_pool},
+    descriptors_{},
+    in_use_(0u) {
+  descriptors_.resize(pile_size_);
+  allocate_new_batch();
 }
 
-void allocate_descriptor_sets(
-    const VkDevice device,
-    const VkDescriptorPool descriptor_pool,
-    const VkDescriptorSetLayout descriptor_set_layout,
-    VkDescriptorSet* const descriptor_sets,
-    const uint32_t count) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device,
-      "Invalid Vulkan device!");
+VkDescriptorSet DescriptorSetPile::get_descriptor_set() {
+  // No-ops if there are descriptor sets available
+  allocate_new_batch();
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      descriptor_pool,
-      "Invalid Vulkan descriptor pool!");
+  const VkDescriptorSet handle = descriptors_[in_use_];
+  descriptors_[in_use_] = VK_NULL_HANDLE;
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      descriptor_set_layout,
-      "Invalid Vulkan descriptor set layout!");
+  in_use_++;
+  return handle;
+}
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      descriptor_sets && (count > 0u),
-      "Invalid usage!");
+void DescriptorSetPile::allocate_new_batch() {
+  // No-ops if there are still descriptor sets availble
+  if (in_use_ < descriptors_.size() &&
+      descriptors_[in_use_] != VK_NULL_HANDLE) {
+    return;
+  }
 
-  std::vector<VkDescriptorSetLayout> descriptor_set_layouts(count);
-  fill(
-    descriptor_set_layouts.begin(),
-    descriptor_set_layouts.end(),
-    descriptor_set_layout
-  );
+  std::vector<VkDescriptorSetLayout> layouts(descriptors_.size());
+  fill(layouts.begin(), layouts.end(), set_layout_);
 
-  const VkDescriptorSetAllocateInfo descriptor_set_allocate_info{
-    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-    nullptr,
-    descriptor_pool,
-    utils::safe_downcast<uint32_t>(descriptor_set_layouts.size()),
-    descriptor_set_layouts.data(),
+  const VkDescriptorSetAllocateInfo allocate_info{
+    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,  // sType
+    nullptr, // pNext
+    pool_,  // descriptorPool
+    utils::safe_downcast<uint32_t>(layouts.size()),  // descriptorSetCount
+    layouts.data(),  // pSetLayouts
   };
 
   VK_CHECK(vkAllocateDescriptorSets(
-      device,
-      &descriptor_set_allocate_info,
-      descriptor_sets));
-}
-
-} // namespace
-
-Descriptor::Pool::Pool(const GPU& gpu)
-  : device_(gpu.device),
-    descriptor_pool_(
-        create_descriptor_pool(gpu.device),
-        VK_DELETER(DescriptorPool)(device_)) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       device_,
-      "Invalid Vulkan device!");
+      &allocate_info,
+      descriptors_.data()));
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      descriptor_pool_,
-      "Invalid Vulkan descriptor pool!");
+  in_use_ = 0u;
 }
 
-Descriptor::Pool::Pool(Pool&& pool)
-  : device_(std::move(pool.device_)),
-    descriptor_pool_(std::move(pool.descriptor_pool_)),
-    set_(std::move(pool.set_)) {
-  pool.invalidate();
-}
+//
+// DescriptorPool
+//
 
-Descriptor::Pool& Descriptor::Pool::operator=(Pool&& pool) {
-  if (&pool != this) {
-    device_ = std::move(pool.device_);
-    descriptor_pool_ = std::move(pool.descriptor_pool_);
-    set_ = std::move(pool.set_);
-
-    pool.invalidate();
+DescriptorPool::DescriptorPool(
+    const VkDevice device,
+    const DescriptorPoolConfig& config)
+  : device_(device),
+    pool_(VK_NULL_HANDLE),
+    config_(config),
+    mutex_{},
+    piles_{} {
+  c10::SmallVector<VkDescriptorPoolSize, 4u> type_sizes {
+    {
+      VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      config_.descriptorUniformBufferCount,
+    },
+    {
+      VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+      config_.descriptorStorageBufferCount,
+    },
+    {
+      VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      config_.descriptorCombinedSamplerCount,
+    },
+    {
+      VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+      config_.descriptorStorageBufferCount,
+    },
   };
 
-  return *this;
-}
+  const VkDescriptorPoolCreateInfo create_info{
+    VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,  // sType
+    nullptr,  // pNext
+    0u,  // flags
+    config_.descriptorPoolMaxSets,  // maxSets
+    static_cast<uint32_t>(type_sizes.size()),  // poolSizeCounts
+    type_sizes.data(),  // pPoolSizes
+  };
 
-Descriptor::Pool::~Pool() {
-  try {
-    if (device_ && descriptor_pool_) {
-      purge();
-    }
-  }
-  catch (const std::exception& e) {
-    TORCH_WARN(
-        "Vulkan: Descriptor pool destructor raised an exception! Error: ",
-        e.what());
-  }
-  catch (...) {
-    TORCH_WARN(
-        "Vulkan: Descriptor pool destructor raised an exception! "
-        "Error: Unknown");
-  }
-}
-
-DescriptorSet Descriptor::Pool::allocate(
-    const VkDescriptorSetLayout handle,
-    const ShaderLayout::Signature& signature) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && descriptor_pool_,
-      "This descriptor pool is in an invalid state! "
-      "Potential reason: This descriptor pool is moved from.");
-
-  auto iterator = set_.layouts.find(handle);
-  if (set_.layouts.cend() == iterator) {
-    iterator = set_.layouts.insert({handle, {}}).first;
-    iterator->second.pool.reserve(Configuration::kReserve);
-  }
-
-  auto& layout = iterator->second;
-
-  if (layout.pool.size() == layout.in_use) {
-    layout.pool.resize(
-        layout.pool.size() +
-        Configuration::kQuantum);
-
-    allocate_descriptor_sets(
-        device_,
-        descriptor_pool_.get(),
-        handle,
-        layout.pool.data() + layout.in_use,
-        Configuration::kQuantum);
-  }
-
-  return DescriptorSet(
+  VK_CHECK(vkCreateDescriptorPool(
       device_,
-      layout.pool[layout.in_use++],
-      signature);
+      &create_info,
+      nullptr,
+      &pool_));
 }
 
-void Descriptor::Pool::purge() {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && descriptor_pool_,
-      "This descriptor pool is in an invalid state! "
-      "Potential reason: This descriptor pool is moved from.");
-
-  VK_CHECK(vkResetDescriptorPool(device_, descriptor_pool_.get(), 0u));
-  set_.layouts.clear();
+DescriptorPool::~DescriptorPool() {
+  if (VK_NULL_HANDLE == pool_) {
+    return;
+  }
+  vkDestroyDescriptorPool(device_, pool_, nullptr);
 }
 
-void Descriptor::Pool::invalidate() {
-  device_ = VK_NULL_HANDLE;
-  descriptor_pool_.reset();
+DescriptorSet DescriptorPool::get_descriptor_set(
+    const VkDescriptorSetLayout set_layout,
+    const ShaderLayout::Signature& signature) {
+  auto it = piles_.find(set_layout);
+  if (piles_.cend() == it) {
+    it = piles_.insert(
+        {
+          set_layout,
+          DescriptorSetPile(
+              config_.descriptorPileSizes,
+              set_layout,
+              device_,
+              pool_),
+        }).first;
+  }
+
+  VkDescriptorSet handle = it->second.get_descriptor_set();
+
+  return DescriptorSet(device_, handle, signature);
+}
+
+void DescriptorPool::flush() {
+  VK_CHECK(vkResetDescriptorPool(device_, pool_, 0u));
+  piles_.clear();
 }
 
 } // namespace api
