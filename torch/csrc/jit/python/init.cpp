@@ -1549,12 +1549,14 @@ void initJITBindings(PyObject* module) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
           auto operations = getAllOperatorsFor(symbol);
-          bool allow_numbers_as_tensors = symbol.is_prims() || (symbol.is_aten() &&
-              torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = symbol.is_prims() ||
+              (symbol.is_aten() &&
+               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
-              auto func = py::cpp_function(
-                  [op, symbol, allow_numbers_as_tensors](py::args args, py::kwargs kwargs) {
+              auto func =
+                  py::cpp_function([op, symbol, allow_numbers_as_tensors](
+                                       py::args args, py::kwargs kwargs) {
                     ToIValueAllowNumbersAsTensors g(allow_numbers_as_tensors);
                     return _get_operation_for_overload_or_packet(
                         {op}, symbol, args, kwargs, true);
@@ -1591,8 +1593,9 @@ void initJITBindings(PyObject* module) {
             overload_names.append(py::str(op->schema().overload_name()));
           }
 
-          bool allow_numbers_as_tensors = symbol.is_prims() || (symbol.is_aten() &&
-              torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
+          bool allow_numbers_as_tensors = symbol.is_prims() ||
+              (symbol.is_aten() &&
+               torch::should_allow_numbers_as_tensors(symbol.toUnqualString()));
 
           auto func = py::cpp_function(
               [operations, symbol, allow_numbers_as_tensors](
