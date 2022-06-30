@@ -14,30 +14,30 @@ else:
     DataType = None
 
 
-# nvFuserTensorViewTemplate and nvFuserScalarValTemplate are helper objects
+# nvFuserTensorTemplate and nvFuserScalarTemplate are helper objects
 # for cached construction of the nvFuser's Fusion
-# TODO: change what is stored in the cache for nvFuser's TensorView objects
+# TODO: change what is stored in the cache for nvFuser's Tensor objects
 # https://github.com/pytorch/pytorch/issues/80551
 @dataclass(frozen=True)
-class nvFuserTensorViewTemplate:
+class nvFuserTensorTemplate:
     size: tuple
     stride: tuple
     dtype: DataType
 
 
 @dataclass(frozen=True)
-class nvFuserScalarValTemplate:
+class nvFuserScalarTemplate:
     dtype: DataType
 
 
 def to_nvfuser_template_args(args):
     def to_nvfuser(arg):
         if isinstance(arg, torch.Tensor):
-            return nvFuserTensorViewTemplate(
+            return nvFuserTensorTemplate(
                 arg.size(), arg.stride(), getnvFuserDtype(arg.dtype)
             )
         elif isinstance(arg, Number):
-            return nvFuserScalarValTemplate(getnvFuserDtype(type(arg)))
+            return nvFuserScalarTemplate(getnvFuserDtype(type(arg)))
         else:
             return arg
 
@@ -76,11 +76,11 @@ def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
                 return target(*args, **kwargs)
 
         def templates_to_nvfuser_inputs(arg):
-            if isinstance(arg, nvFuserTensorViewTemplate):
+            if isinstance(arg, nvFuserTensorTemplate):
                 x = fd.define_tensor(arg.size, arg.stride, arg.dtype)
                 fd.add_input(x)
                 return x
-            elif isinstance(arg, nvFuserScalarValTemplate):
+            elif isinstance(arg, nvFuserScalarTemplate):
                 x = fd.define_scalar(arg.dtype)
                 fd.add_input(x)
                 return x
