@@ -250,6 +250,7 @@ CommandPool::CommandPool(
     queue_family_idx_(queue_family_idx),
     pool_(VK_NULL_HANDLE),
     config_(config),
+    mutex_{},
     buffers_{},
     in_use_(0u) {
   const VkCommandPoolCreateInfo create_info{
@@ -269,16 +270,6 @@ CommandPool::CommandPool(
   allocate_new_batch(config_.cmdPoolInitialSize);
 }
 
-CommandPool::CommandPool(CommandPool&& other) noexcept
-  : device_(other.device_),
-    queue_family_idx_(other.queue_family_idx_),
-    pool_(other.pool_),
-    config_(other.config_),
-    buffers_(std::move(other.buffers_)),
-    in_use_(other.in_use_) {
-  other.pool_ = VK_NULL_HANDLE;
-}
-
 CommandPool::~CommandPool() {
   if (VK_NULL_HANDLE == pool_) {
     return;
@@ -287,6 +278,8 @@ CommandPool::~CommandPool() {
 }
 
 CommandBuffer CommandPool::get_new_cmd() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   // No-ops if there are command buffers available
   allocate_new_batch(config_.cmdPoolBatchSize);
 
@@ -297,6 +290,7 @@ CommandBuffer CommandPool::get_new_cmd() {
 }
 
 void CommandPool::flush() {
+  std::lock_guard<std::mutex> lock(mutex_);
   VK_CHECK(vkResetCommandPool(device_, pool_, 0u));
   in_use_ = 0u;
 }
