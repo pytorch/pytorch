@@ -46,7 +46,7 @@ The input ``bucket`` is a :class:`torch.distributed.GradBucket` object.
 .. autofunction:: fp16_compress_hook
 .. autofunction:: bf16_compress_hook
 
-Additionally, a communication hook wraper is provided to support :meth:`~fp16_compress_hook` or :meth:`~bf16_compress_hook` as a wrapper,
+Additionally, a communication hook wrapper is provided to support :meth:`~fp16_compress_hook` or :meth:`~bf16_compress_hook` as a wrapper,
 which can be combined with other communication hooks.
 
 .. autofunction:: fp16_compress_wrapper

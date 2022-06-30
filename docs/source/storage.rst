@@ -3,7 +3,7 @@ torch.Storage
 
 A :class:`torch._TypedStorage` is a contiguous, one-dimensional array of
 elements of a particular :class:`torch.dtype`. It can be given any
-:class:`torch.dtype`, and the internal data will be interpretted appropriately.
+:class:`torch.dtype`, and the internal data will be interpreted appropriately.
 
 Every strided :class:`torch.Tensor` contains a :class:`torch._TypedStorage`,
 which stores all of the data that the :class:`torch.Tensor` views.
