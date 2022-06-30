@@ -13,6 +13,17 @@
 namespace torch {
 namespace jit {
 
+static thread_local bool allow_numbers_as_tensors = false;
+
+ToIValueAllowNumbersAsTensors::ToIValueAllowNumbersAsTensors(bool enable)
+    : old_(allow_numbers_as_tensors) {
+  allow_numbers_as_tensors = enable;
+}
+
+ToIValueAllowNumbersAsTensors::~ToIValueAllowNumbersAsTensors() {
+  allow_numbers_as_tensors = old_;
+}
+
 // This is a hack to remove instances deleted in C++ from the PyBind cache
 // C++->Python. We need this because otherwise we may get the old Python object
 // if C++ creates a new object at the memory location of the deleted object.
@@ -39,6 +50,10 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
         guardAgainstNamedTensor<autograd::Variable>(var);
         return var;
       } else {
+        if (!allow_numbers_as_tensors) {
+          throw py::cast_error(
+              c10::str("Unable to cast ", py::str(obj), " to Tensor"));
+        }
         at::Scalar scalar;
         if (PyBool_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
