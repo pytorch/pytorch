@@ -2579,7 +2579,7 @@ const auto hyperbolic_integral_shi_string = jiterator_stringify(
             if (x < T(18.0)) {
                 a = (T(576.0) / x - T(52.0)) / T(10.0);
 
-                T *coefficients = S1;
+                const T *coefficients = S1;
 
                 T chebyshev_0 = *coefficients++;
                 T chebyshev_1 = 0.0;
@@ -2604,7 +2604,7 @@ const auto hyperbolic_integral_shi_string = jiterator_stringify(
             if (x <= T(88.0)) {
                 a = (T(6336.0) / x - T(212.0)) / T(70.0);
 
-                T *coefficients = S2;
+                const T *coefficients = S2;
 
                 T chebyshev_0 = *coefficients++;
                 T chebyshev_1 = 0.0;
