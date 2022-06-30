@@ -40,7 +40,11 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
     def decomposition_decorator(f):
         nonlocal registry
         if registry is None:
-            registry = decomposition_table
+            registries = [decomposition_table]
+        elif isinstance(registry, list):
+            registries = registry
+        else:
+            registries = [registry]
 
         def add_op_to_table(aten_op):
             overloads = []
@@ -51,9 +55,10 @@ def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False
                 for ol in aten_op.overloads():
                     overloads.append(getattr(aten_op, ol))
             for op_overload in overloads:
-                if op_overload in registry:
-                    raise RuntimeError(f"duplicate registrations for {op_overload}")
-                registry[op_overload] = f
+                for r in registries:
+                    if op_overload in r:
+                        raise RuntimeError(f"duplicate registrations for {op_overload}")
+                    r[op_overload] = f
                 # TODO: factor this logic into OpOverload or Library API
                 name = op_overload._schema.name
                 if op_overload._schema.overload_name:
