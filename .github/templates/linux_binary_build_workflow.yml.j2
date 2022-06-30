@@ -44,10 +44,6 @@ env:
   SKIP_ALL_TESTS: 1
 !{{ common.concurrency(build_environment) }}
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
 {%- for config in build_configs %}
   !{{ config["build_name"] }}-build:

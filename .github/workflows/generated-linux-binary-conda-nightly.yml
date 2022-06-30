@@ -35,10 +35,6 @@ concurrency:
   group: linux-binary-conda-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   conda-py3_7-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -50,7 +46,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
   conda-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -63,7 +58,6 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
   conda-py3_7-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -76,7 +70,6 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
   conda-py3_7-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -89,7 +82,6 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"
   conda-py3_8-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -101,7 +93,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
   conda-py3_8-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -114,7 +105,6 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
   conda-py3_8-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -127,7 +117,6 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
   conda-py3_8-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -140,7 +129,6 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.8"
   conda-py3_9-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -152,7 +140,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
   conda-py3_9-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -165,7 +152,6 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
   conda-py3_9-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -178,7 +164,6 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
   conda-py3_9-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -191,7 +176,6 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.9"
   conda-py3_10-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -203,7 +187,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/conda-builder:cpu
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
   conda-py3_10-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -216,7 +199,6 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
   conda-py3_10-cuda11_3-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -229,7 +211,6 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"
   conda-py3_10-cuda11_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -242,5 +223,4 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/conda-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.10"

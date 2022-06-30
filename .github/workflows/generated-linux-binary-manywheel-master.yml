@@ -30,10 +30,6 @@ concurrency:
   group: linux-binary-manywheel-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   manywheel-py3_7-cuda10_2-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -46,5 +42,4 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       DESIRED_PYTHON: "3.7"

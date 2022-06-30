@@ -52,7 +52,6 @@
 {%- if not is_windows %}
       DOCKER_IMAGE: !{{ config["container_image"] }}
 {%- endif %}
-      SKIP_ALL_TESTS: 1
 {%- if config["package_type"] == "libtorch" %}
 {%- if config["libtorch_config"] %}
       LIBTORCH_CONFIG: !{{ config["libtorch_config"] }}

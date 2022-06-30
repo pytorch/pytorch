@@ -35,10 +35,6 @@ concurrency:
   group: linux-binary-libtorch-pre-cxx11-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   libtorch-cpu-shared-with-deps-pre-cxx11-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -50,7 +46,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cpu-shared-without-deps-pre-cxx11-build:
@@ -63,7 +58,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cpu-static-with-deps-pre-cxx11-build:
@@ -76,7 +70,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cpu-static-without-deps-pre-cxx11-build:
@@ -89,7 +82,6 @@ jobs:
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu
       DOCKER_IMAGE: pytorch/manylinux-builder:cpu
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda10_2-shared-with-deps-pre-cxx11-build:
@@ -103,7 +95,6 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda10_2-shared-without-deps-pre-cxx11-build:
@@ -117,7 +108,6 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda10_2-static-with-deps-pre-cxx11-build:
@@ -131,7 +121,6 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda10_2-static-without-deps-pre-cxx11-build:
@@ -145,7 +134,6 @@ jobs:
       GPU_ARCH_VERSION: 10.2
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda10.2
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda11_3-shared-with-deps-pre-cxx11-build:
@@ -159,7 +147,6 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda11_3-shared-without-deps-pre-cxx11-build:
@@ -173,7 +160,6 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda11_3-static-with-deps-pre-cxx11-build:
@@ -187,7 +173,6 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda11_3-static-without-deps-pre-cxx11-build:
@@ -201,7 +186,6 @@ jobs:
       GPU_ARCH_VERSION: 11.3
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.3
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda11_6-shared-with-deps-pre-cxx11-build:
@@ -215,7 +199,6 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda11_6-shared-without-deps-pre-cxx11-build:
@@ -229,7 +212,6 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda11_6-static-with-deps-pre-cxx11-build:
@@ -243,7 +225,6 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-cuda11_6-static-without-deps-pre-cxx11-build:
@@ -257,7 +238,6 @@ jobs:
       GPU_ARCH_VERSION: 11.6
       GPU_ARCH_TYPE: cuda
       DOCKER_IMAGE: pytorch/manylinux-builder:cuda11.6
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-without-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-rocm5_0-shared-with-deps-pre-cxx11-build:
@@ -271,7 +251,6 @@ jobs:
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-rocm5_0-static-with-deps-pre-cxx11-build:
@@ -285,7 +264,6 @@ jobs:
       GPU_ARCH_VERSION: 5.0
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.0
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-rocm5_1_1-shared-with-deps-pre-cxx11-build:
@@ -299,7 +277,6 @@ jobs:
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: shared-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
   libtorch-rocm5_1_1-static-with-deps-pre-cxx11-build:
@@ -313,6 +290,5 @@ jobs:
       GPU_ARCH_VERSION: 5.1.1
       GPU_ARCH_TYPE: rocm
       DOCKER_IMAGE: pytorch/manylinux-builder:rocm5.1.1
-      SKIP_ALL_TESTS: 1
       LIBTORCH_VARIANT: static-with-deps
       DESIRED_DEVTOOLSET: pre-cxx11
