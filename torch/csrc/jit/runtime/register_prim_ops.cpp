@@ -444,7 +444,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
-      // note the compiler knows to type TupleIndex more accurately than it
+        // note the compiler knows to type TupleIndex more accurately than it
         // is listed here.
         TORCH_SELECTIVE_SCHEMA("prim::TupleIndex(Any tup, int i) -> Any"),
         tupleIndex,
@@ -455,7 +455,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA(
-          "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)"),
+            "prim::unchecked_unwrap_optional(t(a)? optional) -> t(a)"),
         noop,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(

@@ -1,6 +1,5 @@
 #include <ATen/ScalarOps.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
-#include <iostream>
 namespace torch {
 namespace jit {
 
@@ -65,7 +64,6 @@ void sym_size(Stack& stack) {
 }
 
 void device(Stack& stack) {
-  std::cout << "prim device\n";
   push(stack, pop(stack).toTensor().device());
 }
 
@@ -76,12 +74,10 @@ void dtype(Stack& stack) {
 }
 
 void layout(Stack& stack) {
-  std::cout << "prim layout\n";
-  push(stack, static_cast<c10::Layout>(pop(stack).toTensor().layout()));
+  push(stack, pop(stack).toTensor().layout());
 }
 
 void toPrimDType(Stack& stack) {
-  std::cout << "in toPrimDtype\n";
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool non_blocking;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

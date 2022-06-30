@@ -331,9 +331,6 @@ auto handle_torch_function_no_python_arg_parser(
     }
   }
   if (ret.ptr() == nullptr || ret.ptr() == Py_NotImplemented) {
-    if (ret.ptr() == nullptr) {
-    } else{
-    }
     for (auto& arg : overloaded_args) {
       // NOLINTNEXTLINE(clang-diagnostic-writable-strings)
       py::object torch_function =
@@ -350,19 +347,13 @@ auto handle_torch_function_no_python_arg_parser(
             "and will be an error in future, please define it as a classmethod.");
       }
 
-      auto x = PyObject_CallFunctionObjArgs(
+      ret = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
           torch_function.ptr(),
           torch_api_function,
           py_types.ptr(),
           args,
           kwargs,
-          NULL);
-      ret = py::reinterpret_steal<py::object>(x);
-      if (ret.ptr() == nullptr) {
-      } else if (ret.ptr() == Py_NotImplemented) {
-      }
-      else {
-      }
+          NULL));
       if (ret.ptr() != Py_NotImplemented) {
         // Return the reference to the result. This also covers the case where
         // ret is NULL and __torch_function__/__torch_dispatch raised an

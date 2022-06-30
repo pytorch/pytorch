@@ -1379,11 +1379,8 @@ static PyObject* THPVariable_dtype(THPVariable* self, void* unused) {
 static PyObject* THPVariable_layout(THPVariable* self, void* unused) {
   HANDLE_TH_ERRORS
   if (check_has_torch_function((PyObject*)self)) {
-    auto x = handle_torch_function_getter(self, "layout");
-    return x;
-    // return handle_torch_function_getter(self, "layout");
+    return handle_torch_function_getter(self, "layout");
   }
-  // return THPLayout_New(THPVariable_Unpack(self).layout(), "torch.strided");
   auto& self_ = THPVariable_Unpack(self);
   return torch::autograd::utils::wrap(torch::getTHPLayout(self_.layout()));
   END_HANDLE_TH_ERRORS
