@@ -3,14 +3,6 @@ name: linux-binary-build
 on:
   workflow_call:
     inputs:
-      PYTORCH_ROOT:
-        required: true
-        type: string
-        description: Root path to pytorch repository checkout folder
-      BUILDER_ROOT:
-        required: true
-        type: string
-        description: Root path to builder repository checkout folder
       PACKAGE_TYPE:
         required: true
         type: string
@@ -20,7 +12,7 @@ on:
         type: string
         description: Desired Cuda version
       GPU_ARCH_VERSION:
-        required: true
+        required: false
         type: string
         description: GPU Arch version
       GPU_ARCH_TYPE:
@@ -31,13 +23,8 @@ on:
         required: true
         type: string
         description: Docker image to use
-      SKIP_ALL_TESTS:
-        required: true
-        type: number
-        default: 1
-        description: Whether to skip all tests. Valid values are 1 and 0
       LIBTORCH_CONFIG:
-        required: true
+        required: false
         type: string
         description: Desired libtorch config (for libtorch builds only)
       LIBTORCH_VARIANT:
@@ -45,7 +32,7 @@ on:
         type: string
         description: Desired libtorch variant (for libtorch builds only)
       DESIRED_DEVTOOLSET:
-        required: true
+        required: false
         type: string
         description: Desired dev toolset
       DESIRED_PYTHON:
@@ -58,8 +45,7 @@ jobs:
     runs-on: linux.4xlarge
     timeout-minutes: 240
     env:
-      PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
-      BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
+      PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: ${{ inputs.PACKAGE_TYPE }}
       # TODO: This is a legacy variable that we eventually want to get rid of in
       #       favor of GPU_ARCH_VERSION
@@ -67,7 +53,7 @@ jobs:
       GPU_ARCH_VERSION: ${{ inputs.GPU_ARCH_VERSION }}
       GPU_ARCH_TYPE: ${{ inputs.GPU_ARCH_TYPE }}
       DOCKER_IMAGE: ${{ inputs.DOCKER_IMAGE }}
-      SKIP_ALL_TESTS: ${{ inputs.SKIP_ALL_TESTS }}
+      SKIP_ALL_TESTS: 1
       LIBTORCH_CONFIG: ${{ inputs.LIBTORCH_CONFIG }}
       LIBTORCH_VARIANT: ${{ inputs.LIBTORCH_VARIANT }}
       DESIRED_DEVTOOLSET: ${{ inputs.DESIRED_DEVTOOLSET }}
