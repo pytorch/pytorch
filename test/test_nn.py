@@ -15916,6 +15916,44 @@ torch.cuda.synchronize()
         helper(10, 512, 31, 31, 3, stride=2)
         helper(1, 129, 8, 8, 3, stride=2)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.half, torch.float, torch.double)
+    @onlyCUDA
+    def test_max_pool3d_ndhwc(self, device, dtype):
+        def helper(n, c, h, w, d, kernel_size, stride=None):
+            if stride is None:
+                stride = kernel_size
+            input = torch.randn(n, c, d, h, w, dtype=dtype, device=device)
+            input = input.contiguous(memory_format=torch.channels_last_3d).requires_grad_()
+            grad = torch.randn(n, c, (d - kernel_size) // stride + 1, (h - kernel_size) // stride + 1, (w - kernel_size) // stride + 1,
+                               dtype=dtype, device=device)
+            grad = grad.contiguous(memory_format=torch.channels_last_3d)
+            pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
+
+            ref_input = input.detach().clone().contiguous().requires_grad_(True)
+            ref_grad = grad.detach().clone().contiguous()
+            ref_pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)
+            out, ind = pool(input)
+            out.backward(grad)
+            ref_out, ref_ind = ref_pool(ref_input)
+            ref_out.backward(ref_grad)
+
+            self.assertTrue(out.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(ref_out.is_contiguous())
+            self.assertTrue(ind.is_contiguous(memory_format=torch.channels_last_3d))
+            self.assertTrue(ref_ind.is_contiguous())
+            self.assertEqual(out, ref_out)
+            self.assertEqual(ind, ref_ind)
+            if dtype == torch.half:
+                self.assertEqual(input.grad, ref_input.grad, atol=0.05, rtol=0.01)
+            else:
+                self.assertEqual(input.grad, ref_input.grad)
+
+        helper(4, 8, 8, 8, 8, 7)
+        helper(4, 8, 7, 7, 7, 3, stride=1)
+        helper(10, 128, 19, 19, 19, 3, stride=2)
+        helper(1, 79, 4, 4, 4, 3, stride=2)
+
     @onlyCPU
     def test_max_pool2d_bfloat16(self, device):
         def helper(n, c, h, w, kernel_size, stride, memory_format):
