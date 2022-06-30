@@ -19,6 +19,51 @@ namespace cuda {
 
 namespace {
 
+//! Checks that the current loop nest is not realizing a serial
+//!  broadcast so that each index of producer buffer will only
+//!  be visited once.
+//! TODO: should refactor this utility now to use loop maps in a
+//!  follow up.
+bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
+  auto producer_root =
+      TensorDomain::noReductions(producer->getMaybeRFactorDomain());
+  auto consumer_root =
+      TensorDomain::noReductions(consumer->getMaybeRFactorDomain());
+
+  if (producer_root.size() != consumer_root.size()) {
+    // This case would be a single broadcast or a single reduce
+    //  which wouldn't be a broadcast resolution
+    return false;
+  }
+
+  std::vector<Val*> serial_ids;
+  std::copy_if(
+      producer->domain()->domain().begin(),
+      producer->domain()->domain().end(),
+      std::back_inserter(serial_ids),
+      [](IterDomain* id) { return !id->isThread(); });
+
+  auto serial_producer_roots =
+      InputsOf::outputs(FusionGuard::getCurFusion(), serial_ids);
+  auto serial_root_id =
+      ir_utils::filterByType<IterDomain>(serial_producer_roots);
+  std::unordered_set<IterDomain*> serial_producer_root_set(
+      serial_root_id.begin(), serial_root_id.end());
+
+  for (const auto idx : c10::irange(producer_root.size())) {
+    if (producer_root[idx]->isBroadcast() &&
+        !consumer_root[idx]->isBroadcast()) {
+      // Check if this broadcast contributed to any serial
+      //  scheduled iterdomains:
+      if (serial_producer_root_set.count(producer_root[idx])) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
 //! Get string representation of Allocate size for symbolic comparison
 //!
 //!  TODO: Some expr simplifications could also be helpful
@@ -541,49 +586,6 @@ class BufferUseDefInfo {
     current_pos_ = -1;
   }
 
-  //! Checks that the current loop nest is not realizing a serial
-  //!  broadcast so that each index of producer buffer will only
-  //!  be visited once.
-  bool isSerialBroadcastResolution(TensorView* producer, TensorView* consumer) {
-    auto producer_root =
-        TensorDomain::noReductions(producer->getMaybeRFactorDomain());
-    auto consumer_root =
-        TensorDomain::noReductions(consumer->getMaybeRFactorDomain());
-
-    if (producer_root.size() != consumer_root.size()) {
-      // This case would be a single broadcast or a single reduce
-      //  which wouldn't be a broadcast resolution
-      return true;
-    }
-
-    std::vector<Val*> serial_ids;
-    std::copy_if(
-        producer->domain()->domain().begin(),
-        producer->domain()->domain().end(),
-        std::back_inserter(serial_ids),
-        [](IterDomain* id) { return !id->isThread(); });
-
-    auto serial_producer_roots =
-        InputsOf::outputs(FusionGuard::getCurFusion(), serial_ids);
-    auto serial_root_id =
-        ir_utils::filterByType<IterDomain>(serial_producer_roots);
-    std::unordered_set<IterDomain*> serial_producer_root_set(
-        serial_root_id.begin(), serial_root_id.end());
-
-    for (const auto idx : c10::irange(producer_root.size())) {
-      if (producer_root[idx]->isBroadcast() &&
-          !consumer_root[idx]->isBroadcast()) {
-        // Check if this broadcast contributed to any serial
-        //  scheduled iterdomains:
-        if (serial_producer_root_set.count(producer_root[idx])) {
-          return false;
-        }
-      }
-    }
-
-    return true;
-  }
-
   // Iterate over the inputs and outputs of exprs and update
   //  the liveness info of local buffers if applicaable.
   void collectLivenessInfo(const Expr* expr) {
@@ -599,7 +601,7 @@ class BufferUseDefInfo {
     for (auto input_tv : ir_utils::filterByType<TensorView>(expr->inputs())) {
       auto maybe_alloc_info = getMaybeAllocInfoFromTV(input_tv);
       if (maybe_alloc_info.has_value()) {
-        if (isSerialBroadcastResolution(input_tv, out_tv)) {
+        if (!isSerialBroadcastResolution(input_tv, out_tv)) {
           maybe_alloc_info.value()->inner_live_interval->markRead(current_pos_);
         } else {
           // Disable inner alias info for this buffer, since line number based
@@ -996,6 +998,7 @@ class AllocateReuseModifier {
   struct InPlaceSharingInfo {
     bool has_broadcast_between = false;
     bool has_unsupported_op = false;
+    bool has_serial_broadcast_resolution_between = false;
   };
 
   //! Careful heavy check on inner sharing candidates,
@@ -1031,6 +1034,13 @@ class AllocateReuseModifier {
 
       // Avoid difficult and future introduced ops
       if (topo_info.has_unsupported_op) {
+        return false;
+      }
+
+      // TODO: blanket disable reuse across broadcast concretization
+      //  to unblock issue for now.
+      // Should improve the precision of this analysis in a follow up.
+      if (topo_info.has_serial_broadcast_resolution_between) {
         return false;
       }
 
@@ -1070,6 +1080,9 @@ class AllocateReuseModifier {
 
   InPlaceSharingInfo checkOpsInBetween(std::vector<Val*>& all_used_vals) {
     InPlaceSharingInfo info;
+    std::unordered_set<Val*> all_used_val_set(
+        all_used_vals.begin(), all_used_vals.end());
+
     for (auto val : all_used_vals) {
       if (auto tv = dynamic_cast<TensorView*>(val)) {
         auto tv_def = tv->definition();
@@ -1081,6 +1094,14 @@ class AllocateReuseModifier {
             info.has_broadcast_between = true;
           } else {
             info.has_unsupported_op = true;
+          }
+        }
+
+        for (auto in_tv :
+             ir_utils::filterByType<TensorView>(tv_def->inputs())) {
+          if (all_used_val_set.count(in_tv) &&
+              isSerialBroadcastResolution(in_tv, tv)) {
+            info.has_serial_broadcast_resolution_between = true;
           }
         }
       }

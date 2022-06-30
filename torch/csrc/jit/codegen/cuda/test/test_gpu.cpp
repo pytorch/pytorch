@@ -23996,6 +23996,56 @@ to: 2
   TORCH_CHECK(printer2.ss.str() == expect);
 }
 
+TEST_F(NVFuserTest, FusionIssue1785Repro_CUDA) {
+  Fusion fusion;
+  FusionGuard fg(&fusion);
+
+  // Set up your input tensor views
+  TensorView* tv0 = makeContigTensor(1);
+  TensorView* tv1 = makeContigTensor(2);
+
+  // Register your inputs
+  fusion.addInput(tv0);
+  fusion.addInput(tv1);
+
+  auto tv2 = set(tv0);
+  // [B, I]
+  auto tv3 = broadcast(tv2, {true, false});
+  auto tv4 = add(tv3, tv1);
+  auto tv5 = set(tv4);
+
+  // Register your outputs
+  fusion.addOutput(tv5);
+
+  tv5->split(0, 8);
+  tv5->split(-1, 8);
+
+  // [Serial, TIDy, TIDX, Serial]
+
+  tv4->computeAt(tv5, -2);
+  tv3->computeAt(tv4, -1);
+  tv2->computeAt(tv3, 0);
+  tv2->split(0, 8);
+  tv2->axis(0)->parallelize(ParallelType::TIDx);
+  tv1->computeAt(tv5, -2);
+
+  tv5->axis(1)->parallelize(ParallelType::TIDy);
+  tv5->axis(2)->parallelize(ParallelType::TIDx);
+
+  auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
+
+  at::Tensor in1 = at::randn({16}, options);
+  at::Tensor in2 = at::randn({12, 16}, options);
+
+  FusionExecutor fe;
+  fe.compileFusion(&fusion, {in1, in2});
+  auto cg_outputs = fe.runFusion({in1, in2});
+
+  auto tv_ref = in1 + in2;
+
+  testValidate(&fusion, cg_outputs, {in1, in2}, {tv_ref}, __LINE__, __FILE__);
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

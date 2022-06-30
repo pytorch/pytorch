@@ -4754,6 +4754,35 @@ class TestCudaFuser(JitTestCase):
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
                      "Requires fusion optimization pass to be effective")
+    def test_issue_1785(self):
+        class Fusion(torch.nn.Module):
+            def __init__(self):
+                super(Fusion, self).__init__()
+
+            def forward(self, x, a, b):
+                out = torch.mul(x.unsqueeze(-1), a)
+                out = out + b
+                return out
+
+        x = torch.randn(1024, 192, 3, device='cuda')
+        a = torch.randn(3, 128, device='cuda')
+        b = torch.randn(3, 128, device='cuda')
+
+        model = Fusion()
+        jit_model = torch.jit.script(model)
+
+        with torch.jit.fuser('fuser2'):
+            for _ in range(4):
+                out_ref = model(x, a, b)
+                out_jit = jit_model(x, a, b)
+
+        out_ref = model(x, a, b)
+        out_jit = jit_model(x, a, b)
+        self.assertTrue(self._compare("comparing output failed", out_ref, out_jit, 1e-5))
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
     def test_high_rank_fusion(self):
         # currently we want to limit fusion to node with input where rank <= 8
         rank_limit = 8
