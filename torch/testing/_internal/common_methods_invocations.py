@@ -11727,6 +11727,8 @@ op_db: List[OpInfo] = [
                     ref=np.remainder,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
+                    # https://github.com/pytorch/pytorch/issues/80411
+                    gradcheck_fast_mode=True,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     assert_autodiffed=None,
@@ -12945,8 +12947,6 @@ op_db: List[OpInfo] = [
            aten_name='linalg_lu_factor',
            op=torch.linalg.lu_factor,
            dtypes=floating_and_complex_types(),
-           # https://github.com/pytorch/pytorch/issues/80411
-           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
@@ -12965,6 +12965,8 @@ op_db: List[OpInfo] = [
            aten_name='linalg_lu',
            op=torch.linalg.lu,
            dtypes=floating_and_complex_types(),
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_linalg_lu,
@@ -15254,6 +15256,8 @@ op_db: List[OpInfo] = [
                     # unsupported on CPU.
                     backward_dtypes=floating_and_complex_types_and(torch.bfloat16),
                     backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
+                    # https://github.com/pytorch/pytorch/issues/80411
+                    gradcheck_fast_mode=True,
                     supports_inplace_autograd=False,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
@@ -15761,6 +15765,8 @@ op_db: List[OpInfo] = [
     OpInfo('slice_scatter',
            dtypes=all_types_and(torch.bfloat16, torch.half, torch.bool),
            sample_inputs_func=sample_inputs_slice_scatter,
+           # https://github.com/pytorch/pytorch/issues/80411
+           gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            supports_out=False),
@@ -17469,6 +17475,8 @@ op_db: List[OpInfo] = [
                   op=lambda x, dims: x.repeat(dims),
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                  # https://github.com/pytorch/pytorch/issues/80411
+                  gradcheck_fast_mode=True,
                   supports_out=False,
                   supports_forward_ad=True,
                   supports_fwgrad_bwgrad=True,
@@ -17554,6 +17562,8 @@ op_db: List[OpInfo] = [
     ShapeFuncInfo('tile',
                   ref=np.tile,
                   dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+                  # https://github.com/pytorch/pytorch/issues/80411
+                  gradcheck_fast_mode=True,
                   supports_out=False,
                   supports_forward_ad=True,
                   supports_fwgrad_bwgrad=True,
@@ -18801,6 +18811,8 @@ op_db: List[OpInfo] = [
         identity=1,
         nan_policy='propagate',
         supports_multiple_dims=False,
+        # https://github.com/pytorch/pytorch/issues/80411
+        gradcheck_fast_mode=True,
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
