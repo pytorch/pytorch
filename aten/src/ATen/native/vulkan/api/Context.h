@@ -146,7 +146,7 @@ class Context final {
     }
   }
 
-  DescriptorSet submit_compute_prologue(
+  Descriptor::Set submit_compute_prologue(
       CommandBuffer&,
       const ShaderLayout::Signature&,
       const ShaderSource&,
@@ -154,20 +154,11 @@ class Context final {
 
   void submit_compute_epilogue(
       CommandBuffer&,
-      const DescriptorSet&,
+      const Descriptor::Set&,
       const PipelineBarrier&,
       const utils::uvec3&);
 
  public:
-
-  template<typename... Arguments>
-  void dispatch(
-      Command::Buffer& command_buffer,
-      const ShaderLayout::Signature& shader_layout_signature,
-      const ShaderSource& shader_descriptor,
-      const utils::uvec3& global_work_group,
-      const utils::uvec3& local_work_group_size,
-      Arguments&&... arguments);
 
   template<typename... Arguments>
   void submit_compute_job(
