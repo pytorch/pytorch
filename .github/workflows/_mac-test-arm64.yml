@@ -40,7 +40,7 @@ jobs:
           # shellcheck disable=SC1090
           . ~/miniconda3/etc/profile.d/conda.sh
           set -ex
-          conda create -yp "${ENV_NAME}" "python=${PY_VERS}" numpy expecttest pyyaml
+          conda create -yp "${ENV_NAME}" "python=${PY_VERS}" numpy expecttest
           # As wheels are cross-compiled they are reported as x86_64 ones
           ORIG_WHLNAME=$(ls -1 dist/*.whl); ARM_WHLNAME=${ORIG_WHLNAME/x86_64/arm64}; mv ${ORIG_WHLNAME} ${ARM_WHLNAME}
           conda run -p "${ENV_NAME}" python3 -mpip install dist/*.whl
