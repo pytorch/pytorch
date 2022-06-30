@@ -1805,8 +1805,14 @@ class TestNLLLoss(TestCase):
             # create the criterion
             loss = torch.nn.HuberLoss(reduction=reduction, delta=delta)
 
-            inputCPU = torch.tensor(input, device='cpu', dtype=torch.float, requires_grad=True)
-            targetCPU = torch.tensor(target, device='cpu', dtype=torch.float, requires_grad=False)
+            if isinstance(input, torch.Tensor):
+                inputCPU = input
+            else:
+                inputCPU = torch.tensor(input, device='cpu', dtype=torch.float, requires_grad=True)
+            if isinstance(target, torch.Tensor):
+                targetCPU = target
+            else:
+                targetCPU = torch.tensor(target, device='cpu', dtype=torch.float, requires_grad=False)
             inputMPS = inputCPU.detach().clone().to('mps').requires_grad_()
             targetMPS = targetCPU.detach().clone().to('mps')
 
@@ -1832,8 +1838,18 @@ class TestNLLLoss(TestCase):
         helper([4, 5, 6], [7, 8, 9], 'mean', 1.0)
 
         # verify if changes in shape would cause cached graph lookup problems
-        helper(torch.randn([7, 5, 2, 4, 6]), torch.randn([7, 5, 2, 4, 6]), 'sum', 1.5)
-        helper(torch.randn([8, 4, 5, 7, 6]), torch.randn([8, 4, 5, 7, 6]), 'mean', 1.5)
+        helper(
+            torch.randn([7, 5, 2, 4, 6], dtype=torch.float, requires_grad=True),
+            torch.randn([7, 5, 2, 4, 6], dtype=torch.float, requires_grad=False),
+            'sum',
+            1.5
+        )
+        helper(
+            torch.randn([8, 4, 5, 7, 6], dtype=torch.float, requires_grad=True),
+            torch.randn([8, 4, 5, 7, 6], dtype=torch.float, requires_grad=False),
+            'mean',
+            1.5
+        )
 
     # Mean Squared Error
     def test_mse_loss(self):
