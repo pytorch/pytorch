@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Dict, List, Any
@@ -8,7 +9,7 @@ from tempfile import TemporaryDirectory
 from tools.stats.upload_stats_lib import (
     download_gha_artifacts,
     download_s3_artifacts,
-    upload_to_rockset,
+    upload_to_s3,
     unzip,
 )
 
@@ -205,10 +206,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
     test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
+    # Flush stdout so that any errors in rockset upload show up last in the logs.
+    sys.stdout.flush()
+
     # For PRs, only upload a summary of test_runs. This helps lower the
     # volume of writes we do to Rockset.
-    upload_to_rockset("test_run_summary", summarize_test_cases(test_cases))
+    upload_to_s3(
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        "test_run_summary",
+        summarize_test_cases(test_cases),
+    )
+
+    # upload_to_rockset("test_run_summary", summarize_test_cases(test_cases))
 
     if args.head_branch == "master":
         # For master jobs, upload everytihng.
-        upload_to_rockset("test_run", test_cases)
+        upload_to_s3(
+            args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
+        )
