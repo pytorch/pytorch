@@ -2,7 +2,6 @@ import logging
 
 import torch
 import torch.distributed as dist
-from torch.distributed import distributed_c10d
 
 from . import default_hooks as default
 
@@ -50,38 +49,6 @@ class PostLocalSGDState(object):
         self.post_local_gradient_allreduce = post_local_gradient_allreduce
         # Iteration/step in the training loop.
         self.iter = 0
-
-    def __getstate__(self):
-        r"""
-        Returns a ``Dict[str, Any]`` which will be pickled and saved.
-        ``process_group`` and ``subgroup`` are not serializable and excluded from
-        a returned state.
-        """
-        logger.warning(
-            "NOTE: Process group and subgroup are not serializable and excluded from a saved state."
-        )
-        return {
-            slot: getattr(self, slot)
-            for slot in self.__slots__ if slot != "process_group" and slot != "subgroup"
-        }
-
-    def __setstate__(self, state):
-        r"""
-        Takes provided ``state`` and retrieves ``PostLocalSGDState``.
-        ``process_group`` and ``subgroup`` are set to default process_group and subgroup respectively.
-        Default subgroup is equivalent to the subgroup on each node. To specify a custom subgroup,
-        please use :func:`torch.distributed.new_group`.
-
-        """
-        self.process_group = distributed_c10d._get_default_group()
-        self.subgroup, _ = dist.new_subgroups()
-        logger.warning(
-            "NOTE: Process group will be set to a default group (i.e. the world size).\n"
-            "Subgroup will be set to a default subgroup (i.e. an intra-node subgroup)\n"
-            "If a different group is desired, please set `self.process_group` after `PostLocalSGD`'s state is loaded."
-        )
-        for slot, value in state.items():
-            setattr(self, slot, value)
 
     def maybe_increase_iter(self, bucket):
         # Since bucket 0 is the last bucket to allreduce in an iteration.
