@@ -5,6 +5,138 @@ namespace at {
 namespace native {
 namespace vulkan {
 namespace api {
+
+//
+// DescriptorSet
+//
+
+DescriptorSet::DescriptorSet(
+    const VkDevice device,
+    const VkDescriptorSet handle,
+    const ShaderLayout::Signature& shader_layout_signature)
+  : device_(device),
+    handle_(handle),
+    shader_layout_signature_(shader_layout_signature),
+    bindings_{} {
+}
+
+DescriptorSet::DescriptorSet(DescriptorSet&& other) noexcept
+  : device_(other.device_),
+    handle_(other.handle_),
+    shader_layout_signature_(std::move(other.shader_layout_signature_)),
+    bindings_(std::move(other.bindings_)) {
+  other.handle_ = VK_NULL_HANDLE;
+}
+
+DescriptorSet& DescriptorSet::operator=(DescriptorSet&& other) noexcept {
+  device_ = other.device_;
+  handle_ = other.handle_;
+  shader_layout_signature_ = std::move(other.shader_layout_signature_);
+  bindings_ = std::move(other.bindings_);
+
+  other.handle_ = VK_NULL_HANDLE;
+
+  return *this;
+}
+
+DescriptorSet& DescriptorSet::bind(
+    const uint32_t idx,
+    const VulkanBuffer& buffer) {
+  add_binding(DescriptorSet::ResourceBinding{
+      idx,  // binding_idx
+      shader_layout_signature_[idx],  // descriptor_type
+      false,  // is_image
+      {  // resource_info
+        .buffer_info = {
+          buffer.handle(),  // buffer
+          buffer.mem_offset(),  // offset
+          buffer.mem_range(),  // range
+        },
+      },
+    });
+
+  return *this;
+}
+
+DescriptorSet& DescriptorSet::bind(
+    const uint32_t idx,
+    const VulkanImage& image) {
+  VkImageLayout binding_layout = image.layout();
+  if (shader_layout_signature_[idx] == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE) {
+    binding_layout = VK_IMAGE_LAYOUT_GENERAL;
+  }
+
+  add_binding(DescriptorSet::ResourceBinding{
+      idx,  // binding_idx
+      shader_layout_signature_[idx],  // descriptor_type
+      true,  // is_image
+      {  // resource_info
+        .image_info = {
+          image.sampler(),  // buffer
+          image.image_view(),  // imageView
+          binding_layout,  // imageLayout
+        },
+      },
+    });
+
+  return *this;
+}
+
+VkDescriptorSet DescriptorSet::get_bind_handle() const {
+  c10::SmallVector<VkWriteDescriptorSet, 6u> write_descriptor_sets;
+
+  for (const ResourceBinding& binding : bindings_) {
+    VkWriteDescriptorSet write{
+      VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,  // sType
+      nullptr,  // pNext
+      handle_,  // dstSet
+      binding.binding_idx,  // dstBinding
+      0u,  // dstArrayElement
+      1u,  // descriptorCount
+      binding.descriptor_type,  // descriptorType
+      nullptr,  // pImageInfo
+      nullptr,  // pBufferInfo
+      nullptr,  // pTexelBufferView
+    };
+
+    if (binding.is_image) {
+      write.pImageInfo = &binding.resource_info.image_info;
+    }
+    else {
+      write.pBufferInfo = &binding.resource_info.buffer_info;
+    }
+
+    write_descriptor_sets.emplace_back(write);
+  }
+
+  vkUpdateDescriptorSets(
+      device_,
+      write_descriptor_sets.size(),
+      write_descriptor_sets.data(),
+      0u,
+      nullptr);
+
+  VkDescriptorSet ret = handle_;
+
+  return ret;
+}
+
+void DescriptorSet::add_binding(const ResourceBinding& binding) {
+  const auto bindings_itr = std::find_if(
+      bindings_.begin(),
+      bindings_.end(),
+      [binding_idx = binding.binding_idx](const ResourceBinding& other) {
+        return other.binding_idx == binding_idx;
+      });
+
+  if (bindings_.end() == bindings_itr) {
+    bindings_.emplace_back(binding);
+  }
+  else {
+    *bindings_itr = binding;
+  }
+}
+
 namespace {
 
 VkDescriptorPool create_descriptor_pool(const VkDevice device) {
@@ -114,189 +246,6 @@ void allocate_descriptor_sets(
 
 } // namespace
 
-Descriptor::Set::Set(
-    const VkDevice device,
-    VkDescriptorSet descriptor_set,
-    ShaderLayout::Signature shader_layout_signature)
-  : device_(device),
-    descriptor_set_(descriptor_set),
-    shader_layout_signature_(shader_layout_signature),
-    bindings_{} {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_,
-      "Invalid Vulkan device!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      descriptor_set_,
-      "Invalid Vulkan descriptor set!");
-}
-
-Descriptor::Set::Set(Set&& set)
-  : device_(std::move(set.device_)),
-    descriptor_set_(std::move(set.descriptor_set_)),
-    shader_layout_signature_(std::move(set.shader_layout_signature_)),
-    bindings_(std::move(set.bindings_)) {
-  set.invalidate();
-}
-
-Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
-  if (&set != this) {
-    device_ = std::move(set.device_);
-    descriptor_set_ = std::move(set.descriptor_set_);
-    shader_layout_signature_ = std::move(set.shader_layout_signature_);
-    bindings_ = std::move(set.bindings_);
-
-    set.invalidate();
-  };
-
-  return *this;
-}
-
-Descriptor::Set& Descriptor::Set::bind(
-    const uint32_t binding,
-    const VulkanBuffer& package) {
-  update({
-      binding,
-      shader_layout_signature_[binding],
-      {
-        .buffer = {
-          package.handle(),
-          package.mem_offset(),
-          package.mem_range(),
-        },
-      },
-    });
-
-  return *this;
-}
-
-Descriptor::Set& Descriptor::Set::bind(
-    const uint32_t binding,
-    const VulkanImage& image) {
-  update(Item{
-      binding,
-      shader_layout_signature_[binding],
-      {
-        .image = {
-          image.sampler(),
-          image.image_view(),
-          [](const VkDescriptorType type, const VkImageLayout layout) {
-            return (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE == type) ?
-                    VK_IMAGE_LAYOUT_GENERAL : layout;
-          }(shader_layout_signature_[binding], image.layout()),
-        },
-      },
-    });
-
-  return *this;
-}
-
-
-
-VkDescriptorSet Descriptor::Set::handle() const {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && descriptor_set_,
-      "This descriptor set is in an invalid state! "
-      "Potential reason: This descriptor set is moved from.");
-
-  if (bindings_.dirty) {
-    const auto is_buffer = [](const VkDescriptorType type) {
-      switch (type) {
-        case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
-        case VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
-        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
-          return true;
-
-        default:
-          return false;
-      }
-    };
-
-    const auto is_image = [](const VkDescriptorType type) {
-      switch (type) {
-        case VK_DESCRIPTOR_TYPE_SAMPLER:
-        case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-        case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-          return true;
-
-        default:
-          return false;
-      }
-    };
-
-    c10::SmallVector<VkWriteDescriptorSet, 6u> write_descriptor_sets;
-
-    for (const Item& item : bindings_.items) {
-      VkWriteDescriptorSet write{
-        VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-        nullptr,
-        descriptor_set_,
-        item.binding,
-        0u,
-        1u,
-        item.type,
-        nullptr,
-        nullptr,
-        nullptr,
-      };
-
-      if (is_buffer(item.type)) {
-        write.pBufferInfo = &item.info.buffer;
-      }
-      else if (is_image(item.type)) {
-        write.pImageInfo = &item.info.image;
-      }
-
-      write_descriptor_sets.emplace_back(write);
-    }
-
-    vkUpdateDescriptorSets(
-        device_,
-        write_descriptor_sets.size(),
-        write_descriptor_sets.data(),
-        0u,
-        nullptr);
-
-    // Reset
-    bindings_.dirty = false;
-  }
-
-  return descriptor_set_;
-}
-
-void Descriptor::Set::invalidate() {
-  device_ = VK_NULL_HANDLE;
-  descriptor_set_ = VK_NULL_HANDLE;
-}
-
-void Descriptor::Set::update(const Item& item) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      device_ && descriptor_set_,
-      "This descriptor set is in an invalid state! "
-      "Potential reason: This descriptor set is moved from.");
-
-  const auto items_itr = std::find_if(
-      bindings_.items.begin(),
-      bindings_.items.end(),
-      [binding = item.binding](const Item& other) {
-        return other.binding == binding;
-      });
-
-  if (bindings_.items.end() == items_itr) {
-     bindings_.items.emplace_back(item);
-  }
-  else {
-    *items_itr = item;
-  }
-
-  bindings_.dirty = true;
-}
-
 Descriptor::Pool::Pool(const GPU& gpu)
   : device_(gpu.device),
     descriptor_pool_(
@@ -348,7 +297,7 @@ Descriptor::Pool::~Pool() {
   }
 }
 
-Descriptor::Set Descriptor::Pool::allocate(
+DescriptorSet Descriptor::Pool::allocate(
     const VkDescriptorSetLayout handle,
     const ShaderLayout::Signature& signature) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
@@ -377,7 +326,7 @@ Descriptor::Set Descriptor::Pool::allocate(
         Configuration::kQuantum);
   }
 
-  return Set(
+  return DescriptorSet(
       device_,
       layout.pool[layout.in_use++],
       signature);

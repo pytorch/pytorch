@@ -43,7 +43,7 @@ Context::~Context() {
   adapter_p_->return_queue(queue_);
 }
 
-Descriptor::Set Context::submit_compute_prologue(
+DescriptorSet Context::submit_compute_prologue(
     CommandBuffer& command_buffer,
     const ShaderLayout::Signature& shader_layout_signature,
     const ShaderSource& shader_descriptor,
@@ -68,10 +68,10 @@ Descriptor::Set Context::submit_compute_prologue(
 
 void Context::submit_compute_epilogue(
     CommandBuffer& command_buffer,
-    const Descriptor::Set& descriptors,
+    const DescriptorSet& descriptors,
     const PipelineBarrier& pipeline_barrier,
     const utils::uvec3& global_workgroup_size) {
-  command_buffer.bind_descriptors(descriptors.handle());
+  command_buffer.bind_descriptors(descriptors.get_bind_handle());
   command_buffer.insert_barrier(pipeline_barrier);
 
   command_buffer.dispatch(global_workgroup_size);
