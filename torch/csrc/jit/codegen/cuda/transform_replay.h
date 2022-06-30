@@ -154,6 +154,27 @@ class TORCH_CUDA_CU_API TransformReplay {
   static TensorDomain* fullSelfReplay(
       const TensorDomain* new_self_root,
       const TensorDomain* self);
+
+  // Returns the leaf position in producer that matches with `consumer_pos` in
+  // consumer. Returns -1 if matching is impossible. This function can be used
+  // to test if replay is needed for getting matching outer dims.
+  static int getMatchedLeafPosWithoutReplayPasC(
+      const TensorView* producer,
+      const TensorView* consumer,
+      int consumer_pos);
+
+  // Returns the leaf position in consumer that matches with `producer_pos` in
+  // producer. Returns -1 if matching is impossible. This function can be used
+  // to test if replay is needed for getting matching outer dims.
+  static int getMatchedLeafPosWithoutReplayCasP(
+      const TensorView* consumer,
+      const TensorView* producer,
+      int producer_pos);
+
+  // tests if two tensors has fully matching transformations
+  static bool fullSelfMatching(
+      const TensorView* replay,
+      const TensorView* target);
 };
 
 class TORCH_CUDA_CU_API TransformPropagator

@@ -342,96 +342,6 @@ void ComputeAt::runWith(
   ca.runPass();
 }
 
-namespace {
-
-// Checks if producer and consumer are transformed consistently so that to
-// satisfy the provided compute at position. This means no replay is actually
-// necessary for the compute at requested. If consumer_pos then
-// consumer_or_producer_pos is relative to the consumer and skipReplay returns
-// the associated position in producer.
-//
-// If producer and consumer are not transformed consistently with provided
-// postition, returns -1.
-int skipReplay(
-    const TensorView* producer,
-    const TensorView* consumer,
-    int consumer_or_producer_pos,
-    bool consumer_pos = true) {
-  FUSER_PERF_SCOPE("transform_replay.cpp::skipReplay");
-
-  const auto c2p_root_map =
-      PairwiseRootDomainMap(producer, consumer)
-          .mapConsumerToProducer(consumer->domain(), producer->domain());
-
-  // IterDomains in consumer root also in producer root
-  std::unordered_set<Val*> mapped_consumer_roots;
-  for (auto entry : c2p_root_map) {
-    mapped_consumer_roots.emplace(entry.first);
-  }
-
-  const auto consumer_domain = consumer->domain()->domain();
-
-  auto mapped_consumer_domain_ids_vec = DependencyCheck::getAllValsBetween(
-      mapped_consumer_roots, {consumer_domain.begin(), consumer_domain.end()});
-
-  std::unordered_set<Val*> mapped_consumer_domain_ids(
-      mapped_consumer_domain_ids_vec.begin(),
-      mapped_consumer_domain_ids_vec.end());
-
-  const auto producer_domain = producer->domain()->domain();
-
-  auto it_consumer = consumer_domain.begin();
-  auto it_producer = producer_domain.begin();
-
-  auto best_effort_PasC = BestEffortReplay::replayPasC(
-      producer, consumer, -1, PairwiseRootDomainMap(producer, consumer));
-
-  auto c2p_map = best_effort_PasC.getReplay();
-
-  int mismatched_consumer_pos = 0;
-  int mismatched_producer_pos = 0;
-  while (it_consumer != consumer_domain.end()) {
-    auto consumer_id = *it_consumer;
-    if (!mapped_consumer_domain_ids.count(consumer_id)) {
-      ++it_consumer;
-      mismatched_consumer_pos++;
-      continue;
-    }
-
-    auto c2p_it = c2p_map.find(consumer_id);
-    if (c2p_it == c2p_map.end()) {
-      break;
-    }
-
-    if (it_producer == producer_domain.end()) {
-      break;
-    }
-
-    auto producer_id = *it_producer;
-
-    if (c2p_it->second == producer_id) {
-      ++mismatched_consumer_pos;
-      ++mismatched_producer_pos;
-      ++it_consumer;
-      ++it_producer;
-      if (consumer_pos) {
-        if (consumer_or_producer_pos == mismatched_consumer_pos) {
-          return mismatched_producer_pos;
-        }
-      } else {
-        if (consumer_or_producer_pos == mismatched_producer_pos) {
-          return mismatched_consumer_pos;
-        }
-      }
-    } else {
-      break;
-    }
-  }
-  return -1;
-}
-
-} // namespace
-
 // Actually applies transformation
 unsigned int ComputeAt::backwardComputeAt_impl(
     TensorView* producer,
@@ -460,9 +370,11 @@ unsigned int ComputeAt::backwardComputeAt_impl(
         max_consumer_compute_at_pos);
   }
 
-  // Short cut if no replay is necessary
-  auto maybe_producer_pos =
-      skipReplay(producer, consumer, (int)consumer_compute_at_pos, true);
+  // Checks if producer and consumer are transformed consistently so that to
+  // satisfy the provided compute at position. This means no replay is actually
+  // necessary for the compute at requested.
+  auto maybe_producer_pos = TransformReplay::getMatchedLeafPosWithoutReplayPasC(
+      producer, consumer, consumer_compute_at_pos);
   if (maybe_producer_pos >= 0) {
     if (!producer->isFusionInput()) {
       producer->setComputeAt((unsigned int)maybe_producer_pos);
@@ -536,8 +448,8 @@ unsigned int ComputeAt::forwardComputeAt_impl(
   }
 
   // Short cut if no replay is necessary
-  auto maybe_consumer_pos =
-      skipReplay(producer, consumer, (int)producer_compute_at_pos, false);
+  auto maybe_consumer_pos = TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+      consumer, producer, producer_compute_at_pos);
   if (maybe_consumer_pos > -1) {
     if (!producer->isFusionInput()) {
       producer->setComputeAt(producer_compute_at_pos);

@@ -644,24 +644,173 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   return replayCasP(consumer, producer, compute_at_axis, root_map);
 }
 
+namespace {
+
+int getMatchedLeafPosWithoutReplay(
+    const TensorView* producer,
+    const TensorView* consumer,
+    int consumer_or_producer_pos,
+    bool consumer_pos = true) {
+  FUSER_PERF_SCOPE("transform_replay.cpp::getMatchedLeafPosWithoutReplay");
+
+  const auto c2p_root_map =
+      PairwiseRootDomainMap(producer, consumer)
+          .mapConsumerToProducer(consumer->domain(), producer->domain());
+
+  // IterDomains in consumer root also in producer root
+  std::unordered_set<Val*> mapped_consumer_roots;
+  for (auto entry : c2p_root_map) {
+    mapped_consumer_roots.emplace(entry.first);
+  }
+
+  const auto consumer_domain = consumer->domain()->domain();
+
+  auto mapped_consumer_domain_ids_vec = DependencyCheck::getAllValsBetween(
+      mapped_consumer_roots, {consumer_domain.begin(), consumer_domain.end()});
+
+  std::unordered_set<Val*> mapped_consumer_domain_ids(
+      mapped_consumer_domain_ids_vec.begin(),
+      mapped_consumer_domain_ids_vec.end());
+
+  const auto producer_domain = producer->domain()->domain();
+
+  auto it_consumer = consumer_domain.begin();
+  auto it_producer = producer_domain.begin();
+
+  auto best_effort_PasC = BestEffortReplay::replayPasC(
+      producer, consumer, -1, PairwiseRootDomainMap(producer, consumer));
+
+  auto c2p_map = best_effort_PasC.getReplay();
+
+  int mismatched_consumer_pos = 0;
+  int mismatched_producer_pos = 0;
+  while (it_consumer != consumer_domain.end()) {
+    auto consumer_id = *it_consumer;
+    if (!mapped_consumer_domain_ids.count(consumer_id)) {
+      ++it_consumer;
+      mismatched_consumer_pos++;
+      continue;
+    }
+
+    auto c2p_it = c2p_map.find(consumer_id);
+    if (c2p_it == c2p_map.end()) {
+      break;
+    }
+
+    if (it_producer == producer_domain.end()) {
+      break;
+    }
+
+    auto producer_id = *it_producer;
+
+    if (c2p_it->second == producer_id) {
+      ++mismatched_consumer_pos;
+      ++mismatched_producer_pos;
+      ++it_consumer;
+      ++it_producer;
+      if (consumer_pos) {
+        if (consumer_or_producer_pos == mismatched_consumer_pos) {
+          return mismatched_producer_pos;
+        }
+      } else {
+        if (consumer_or_producer_pos == mismatched_producer_pos) {
+          return mismatched_consumer_pos;
+        }
+      }
+    } else {
+      break;
+    }
+  }
+  return -1;
+}
+
+} // namespace
+
+int TransformReplay::getMatchedLeafPosWithoutReplayPasC(
+    const TensorView* producer,
+    const TensorView* consumer,
+    int consumer_pos) {
+  return getMatchedLeafPosWithoutReplay(producer, consumer, consumer_pos, true);
+}
+
+int TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+    const TensorView* consumer,
+    const TensorView* producer,
+    int producer_pos) {
+  return getMatchedLeafPosWithoutReplay(
+      producer, consumer, producer_pos, false);
+}
+
+bool TransformReplay::fullSelfMatching(
+    const TensorView* replay,
+    const TensorView* target) {
+  auto replay_root = replay->getRootDomain();
+  auto replay_dom = replay->domain()->domain();
+  auto target_root = target->getRootDomain();
+  auto target_dom = target->domain()->domain();
+  std::unordered_map<IterDomain*, IterDomain*> target2replay_map;
+  if (replay_root.size() != target_root.size()) {
+    return false;
+  }
+  target2replay_map.reserve(replay_root.size());
+  std::transform(
+      target_root.begin(),
+      target_root.end(),
+      replay_root.begin(),
+      std::inserter(target2replay_map, target2replay_map.begin()),
+      [](auto a, auto b) { return std::make_pair(a, b); });
+  BestEffortReplay replay_(replay_dom, target_dom, target2replay_map);
+  auto r = replay_.getReplay();
+  for (int64_t i = 0; i < replay_dom.size(); i++) {
+    auto target_id = target_dom[i];
+    auto replay_it = r.find(target_id);
+    if (replay_it == r.end() || replay_it->second != replay_dom[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void TransformPropagator::propagateTvPasC(TensorView* from, TensorView* to) {
   int pos = replayed_pos_.at(from);
-  auto replay = TransformReplay::replayPasC(to, from, pos);
-  to->setDomain(replay.first);
-  replayed_pos_[to] = replay.second;
+  // Note: [Using multiple TransformPropagators]
+  // There are cases that we use multiple TransformPropagators along different
+  // spanning trees with different references in the same fusion. Some of these
+  // spanning trees could overlap. In cases when there are overlapping nodes,
+  // TransformPropagator needs to respect the replay of others, because the
+  // current TransformPropagator might not contain the most amount of
+  // information on how to do the correct transformation. The logic below tells
+  // TransformPropagator to skip the replay when not necessary.
+  int new_pos =
+      TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, pos);
+  if (new_pos < 0) {
+    auto replay = TransformReplay::replayPasC(to, from, pos);
+    to->setDomain(replay.first);
+    new_pos = replay.second;
+  }
+  replayed_pos_[to] = new_pos;
 }
 
 void TransformPropagator::propagateTvCasP(TensorView* from, TensorView* to) {
   int pos = replayed_pos_.at(from);
-  auto replay = TransformReplay::replayCasP(to, from, pos);
-  to->setDomain(replay.first);
-  replayed_pos_[to] = replay.second;
+  // See note [Using multiple TransformPropagators]
+  int new_pos =
+      TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, pos);
+  if (new_pos < 0) {
+    auto replay = TransformReplay::replayCasP(to, from, pos);
+    to->setDomain(replay.first);
+    new_pos = replay.second;
+  }
+  replayed_pos_[to] = new_pos;
 }
 
 void TransformPropagator::propagateTvSibling(TensorView* from, TensorView* to) {
   int pos = replayed_pos_.at(from);
-  auto replay = TransformReplay::fullSelfReplay(to->domain(), from->domain());
-  to->setDomain(replay);
+  // See note [Using multiple TransformPropagators]
+  if (!TransformReplay::fullSelfMatching(to, from)) {
+    auto replay = TransformReplay::fullSelfReplay(to->domain(), from->domain());
+    to->setDomain(replay);
+  }
   replayed_pos_[to] = pos;
 }
 

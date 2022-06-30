@@ -23710,7 +23710,7 @@ TEST_F(NVFuserTest, FusionTransformPropagateSibling_CUDA) {
   for (auto tensors : siblings) {
     for (auto t1 : tensors) {
       for (auto t2 : tensors) {
-        checkSiblingConsistency(t1, t2);
+        TORCH_CHECK(TransformReplay::fullSelfMatching(t1, t2));
       }
     }
   }
@@ -23769,7 +23769,7 @@ TEST_F(NVFuserTest, FusionTransformPropagateSelectorSibling_CUDA) {
     for (auto tensors : siblings) {
       for (auto t1 : tensors) {
         for (auto t2 : tensors) {
-          checkSiblingConsistency(t1, t2);
+          TORCH_CHECK(TransformReplay::fullSelfMatching(t1, t2));
         }
       }
     }
@@ -23922,7 +23922,7 @@ TEST_F(NVFuserTest, FusionTransformPropagatorSelector) {
   TORCH_CHECK(tv4->nDims() == 1);
 }
 
-TEST_F(NVFuserTest, FusionTransormPropagatorPos_CUDA) {
+TEST_F(NVFuserTest, FusionTransformPropagatorPos_CUDA) {
   auto fusion = std::make_unique<Fusion>();
   FusionGuard fg(fusion.get());
 
@@ -23939,10 +23939,9 @@ TEST_F(NVFuserTest, FusionTransormPropagatorPos_CUDA) {
   TransformPropagator propagator(tv1, 2);
   MaxRootDomainInfoSpanningTree(tv1, 2).traverse(&propagator);
 
-  TORCH_CHECK(tv0->nDims() == 3);
-  TORCH_CHECK(tv0->axis(0)->extent()->evaluateInt() == 11);
-  TORCH_CHECK(tv0->axis(1)->extent()->evaluateInt() == 2);
-  TORCH_CHECK(tv0->axis(2)->extent()->evaluateInt() == 105);
+  auto expect = makeConcreteTensor({22, 105});
+  expect->split(0, 2);
+  TORCH_CHECK(TransformReplay::fullSelfMatching(expect, tv0));
 }
 
 TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
@@ -23994,6 +23993,40 @@ to: 2
 )ESCAPE";
   TORCH_CHECK(printer1.ss.str() == expect);
   TORCH_CHECK(printer2.ss.str() == expect);
+}
+
+TEST_F(NVFuserTest, FusionTransformPropagatorNoOverwrite_CUDA) {
+  auto fusion = std::make_unique<Fusion>();
+  FusionGuard fg(fusion.get());
+
+  auto tv0 = makeSymbolicTensor(1);
+  fusion->addInput(tv0);
+  auto tv1 = broadcast(tv0, {true, false, true});
+  auto tv2 = sin(tv1);
+  fusion->addOutput(tv2);
+
+  tv0->split(0, 2);
+  tv2->split(1, 2);
+  tv2->split(0, 4);
+
+  MaxRootDomainInfoSpanningTree path1(tv2);
+  TransformPropagator propagator1(tv2);
+  path1.traverse(&propagator1);
+
+  MaxRootDomainInfoSpanningTree path2(tv0);
+  TransformPropagator propagator2(tv0);
+  path2.traverse(&propagator2);
+
+  TORCH_CHECK(tv1->axis(0)->isBroadcast());
+  TORCH_CHECK(tv1->axis(1)->isBroadcast());
+  TORCH_CHECK(!tv1->axis(2)->isBroadcast());
+  TORCH_CHECK(!tv1->axis(3)->isBroadcast());
+  TORCH_CHECK(tv1->axis(4)->isBroadcast());
+
+  auto expect = makeSymbolicTensor(3);
+  expect->split(1, 2);
+  expect->split(0, 4);
+  TORCH_CHECK(TransformReplay::fullSelfMatching(expect, tv1));
 }
 
 TEST_F(NVFuserTest, FusionIssue1785Repro_CUDA) {
