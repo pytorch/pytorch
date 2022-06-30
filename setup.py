@@ -52,8 +52,6 @@
 #
 #   USE_STATIC_MKL
 #     Prefer to link with MKL statically - Unix only
-#   USE_ITT=0
-#     disable use of Intel(R) VTune Profiler's ITT functionality
 #
 #   USE_NNPACK=0
 #     disables NNPACK build
@@ -542,11 +540,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report('-- Using static dispatch with backend {}'.format(cmake_cache_vars['STATIC_DISPATCH_BACKEND']))
         if cmake_cache_vars['USE_LIGHTWEIGHT_DISPATCH']:
             report('-- Using lightweight dispatch')
-
-        if cmake_cache_vars['USE_ITT']:
-            report('-- Using ITT')
-        else:
-            report('-- Not using ITT')
 
         # Do not use clang to compile extensions if `-fstack-clash-protection` is defined
         # in system CFLAGS

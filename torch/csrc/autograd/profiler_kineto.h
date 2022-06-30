@@ -273,8 +273,8 @@ struct TORCH_API KinetoEvent {
   int64_t debug_handle_{-1};
   std::string backend_;
 
-  torch::profiler::impl::ProfilerEventStub cuda_event_start_ = nullptr;
-  torch::profiler::impl::ProfilerEventStub cuda_event_end_ = nullptr;
+  torch::profiler::impl::CUDAEventStub cuda_event_start_ = nullptr;
+  torch::profiler::impl::CUDAEventStub cuda_event_end_ = nullptr;
   bool is_python_function_;
 };
 
