@@ -1370,7 +1370,7 @@ def clamp(
     return a
 
 
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "min"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
@@ -1382,7 +1382,7 @@ def clamp_min(
     return clamp(self, min=min)
 
 
-@out_wrapper
+@out_wrapper()
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "max"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
