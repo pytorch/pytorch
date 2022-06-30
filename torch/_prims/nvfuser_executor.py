@@ -10,6 +10,8 @@ from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 
 if torch.cuda.is_available():
     from torch._C._nvfuser import DataType, Fusion, FusionDefinition  # type: ignore[import]
+else:
+    DataType = None
 
 
 # nvFuserTensorViewTemplate and nvFuserScalarValTemplate are helper objects
