@@ -3,6 +3,8 @@
 #ifdef USE_VULKAN_API
 
 #include <ATen/native/vulkan/api/Common.h>
+#include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/Pipeline.h>
 #include <ATen/native/vulkan/api/Utils.h>
 #include <ostream>
 #include <iostream>
@@ -28,6 +30,24 @@ struct PhysicalDevice final {
   float timestamp_period;
 
   explicit PhysicalDevice(const VkPhysicalDevice);
+};
+
+class DeviceHandle final {
+ public:
+  explicit DeviceHandle(const VkDevice device);
+
+  DeviceHandle(const DeviceHandle&) = delete;
+  DeviceHandle& operator=(const DeviceHandle&) = delete;
+
+  DeviceHandle(DeviceHandle&&) noexcept;
+  DeviceHandle& operator=(DeviceHandle&&) = delete;
+
+  ~DeviceHandle();
+
+ private:
+  VkDevice handle_;
+
+  friend class Adapter;
 };
 
 //
@@ -56,7 +76,9 @@ struct PhysicalDevice final {
 class Adapter final {
  public:
   explicit Adapter(
-      const PhysicalDevice& physical_device, const uint32_t num_queues);
+      const VkInstance instance,
+      const PhysicalDevice& physical_device,
+      const uint32_t num_queues);
 
   Adapter(const Adapter&) = delete;
   Adapter& operator=(const Adapter&) = delete;
@@ -64,7 +86,7 @@ class Adapter final {
   Adapter(Adapter&&) noexcept;
   Adapter& operator=(Adapter&&) = delete;
 
-  ~Adapter();
+  ~Adapter() = default;
 
   struct Queue {
     uint32_t family_index;
@@ -74,24 +96,33 @@ class Adapter final {
   };
 
  private:
-  // Use a mutex to manage resources held by this class since
+  // Use a mutex to manage queue usage info since
   // it can be accessed from multiple threads
-  std::mutex mutex_;
+  std::mutex queue_mutex_;
   // Physical Device Info
   PhysicalDevice physical_device_;
   // Queue Management
   std::vector<Queue> queues_;
   std::vector<uint32_t> queue_usage_;
   // Handles
-  VkDevice handle_;
+  VkInstance instance_;
+  DeviceHandle device_;
+  // Device-level resource caches
+  ShaderLayoutCache shader_layout_cache_;
+  ShaderCache shader_cache_;
+  PipelineLayoutCache pipeline_layout_cache_;
+  ComputePipelineCache compute_pipeline_cache_;
 
  public:
+
+  // Physical Device metadata
+
   inline VkPhysicalDevice physical_handle() const {
     return physical_device_.handle;
   }
 
   inline VkDevice device_handle() const {
-    return handle_;
+    return device_.handle_;
   }
 
   inline bool has_unified_memory() const {
@@ -110,8 +141,30 @@ class Adapter final {
     return physical_device_.timestamp_period;
   }
 
+  // Queue Management
+
   Queue request_queue();
   void return_queue(Queue&);
+
+  // Caches
+
+  inline ShaderLayoutCache& shader_layout_cache() {
+    return shader_layout_cache_;
+  }
+
+  inline ShaderCache& shader_cache() {
+    return shader_cache_;
+  }
+
+  inline PipelineLayoutCache& pipeline_layout_cache() {
+    return pipeline_layout_cache_;
+  }
+
+  inline ComputePipelineCache& compute_pipeline_cache() {
+    return compute_pipeline_cache_;
+  }
+
+  // Miscellaneous
 
   inline utils::uvec3 local_work_group_size() const {
     return { 4u, 4u, 4u, };
