@@ -291,6 +291,10 @@ if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
 endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
+# Ensure that an ITT build is the default for x86 CPUs
+cmake_dependent_option(
+  USE_ITT "Use Intel(R) VTune Profiler ITT functionality" ON
+  "CPU_INTEL" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
 # but optional for AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
