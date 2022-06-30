@@ -55,7 +55,7 @@ void _segment_reduce_lengths_cpu_kernel1(
   auto output_size_axis = output.size(axis);
   AT_DISPATCH_ALL_TYPES_AND2(
       kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", [&]() {
-        auto type_has_nan = !std::is_integral<scalar_t>::value; 
+        auto type_has_nan = !std::is_integral<scalar_t>::value;
         auto* output_data = output.data_ptr<scalar_t>();
         const auto* values_data = data.data_ptr<scalar_t>();
         for (const auto outer_idx : c10::irange(outer_offset)) {

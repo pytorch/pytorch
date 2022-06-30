@@ -88,7 +88,7 @@ __global__ static void post_sum_div_kernel(
     const int64_t segment_count,
     bool is_initial_set,
     scalar_t initial) {
-  auto type_has_nan = !std::is_integral<scalar_t>::value; 
+  auto type_has_nan = !std::is_integral<scalar_t>::value;
   CUDA_KERNEL_LOOP(index, segment_count) {
     CUDA_KERNEL_ASSERT(lengths_data[index] >= 0);
     if (lengths_data[index] == 0) {
@@ -134,7 +134,7 @@ __global__ void segment_reduce_forward_kernel(
   index_t offset_start = lengths_cumsum_data[offset_idx];
   index_t offset_end = lengths_cumsum_data[offset_idx + 1];
 
-  auto type_has_nan = !std::is_integral<scalar_t>::value; 
+  auto type_has_nan = !std::is_integral<scalar_t>::value;
 
   // ===== step2: apply reduction
   for (index_t j = offset_start; j < offset_end; ++j) {

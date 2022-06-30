@@ -168,7 +168,7 @@ class TestSegmentReductions(TestCase):
                         expected_result = [1, 0, 100, default_value]
                         expected_grad = [1.0, 3.0, float("nan"), 25.0, 20.0, 20.0]
                 if val_dtype.is_floating_point:
-                    expected_result[1] = float("nan") 
+                    expected_result[1] = float("nan")
                 for axis in [0, -1]:
                     for unsafe in [True, False]:
                         self._test_common(
