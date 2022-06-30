@@ -45,7 +45,7 @@ def to_nvfuser_template_args(args):
 
 
 # MyPy bug: https://github.com/python/mypy/issues/5107
-@lru_cache  # type: ignore[arg-type]
+@lru_cache()  # type: ignore[arg-type]
 def make_nvfuser_fusion(gm: GraphModule, *nv_args_templates):
     # PROTOTYPE nvfuser executor
     # Everything in the graph must support nvfuser
