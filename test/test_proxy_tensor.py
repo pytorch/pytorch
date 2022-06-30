@@ -9,8 +9,9 @@ from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_methods_invocations import op_db, wrapper_set_seed
 from torch._subclasses.fake_tensor import DynamicOutputShapeException
 
+from torch._decomp import decomposition_table
 from torch.testing._internal.common_device_type import ops
-from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter
 
 # Copied from functorch
 def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
@@ -130,7 +131,7 @@ class TestProxyTensor(TestCase):
         traced = make_fx(f)(torch.randn(3))
         self.assertTrue(
             any(
-                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
+                node.target == torch.ops.aten.randn.default
                 for node in traced.graph.nodes
             )
         )
@@ -138,14 +139,53 @@ class TestProxyTensor(TestCase):
     def test_mode_tracing_factory_function_no_factory_function(self):
         def f(x):
             return x + torch.randn(x.shape)
-
-        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))  # default behavior should not trace factory functions
+        # setting the flag to false should not trace factory functions
+        traced = make_fx(f, trace_factory_functions=False)(torch.randn(3))
         self.assertFalse(
             any(
-                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
+                node.target == torch.ops.aten.randn.default
                 for node in traced.graph.nodes
             )
         )
+
+    def test_make_fx_overloads(self):
+        def f(x):
+            return x.cos() + torch.randn(x.shape)
+
+        traced = make_fx(f)(torch.randn(3))
+
+        self.assertTrue(all([isinstance(node.target, torch._ops.OpOverload)
+                             for node in traced.graph.nodes if node.op == 'call_function']))
+
+    def test_decomposition_interpreter(self):
+        def fn(x):
+            return torch.nn.functional.silu(x)
+
+        x = torch.rand((4, 4))
+        fx_module = make_fx(fn, decomposition_table=None)(x)
+
+        found_silu = False
+        for n in fx_module.graph.nodes:
+            if n.target == torch.ops.aten.silu or n.target == torch.ops.aten.silu.default:
+                found_silu = True
+
+        self.assertTrue(found_silu)
+
+        new_graph = torch.fx.Graph()
+        silu_decomp_table = {torch.ops.aten.silu.default: decomposition_table[torch.ops.aten.silu.default]}
+        DecompositionInterpreter(
+            fx_module,
+            new_graph=new_graph,
+            decomposition_table=silu_decomp_table,
+        ).run(x)
+
+        decomposed_module = torch.fx.GraphModule(fx_module, new_graph)
+
+        for n in decomposed_module.graph.nodes:
+            self.assertTrue(n.target != torch.ops.aten.silu)
+            self.assertTrue(n.target != torch.ops.aten.silu.default)
+
+        self.assertEqual(fx_module(x), decomposed_module(x))
 
 make_fx_failures = {
     # unknown
