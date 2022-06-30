@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Utils.h>
 #include <torch/library.h>
@@ -31,9 +30,9 @@ Tensor view_internal(
       pipeline_barrier,
       buffer.buffer(),
       // Previous access
-      api::PipelineStage::Compute, api::MemoryAccessType::WRITE,
+      api::PipelineStage::COMPUTE, api::MemoryAccessType::WRITE,
       // Next access
-      api::PipelineStage::Compute, api::MemoryAccessType::READ);
+      api::PipelineStage::COMPUTE, api::MemoryAccessType::READ);
 
   utils::pack_buffer_to_vtensor(buffer.buffer(), v_output, pipeline_barrier);
 
