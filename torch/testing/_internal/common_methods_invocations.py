@@ -20955,9 +20955,6 @@ python_ref_db = [
         "_refs.constant_pad_nd",
         torch_opinfo_name="constant_pad_nd",
         supports_nvfuser=False,
-        skips=(
-            DecorateInfo(unittest.skip, 'TestCommon', 'test_python_ref_executor'),
-        ),
     ),
     PythonRefInfo(
         "_refs.dsplit",
