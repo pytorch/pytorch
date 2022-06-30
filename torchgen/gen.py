@@ -77,6 +77,7 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
     gen_composite_view_copy_kernel,
+    gen_symint_view_copy_kernel,
 )
 
 T = TypeVar("T")
@@ -2281,6 +2282,24 @@ TORCH_LIBRARY({custom_namespace}, m) {{
             )
         },
     )
+    view_copy_with_symint_pairs: List[Tuple[NativeFunction, NativeFunction]] = []
+    for g1 in view_groups:
+        for g2 in view_groups:
+            if g1.view_copy is None or g2.view_copy is None:
+                continue
+            # TODO: make this more first class in the data model
+            same_base_op = str(g1.view_copy.func.name.name) == str(
+                g2.view_copy.func.name.name
+            )
+            op1_not_symint = "SymInt" not in str(g1.view_copy.func.name.overload_name)
+            op2_symint = "SymInt" in str(g2.view_copy.func.name.overload_name)
+            if same_base_op and op1_not_symint and op2_symint:
+                view_copy_with_symint_pairs.append(
+                    (
+                        g1.view_copy,
+                        g2.view_copy,
+                    )
+                )
 
     # Note [view_copy NativeFunctions]
     # Every view operator in native_functions.yaml that is not CompositeImplicitAutograd
@@ -2320,6 +2339,12 @@ TORCH_LIBRARY({custom_namespace}, m) {{
             ],
             "CompositeViewCopyKernel_Definitions": list(
                 mapMaybe(gen_composite_view_copy_kernel, view_groups)
+            ),
+            "SymIntViewCopyKernel_Definitions": list(
+                mapMaybe(
+                    lambda pair: gen_symint_view_copy_kernel(pair[0], pair[1]),
+                    view_copy_with_symint_pairs,
+                )
             ),
             "GeneratedCompositeFunctional_Definitions": list(
                 mapMaybe(
@@ -2525,6 +2550,9 @@ def main() -> None:
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.Meta,
     }
+    if options.mps:
+        functions_keys.add(DispatchKey.MPS)
+
     if options.backend_whitelist:
         dispatch_keys = [
             k
