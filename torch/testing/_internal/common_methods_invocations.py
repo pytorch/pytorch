@@ -13002,8 +13002,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            supports_out=False,
            skips=(
-               DecorateInfo(unittest.expectedFailure, 'TestCommon',
-                            'test_non_standard_bool_values', device_type='cuda'),
            )),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
