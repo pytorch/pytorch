@@ -236,10 +236,6 @@ __all__ = [
     # Test-related functions
     #
     "equal",  # TODO: add OpInfo
-    #
-    # Other utilities
-    #
-    "ref_decomposition_table",
 ]
 
 Tensor = torch.Tensor
@@ -2710,7 +2706,6 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@register_ref_decomposition(torch.ops.aten.empty)
 @out_wrapper
 def empty(
     *shape,
@@ -2782,7 +2777,6 @@ def full(
     return fill(e, fill_value)
 
 
-@register_ref_decomposition(torch.ops.aten.full_like)
 def full_like(
     a: TensorLikeType,
     fill_value: NumberType,
