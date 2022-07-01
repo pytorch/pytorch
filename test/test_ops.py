@@ -1540,6 +1540,7 @@ class TestRefsOpsInfo(TestCase):
         # not sure
         '_refs.copy_to',
         '_refs.clone',
+        '_refs.equal',
     }
 
     @parametrize("op", ref_ops_names)
