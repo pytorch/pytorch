@@ -15,13 +15,19 @@ Context::Context(const VkInstance instance, size_t adapter_i)
       adapter_p_(runtime()->get_adapter_p(adapter_i)),
       device_(adapter_p_->device_handle()),
       queue_(adapter_p_->request_queue()),
-      threadcontext_(gpu()) {
+      command_(gpu()),
+      descriptor_(gpu()),
+      resource_(gpu()),
+      querypool_(
+        device_,
+        adapter_p_->timestamp_compute_and_graphics(),
+        adapter_p_->timestamp_period()) {
 }
 
 Context::~Context() {
+  flush();
   // Let the device know the context is done with the queue
   adapter_p_->return_queue(queue_);
-  // Do not call flush() since all per-thread objects will be destroyed as each thread exits
 }
 
 void Context::flush() {

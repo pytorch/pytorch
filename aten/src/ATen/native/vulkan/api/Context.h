@@ -7,10 +7,10 @@
 #include <ATen/native/vulkan/api/Command.h>
 #include <ATen/native/vulkan/api/Descriptor.h>
 #include <ATen/native/vulkan/api/Pipeline.h>
+#include <ATen/native/vulkan/api/QueryPool.h>
 #include <ATen/native/vulkan/api/Resource.h>
 #include <ATen/native/vulkan/api/Runtime.h>
 #include <ATen/native/vulkan/api/Shader.h>
-#include <ATen/native/vulkan/api/ThreadContext.h>
 
 namespace at {
 namespace native {
@@ -38,18 +38,75 @@ class Context final {
 
   ~Context();
 
-  GPU gpu();
-  Command& command();
-  //Shader& shader();
-  ShaderLayoutCache& shader_layout_cache();
-  ShaderCache& shader_cache();
-  QueryPool& querypool();
-  PipelineLayoutCache& pipeline_layout_cache();
-  ComputePipelineCache& pipeline_cache();
-  Descriptor& descriptor();
-  Resource& resource();
+ private:
+  VkInstance instance_;
+  Adapter* adapter_p_;
+  // Handles
+  VkDevice device_;
+  Adapter::Queue queue_;
+  // Resource Pools
+  Command command_;
+  Descriptor descriptor_;
+  Resource resource_;
+  QueryPool querypool_;
+
+ public:
+
+  inline GPU gpu() {
+    const Adapter* p_adapter = adapter_p_;
+    return {
+      instance_,
+      p_adapter,
+      device_,
+      queue_.family_index,
+      queue_.handle,
+    };
+  }
+
+  // Adapter access
+
+  inline Adapter* adapter_ptr() {
+    return adapter_p_;
+  }
+
+  // Device Caches
+
+  inline ShaderLayoutCache& shader_layout_cache() {
+    return adapter_ptr()->shader_layout_cache();
+  }
+
+  inline ShaderCache& shader_cache() {
+    return adapter_ptr()->shader_cache();
+  }
+
+  inline PipelineLayoutCache& pipeline_layout_cache() {
+    return adapter_ptr()->pipeline_layout_cache();
+  }
+
+  inline ComputePipelineCache& pipeline_cache() {
+    return adapter_ptr()->compute_pipeline_cache();
+  }
+
+  // Resource Pools
+
+  inline Command& command() {
+    return command_;
+  }
+
+  inline Descriptor& descriptor() {
+    return descriptor_;
+  }
+
+  inline Resource& resource() {
+    return resource_;
+  }
+
+  inline QueryPool& querypool() {
+    return querypool_;
+  }
 
   // GPU RPC
+
   template<typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
@@ -70,16 +127,15 @@ class Context final {
   void wait(const at::Tensor& src);
 
  private:
-  VkDevice device();
-  VkQueue queue();
 
- private:
-  // Construction and destruction order matters.  Do not move members around.
-  VkInstance instance_;
-  Adapter* adapter_p_;
-  VkDevice device_;
-  Adapter::Queue queue_;
-  ThreadContext threadcontext_;
+  inline VkDevice device() {
+    return device_;
+  }
+
+  inline VkQueue queue() {
+    return queue_.handle;
+  }
+
 };
 
 bool available();
@@ -87,62 +143,6 @@ bool available();
 // The global runtime is retrieved using this function, where it is declared as
 // a static local variable.
 Context* context();
-
-//
-// Impl
-//
-
-inline GPU Context::gpu() {
-  // A GPU is simply a (physical device, logical device, device queue) trio.
-  const Adapter* p_adapter = adapter_p_;
-  return {
-    instance_,
-    p_adapter,
-    device_,
-    queue_.family_index,
-    queue_.handle,
-  };
-}
-
-inline ShaderLayoutCache& Context::shader_layout_cache() {
-  return adapter_p_->shader_layout_cache();
-}
-
-inline ShaderCache& Context::shader_cache() {
-  return adapter_p_->shader_cache();
-}
-
-inline PipelineLayoutCache& Context::pipeline_layout_cache() {
-  return adapter_p_->pipeline_layout_cache();
-}
-
-inline ComputePipelineCache& Context::pipeline_cache() {
-  return adapter_p_->compute_pipeline_cache();
-}
-
-inline Command& Context::command() {
-  return threadcontext_.command();
-}
-
-inline Descriptor& Context::descriptor() {
-  return threadcontext_.descriptor();
-}
-
-inline Resource& Context::resource() {
-  return threadcontext_.resource();
-}
-
-inline QueryPool& Context::querypool() {
-  return threadcontext_.querypool();
-}
-
-inline VkDevice Context::device() {
-  return device_;
-}
-
-inline VkQueue Context::queue() {
-  return queue_.handle;
-}
 
 namespace detail {
 
