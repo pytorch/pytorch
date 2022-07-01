@@ -87,7 +87,7 @@ class vTensor final {
     Types
   */
 
-  typedef api::Pipeline::Stage Stage;
+  typedef api::PipelineStage Stage;
   typedef api::Resource::Memory::Access Access;
   typedef api::Resource::Buffer Buffer;
   typedef api::Resource::Fence Fence;

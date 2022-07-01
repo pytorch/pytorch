@@ -102,6 +102,16 @@ using vec3 = vec<3u>;
 using vec4 = vec<4u>;
 
 } // namespace utils
+
+inline bool operator==(
+    const utils::uvec3& _1,
+    const utils::uvec3& _2) {
+
+  return (_1.data[0u] == _2.data[0u] && \
+          _1.data[1u] == _2.data[1u] && \
+          _1.data[2u] == _2.data[2u]);
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native
