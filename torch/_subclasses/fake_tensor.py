@@ -511,20 +511,10 @@ class FakeTensorMode(TorchDispatchMode):
         return self.fake_tensor_converter(self, tensor)
 
 def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
-    # these should all be supported, just to be safe
-    # avoid fallback for operators which inplace modify metadata
-    # because the input fake tensors would be umodified
-    if torch.Tag.inplace_view in func.tags:  # type: ignore[attr-defined]
-        raise orig_not_implemented_exception
-
     with no_dispatch():
-        inp_impls = {}
-
         def to_real_tensor(e):
             if isinstance(e, FakeTensor):
-                out = torch.zeros_like(e, device=e.fake_device)
-                inp_impls[id(out)] = e
-                return out
+                return torch.zeros_like(e, device=e.fake_device)
             return e
 
         try:
@@ -540,26 +530,22 @@ def run_fallback_kernel(func, args, kwargs, orig_not_implemented_exception):
 
         for e in tree_flatten((args, kwargs))[0]:
             if isinstance(e, torch.Tensor):
+                tensor_impls.add(e)
                 storages.add(e.storage()._cdata)
 
         # TODO: also check metadata change on inputs
         # proper aliasing/metadata relationship between outputs and inputs will
-        # not be set up, bc of conversion to device, unless we can reuse an
-        # input impl
+        # not be set up, bc of conversion to cpu, error on reused impls
         for e in tree_flatten(r)[0]:
-            if id(e) not in inp_impls and (
+            if e in tensor_impls or (
                 isinstance(e, torch.Tensor) and e.storage()._cdata in storages
             ):
                 raise orig_not_implemented_exception
 
-    # the outputs which are are not reused from impls will be converted
-    # to fake tensors later
-    meta_converter = MetaConverter()
-
-    def map_out(e):
-        return inp_impls.get(id(e), meta_converter(e))
-
-    return tree_map(map_out, r)
+    # we're only converting these to MetaTensors now, not Fake Tensors,
+    # and the cpu inputs should be temporary. just convert outputs to meta
+    # and continue
+    return tree_map(MetaConverter(), r)
 
 
 # Just for use to allow copying a module to fake tensors,
