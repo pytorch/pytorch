@@ -904,7 +904,7 @@ def _pow(
             return a * a  # type: ignore[return-value]
         elif b == 0.5:
             return torch.sqrt(a)  # type: ignore[arg-type]
-    return a**b  # type: ignore[return-value]
+    return prims.pow(a, b)
 
 
 # TODO: add docstring
