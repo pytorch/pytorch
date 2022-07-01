@@ -875,7 +875,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 
   // Iterate through each set of 2D matrices within the 3D
   // tensor inputs, performing a matrix multiply with each
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16,
     values.scalar_type(), "bmm_sparse_cuda", [&] {
       scalar_t alpha_val = alpha.to<scalar_t>();
       scalar_t beta_val = beta.to<scalar_t>();
