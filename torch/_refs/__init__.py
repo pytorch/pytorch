@@ -641,7 +641,6 @@ def reciprocal(a):
 
 
 # TODO: round takes additional kwargs
-@register_decomposition(torch.ops.aten.round)
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
@@ -2692,7 +2691,6 @@ def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
 
-@register_decomposition(torch.ops.aten.empty)
 @out_wrapper
 def empty(
     *shape,
@@ -2781,7 +2779,6 @@ ones = partial(full, fill_value=True)
 register_decomposition(torch.ops.aten.ones)(ones)
 
 ones_like = partial(full_like, fill_value=True)
-register_decomposition(torch.ops.aten.ones_like)(ones_like)
 
 
 @register_decomposition(torch.ops.aten.scalar_tensor)
@@ -2800,7 +2797,6 @@ zeros = partial(full, fill_value=False)
 register_decomposition(torch.ops.aten.zeros)(zeros)
 
 zeros_like = partial(full_like, fill_value=False)
-register_decomposition(torch.ops.aten.zeros_like)(zeros_like)
 
 
 @register_decomposition(torch.ops.aten.uniform)
