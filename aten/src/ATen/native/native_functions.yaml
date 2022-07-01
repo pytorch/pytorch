@@ -2963,11 +2963,6 @@
   dispatch:
     CompositeExplicitAutograd: xlogy_out
 
-- func: logdet(Tensor self) -> Tensor
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: logdet
-
 - func: logspace(Scalar start, Scalar end, int steps, float base=10.0, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
 
 - func: logspace.out(Scalar start, Scalar end, int steps, float base=10.0, *, Tensor(a!) out) -> Tensor(a!)
@@ -4352,11 +4347,6 @@
   device_guard: False
   dispatch:
     CompositeExplicitAutograd: as_strided_scatter
-
-- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  variants: function, method
-  dispatch:
-    CompositeExplicitAutograd: slogdet
 
 - func: smm(Tensor self, Tensor mat2) -> Tensor
   variants: function, method
@@ -11600,16 +11590,28 @@
   dispatch:
     CPU, CUDA: linalg_matrix_exp
 
-- func: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  python_module: linalg
-  variants: function
-  dispatch:
-    CPU, CUDA: linalg_slogdet
+- func: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
+  structured_delegate: _linalg_slogdet.sign
 
-- func: linalg_slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
-  python_module: linalg
+- func: _linalg_slogdet.sign(Tensor A, *, Tensor(a!) sign, Tensor(b!) logabsdet, Tensor(c!) LU, Tensor(d!) pivots) -> (Tensor(a!) sign, Tensor(b!) logabsdet, Tensor(c!) LU, Tensor(d!) pivots)
+  structured: True
   dispatch:
-    CPU, CUDA: linalg_slogdet_out
+    CPU, CUDA: _linalg_slogdet_out
+
+- func: linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet)
+  python_module: linalg
+
+- func: linalg_slogdet.out(Tensor A, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+  python_module: linalg
+
+- func: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
+  variants: function, method
+
+- func: slogdet.out(Tensor self, *, Tensor(a!) sign, Tensor(b!) logabsdet) -> (Tensor(a!) sign, Tensor(b!) logabsdet)
+  variants: function
+
+- func: logdet(Tensor self) -> Tensor
+  variants: function, method
 
 - func: linalg_eig(Tensor self) -> (Tensor eigenvalues, Tensor eigenvectors)
   python_module: linalg
