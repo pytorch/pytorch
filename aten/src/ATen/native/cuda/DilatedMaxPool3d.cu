@@ -119,15 +119,14 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
       }
     }
 
+    int64_t out_index;
     if (!channels_last) {
-      int64_t out_index = (int64_t) slice*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn;
-      outputData[out_index] = max;
-      indicesData[out_index] = maxIndex;
+      out_index = (int64_t) slice*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn;
     } else {
-      int64_t out_index = ((int64_t) batch*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn)*features + channel;
-      outputData[out_index] = max;
-      indicesData[out_index] = maxIndex;
+      out_index = ((int64_t) batch*otime*oheight*owidth + oFrame*oheight*owidth + oRow*owidth + oColumn)*features + channel;
     }
+    outputData[out_index] = max;
+    indicesData[out_index] = maxIndex;
   }
 }
 
