@@ -232,7 +232,6 @@ void multi_tensor_apply_for_fused_optimizer(
         multi_tensor_apply_kernel<<<loc_block_info, kBlockSize, 0, at::cuda::getCurrentCUDAStream()>>>(
             tensorListMeta,
             callable,
-            tensor_index,
             args...);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
 
