@@ -1315,3 +1315,9 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
             # make sure that the string only has two lines, as should be if no suggestions
             self.assertEqual(input_weight_str.count("\n"), 2)
+
+
+class TestFxDetectOutliers(QuantizationTestCase):
+
+    def test_simple_pass(self):
+        pass
