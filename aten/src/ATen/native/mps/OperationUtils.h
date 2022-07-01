@@ -37,6 +37,11 @@ private:
 
 const Generator& getDefaultMPSGenerator();
 
+enum GatherScatterViewOpType {
+  Gather,
+  Scatter,
+};
+
 void runMPSGraph(
     MPSStream* mpsStream,
     MPSGraph* mpsGraph,
@@ -51,8 +56,9 @@ std::string getTensorsStringKey(const TensorList& tensors, bool use_scalar_value
 double getMPSScalarValue(const Tensor& t);
 std::string getArrayRefString(const IntArrayRef s);
 std::string getStridedKey(const Tensor& self, const IntArrayRef sz,
-                          const IntArrayRef strides, int64_t offset);
+                          const IntArrayRef strides, int64_t offset, GatherScatterViewOpType viewOpType);
 id<MTLBuffer> gatherViewTensor(const at::Tensor& src, id<MTLBuffer> s);
+id<MTLBuffer> scatterViewTensor(at::Tensor& output, const at::Tensor src, id<MTLBuffer> updatesTensorBuffer);
 
 MPSShape* getMPSShape(const Tensor& t);
 MPSShape* getMPSShape(IntArrayRef sizes);
