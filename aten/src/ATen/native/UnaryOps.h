@@ -79,6 +79,7 @@ DECLARE_DISPATCH(unary_fn, special_modified_bessel_i0_stub);
 DECLARE_DISPATCH(unary_fn, special_modified_bessel_i1_stub);
 DECLARE_DISPATCH(unary_fn, special_modified_bessel_k0_stub);
 DECLARE_DISPATCH(unary_fn, special_modified_bessel_k1_stub);
+DECLARE_DISPATCH(unary_fn, special_scaled_modified_bessel_k0_stub);
 DECLARE_DISPATCH(unary_fn, special_scaled_modified_bessel_k1_stub);
 DECLARE_DISPATCH(unary_fn, special_spherical_bessel_j0_stub);
 

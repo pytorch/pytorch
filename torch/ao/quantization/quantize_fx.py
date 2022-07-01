@@ -512,7 +512,6 @@ def _convert_fx(
 
 def convert_fx(
     graph_module: GraphModule,
-    is_reference: bool = False,
     convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
     _remove_qconfig: bool = True,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]] = None,
@@ -568,8 +567,54 @@ def convert_fx(
     torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_fx")
     return _convert_fx(
         graph_module,
-        is_reference,
-        convert_custom_config,
+        is_reference=False,
+        convert_custom_config=convert_custom_config,
+        _remove_qconfig=_remove_qconfig,
+        qconfig_mapping=qconfig_mapping,
+        backend_config_dict=backend_config_dict,
+    )
+
+
+def convert_to_reference(
+    graph_module: GraphModule,
+    convert_custom_config: Union[ConvertCustomConfig, Dict[str, Any], None] = None,
+    _remove_qconfig: bool = True,
+    qconfig_mapping: Union[QConfigMapping, Dict[str, Any]] = None,
+    backend_config_dict: Dict[str, Any] = None,
+) -> torch.nn.Module:
+    r""" Convert a calibrated or trained model to a reference quantized model, a common interface
+    between PyTorch quantization with other backends like accelerators. Callers should additionally
+    lower the returned reference model to the target backend before using the model for inference.
+
+    Args:
+        * `graph_module`: A prepared and calibrated/trained model (GraphModule)
+
+        * `convert_custom_config`: custom configurations for convert function.
+            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+
+        * `_remove_qconfig`: Option to remove the qconfig attributes in the model after convert.
+
+        * `qconfig_mapping`: config for specifying how to convert a model for quantization.
+            See :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+
+         * `backend_config_dict`: A configuration for the backend which describes how
+            operators should be quantized in the backend. See
+            :func:`~torch.ao.quantization.quantize_fx.convert_fx` for more detail.
+
+    Return:
+        A reference quantized model (GraphModule)
+
+    Example::
+
+        # prepared_model: the model after prepare_fx/prepare_qat_fx and calibration/training
+        reference_model = convert_to_reference(prepared_model)
+
+    """
+    torch._C._log_api_usage_once("quantization_api.quantize_fx.convert_to_reference")
+    return _convert_fx(
+        graph_module,
+        is_reference=True,
+        convert_custom_config=convert_custom_config,
         _remove_qconfig=_remove_qconfig,
         qconfig_mapping=qconfig_mapping,
         backend_config_dict=backend_config_dict,
