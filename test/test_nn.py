@@ -15925,7 +15925,9 @@ torch.cuda.synchronize()
                 stride = kernel_size
             input = torch.randn(n, c, d, h, w, dtype=dtype, device=device)
             input = input.contiguous(memory_format=torch.channels_last_3d).requires_grad_()
-            grad = torch.randn(n, c, (d - kernel_size) // stride + 1, (h - kernel_size) // stride + 1, (w - kernel_size) // stride + 1,
+            grad = torch.randn(n, c, (d - kernel_size) // stride + 1,
+                                     (h - kernel_size) // stride + 1,
+                                     (w - kernel_size) // stride + 1,
                                dtype=dtype, device=device)
             grad = grad.contiguous(memory_format=torch.channels_last_3d)
             pool = torch.nn.MaxPool3d(kernel_size, stride, return_indices=True).to(device)

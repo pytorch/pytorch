@@ -54,9 +54,8 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
     oColumn = blockIdx.z * blockDim.z + threadIdx.z;
   }
   int oRow = blockIdx.y * blockDim.y + threadIdx.y;
-  
-  int oFrame; 
-  int64_t slice;       
+  int oFrame;
+  int64_t slice;
   if (!channels_last) {
     oFrame = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % otime; // output frame/time
     slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / otime; // output slice/feature
@@ -215,7 +214,7 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   } else {
     oColumn = blockIdx.z * blockDim.z + threadIdx.z;
   }
-  int oRow    = blockIdx.y * blockDim.y + threadIdx.y;
+  int oRow = blockIdx.y * blockDim.y + threadIdx.y;
   int oFrame;
   int slice;
   if (!channels_last) {
