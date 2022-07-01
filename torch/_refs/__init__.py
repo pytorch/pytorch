@@ -2748,7 +2748,7 @@ def empty_strided(
     )
 
 
-@register_decomposition(torch.ops.aten.full)
+# TODO: missing kwargs (e.g. layout)
 @out_wrapper
 def full(
     shape: ShapeType,
@@ -2775,12 +2775,11 @@ def full_like(
 
 
 ones = partial(full, fill_value=True)
-register_decomposition(torch.ops.aten.ones)(ones)
 
 ones_like = partial(full_like, fill_value=True)
 
 
-@register_decomposition(torch.ops.aten.scalar_tensor)
+# TODO: missing kwargs (e.g. layout)
 def scalar_tensor(
     a: NumberType,
     *,
@@ -2793,7 +2792,6 @@ def scalar_tensor(
 
 
 zeros = partial(full, fill_value=False)
-register_decomposition(torch.ops.aten.zeros)(zeros)
 
 zeros_like = partial(full_like, fill_value=False)
 
