@@ -18,8 +18,8 @@ class InlinePropagatorSelector : public MaxInfoSpanningTree::Selector {
   std::unordered_set<TensorView*> selected_;
 
  public:
-  virtual bool allowPasC(TensorView* from, TensorView* to) override;
-  virtual bool allowCasP(TensorView* from, TensorView* to) override;
+  virtual bool allowC2P(TensorView* from, TensorView* to) override;
+  virtual bool allowP2C(TensorView* from, TensorView* to) override;
   virtual bool allowSibling(TensorView* from, TensorView* to) override;
 
   InlinePropagatorSelector(std::unordered_set<TensorView*> selected)
@@ -60,11 +60,11 @@ class MaxPosCalculator {
 
   // Returns the maximum position producer can be inlined based on consumer
   // given the set ComputeAtMode
-  size_t getMaxPosPasC(TensorView* producer, TensorView* consumer) const;
+  size_t getMaxPosC2P(TensorView* from, TensorView* to) const;
 
   // Returns the maximum position consumer can be inlined based on producer
   // given the set ComputeAtMode
-  size_t getMaxPosCasP(TensorView* consumer, TensorView* producer) const;
+  size_t getMaxPosP2C(TensorView* from, TensorView* to) const;
 
   MaxPosCalculator(ComputeAtMode mode);
 };
@@ -76,13 +76,13 @@ class InlinePropagator : public MaxInfoSpanningTree::Propagator {
 
   // Returns the inline position in consumer that producer should be inlined as
   // based on consumer, taking into consideration the max possible returned by
-  // getMaxPos{PasC, CasP}, the compute at mode type.
-  size_t getFromPosPasC(TensorView* producer, TensorView* consumer);
+  // getMaxPos{P2C, C2P}, the compute at mode type.
+  size_t getFromPosC2P(TensorView* from, TensorView* to);
 
   // Returns the inline position in producer that consumer should be inlined as
   // based on producer, taking into consideration the max possible returned by
-  // getMaxPos{PasC, CasP}, the compute at mode type.
-  size_t getFromPosCasP(TensorView* consumer, TensorView* producer);
+  // getMaxPos{P2C, C2P}, the compute at mode type.
+  size_t getFromPosP2C(TensorView* from, TensorView* to);
 
   // We use mapped_reference_pos_ to keep track of the outer axes information of
   // the reference tensor. That is, mapped_reference_pos_[tv] answers the
@@ -115,9 +115,9 @@ class InlinePropagator : public MaxInfoSpanningTree::Propagator {
 
   // Actually propagate the transformations for the inlining pass. Uses the
   // functions above to figure out what position to do the propagation at.
-  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
-  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
-  virtual void propagateTvSibling(TensorView* from, TensorView* to) override;
+  virtual void propagateC2P(TensorView* from, TensorView* to) override;
+  virtual void propagateP2C(TensorView* from, TensorView* to) override;
+  virtual void propagateSibling(TensorView* from, TensorView* to) override;
 };
 
 // This is actually not a propagation, it only sets the max producer position of
@@ -129,9 +129,9 @@ class MaxProducerPosUpdater : public MaxInfoSpanningTree::Propagator {
   void handle(TensorView* tv);
 
  public:
-  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
-  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
-  virtual void propagateTvSibling(TensorView* from, TensorView* to) override;
+  virtual void propagateC2P(TensorView* from, TensorView* to) override;
+  virtual void propagateP2C(TensorView* from, TensorView* to) override;
+  virtual void propagateSibling(TensorView* from, TensorView* to) override;
 };
 
 } // namespace cuda

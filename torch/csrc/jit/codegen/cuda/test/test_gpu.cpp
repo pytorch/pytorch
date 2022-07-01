@@ -206,24 +206,24 @@ class UnswitchInElseChecker : public kir::IrVisitor {
 // - After fullSelfReplay, fullSelfMatching should return true
 struct TransformPropagatorWithCheck : public TransformPropagator {
  public:
-  virtual void propagateTvPasC(TensorView* from, TensorView* to) override {
-    TransformPropagator::propagateTvPasC(from, to);
+  virtual void propagateC2P(TensorView* from, TensorView* to) override {
+    TransformPropagator::propagateC2P(from, to);
     auto from_pos = replayed_pos_.at(from);
     auto to_pos = replayed_pos_.at(to);
     TORCH_CHECK(
         TransformReplay::getMatchedLeafPosWithoutReplayPasC(
             to, from, from_pos) == to_pos);
   }
-  virtual void propagateTvCasP(TensorView* from, TensorView* to) override {
-    TransformPropagator::propagateTvCasP(from, to);
+  virtual void propagateP2C(TensorView* from, TensorView* to) override {
+    TransformPropagator::propagateP2C(from, to);
     auto from_pos = replayed_pos_.at(from);
     auto to_pos = replayed_pos_.at(to);
     TORCH_CHECK(
         TransformReplay::getMatchedLeafPosWithoutReplayCasP(
             to, from, from_pos) == to_pos);
   }
-  virtual void propagateTvSibling(TensorView* from, TensorView* to) override {
-    TransformPropagator::propagateTvSibling(from, to);
+  virtual void propagateSibling(TensorView* from, TensorView* to) override {
+    TransformPropagator::propagateSibling(from, to);
     auto from_pos = replayed_pos_.at(from);
     auto to_pos = replayed_pos_.at(to);
     TORCH_CHECK(from_pos == to_pos);
@@ -23776,10 +23776,10 @@ TEST_F(NVFuserTest, FusionTransformPropagateSelectorSibling_CUDA) {
 
   struct DisableTv0 : public MaxInfoSpanningTree::Selector {
     TensorView* tv0;
-    virtual bool allowPasC(TensorView* from, TensorView* to) override {
+    virtual bool allowC2P(TensorView* from, TensorView* to) override {
       return from != tv0 && to != tv0;
     };
-    virtual bool allowCasP(TensorView* from, TensorView* to) override {
+    virtual bool allowP2C(TensorView* from, TensorView* to) override {
       return from != tv0 && to != tv0;
     };
     virtual bool allowSibling(TensorView* from, TensorView* to) override {
@@ -23936,10 +23936,10 @@ TEST_F(NVFuserTest, FusionTransformPropagatorSelector) {
   struct Selector : public MaxInfoSpanningTree::Selector {
     TensorView* tv0;
     TensorView* tv3;
-    virtual bool allowPasC(TensorView* from, TensorView* to) override {
+    virtual bool allowC2P(TensorView* from, TensorView* to) override {
       return to == tv0;
     }
-    virtual bool allowCasP(TensorView* from, TensorView* to) override {
+    virtual bool allowP2C(TensorView* from, TensorView* to) override {
       return to == tv3;
     }
     virtual bool allowSibling(TensorView* from, TensorView* to) override {
@@ -23996,18 +23996,18 @@ TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
 
   struct Printer : public MaxInfoSpanningTree::Propagator {
     std::stringstream ss;
-    virtual void propagateTvPasC(TensorView* from, TensorView* to) override {
-      ss << "propagateTvPasC" << std::endl;
+    virtual void propagateC2P(TensorView* from, TensorView* to) override {
+      ss << "propagateC2P" << std::endl;
       ss << "from: " << from->name() << std::endl;
       ss << "to: " << to->name() << std::endl;
     }
-    virtual void propagateTvCasP(TensorView* from, TensorView* to) override {
-      ss << "propagateTvCasP" << std::endl;
+    virtual void propagateP2C(TensorView* from, TensorView* to) override {
+      ss << "propagateP2C" << std::endl;
       ss << "from: " << from->name() << std::endl;
       ss << "to: " << to->name() << std::endl;
     }
-    virtual void propagateTvSibling(TensorView* from, TensorView* to) override {
-      ss << "propagateTvSibling" << std::endl;
+    virtual void propagateSibling(TensorView* from, TensorView* to) override {
+      ss << "propagateSibling" << std::endl;
       ss << "from: " << from->name() << std::endl;
       ss << "to: " << to->name() << std::endl;
     }
@@ -24020,10 +24020,10 @@ TEST_F(NVFuserTest, FusionMaxRootDomainInfoSpanningTreePrintTwice_CUDA) {
   path.traverse(&printer2);
 
   auto expect = R"ESCAPE(
-propagateTvPasC
+propagateC2P
 from: 1
 to: 0
-propagateTvCasP
+propagateP2C
 from: 1
 to: 2
 )ESCAPE";

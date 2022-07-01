@@ -10,11 +10,11 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
-bool InlinePropagatorSelector::allowPasC(TensorView* from, TensorView* to) {
+bool InlinePropagatorSelector::allowC2P(TensorView* from, TensorView* to) {
   return selected_.count(to) > 0;
 }
 
-bool InlinePropagatorSelector::allowCasP(TensorView* from, TensorView* to) {
+bool InlinePropagatorSelector::allowP2C(TensorView* from, TensorView* to) {
   // If the producer is in the selected set, then the consumer must also be
   // replayed to obtain a compatible loop structure so that this producer
   // can be consumed in this loop.
@@ -112,9 +112,9 @@ size_t MaxPosCalculator::getMaxPosSelf(
 //   Unrolled dimensions in producer or consumer
 //   Dimensions derived from root dimensions that exist in both but are
 //   unmappable
-size_t MaxPosCalculator::getMaxPosPasC(
-    TensorView* producer,
-    TensorView* consumer) const {
+size_t MaxPosCalculator::getMaxPosC2P(
+    TensorView* consumer,
+    TensorView* producer) const {
   // Limit max position based on vectorized dims in consumer.
   auto max_consumer_pos = getMaxPosSelf(consumer, true, false, true);
 
@@ -144,9 +144,9 @@ size_t MaxPosCalculator::getMaxPosPasC(
 //   Unrolled dimensions in producer or consumer
 //   Dimensions derived from root dimensions that exist in both but are
 //   unmappable
-size_t MaxPosCalculator::getMaxPosCasP(
-    TensorView* consumer,
-    TensorView* producer) const {
+size_t MaxPosCalculator::getMaxPosP2C(
+    TensorView* producer,
+    TensorView* consumer) const {
   auto max_producer_pos = getMaxPosSelf(producer, false, false, false);
 
   auto pairwise_root_map = PairwiseRootDomainMap(producer, consumer);
@@ -173,16 +173,14 @@ size_t InlinePropagator::getMaxPosAll(TensorView* tv) {
   for (auto consumer_tv : ir_utils::consumerTvsOf(tv)) {
     // consumers are always replayed consistently
     max_pos =
-        std::min<size_t>(max_pos, max_pos_calc.getMaxPosCasP(consumer_tv, tv));
+        std::min<size_t>(max_pos, max_pos_calc.getMaxPosP2C(tv, consumer_tv));
   }
   return max_pos;
 }
 
-size_t InlinePropagator::getFromPosPasC(
-    TensorView* producer,
-    TensorView* consumer) {
-  size_t max_pos = max_pos_calc.getMaxPosPasC(producer, consumer);
-  size_t pos = mapped_reference_pos_.at(consumer);
+size_t InlinePropagator::getFromPosC2P(TensorView* from, TensorView* to) {
+  size_t max_pos = max_pos_calc.getMaxPosC2P(from, to);
+  size_t pos = mapped_reference_pos_.at(from);
 
   if (mode_ == ComputeAtMode::BestEffort) {
     return std::min(pos, max_pos);
@@ -193,9 +191,9 @@ size_t InlinePropagator::getFromPosPasC(
   TORCH_INTERNAL_ASSERT(
       pos <= max_pos,
       "Invalid compute at position detected in compute at when trying to propagate the CA position from consumer: ",
-      consumer,
+      from,
       " to producer: ",
-      producer,
+      to,
       " tried to do this at position: ",
       pos,
       " but max position that's allowed is ",
@@ -203,11 +201,9 @@ size_t InlinePropagator::getFromPosPasC(
   return pos;
 }
 
-size_t InlinePropagator::getFromPosCasP(
-    TensorView* consumer,
-    TensorView* producer) {
-  size_t max_pos = max_pos_calc.getMaxPosCasP(consumer, producer);
-  size_t pos = mapped_reference_pos_.at(producer);
+size_t InlinePropagator::getFromPosP2C(TensorView* from, TensorView* to) {
+  size_t max_pos = max_pos_calc.getMaxPosP2C(from, to);
+  size_t pos = mapped_reference_pos_.at(from);
 
   if (mode_ == ComputeAtMode::BestEffort) {
     return std::min(pos, max_pos);
@@ -218,9 +214,9 @@ size_t InlinePropagator::getFromPosCasP(
   TORCH_INTERNAL_ASSERT(
       pos <= max_pos,
       "Invalid compute at position detected in compute at when trying to propagate the CA position from producer: ",
-      producer,
+      from,
       " to consumer: ",
-      consumer,
+      to,
       " tried to do this at position: ",
       pos,
       " but max position that's allowed is ",
@@ -263,13 +259,13 @@ InlinePropagator::InlinePropagator(
       ".");
 }
 
-void InlinePropagator::propagateTvPasC(TensorView* from, TensorView* to) {
+void InlinePropagator::propagateC2P(TensorView* from, TensorView* to) {
   if (is_first_) {
     is_first_ = false;
     setCAPos(reference_, reference_pos_);
     mapped_reference_pos_[reference_] = reference_pos_;
   }
-  int from_pos = getFromPosPasC(to, from);
+  int from_pos = getFromPosC2P(from, to);
   auto to_pos =
       TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, from_pos);
   TORCH_CHECK(
@@ -283,13 +279,13 @@ void InlinePropagator::propagateTvPasC(TensorView* from, TensorView* to) {
   mapped_reference_pos_[to] = to_pos;
 }
 
-void InlinePropagator::propagateTvCasP(TensorView* from, TensorView* to) {
+void InlinePropagator::propagateP2C(TensorView* from, TensorView* to) {
   if (is_first_) {
     is_first_ = false;
     setCAPos(reference_, reference_pos_);
     mapped_reference_pos_[reference_] = reference_pos_;
   }
-  int from_pos = getFromPosCasP(to, from);
+  int from_pos = getFromPosP2C(from, to);
   auto to_pos =
       TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, from_pos);
   TORCH_CHECK(
@@ -303,7 +299,7 @@ void InlinePropagator::propagateTvCasP(TensorView* from, TensorView* to) {
   mapped_reference_pos_[to] = to_pos;
 }
 
-void InlinePropagator::propagateTvSibling(TensorView* from, TensorView* to) {
+void InlinePropagator::propagateSibling(TensorView* from, TensorView* to) {
   if (is_first_) {
     is_first_ = false;
     setCAPos(reference_, reference_pos_);
@@ -388,11 +384,11 @@ void MaxProducerPosUpdater::handle(TensorView* consumer) {
   consumer->setMaxProducer(consumer_pos);
 }
 
-void MaxProducerPosUpdater::propagateTvPasC(TensorView* from, TensorView* to) {
+void MaxProducerPosUpdater::propagateC2P(TensorView* from, TensorView* to) {
   if (updated_.empty()) {
     // handle the reference tensor
     updated_.insert(nullptr);
-    propagateTvPasC(nullptr, from);
+    propagateC2P(nullptr, from);
   }
   for (auto consumer_tv : ir_utils::consumerTvsOf(to)) {
     if (updated_.count(consumer_tv) > 0) {
@@ -403,14 +399,12 @@ void MaxProducerPosUpdater::propagateTvPasC(TensorView* from, TensorView* to) {
   }
 }
 
-void MaxProducerPosUpdater::propagateTvCasP(TensorView* from, TensorView* to) {
-  propagateTvPasC(from, to);
+void MaxProducerPosUpdater::propagateP2C(TensorView* from, TensorView* to) {
+  propagateC2P(from, to);
 }
 
-void MaxProducerPosUpdater::propagateTvSibling(
-    TensorView* from,
-    TensorView* to) {
-  propagateTvPasC(from, to);
+void MaxProducerPosUpdater::propagateSibling(TensorView* from, TensorView* to) {
+  propagateC2P(from, to);
 }
 
 } // namespace cuda

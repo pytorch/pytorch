@@ -848,7 +848,7 @@ bool validateDomain(TensorView* tv, TensorDomain* new_td) {
 
 } // namespace
 
-void TransformPropagator::propagateTvPasC(TensorView* from, TensorView* to) {
+void TransformPropagator::propagateC2P(TensorView* from, TensorView* to) {
   int pos = replayed_pos_.at(from);
   // Note: [Using multiple TransformPropagators]
   // There are cases that we use multiple TransformPropagators along different
@@ -875,7 +875,7 @@ void TransformPropagator::propagateTvPasC(TensorView* from, TensorView* to) {
   replayed_pos_[to] = new_pos;
 }
 
-void TransformPropagator::propagateTvCasP(TensorView* from, TensorView* to) {
+void TransformPropagator::propagateP2C(TensorView* from, TensorView* to) {
   int pos = replayed_pos_.at(from);
   // See note [Using multiple TransformPropagators]
   int new_pos =
@@ -895,7 +895,7 @@ void TransformPropagator::propagateTvCasP(TensorView* from, TensorView* to) {
   replayed_pos_[to] = new_pos;
 }
 
-void TransformPropagator::propagateTvSibling(TensorView* from, TensorView* to) {
+void TransformPropagator::propagateSibling(TensorView* from, TensorView* to) {
   int pos = replayed_pos_.at(from);
   // See note [Using multiple TransformPropagators]
   if (!TransformReplay::fullSelfMatching(to, from)) {
@@ -922,7 +922,7 @@ TransformPropagator::TransformPropagator(TensorView* from, int64_t pos) {
   replayed_pos_[from] = pos;
 }
 
-void MostInlinedTransformPropagator::propagateTvPasC(
+void MostInlinedTransformPropagator::propagateC2P(
     TensorView* from,
     TensorView* to) {
   int pos = from->nDims();
@@ -942,7 +942,7 @@ void MostInlinedTransformPropagator::propagateTvPasC(
   }
 }
 
-void MostInlinedTransformPropagator::propagateTvCasP(
+void MostInlinedTransformPropagator::propagateP2C(
     TensorView* from,
     TensorView* to) {
   int pos = from->nDims();
@@ -962,7 +962,7 @@ void MostInlinedTransformPropagator::propagateTvCasP(
   }
 }
 
-void MostInlinedTransformPropagator::propagateTvSibling(
+void MostInlinedTransformPropagator::propagateSibling(
     TensorView* from,
     TensorView* to) {
   // See note [Using multiple TransformPropagators]

@@ -39,16 +39,16 @@ class TORCH_CUDA_CU_API MaxInfoSpanningTree {
   // Class to subclass in order to stop traversal, by which limits the nodes in
   // the spanning tree.
   struct Selector {
-    virtual bool allowPasC(TensorView* from, TensorView* to) = 0;
-    virtual bool allowCasP(TensorView* from, TensorView* to) = 0;
+    virtual bool allowC2P(TensorView* from, TensorView* to) = 0;
+    virtual bool allowP2C(TensorView* from, TensorView* to) = 0;
     virtual bool allowSibling(TensorView* from, TensorView* to) = 0;
   };
 
   // This is the interface to implement the actual propagation
   struct Propagator {
-    virtual void propagateTvPasC(TensorView* from, TensorView* to) = 0;
-    virtual void propagateTvCasP(TensorView* from, TensorView* to) = 0;
-    virtual void propagateTvSibling(TensorView* from, TensorView* to) = 0;
+    virtual void propagateC2P(TensorView* from, TensorView* to) = 0;
+    virtual void propagateP2C(TensorView* from, TensorView* to) = 0;
+    virtual void propagateSibling(TensorView* from, TensorView* to) = 0;
   };
 
   // This is the interface that specifies the structure of information used to
@@ -237,9 +237,9 @@ class TORCH_CUDA_CU_API SpanningTreePrinter
   std::ostream& stream_;
 
  public:
-  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
-  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
-  virtual void propagateTvSibling(TensorView* from, TensorView* to) override;
+  virtual void propagateC2P(TensorView* from, TensorView* to) override;
+  virtual void propagateP2C(TensorView* from, TensorView* to) override;
+  virtual void propagateSibling(TensorView* from, TensorView* to) override;
   SpanningTreePrinter(std::ostream& stream = std::cout) : stream_(stream) {}
 };
 

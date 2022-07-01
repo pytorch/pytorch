@@ -66,18 +66,18 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
     }
   };
 
-  auto allowPasC = [this](TensorView* from, TensorView* to) {
+  auto allowC2P = [this](TensorView* from, TensorView* to) {
     if (selector_ == nullptr) {
       return true;
     }
-    return selector_->allowPasC(from, to);
+    return selector_->allowC2P(from, to);
   };
 
-  auto allowCasP = [this](TensorView* from, TensorView* to) {
+  auto allowP2C = [this](TensorView* from, TensorView* to) {
     if (selector_ == nullptr) {
       return true;
     }
-    return selector_->allowCasP(from, to);
+    return selector_->allowP2C(from, to);
   };
 
   auto allowSibling = [this](TensorView* from, TensorView* to) {
@@ -114,7 +114,7 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
     }
 
     for (auto consumer_tv : ir_utils::consumerTvsOf(next_hop.to)) {
-      if (replayed.count(consumer_tv) || !allowCasP(next_hop.to, consumer_tv)) {
+      if (replayed.count(consumer_tv) || !allowP2C(next_hop.to, consumer_tv)) {
         continue;
       }
       insertNextHop(
@@ -128,7 +128,7 @@ void MaxInfoSpanningTree::compute_spanning_tree() {
     }
 
     for (auto producer_tv : ir_utils::producerTvsOf(next_hop.to)) {
-      if (replayed.count(producer_tv) || !allowPasC(next_hop.to, producer_tv)) {
+      if (replayed.count(producer_tv) || !allowC2P(next_hop.to, producer_tv)) {
         continue;
       }
       insertNextHop(
@@ -150,13 +150,13 @@ void MaxInfoSpanningTree::traverse(Propagator* propagator) {
   for (const auto& next_hop : path_) {
     switch (next_hop.type) {
       case NextHopType::SIBLING:
-        propagator->propagateTvSibling(next_hop.from, next_hop.to);
+        propagator->propagateSibling(next_hop.from, next_hop.to);
         break;
       case NextHopType::C_AS_P:
-        propagator->propagateTvCasP(next_hop.from, next_hop.to);
+        propagator->propagateP2C(next_hop.from, next_hop.to);
         break;
       case NextHopType::P_AS_C:
-        propagator->propagateTvPasC(next_hop.from, next_hop.to);
+        propagator->propagateC2P(next_hop.from, next_hop.to);
         break;
     }
   }
@@ -416,20 +416,20 @@ std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree:
   return from_info;
 }
 
-void SpanningTreePrinter::propagateTvPasC(TensorView* from, TensorView* to) {
-  stream_ << "propagateTvPasC" << std::endl;
+void SpanningTreePrinter::propagateC2P(TensorView* from, TensorView* to) {
+  stream_ << "propagateC2P" << std::endl;
   stream_ << "  from: " << from->toString() << std::endl;
   stream_ << "  to: " << to->toString() << std::endl;
 }
 
-void SpanningTreePrinter::propagateTvCasP(TensorView* from, TensorView* to) {
-  stream_ << "propagateTvCasP" << std::endl;
+void SpanningTreePrinter::propagateP2C(TensorView* from, TensorView* to) {
+  stream_ << "propagateP2C" << std::endl;
   stream_ << "  from: " << from->toString() << std::endl;
   stream_ << "  to: " << to->toString() << std::endl;
 }
 
-void SpanningTreePrinter::propagateTvSibling(TensorView* from, TensorView* to) {
-  stream_ << "propagateTvSibling" << std::endl;
+void SpanningTreePrinter::propagateSibling(TensorView* from, TensorView* to) {
+  stream_ << "propagateSibling" << std::endl;
   stream_ << "  from: " << from->toString() << std::endl;
   stream_ << "  to: " << to->toString() << std::endl;
 }
