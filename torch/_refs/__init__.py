@@ -1931,7 +1931,7 @@ def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
 
-@register_decomposition(torch.ops.aten.broadcast_to)
+# CompositeImplicitAutograd - don't register decomp
 def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     start = len(size) - len(a.shape)
     dims = tuple(range(start, len(a.shape) + start))
@@ -2584,7 +2584,7 @@ def hsplit(
     return tensor_split(a, split_sizes, dim)
 
 
-@register_decomposition(torch.ops.aten.vsplit)
+# CompositeImplicitAutograd - don't register decomp
 def vsplit(
     a: TensorLikeType, indices_or_sections: DimsType
 ) -> Tuple[TensorLikeType, ...]:

@@ -1540,7 +1540,6 @@ class TestRefsOpsInfo(TestCase):
         '_refs.dsplit',
         '_refs.dstack',
         '_refs.fill',
-
         '_refs.flatten',
         '_refs.fliplr',
         '_refs.flipud',
@@ -1557,6 +1556,7 @@ class TestRefsOpsInfo(TestCase):
         '_refs.tensor_split',
         '_refs.true_divide',
         '_refs.trunc_divide',
+        '_refs.vsplit',
         '_refs.vstack',
         # missing kwargs
         '_refs.empty_like',
