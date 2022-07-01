@@ -25,8 +25,7 @@ class TracingConfig:
             as ``torch.fx.Proxy`` when tracing the forward function.
             ``concrete_args`` allows one to partially specialize the forward function,
             including removing control flow or data structures.
-            ``concrete_args`` is also the parameter used in ``tracer.trace()``:
-            https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.trace
+            ``concrete_args`` is also the parameter used in :meth:`~torch.fx.Tracer.trace`.
     """
 
     tracer: torch.fx.Tracer = torch.fx.Tracer()
@@ -56,12 +55,12 @@ class _ExecutionInfo:
             The list of tuple is ordered based on the parameter execution order.
     """
 
-    current_module: Optional[torch.nn.Module] = None
-    module_forward_order: List[torch.nn.Module] = field(default_factory=list)
+    current_module: torch.nn.Module
+    module_forward_order: List[torch.nn.Module]
     module_execution_info_dict: Dict[
         torch.nn.Module,
         List[Tuple[torch.nn.Module, List[Tuple[str, torch.nn.Parameter]]]],
-    ] = field(default_factory=dict)
+    ]
     param_exec_order: List[torch.nn.Parameter] = field(default_factory=list)
     _traced_param_set: Set[torch.nn.Parameter] = field(default_factory=set)
 
@@ -74,11 +73,13 @@ def _init_execution_info(root_module: torch.nn.Module) -> _ExecutionInfo:
         root_module (torch.nn.Module): the module to get the execution information
             via ``tracer.trace()`` inside ``_patch_tracer``.
     """
-    exec_info = _ExecutionInfo()
-    exec_info.current_module = root_module
-    exec_info.module_forward_order = [root_module]
-    exec_info.module_execution_info_dict[root_module] = []
-    return exec_info
+    module_execution_info_dict = dict()
+    module_execution_info_dict[root_module] = []
+    return _ExecutionInfo(
+        current_module=root_module,
+        module_forward_order=[root_module],
+        module_execution_info_dict=module_execution_info_dict,
+    )
 
 
 def _patched_create_proxy(
@@ -93,8 +94,7 @@ def _patched_create_proxy(
     type_expr: Optional[Any] = None,
 ):
     """
-    Override of ``Tracer.create_proxy`` (see
-    https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.create_proxy).
+    Override of :meth:`~torch.fx.Tracer.create_proxy`.
     ``Tracer.create_proxy`` is called in symbolic tracing for each leaf function/method/module.
     This override intercepts the recording of each of these operations and
     update ``execution_info.module_execution_info_dict``.
@@ -147,8 +147,7 @@ def _patched_call_module(
     kwargs: Dict[str, Any],
 ) -> Any:
     """
-    Override of ``Tracer.call_module`` (see
-    https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.call_module).
+    Override of :meth:`~torch.fx.Tracer.call_module`.
     ``Tracer.call_module`` is called in symbolic tracing for each non-root module.
     This override intercepts the recording of each operation and
     update ``execution_info.module_forward_order`` and ``execution_info.module_execution_info_dict``.

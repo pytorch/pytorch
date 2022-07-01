@@ -947,7 +947,13 @@ class FullyShardedDataParallel(nn.Module):
                 root_module=module,
                 execution_info=execution_info,
             ):
-                tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
+                try:
+                    tracer.trace(module, auto_wrap_policy.tracing_config.concrete_args)
+                except BaseException as e:
+                    raise RuntimeError(
+                        "tracer.trace failed inside _init_param_exec_order_wrap_policy"
+                        f" with the error: {e}."
+                    )
         # The initial FSDP wrapping is done with auto_wrap_policy.init_policy
         kwargs["auto_wrap_policy"] = auto_wrap_policy.init_policy
         self.__init__(*args, **kwargs)
