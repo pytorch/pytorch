@@ -27,9 +27,8 @@ from torch.distributions import Uniform, Exponential
 from functools import partial
 
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import dtypes, ops, instantiate_device_type_tests
+from torch.testing._internal.common_device_type import ops, instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing import make_tensor
 import numpy as np
 import torch
 
