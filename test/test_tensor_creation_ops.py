@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
-    onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta, get_all_device_types)
+    onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta)
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, all_types_and, floating_and_complex_types,
     floating_types, floating_and_complex_types_and, integral_types_and, get_all_dtypes
@@ -2512,20 +2512,20 @@ class TestTensorCreation(TestCase):
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # FloatTensor
-        out=torch.tensor([], dtype=torch.float, device=device)
+        out = torch.tensor([], dtype=torch.float, device=device)
         res1 = torch.arange(0.6, 0.89, 0.1, out=out)
         self.assertEqual(res1, [0.6, 0.7, 0.8])
-        out=torch.tensor([], dtype=torch.float, device=device)
+        out = torch.tensor([], dtype=torch.float, device=device)
         res1 = torch.arange(1, 10, 0.3, out=out)
         self.assertEqual(res1.size(0), 30)
         self.assertEqual(res1[0], 1)
         self.assertEqual(res1[29], 9.7)
 
         # DoubleTensor
-        out=torch.tensor([], dtype=torch.double, device=device)
+        out = torch.tensor([], dtype=torch.double, device=device)
         res1 = torch.arange(0.6, 0.89, 0.1, out=out)
         self.assertEqual(res1, [0.6, 0.7, 0.8])
-        out=torch.tensor([], dtype=torch.double, device=device)
+        out = torch.tensor([], dtype=torch.double, device=device)
         res1 = torch.arange(1, 10, 0.3, out=out)
         self.assertEqual(res1.size(0), 30)
         self.assertEqual(res1[0], 1)
@@ -2580,7 +2580,7 @@ class TestTensorCreation(TestCase):
 
         r1 = torch.arange(-1.5, 1.5, dtype=torch.int32, device=device)
         self.assertEqual(r1.numel(), 3)
-        r2= torch.arange(-1.5, 1.5, dtype=torch.int64, device=device)
+        r2 = torch.arange(-1.5, 1.5, dtype=torch.int64, device=device)
         self.assertEqual(r1, r2, exact_dtype=False, atol=0, rtol=0)
 
         # Test Rounding Errors
