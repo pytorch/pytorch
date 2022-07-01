@@ -50,6 +50,8 @@ Tensor _clamp(
         },
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -73,7 +75,7 @@ Tensor _clamp(
               vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -128,6 +130,8 @@ Tensor& _clamp_(
         },
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -145,7 +149,7 @@ Tensor& _clamp_(
               vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -199,6 +203,8 @@ Tensor activation(
         0u,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -222,7 +228,7 @@ Tensor activation(
               vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -259,6 +265,8 @@ Tensor& activation_(
         0u,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -276,7 +284,7 @@ Tensor& activation_(
               vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -357,6 +365,8 @@ Tensor activation_scalar(
         scalar_arg.to<float>(),
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -380,7 +390,7 @@ Tensor activation_scalar(
               vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
@@ -420,6 +430,8 @@ Tensor& activation_scalar_(
         scalar_arg.to<float>(),
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -437,7 +449,7 @@ Tensor& activation_scalar_(
               vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     }
     else {
       TORCH_CHECK(false, "Not implemented!");
