@@ -20,7 +20,6 @@ vTensor pack_weights(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const Tensor weight = weight_arg.contiguous();
   const IntArrayRef w_sizes = weight.sizes();
@@ -77,7 +76,6 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   if (bias_arg) {
     const Tensor bias = bias_arg->contiguous();
