@@ -791,7 +791,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0");
 #elif defined(CUDART_VERSION) && (CUDART_VERSION >= 10010)  // linux cuda >= 10.1 or windows cuda >= 11.0
 
-  TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
+  TORCH_CHECK(mat2.layout() == c10::kStrided, "bmm_sparse: Tensor 'mat2' must be dense, but has ", mat2.layout());
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
   TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
   TORCH_CHECK(mat2.dim() == 3, "bmm_sparse: Tensor 'mat2' must have 3 dims, but has ", mat2.dim());
