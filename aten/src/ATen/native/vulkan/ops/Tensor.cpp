@@ -477,8 +477,6 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
         from.access,
         to.access);
 
-    api::VulkanBuffer::Package package = view_.buffer().package();
-
     if (Barrier::None != category) {
       barrier.stage.src |= from.stage;
       barrier.stage.dst |= to.stage;
