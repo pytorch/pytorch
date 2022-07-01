@@ -41,9 +41,9 @@ VkExtent3D vk_extent(const uvec3& extent) {
   };
 }
 
-vTensor::Access::Flags access(
+api::MemoryAccessFlags access(
     const VkAccessFlags vk_access) {
-  vTensor::Access::Flags access = 0u;
+  api::MemoryAccessFlags access = 0u;
 
   constexpr VkAccessFlags kRead =
       VK_ACCESS_HOST_READ_BIT |
@@ -59,11 +59,11 @@ vTensor::Access::Flags access(
       VK_ACCESS_TRANSFER_WRITE_BIT;
 
   if (vk_access & kRead) {
-    access |= vTensor::Access::Read;
+    access |= api::MemoryAccessType::READ;
   }
 
   if (vk_access & kWrite) {
-    access |= vTensor::Access::Write;
+    access |= api::MemoryAccessType::WRITE;
   }
 
   return access;
@@ -71,10 +71,10 @@ vTensor::Access::Flags access(
 
 VkAccessFlags vk_access(
     const vTensor::Stage::Flags stage,
-    const vTensor::Access::Flags access) {
+    const api::MemoryAccessFlags access) {
   VkAccessFlags vk_access = 0u;
 
-  if (access & vTensor::Access::Read) {
+  if (access & api::MemoryAccessType::READ) {
     if (stage & vTensor::Stage::Compute) {
       vk_access |= VK_ACCESS_SHADER_READ_BIT;
     }
@@ -88,7 +88,7 @@ VkAccessFlags vk_access(
     }
   }
 
-  if (access & vTensor::Access::Write) {
+  if (access & api::MemoryAccessType::WRITE) {
     if (stage & vTensor::Stage::Compute) {
       vk_access |= VK_ACCESS_SHADER_WRITE_BIT;
     }
@@ -107,11 +107,11 @@ VkAccessFlags vk_access(
 
 VkImageLayout vk_layout(
     const vTensor::Stage::Flags stage,
-    const vTensor::Access::Flags access) {
+    const api::MemoryAccessFlags access) {
   switch (stage) {
     case vTensor::Stage::Compute:
       switch (access) {
-        case vTensor::Access::Read:
+        case api::MemoryAccessType::READ:
           return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
         default:
@@ -120,10 +120,10 @@ VkImageLayout vk_layout(
 
     case vTensor::Stage::Transfer:
       switch (access) {
-        case vTensor::Access::Read:
+        case api::MemoryAccessType::READ:
           return VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
-        case vTensor::Access::Write:
+        case api::MemoryAccessType::WRITE:
           return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
         default:
@@ -172,53 +172,6 @@ VkDeviceSize buffer_bytes(
   return size;
 }
 
-vTensor::Buffer allocate_buffer(
-    const api::Adapter* const adapter,
-    api::Resource::Pool* const pool,
-    const IntArrayRef sizes,
-    const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      adapter,
-      "Invalid Vulkan adapter!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pool,
-      "Invalid Vulkan resource pool!");
-
-  TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
-  verify(options);
-
-  const VkFlags usage =
-      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-      VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-      VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-
-  const auto memory = [adapter]() -> api::Resource::Memory::Descriptor {
-    if (requires_staging(adapter)) {
-      return {
-        VMA_MEMORY_USAGE_GPU_ONLY,
-        0u,
-        0u,
-      };
-    }
-
-    return {
-      VMA_MEMORY_USAGE_GPU_TO_CPU,
-      0u,
-      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-    };
-  }();
-
-  return pool->create_buffer({
-      buffer_bytes(sizes, options.dtype()),
-      // Usage
-      {
-        usage,
-        memory,
-      },
-    });
-}
-
 bool requires_image(const IntArrayRef sizes) {
   return (1u <= sizes.size()) && (sizes.size() <= 4u);
 }
@@ -263,92 +216,12 @@ uvec3 image_extents(const IntArrayRef sizes) {
   };
 }
 
-vTensor::Image allocate_image(
-    api::Resource::Pool* const pool,
-    const VkExtent3D& extents,
-    const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pool,
-      "Invalid Vulkan resource pool!");
-
-  verify(options);
-
-  return pool->create_image({
-      VK_IMAGE_TYPE_3D,
-      vk_format(options.dtype()),
-      extents,
-      // Usage
-      {
-        VK_IMAGE_USAGE_SAMPLED_BIT |
-            VK_IMAGE_USAGE_STORAGE_BIT |
-            VK_IMAGE_USAGE_TRANSFER_SRC_BIT | // for vkCmdCopyImage
-            VK_IMAGE_USAGE_TRANSFER_DST_BIT,  // for vkCmdCopyImage
-        {
-          VMA_MEMORY_USAGE_GPU_ONLY,
-          0u,
-          0u,
-        },
-      },
-      // View
-      {
-        VK_IMAGE_VIEW_TYPE_3D,
-        vk_format(options.dtype()),
-      },
-      // Sampler
-      {
-        VK_FILTER_NEAREST,
-        VK_SAMPLER_MIPMAP_MODE_NEAREST,
-        VK_SAMPLER_ADDRESS_MODE_REPEAT,
-        VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
-      },
-    });
-}
-
 bool requires_staging(const api::Adapter* const adapter) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       adapter,
       "Invalid Vulkan adapter!");
 
   return !adapter->has_unified_memory();
-}
-
-vTensor::Buffer allocate_staging(
-    const api::Adapter* const adapter,
-    api::Resource::Pool* const pool,
-    const IntArrayRef sizes,
-    const TensorOptions& options) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      adapter,
-      "Invalid Vulkan adapter!");
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pool,
-      "Invalid Vulkan resource pool!");
-
-  TORCH_CHECK(!sizes.empty(), "Invalid Vulkan tensor size!");
-  verify(options);
-
-  return pool->create_buffer({
-      buffer_bytes(sizes, options.dtype()),
-      // Usage
-      {
-        VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-            VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-        {
-          VMA_MEMORY_USAGE_CPU_COPY,
-          0u,
-          0u,
-        },
-      },
-    });
-}
-
-vTensor::Fence allocate_fence(api::Resource::Pool* const pool) {
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pool,
-      "Invalid Vulkan resource pool!");
-
-  return pool->fence();
 }
 
 enum class Barrier {
@@ -364,11 +237,11 @@ Barrier categorize(
     return Barrier::None;
   }
 
-  const vTensor::Access::Flags src_access = access(vk_src_access);
-  const vTensor::Access::Flags dst_access = access(vk_dst_access);
+  const api::MemoryAccessFlags src_access = access(vk_src_access);
+  const api::MemoryAccessFlags dst_access = access(vk_dst_access);
 
-  if ((src_access & vTensor::Access::Read) == src_access) {
-    if ((dst_access & vTensor::Access::Read) == dst_access) {
+  if ((src_access & api::MemoryAccessType::READ) == src_access) {
+    if ((dst_access & api::MemoryAccessType::READ) == dst_access) {
       // RAR (Read after Read)
       return Barrier::None;
     }
@@ -399,21 +272,8 @@ vTensor::vTensor(
     api::Context* const context,
     const IntArrayRef sizes,
     const TensorOptions& options)
-  : vTensor(
-      context,
-      &context->resource().pool,
-      sizes,
-      options) {
-}
-
-vTensor::vTensor(
-    api::Context* const context,
-    api::Resource::Pool* const pool,
-    const IntArrayRef sizes,
-    const TensorOptions& options)
   : view_(new View{
       context,
-      pool,
       sizes,
       options,
     }) {
@@ -421,7 +281,7 @@ vTensor::vTensor(
 
 api::VulkanBuffer& vTensor::host_buffer(
     api::Command::Buffer& command_buffer,
-    const Access::Flags access) & {
+    const api::MemoryAccessFlags access) & {
   return view_->staging(command_buffer, Stage::Host, access);
 }
 
@@ -431,13 +291,13 @@ api::VulkanBuffer::Package vTensor::buffer(
   return view_->buffer(
       command_buffer,
       stage,
-      Access::Read).package();
+      api::MemoryAccessType::READ).package();
 }
 
 api::VulkanBuffer::Package vTensor::buffer(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
-    const Access::Flags access) & {
+    const api::MemoryAccessFlags access) & {
   return view_->buffer(
       command_buffer,
       stage,
@@ -450,13 +310,13 @@ api::VulkanImage::Package vTensor::image(
   return view_->image(
       command_buffer,
       stage,
-      Access::Read).package();
+      api::MemoryAccessType::READ).package();
 }
 
 api::VulkanImage::Package vTensor::image(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
-    const Access::Flags access) & {
+    const api::MemoryAccessFlags access) & {
   return view_->image(
       command_buffer,
       stage,
@@ -479,7 +339,6 @@ vTensor::View::View()
 
 vTensor::View::View(
     api::Context* const context,
-    api::Resource::Pool* const pool,
     const IntArrayRef sizes,
     const TensorOptions& options)
     // Resources
@@ -522,10 +381,6 @@ class vTensor::View::CMD final {
   CMD(CMD&&) = delete;
   CMD& operator=(CMD&&) = delete;
   ~CMD() = default;
-
-  typedef api::Resource::Buffer Buffer;
-  typedef api::Resource::Image Image;
-  typedef api::Resource::Fence Fence;
 
   void barrier(State::Transition transition);
 
@@ -603,24 +458,13 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
         from.access,
         to.access);
 
-    api::VulkanBuffer::Package package = view_.staging().package();
-
     if (Barrier::None != category) {
       barrier.stage.src |= from.stage;
       barrier.stage.dst |= to.stage;
 
       if (Barrier::Memory == category) {
-        barrier.buffers.push_back({
-          {
-            package.handle,
-            package.buffer_offset,
-            package.buffer_range,
-          },
-          {
-            from.access,
-            to.access,
-          },
-        });
+        barrier.buffers.push_back(
+            api::BufferMemoryBarrier(from.access, to.access, view_.staging()));
       }
     }
   }
@@ -633,23 +477,12 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
         from.access,
         to.access);
 
-    api::VulkanBuffer::Package package = view_.buffer().package();
-
     if (Barrier::None != category) {
       barrier.stage.src |= from.stage;
       barrier.stage.dst |= to.stage;
       if (Barrier::Memory == category) {
-        barrier.buffers.push_back({
-          {
-            package.handle,
-            package.buffer_offset,
-            package.buffer_range,
-          },
-          {
-            from.access,
-            to.access,
-          },
-        });
+        barrier.buffers.push_back(
+            api::BufferMemoryBarrier(from.access, to.access, view_.buffer()));
       }
     }
   }
@@ -672,24 +505,14 @@ void vTensor::View::CMD::barrier(State::Transition transition) {
         TORCH_INTERNAL_ASSERT(
             from.layout == view_.image().layout(),
             "Invalid image layout!");
-        api::VulkanImage::Package package = view_.image().package();
 
-        barrier.images.push_back({
-          {
-            package.handle,
-            package.image_layout,
-            package.image_view,
-            package.image_sampler,
-          },
-          {
-            from.access,
-            to.access,
-          },
-          {
-            from.layout,
-            to.layout,
-          },
-        });
+        barrier.images.push_back(
+            api::ImageMemoryBarrier(
+                from.access,
+                to.access,
+                from.layout,
+                to.layout,
+                view_.image()));
 
         view_.image().set_layout(to.layout);
       }
@@ -724,12 +547,12 @@ void vTensor::View::CMD::copy_buffer_to_staging(
           // Staging
           {
             vk_stage(Stage::Transfer),
-            vk_access(Stage::Transfer, Access::Write),
+            vk_access(Stage::Transfer, api::MemoryAccessType::WRITE),
           },
           // Buffer
           {
             vk_stage(Stage::Transfer),
-            vk_access(Stage::Transfer, Access::Read),
+            vk_access(Stage::Transfer, api::MemoryAccessType::READ),
           },
           // Image
           {},
@@ -751,12 +574,12 @@ void vTensor::View::CMD::copy_staging_to_buffer(
           // Staging
           {
             vk_stage(Stage::Transfer),
-            vk_access(Stage::Transfer, Access::Read),
+            vk_access(Stage::Transfer, api::MemoryAccessType::READ),
           },
           // Buffer
           {
             vk_stage(Stage::Transfer),
-            vk_access(Stage::Transfer, Access::Write),
+            vk_access(Stage::Transfer, api::MemoryAccessType::WRITE),
           },
           // Image
           {},
@@ -782,13 +605,13 @@ void vTensor::View::CMD::copy_buffer_to_image(
           // Buffer
           {
             vk_stage(Stage::Compute),
-            vk_access(Stage::Compute, Access::Read),
+            vk_access(Stage::Compute, api::MemoryAccessType::READ),
           },
           // Image
           {
             vk_stage(Stage::Compute),
-            vk_access(Stage::Compute, Access::Write),
-            vk_layout(Stage::Compute, Access::Write),
+            vk_access(Stage::Compute, api::MemoryAccessType::WRITE),
+            vk_layout(Stage::Compute, api::MemoryAccessType::WRITE),
           },
         }));
 
@@ -844,13 +667,13 @@ void vTensor::View::CMD::copy_image_to_buffer(
           // Buffer
           {
             vk_stage(Stage::Compute),
-            vk_access(Stage::Compute, Access::Write),
+            vk_access(Stage::Compute, api::MemoryAccessType::WRITE),
           },
           // Image
           {
             vk_stage(Stage::Compute),
-            vk_access(Stage::Compute, Access::Read),
-            vk_layout(Stage::Compute, Access::Read),
+            vk_access(Stage::Compute, api::MemoryAccessType::READ),
+            vk_layout(Stage::Compute, api::MemoryAccessType::READ),
           },
         }));
 
@@ -910,7 +733,7 @@ api::VulkanBuffer& vTensor::View::buffer() const {
 api::VulkanBuffer& vTensor::View::buffer(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
-    const Access::Flags access) const {
+    const api::MemoryAccessFlags access) const {
   CMD cmd(*this, command_buffer);
   return buffer(cmd, stage, access);
 }
@@ -918,18 +741,18 @@ api::VulkanBuffer& vTensor::View::buffer(
 api::VulkanBuffer& vTensor::View::buffer(
     CMD& cmd,
     const Stage::Flags stage,
-    const Access::Flags access) const {
-  if ((access & Access::Read) && state_.is_dirty(Component::Buffer)) {
+    const api::MemoryAccessFlags access) const {
+  if ((access & api::MemoryAccessType::READ) && state_.is_dirty(Component::Buffer)) {
     if (state_.is_clean(Component::Staging)) {
       cmd.copy_staging_to_buffer(
           state_,
-          staging(cmd, Stage::Transfer, Access::Read),
+          staging(cmd, Stage::Transfer, api::MemoryAccessType::READ),
           buffer());
     }
     else if (state_.is_clean(Component::Image)) {
       cmd.copy_image_to_buffer(
           state_,
-          image(cmd, Stage::Compute, Access::Read),
+          image(cmd, Stage::Compute, api::MemoryAccessType::READ),
           buffer());
     }
     else {
@@ -952,7 +775,7 @@ api::VulkanBuffer& vTensor::View::buffer(
           {},
         }));
 
-  if (access & Access::Write) {
+  if (access & api::MemoryAccessType::WRITE) {
     state_.set_dirty(Component::All);
   }
 
@@ -985,7 +808,7 @@ api::VulkanImage& vTensor::View::image() const {
 api::VulkanImage& vTensor::View::image(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
-    const Access::Flags access) const {
+    const api::MemoryAccessFlags access) const {
   CMD cmd(*this, command_buffer);
   return image(cmd, stage, access);
 }
@@ -993,11 +816,11 @@ api::VulkanImage& vTensor::View::image(
 api::VulkanImage& vTensor::View::image(
     CMD& cmd,
     const Stage::Flags stage,
-    const Access::Flags access) const {
-  if ((access & Access::Read) && state_.is_dirty(Component::Image)) {
+    const api::MemoryAccessFlags access) const {
+  if ((access & api::MemoryAccessType::READ) && state_.is_dirty(Component::Image)) {
     cmd.copy_buffer_to_image(
         state_,
-        buffer(cmd, stage, Access::Read),
+        buffer(cmd, stage, api::MemoryAccessType::READ),
         image());
   }
 
@@ -1015,7 +838,7 @@ api::VulkanImage& vTensor::View::image(
           },
         }));
 
-  if (access & Access::Write) {
+  if (access & api::MemoryAccessType::WRITE) {
     state_.set_dirty(Component::All);
   }
 
@@ -1041,7 +864,7 @@ api::VulkanBuffer& vTensor::View::staging() const {
 api::VulkanBuffer& vTensor::View::staging(
     api::Command::Buffer& command_buffer,
     const Stage::Flags stage,
-    const Access::Flags access) const {
+    const api::MemoryAccessFlags access) const {
   CMD cmd(*this, command_buffer);
   api::VulkanBuffer& staging = this->staging(cmd, stage, access);
   cmd.submit(fence(access));
@@ -1052,11 +875,11 @@ api::VulkanBuffer& vTensor::View::staging(
 api::VulkanBuffer& vTensor::View::staging(
     CMD& cmd,
     const Stage::Flags stage,
-    const Access::Flags access) const {
-  if ((access & Access::Read) && state_.is_dirty(Component::Staging)) {
+    const api::MemoryAccessFlags access) const {
+  if ((access & api::MemoryAccessType::READ) && state_.is_dirty(Component::Staging)) {
     cmd.copy_buffer_to_staging(
         state_,
-        buffer(cmd, Stage::Transfer, Access::Read),
+        buffer(cmd, Stage::Transfer, api::MemoryAccessType::READ),
         staging());
   }
 
@@ -1073,7 +896,7 @@ api::VulkanBuffer& vTensor::View::staging(
           {},
         }));
 
-  if (access & Access::Write) {
+  if (access & api::MemoryAccessType::WRITE) {
     state_.set_dirty(Component::All);
   }
 
@@ -1082,8 +905,9 @@ api::VulkanBuffer& vTensor::View::staging(
   return staging();
 }
 
-api::VulkanFence& vTensor::View::fence(const Access::Flags access) const {
-  if (!fence_ && access & Access::Read) {
+api::VulkanFence& vTensor::View::fence(
+    const api::MemoryAccessFlags access) const {
+  if (!fence_ && access & api::MemoryAccessType::READ) {
     fence_ = context_->fences().get_fence();
   }
 
