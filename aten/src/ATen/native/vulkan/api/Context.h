@@ -20,6 +20,7 @@ namespace api {
 struct ContextConfig final {
   uint32_t cmdSubmitFrequency;
   CommandPoolConfig cmdPoolConfig;
+  DescriptorPoolConfig descriptorPoolConfig;
 };
 
 //
@@ -54,7 +55,7 @@ class Context final {
   Adapter::Queue queue_;
   // Resource Pools
   CommandPool command_pool_;
-  Descriptor descriptor_;
+  DescriptorPool descriptor_pool_;
   FencePool fences_;
   QueryPool querypool_;
   // Command buffers submission
@@ -115,8 +116,8 @@ class Context final {
 
   // Resource Pools
 
-  inline Descriptor& descriptor() {
-    return descriptor_;
+  inline DescriptorPool& descriptor_pool() {
+    return descriptor_pool_;
   }
 
   inline FencePool& fences() {
