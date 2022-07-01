@@ -61,7 +61,7 @@ struct Descriptor final {
     Set(
         VkDevice device,
         VkDescriptorSet descriptor_set,
-        const Shader::Layout::Signature& shader_layout_signature);
+        ShaderLayout::Signature shader_layout_signature);
     Set(const Set&) = delete;
     Set& operator=(const Set&) = delete;
     Set(Set&&);
@@ -92,7 +92,7 @@ struct Descriptor final {
    private:
     VkDevice device_;
     VkDescriptorSet descriptor_set_;
-    Shader::Layout::Signature shader_layout_signature_;
+    ShaderLayout::Signature shader_layout_signature_;
 
     struct {
       c10::SmallVector<Item, 6u> items;
@@ -113,7 +113,9 @@ struct Descriptor final {
     Pool& operator=(Pool&&);
     ~Pool();
 
-    Set allocate(const Shader::Layout::Object& shader_layout);
+    Set allocate(
+        const VkDescriptorSetLayout handle,
+        const ShaderLayout::Signature& signature);
     void purge();
 
    private:

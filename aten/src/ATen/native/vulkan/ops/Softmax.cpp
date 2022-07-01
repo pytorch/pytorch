@@ -15,7 +15,7 @@ Tensor softmax_internal(
     const at::Tensor& input_arg,
     const int64_t dim,
     const bool half_to_float,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   TORCH_CHECK(
       input_arg.dim() == 4,
@@ -48,12 +48,12 @@ Tensor softmax_internal(
     v_input.options(),
   };
 
-  const api::Shader::WorkGroup global_work_group_size = {
+  const api::utils::uvec3 global_work_group_size = {
     safe_downcast<uint32_t>(v_input_sizes[Layout::Activation4D::width]),
     safe_downcast<uint32_t>(v_input_sizes[Layout::Activation4D::height]),
     1,
   };
-  const api::Shader::WorkGroup local_work_group_size = {8, 8, 1};
+  const api::utils::uvec3 local_work_group_size = {8, 8, 1};
 
   api::Command::Pool& command_pool = context->command().pool;
   api::Command::Buffer& command_buffer = command_pool.stream();

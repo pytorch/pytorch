@@ -4,7 +4,7 @@
 
 #include <ATen/native/vulkan/api/Common.h>
 #include <ATen/native/vulkan/api/Runtime.h>
-#include <ATen/native/vulkan/api/Shader.h>
+#include <ATen/native/vulkan/api/Utils.h>
 #include <ostream>
 #include <iostream>
 
@@ -105,7 +105,7 @@ class Adapter final {
   Queue request_queue();
   void return_queue(Queue& compute_queue);
 
-  inline Shader::WorkGroup local_work_group_size() const {
+  inline utils::uvec3 local_work_group_size() const {
     return { 4u, 4u, 4u, };
   }
 

@@ -55,7 +55,7 @@ Tensor arithmetic_scalar(
     const Tensor& self_arg,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   api::Context* const context = api::context();
 
@@ -118,7 +118,7 @@ Tensor& arithmetic_scalar_(
     Tensor& self,
     const Scalar& other,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   api::Context* const context = api::context();
 
@@ -176,7 +176,7 @@ Tensor arithmetic_tensor(
     const Tensor& self_arg,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   check_inputs(self_arg, other_arg);
   api::Context* const context = api::context();
@@ -253,7 +253,7 @@ Tensor& arithmetic_tensor_(
     Tensor& self,
     const Tensor& other_arg,
     const c10::optional<Scalar>& alpha_arg,
-    const api::Shader::Descriptor& shader_descriptor,
+    const api::ShaderSource& shader_descriptor,
     const std::string& op_name) {
   check_inputs(self, other_arg);
   api::Context* const context = api::context();

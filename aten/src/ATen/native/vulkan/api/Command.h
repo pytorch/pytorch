@@ -36,11 +36,14 @@ struct Command final {
     void begin();
     void end();
 
-    void barrier(const Pipeline::Barrier& barrier);
-    void bind(const Pipeline::Object& pipeline);
+    void barrier(const PipelineBarrier& barrier);
+    void bind(
+        const VkPipeline pipeline,
+        VkPipelineLayout pipeline_layout,
+        utils::uvec3 local_work_group);
     void bind(const Descriptor::Set& set);
     void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
-    void dispatch(const Shader::WorkGroup& global_work_group);
+    void dispatch(const utils::uvec3& global_work_group);
 
    private:
     friend class Pool;
@@ -52,7 +55,9 @@ struct Command final {
     VkCommandBuffer command_buffer_;
 
     struct Bound final {
-      Pipeline::Object pipeline;
+      VkPipeline pipeline;
+      VkPipelineLayout pipeline_layout;
+      utils::uvec3 local_work_group;
       VkDescriptorSet descriptor_set;
 
       void reset();

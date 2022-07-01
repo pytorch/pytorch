@@ -127,7 +127,7 @@ void Command::Buffer::Buffer::end() {
   VK_CHECK(vkEndCommandBuffer(command_buffer_));
 }
 
-void Command::Buffer::barrier(const Pipeline::Barrier& barrier) {
+void Command::Buffer::barrier(const PipelineBarrier& barrier) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
@@ -147,23 +147,24 @@ void Command::Buffer::barrier(const Pipeline::Barrier& barrier) {
       barrier.images.end());
 }
 
-void Command::Buffer::bind(const Pipeline::Object& pipeline) {
+void Command::Buffer::bind(
+    const VkPipeline pipeline,
+    VkPipelineLayout pipeline_layout,
+    utils::uvec3 local_work_group) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
       "Potential reason: This command buffer is moved from.");
 
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-      pipeline,
-      "Invalid Vulkan pipeline!");
-
-  if (pipeline.handle != bound_.pipeline.handle) {
+  if (pipeline != bound_.pipeline) {
     vkCmdBindPipeline(
         command_buffer_,
         VK_PIPELINE_BIND_POINT_COMPUTE,
-        pipeline.handle);
+        pipeline);
 
     bound_.pipeline = pipeline;
+    bound_.pipeline_layout = pipeline_layout;
+    bound_.local_work_group = local_work_group;
   }
 }
 
@@ -183,7 +184,7 @@ void Command::Buffer::bind(const Descriptor::Set& set) {
     vkCmdBindDescriptorSets(
         command_buffer_,
         VK_PIPELINE_BIND_POINT_COMPUTE,
-        bound_.pipeline.layout,
+        bound_.pipeline_layout,
         0u,
         1u,
         &descriptor_set,
@@ -227,7 +228,7 @@ void Command::Buffer::copy(
 }
 
 void Command::Buffer::dispatch(
-    const Shader::WorkGroup& global_work_group) {
+    const utils::uvec3& global_work_group) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
       command_buffer_,
       "This command buffer is in an invalid state! "
@@ -239,13 +240,13 @@ void Command::Buffer::dispatch(
       command_buffer_,
       utils::div_up(
           global_work_group.data[0u],
-          bound_.pipeline.local_work_group.data[0u]),
+          bound_.local_work_group.data[0u]),
       utils::div_up(
           global_work_group.data[1u],
-          bound_.pipeline.local_work_group.data[1u]),
+          bound_.local_work_group.data[1u]),
       utils::div_up(
           global_work_group.data[2u],
-          bound_.pipeline.local_work_group.data[2u]));
+          bound_.local_work_group.data[2u]));
 }
 
 void Command::Buffer::barrier() {
@@ -317,6 +318,8 @@ void Command::Buffer::invalidate() {
 
 inline void Command::Buffer::Bound::reset() {
   pipeline = {};
+  pipeline_layout = {};
+  local_work_group = {};
   descriptor_set = VK_NULL_HANDLE;
 }
 
