@@ -226,6 +226,17 @@ class HFOperations(unittest.TestCase):
         self.assertEqual(negative, z3.sat)
 
 
+        # change the annotation to TensorType[Dyn, Dyn]
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, Dyn])
+
+        # here, both should be SAT as well
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.sat)
+
 
 class ComposeOperationsGradualTypes(unittest.TestCase):
 
