@@ -448,7 +448,7 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
     ) -> None:
-        if not is_per_tensor(qscheme): 
+        if not is_per_tensor(qscheme):
             raise NotImplementedError(
                 "MinMaxObserver's qscheme only support torch.per_tensor_symmetric \
                     and torch.per_tensor_affine."
