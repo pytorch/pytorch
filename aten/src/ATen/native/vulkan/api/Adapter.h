@@ -73,6 +73,8 @@ class DeviceHandle final {
 // separate threads) to run concurrently.
 //
 
+#define NUM_QUEUE_MUTEXES 4
+
 class Adapter final {
  public:
   explicit Adapter(
@@ -83,7 +85,7 @@ class Adapter final {
   Adapter(const Adapter&) = delete;
   Adapter& operator=(const Adapter&) = delete;
 
-  Adapter(Adapter&&) noexcept;
+  Adapter(Adapter&&) = delete;
   Adapter& operator=(Adapter&&) = delete;
 
   ~Adapter() = default;
@@ -98,12 +100,13 @@ class Adapter final {
  private:
   // Use a mutex to manage queue usage info since
   // it can be accessed from multiple threads
-  std::mutex queue_mutex_;
+  std::mutex queue_usage_mutex_;
   // Physical Device Info
   PhysicalDevice physical_device_;
   // Queue Management
   std::vector<Queue> queues_;
   std::vector<uint32_t> queue_usage_;
+  std::array<std::mutex, NUM_QUEUE_MUTEXES> queue_mutexes_;
   // Handles
   VkInstance instance_;
   DeviceHandle device_;

@@ -13,10 +13,12 @@ namespace api {
 Context::Context(
     const VkInstance instance, size_t adapter_i, const ContextConfig config)
     : config_(config),
+      // Important handles
       instance_(instance),
       adapter_p_(runtime()->get_adapter_p(adapter_i)),
       device_(adapter_p_->device_handle()),
       queue_(adapter_p_->request_queue()),
+      // Resource pools
       command_pool_(device_, queue_.family_index, config_.cmdPoolConfig),
       descriptor_(gpu()),
       fences_(device_),
@@ -24,11 +26,14 @@ Context::Context(
         device_,
         adapter_p_->timestamp_compute_and_graphics(),
         adapter_p_->timestamp_period()),
+      // Command buffer submission
+      cmd_mutex_{},
       cmd_(VK_NULL_HANDLE),
       submit_count_{0u},
-      fence_{},
-      cmd_submit_list_{},
+      // Memory Management
+      buffer_clearlist_mutex_{},
       buffers_to_clear_{},
+      image_clearlist_mutex_{},
       images_to_clear_{} {
 }
 
@@ -80,6 +85,9 @@ void Context::submit_texture_copy(
     const api::utils::uvec3& src_offset,
     const api::utils::uvec3& dst_offset,
     const VkFence fence_handle) {
+  // Serialize recording to the shared command buffer
+  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_);
+
   set_cmd();
 
   cmd_.insert_barrier(pipeline_barrier);
@@ -91,6 +99,11 @@ void Context::submit_texture_copy(
   if (fence_handle != VK_NULL_HANDLE ||
       submit_count_ >= config_.cmdSubmitFrequency) {
     submit_cmd_to_gpu(fence_handle);
+  }
+
+  // Refer to comments in submit_compute_job for explanation
+  if (fence_handle != VK_NULL_HANDLE) {
+    cmd_lock.release();
   }
 }
 
@@ -104,11 +117,20 @@ void Context::submit_cmd_to_gpu(const VkFence fence_handle) {
 }
 
 void Context::flush() {
+  // Refer to comments in submit_compute_job. When this function is called, the
+  // previous call to submit_compute_job did not unlock cmd_mutex_ before returning.
+  // Therefore, we use std::adopt_lock when constructing the unique_lock as we
+  // assume the calling thread already has ownership of cmd_mutex_. The unique_lock
+  // will then unlock the mutex in its destructor.
+  std::unique_lock<std::mutex> cmd_lock(cmd_mutex_, std::adopt_lock);
+
   VK_CHECK(vkQueueWaitIdle(queue()));
 
   command_pool_.flush();
   descriptor().pool.purge();
 
+  std::lock_guard<std::mutex> bufferlist_lock(buffer_clearlist_mutex_);
+  std::lock_guard<std::mutex> imagelist_lock(image_clearlist_mutex_);
   buffers_to_clear_.clear();
   images_to_clear_.clear();
 }

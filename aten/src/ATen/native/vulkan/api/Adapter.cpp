@@ -262,10 +262,11 @@ Adapter::Adapter(
     const VkInstance instance,
     const PhysicalDevice& physical_device,
     const uint32_t num_queues)
-  : queue_mutex_{},
+  : queue_usage_mutex_{},
     physical_device_(physical_device),
     queues_{},
     queue_usage_{},
+    queue_mutexes_{},
     instance_(instance),
     device_(create_logical_device(
         physical_device_, num_queues, queues_, queue_usage_)),
@@ -277,26 +278,9 @@ Adapter::Adapter(
     vma_(instance_, physical_device_.handle, device_.handle_) {
 }
 
-Adapter::Adapter(Adapter&& other) noexcept
-  : queue_mutex_{},
-    physical_device_(std::move(other.physical_device_)),
-    instance_(other.instance_),
-    device_(std::move(other.device_)),
-    shader_layout_cache_(std::move(other.shader_layout_cache_)),
-    shader_cache_(std::move(other.shader_cache_)),
-    pipeline_layout_cache_(std::move(other.pipeline_layout_cache_)),
-    compute_pipeline_cache_(std::move(other.compute_pipeline_cache_)),
-    sampler_cache_(std::move(other.sampler_cache_)),
-    vma_(std::move(other.vma_)) {
-  std::lock_guard<std::mutex> lock(other.queue_mutex_);
-
-  queues_ = std::move(other.queues_);
-  queue_usage_ = std::move(other.queue_usage_);
-}
-
 Adapter::Queue Adapter::request_queue() {
   // Lock the mutex as multiple threads can request a queue at the same time
-  std::lock_guard<std::mutex> lock(queue_mutex_);
+  std::lock_guard<std::mutex> lock(queue_usage_mutex_);
 
   uint32_t min_usage = UINT32_MAX;
   uint32_t min_used_i = 0;
@@ -315,7 +299,7 @@ void Adapter::return_queue(Adapter::Queue& compute_queue) {
   for (const uint32_t i : c10::irange(queues_.size())) {
     if ((queues_[i].family_index == compute_queue.family_index) &&
         (queues_[i].queue_index == compute_queue.queue_index)) {
-      std::lock_guard<std::mutex> lock(queue_mutex_);
+      std::lock_guard<std::mutex> lock(queue_usage_mutex_);
       queue_usage_[i] -= 1;
       break;
     }
@@ -337,6 +321,9 @@ void Adapter::submit_cmd(
     0u,  // signalSemaphoreCount
     nullptr,  // pSignalSemaphores
   };
+
+  std::lock_guard<std::mutex> queue_lock(
+      queue_mutexes_[device_queue.queue_index % NUM_QUEUE_MUTEXES]);
 
   VK_CHECK(vkQueueSubmit(device_queue.handle, 1u, &submit_info, fence));
 }
