@@ -1437,10 +1437,10 @@
   src: grad.contiguous().as_strided(size, stride, storage_offset)
   result: auto_linear
 
-- name: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+- name: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)
   A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
   result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
-  output_differentiability: [True, False, False]  # LU is an auxiliary tensor not exposed to the user
+  output_differentiability: [True, False, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
