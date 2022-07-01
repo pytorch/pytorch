@@ -644,6 +644,10 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   return replayCasP(consumer, producer, compute_at_axis, root_map);
 }
 
+// In a PasC replay, we want the producer to exactly match the consumer:
+// all the beginning axes in the producer should be mapped to the consumer in
+// the same order. Reductions in the producer needs to be in the back of the
+// producer.
 int TransformReplay::getMatchedLeafPosWithoutReplayPasC(
     const TensorView* producer,
     const TensorView* consumer,
@@ -717,6 +721,7 @@ int TransformReplay::getMatchedLeafPosWithoutReplayPasC(
   return -1;
 }
 
+// We want to ignore reductions in the producer in a CasP replay.
 int TransformReplay::getMatchedLeafPosWithoutReplayCasP(
     const TensorView* consumer,
     const TensorView* producer,

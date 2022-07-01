@@ -157,15 +157,20 @@ class TORCH_CUDA_CU_API TransformReplay {
 
   // Returns the leaf position in producer that matches with `consumer_pos` in
   // consumer. Returns -1 if matching is impossible. This function can be used
-  // to test if replay is needed for getting matching outer dims.
+  // to test if replay is needed for getting matching outer dims. This function
+  // should be consistent with `replayPasC`: if you pass the tensors just
+  // replayed by replayPasC as inputs, you should return exactly the same
+  // position as `replayPasC`. However, this function is more tolerant than
+  // fully matching `replayPasC`: if in the consumer, there are unmappable
+  // dimensions, these dimensions are just ignored.
   static int getMatchedLeafPosWithoutReplayPasC(
       const TensorView* producer,
       const TensorView* consumer,
       int consumer_pos);
 
   // Returns the leaf position in consumer that matches with `producer_pos` in
-  // producer. Returns -1 if matching is impossible. This function can be used
-  // to test if replay is needed for getting matching outer dims.
+  // producer. Behavior similar to getMatchedLeafPosWithoutReplayPasC, except
+  // that we are also ignoring reductions in the producer.
   static int getMatchedLeafPosWithoutReplayCasP(
       const TensorView* consumer,
       const TensorView* producer,
