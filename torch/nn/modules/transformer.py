@@ -12,14 +12,14 @@ from .dropout import Dropout
 from .linear import Linear
 from .normalization import LayerNorm
 
+__all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'TransformerEncoderLayer', 'TransformerDecoderLayer']
 
 class Transformer(Module):
     r"""A transformer model. User is able to modify the attributes as needed. The architecture
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
     Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
     Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
-    Processing Systems, pages 6000-6010. Users can build the BERT(https://arxiv.org/abs/1810.04805)
-    model with corresponding parameters.
+    Processing Systems, pages 6000-6010.
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -124,7 +124,7 @@ class Transformer(Module):
 
             Note: Due to the multi-head attention architecture in the transformer model,
             the output sequence length of a transformer is same as the input sequence
-            (i.e. target) length of the decode.
+            (i.e. target) length of the decoder.
 
             where S is the source sequence length, T is the target sequence length, N is the
             batch size, E is the feature number
@@ -164,12 +164,16 @@ class Transformer(Module):
 
 
 class TransformerEncoder(Module):
-    r"""TransformerEncoder is a stack of N encoder layers
+    r"""TransformerEncoder is a stack of N encoder layers. Users can build the
+    BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
 
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
         num_layers: the number of sub-encoder-layers in the encoder (required).
         norm: the layer normalization component (optional).
+        enable_nested_tensor: if True, input will automatically convert to nested tensor
+            (and convert back on output). This will improve the overall performance of
+            TransformerEncoder when padding rate is high. Default: ``True`` (enabled).
 
     Examples::
         >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8)
@@ -179,11 +183,12 @@ class TransformerEncoder(Module):
     """
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None):
+    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True):
         super(TransformerEncoder, self).__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
+        self.enable_nested_tensor = enable_nested_tensor
 
     def forward(self, src: Tensor, mask: Optional[Tensor] = None, src_key_padding_mask: Optional[Tensor] = None) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
@@ -197,9 +202,45 @@ class TransformerEncoder(Module):
             see the docs in Transformer class.
         """
         output = src
+        convert_to_nested = False
+        first_layer = self.layers[0]
+        src_key_padding_mask_for_layers = src_key_padding_mask
+        if isinstance(first_layer, torch.nn.TransformerEncoderLayer):
+            if (not first_layer.norm_first and not first_layer.training and
+                    first_layer.self_attn.batch_first and
+                    first_layer.self_attn._qkv_same_embed_dim and first_layer.activation_relu_or_gelu and
+                    first_layer.norm1.eps == first_layer.norm2.eps and
+                    src.dim() == 3 and self.enable_nested_tensor and
+                    src_key_padding_mask is not None and
+                    torch._nested_tensor_from_mask_left_aligned(src, src_key_padding_mask.logical_not())):
+                if src_key_padding_mask is not None and not output.is_nested and mask is None:
+                    tensor_args = (
+                        src,
+                        first_layer.self_attn.in_proj_weight,
+                        first_layer.self_attn.in_proj_bias,
+                        first_layer.self_attn.out_proj.weight,
+                        first_layer.self_attn.out_proj.bias,
+                        first_layer.norm1.weight,
+                        first_layer.norm1.bias,
+                        first_layer.norm2.weight,
+                        first_layer.norm2.bias,
+                        first_layer.linear1.weight,
+                        first_layer.linear1.bias,
+                        first_layer.linear2.weight,
+                        first_layer.linear2.bias,
+                    )
+                    if not torch.overrides.has_torch_function(tensor_args):
+                        if not torch.is_grad_enabled() or all([not x.requires_grad for x in tensor_args]):
+                            if output.is_cuda or 'cpu' in str(output.device):
+                                convert_to_nested = True
+                                output = torch._nested_tensor_from_mask(output, src_key_padding_mask.logical_not())
+                                src_key_padding_mask_for_layers = None
 
         for mod in self.layers:
-            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask)
+            output = mod(output, src_mask=mask, src_key_padding_mask=src_key_padding_mask_for_layers)
+
+        if convert_to_nested:
+            output = output.to_padded_tensor(0.)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -340,9 +381,9 @@ class TransformerEncoderLayer(Module):
 
         # We can't test self.activation in forward() in TorchScript,
         # so stash some information about it instead.
-        if activation is F.relu:
+        if activation is F.relu or isinstance(activation, torch.nn.ReLU):
             self.activation_relu_or_gelu = 1
-        elif activation is F.gelu:
+        elif activation is F.gelu or isinstance(activation, torch.nn.GELU):
             self.activation_relu_or_gelu = 2
         else:
             self.activation_relu_or_gelu = 0
@@ -368,9 +409,10 @@ class TransformerEncoderLayer(Module):
 
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 
-        if (not self.norm_first and not self.training and
-            self.self_attn.batch_first and src.dim() == 3 and self.self_attn._qkv_same_embed_dim and
-            self.activation_relu_or_gelu and self.norm1.eps == self.norm2.eps and
+        if (src.dim() == 3 and not self.norm_first and not self.training and
+            self.self_attn.batch_first and
+            self.self_attn._qkv_same_embed_dim and self.activation_relu_or_gelu and
+            self.norm1.eps == self.norm2.eps and
             ((src_mask is None and src_key_padding_mask is None)
              if src.is_nested
              else (src_mask is None or src_key_padding_mask is None))):

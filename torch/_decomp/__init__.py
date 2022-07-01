@@ -15,7 +15,7 @@ decomposition_table: Dict[torch._ops.OpOverload, Callable] = {}
 meta_lib = torch.library.Library("aten", "IMPL", "Meta")
 
 
-def register_decomposition(aten_op, registry=None, *, register_meta: bool = False):
+def register_decomposition(aten_op, registry=None, *, disable_meta: bool = False):
     """
     A decorator to register a function as a decomposition to the Python
     decomposition table.  Use it like this::
@@ -32,10 +32,11 @@ def register_decomposition(aten_op, registry=None, *, register_meta: bool = Fals
     autograd) and not just backend tracing, where we then need to know if a
     decomposition can be used to simulate a transform.
 
-    If `register_meta` is True, we will also register this function to the
-    Meta key in the dispatcher, so that it will be used to compute meta
-    tensors.
+    By default, if the decomposition is for an operator that doesn't have
+    a Meta implementation, we will register it to the dispatcher.  Use
+    `disable_meta` to disable this behavior.
     """
+
     def decomposition_decorator(f):
         nonlocal registry
         if registry is None:
@@ -53,7 +54,22 @@ def register_decomposition(aten_op, registry=None, *, register_meta: bool = Fals
                 if op_overload in registry:
                     raise RuntimeError(f"duplicate registrations for {op_overload}")
                 registry[op_overload] = f
-                if register_meta:
+                # TODO: factor this logic into OpOverload or Library API
+                name = op_overload._schema.name
+                if op_overload._schema.overload_name:
+                    name += "." + op_overload._schema.overload_name
+                if (
+                    not disable_meta
+                    # TorchScript dumps a bunch of extra nonsense overloads
+                    # which don't have corresponding dispatcher entries, we need
+                    # to filter those out
+                    and torch._C._dispatch_has_kernel(name)
+                    # Don't register a meta kernel to any operator that has
+                    # a CompositeImplicitAutograd kernel in core.
+                    # Otherwise we won't be able to run autograd for that operator with the meta backend.
+                    and "CompositeImplicitAutograd" not in torch._C._dispatch_dump(name)
+                    and not torch._C._dispatch_has_kernel_for_dispatch_key(name, "Meta")
+                ):
                     meta_lib.impl(op_overload, f)
 
         # To handle allowing multiple aten_ops at once
@@ -88,6 +104,7 @@ def get_decompositions(
         elif isinstance(op, torch._ops.OpOverload) and op in decomposition_table:
             decompositions[op] = decomposition_table[op]
     return decompositions
+
 
 # populate the table
 import torch._decomp.decompositions

@@ -277,7 +277,7 @@ Tensor& bce_loss_out_impl(const Tensor& input, const Tensor& target,
                             newCachedGraph->gradInputTensor = bceLoss;
                         }
                     } else {
-                        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input.sizes().size());
+                        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input_squeezed.sizes().size());
                     }
                 }
                 return newCachedGraph;
@@ -288,6 +288,7 @@ Tensor& bce_loss_out_impl(const Tensor& input, const Tensor& target,
         Placeholder lossPlaceholder   = Placeholder(cachedGraph->lossTensor, loss_squeezed);
 
         NSMutableDictionary *feeds = [[NSMutableDictionary new] autorelease];
+
         feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
         feeds[targetPlaceholder.getMPSGraphTensor()] = targetPlaceholder.getMPSGraphTensorData();
         if (weight.defined()) {

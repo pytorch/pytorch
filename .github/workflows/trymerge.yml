@@ -31,6 +31,7 @@ jobs:
           GH_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           FORCE: ${{ github.event.client_payload.force}}
           ON_GREEN: ${{ github.event.client_payload.on_green}}
+          LAND_CHECKS: ${{ github.event.client_payload.land_checks }}
           COMMENT_ID: ${{ github.event.client_payload.comment_id }}
         run: |
           set -ex
@@ -42,12 +43,15 @@ jobs:
             fi
           elif [ -n "${ON_GREEN}" ]; then
             python3 .github/scripts/trymerge.py --on-green "${PR_NUM}"
+          elif [ -n "${LAND_CHECKS}" ]; then
+            python3 .github/scripts/trymerge.py --land-checks "${PR_NUM}"
           elif [ -n "${COMMENT_ID}" ]; then
             python3 .github/scripts/trymerge.py --comment-id "${COMMENT_ID}" "${PR_NUM}"
           else
             python3 .github/scripts/trymerge.py "${PR_NUM}"
           fi
 
-# TODO: Separate merge on green merges from regular merges to not hold up try-merge workflows overall concurrency
-# NOTE: force pushes are also put in their concurrency group to put them higher than regular merges
-concurrency: try-merge-${{ github.event.client_payload.force}}-${{ github.event.client_payload.on_green }}
+# We want newer merge commands to supercede old ones
+concurrency:
+  group: try-merge-${{ github.event.client_payload.pr_num }}
+  cancel-in-progress: true

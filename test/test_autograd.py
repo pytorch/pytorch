@@ -19,7 +19,7 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
-from functools import reduce
+from functools import reduce, partial
 import torch
 
 from torch import nn
@@ -34,7 +34,7 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoLapack, slowTest, IS_WINDOWS, IS_MACOS,
     disable_gc, gradcheck, gradgradcheck, parametrize,
     instantiate_parametrized_tests, skipIfMps)
-from torch.autograd import Variable, Function, detect_anomaly, kineto_available
+from torch.autograd import Variable, Function, detect_anomaly, kineto_available, _calculate_shape
 from torch.autograd.function import InplaceFunction
 import torch.autograd.forward_ad as fwAD
 from torch.testing._internal.common_methods_invocations import mask_not_all_zeros
@@ -42,7 +42,7 @@ from torch.testing._internal.common_device_type import (instantiate_device_type_
                                                         onlyCPU, onlyCUDA, dtypes, dtypesIfCUDA,
                                                         deviceCountAtLeast, skipMeta, dtypesIfMPS)
 from torch.testing._internal.common_dtype import floating_types_and
-from torch.testing._internal.logging_tensor import no_dispatch
+from torch.utils._mode_utils import no_dispatch
 
 import pickle
 
@@ -2835,43 +2835,37 @@ class TestAutograd(TestCase):
         # expecting aten::add, aten::sum to have the sequence numbers,
         # expecting the corresponding backward nodes to have the same numbers
         # as the forward ops
-        add_seq_nr = -1
-        sum_seq_nr = -1
-        found_add = found_sum = False
-        found_bwd_add = found_bwd_sum = False
+        autograd_ops = {
+            ("aten::add", "Add"): [],
+            ("aten::sum", "Sum"): [],
+        }
+        accumulate_ops = []
         found_empty = False
         for e in p.function_events:
-            # Ignore record_function user scope.
-            if "autograd::engine::evaluate_function" in e.name:
-                continue
-            if e.name == "aten::add":
-                add_seq_nr = e.sequence_nr
-                self.assertFalse(found_add)
-                found_add = True
-            elif e.name == "aten::sum":
-                sum_seq_nr = e.sequence_nr
-                self.assertFalse(found_sum)
-                found_sum = True
-            elif "Add" in e.name and "Backward" in e.name:
-                self.assertEqual(e.sequence_nr, add_seq_nr)
-                self.assertFalse(found_bwd_add)
-                found_bwd_add = True
-            elif "Sum" in e.name and "Backward" in e.name:
-                self.assertEqual(e.sequence_nr, sum_seq_nr)
-                self.assertFalse(found_bwd_sum)
-                found_bwd_sum = True
+            for (fwd_name, bwd_name), ops in autograd_ops.items():
+                if e.name == fwd_name or (bwd_name in e.name and "Backward" in e.name):
+                    ops.append(e)
+
+            if "AccumulateGrad" in e.name:
+                accumulate_ops.append(e)
+
             # check that nested ops (e.g. empty) don't have
             # sequence number
             if e.name == "aten::empty":
                 self.assertEqual(e.sequence_nr, -1)
                 found_empty = True
-        self.assertGreaterEqual(add_seq_nr, 0)
-        self.assertGreaterEqual(sum_seq_nr, 0)
-        self.assertNotEqual(add_seq_nr, sum_seq_nr)
-        self.assertTrue(found_add)
-        self.assertTrue(found_sum)
-        self.assertTrue(found_bwd_add)
-        self.assertTrue(found_bwd_sum)
+
+        for (fwd_name, bwd_name), ops in autograd_ops.items():
+            self.assertEqual(len(ops), 3)
+            self.assertEqual(ops[0].name, fwd_name)
+            self.assertEqual(ops[1].name, f"autograd::engine::evaluate_function: {bwd_name}Backward0")
+            self.assertEqual(ops[2].name, f"{bwd_name}Backward0")
+            self.assertGreaterEqual(ops[0].sequence_nr, 0)
+            self.assertEqual(ops[1].sequence_nr, ops[0].sequence_nr)
+            self.assertEqual(ops[2].sequence_nr, ops[0].sequence_nr)
+            self.assertEqual(ops[0].fwd_thread, 0)
+            self.assertEqual(ops[1].fwd_thread, ops[0].thread)
+            self.assertEqual(ops[2].fwd_thread, ops[0].thread)
         self.assertTrue(found_empty)
 
     def test_profiler_unboxed_only(self):
@@ -3301,6 +3295,25 @@ class TestAutograd(TestCase):
                     out = MyFunc.apply(inp, inp, False)
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
+
+    def test_calculate_shape_util(self):
+        out = torch.randn(10, 5, requires_grad=True)
+        grad = torch.randn(5, 10, requires_grad=True)
+        out_shape, grad_shape = _calculate_shape(out, grad, False)
+
+        assert out_shape == torch.Size([10, 5])
+        assert grad_shape == torch.Size([5, 10])
+
+        out = torch.nested_tensor([
+            torch.randn(10, 5, requires_grad=True),
+            torch.randn(10, 5, requires_grad=True),
+            torch.randn(10, 5, requires_grad=True)]
+        )
+        grad = torch.nested_tensor([torch.randn(5, 10, requires_grad=True), torch.randn(5, 10, requires_grad=True)])
+        out_shape, grad_shape = _calculate_shape(out, grad, False)
+
+        assert torch.equal(out_shape, torch.tensor([[10, 5], [10, 5], [10, 5]]))
+        assert torch.equal(grad_shape, torch.tensor([[5, 10], [5, 10]]))
 
     def test_nested_anomaly_detect_nan(self):
         size = 10
@@ -4146,8 +4159,10 @@ class TestAutograd(TestCase):
                 jvp_count[0] += 1
                 return x_t, y_t
 
-        x = torch.rand(2, dtype=torch.double, requires_grad=True)
-        y = torch.rand(2, dtype=torch.double, requires_grad=True)
+        # NB: In slow gradcheck we need to loop through numel times so use numel = 1 to ensure
+        #     that fast and slow have the same counts
+        x = torch.rand(1, dtype=torch.double, requires_grad=True)
+        y = torch.rand(1, dtype=torch.double, requires_grad=True)
         gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=False, check_backward_ad=False,
                   check_batched_grad=False, check_batched_forward_grad=False)
         self.assertEqual(jvp_count[0], 2)  # (2) once per input
@@ -4166,8 +4181,8 @@ class TestAutograd(TestCase):
         # Repeat the previous test except we mark one input with requires_grad=False
         # NB: _test_undefined_forward_mode is only (+1), when function has single differentiable input, not (+2)!
         #     Otherwise, other counts are halved.
-        x = torch.rand(2, dtype=torch.double, requires_grad=True)
-        y = torch.rand(2, dtype=torch.double, requires_grad=False)
+        x = torch.rand(1, dtype=torch.double, requires_grad=True)
+        y = torch.rand(1, dtype=torch.double, requires_grad=False)
         gradcheck(UserFn.apply, (x, y), check_forward_ad=True, check_undefined_grad=True, check_backward_ad=False,
                   check_batched_grad=False, check_batched_forward_grad=True)
         self.assertEqual(jvp_count[0], 5)  # 1 + 1 + 3
@@ -4307,6 +4322,14 @@ class TestAutograd(TestCase):
         b.data = a
         self.assertTrue(b_id_saved == id(b))
 
+    def test_set_data_self_requires_grad(self):
+        a = torch.tensor(1.0, requires_grad=True)
+        b = torch.tensor(2.0)
+        c = torch.tensor(3, dtype=torch.int64)
+        a.data = b
+        with self.assertRaisesRegex(RuntimeError, 'must be floating point or complex dtype'):
+            a.data = c
+
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     def test_thread_shutdown(self):
         code = """import torch
@@ -4328,7 +4351,7 @@ for shape in [(1,), ()]:
         # The autograd engine creates worker threads only when GPU devices are present.
         # So make sure that we do shutdown threads when we're testing cuda and make sure
         # that there is no thread to shutdown when we're not using cuda.
-        if TEST_CUDA:
+        if TEST_CUDA or torch.backends.mps.is_available():
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
             self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
@@ -4433,6 +4456,132 @@ for shape in [(1,), ()]:
         # compute mean as a proxy for some joint reasoning
         mean_combined = torch.stack(feat_combined).mean()
         mean_combined.backward()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @slowTest
+    def test_checkpointing_without_reentrant_memory_savings(self):
+        class MyModel(nn.Module):
+            def __init__(self, n, use_checkpoint, use_reentrant):
+                super().__init__()
+                self.n = n
+                self.use_checkpoint = use_checkpoint
+                self.use_reentrant = use_reentrant
+                self.layers = nn.ModuleList()
+                for i in range(self.n):
+                    layer = nn.Sequential(
+                        nn.Linear(256, 256), nn.Linear(256, 256), nn.Linear(256, 256)
+                    )
+                    self.layers.append(layer)
+                # pre-allocate the grad so that increased memory usage is mainly
+                # due to activations.
+                for layer in self.layers:
+                    for lin in layer:
+                        lin.weight.grad = torch.ones_like(lin.weight)
+                        lin.bias.grad = torch.ones_like(lin.bias)
+
+            def forward(self, x):
+                for i in range(self.n):
+                    if not self.use_checkpoint:
+                        x = self.layers[i](x)
+                    else:
+                        x = checkpoint(self.layers[i], x, use_reentrant=self.use_reentrant)
+
+                return x
+
+        model_no_checkpoint = MyModel(8, use_checkpoint=False, use_reentrant=False).cuda()
+        model_reentrant_checkpoint = MyModel(8, use_checkpoint=True, use_reentrant=True).cuda()
+        model_no_reentrant_checkpoint = MyModel(8, use_checkpoint=True, use_reentrant=False).cuda()
+
+        x = torch.randn(100, 256, requires_grad=True, device='cuda')
+
+        torch.cuda.reset_peak_memory_stats()
+        loss = model_no_checkpoint(x.clone()).sum()
+        loss.backward()
+        mem_no_checkpoint = torch.cuda.max_memory_allocated()
+
+        torch.cuda.reset_peak_memory_stats()
+        loss = model_reentrant_checkpoint(x.clone()).sum()
+        loss.backward()
+        mem_reentrant_checkpoint = torch.cuda.max_memory_allocated()
+
+        torch.cuda.reset_peak_memory_stats()
+        loss = model_no_reentrant_checkpoint(x.clone()).sum()
+        loss.backward()
+        mem_no_reentrant_checkpoint = torch.cuda.max_memory_allocated()
+
+        self.assertTrue(mem_reentrant_checkpoint < mem_no_checkpoint)
+        self.assertTrue(mem_no_reentrant_checkpoint < mem_no_checkpoint)
+
+    def test_checkpointing_without_reentrant_custom_function_raises(self):
+        """
+        Accessing ctx.saved_tensors multiple times in a custom function
+        backward pass with non-reentrant checkpoint currently throws due to
+        saved tensors not being recomputed in between the accesses.
+        """
+        # For verifying first access to ctx.saved_tensors succeeded.
+
+        _first_saved_tensor_access_succeeded = False
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y, z):
+                w = x * y * z
+                out = w + w
+                ctx.save_for_backward(x, y, z, w, out)
+                return out
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                x, y, z, w, out = ctx.saved_tensors
+                nonlocal _first_saved_tensor_access_succeeded
+                _first_saved_tensor_access_succeeded = True
+                # Raises issue in non-reentrant checkpointing where
+                # second access to saved tensors raises because they were
+                # not recomputed.
+                x_2, y_2, z_2, w_2, out_2 = ctx.saved_tensors
+
+        x = torch.tensor(1., requires_grad=True)
+        y = torch.tensor(2., requires_grad=True)
+        z = torch.tensor(3., requires_grad=True)
+
+        def foo(x, y, z):
+            x = x * y * z
+            y = y * y * z
+            z = z * z
+            out = MyFunc.apply(x, y, z)
+            return out
+
+        out = checkpoint(foo, x, y, z, use_reentrant=False)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Attempt to retrieve a tensor saved by autograd multiple times"
+        ):
+            out.sum().backward()
+
+        self.assertTrue(_first_saved_tensor_access_succeeded)
+
+    def test_access_saved_tensor_twice_without_recomputation_raises(self):
+        """
+        If using saved tensor hooks based checkpointing and a saved tensor
+        is accessed multiple times without triggering recomputation in the
+        middle, error is raised indicating so.
+        """
+        def foo(a):
+            b = a * a
+            c = a * b
+            d = torch.exp(a)
+            return d
+
+        a = torch.randn(5, requires_grad=True)
+        d = checkpoint(foo, a, use_reentrant=False)
+        # First access
+        d.grad_fn._saved_result
+        # Second access raises error
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Attempt to retrieve a tensor saved by autograd multiple times"
+        ):
+            d.grad_fn._saved_result
 
     @slowTest
     @parametrize("input_requires_grad", [True, False])
@@ -6467,7 +6616,6 @@ class TestAutogradForwardModeBatchedGrad(TestCase):
         self.assertFalse(view_tangent._is_view())  # Optimization to share the same tensor!
         self.assertIs(view_tangent, base_tangent)
         self.assertIs(x_tangent, tangent)
-        self.assertIs(view_tangent, tangent)
 
     def test_inplace_on_view_not_same_layout(self):
         input = torch.zeros([2, 2])
@@ -6577,6 +6725,18 @@ class TestAutogradForwardMode(TestCase):
             # as_strided runs without error
             dual.as_strided((5,), (1,), 0)
 
+    def test_metadata_check_checks_ignores_size_zero(self):
+        a = torch.ones(0).as_strided((0, 1,), (1, 1,), 0)
+        b = torch.ones(0).as_strided((0, 1,), (1, 0,), 0)
+
+        with fwAD.dual_level():
+            dual = fwAD.make_dual(a, b)
+            torch.diagonal(dual, offset=0)
+
+        input = torch.rand([0, 1], dtype=torch.complex128, requires_grad=True)
+        func = partial(torch.diagonal, offset=0)
+        torch.autograd.gradcheck(func, (input,), check_forward_ad=True)
+
     def test_metadata_check_when_primal_has_conj_bit(self):
         # Make sure the _has_same_storage_numel is a fallthrough, so that
         # conj bit does not materialize. If it materializes it would
@@ -6606,6 +6766,30 @@ class TestAutogradForwardMode(TestCase):
         with fwAD.dual_level():
             dual = fwAD.make_dual(a, b)
             dual[1:]
+
+    def test_metadata_check_check_conj(self):
+        keys = {
+            "NEITHER": lambda x: x,
+            "CONJ": lambda x: x.conj(),
+            "NEG": lambda x: x._neg_view()
+        }
+
+        for primal_key, tangent_key in product(keys, keys):
+            x = keys[primal_key](torch.randn(2, 3, 4, dtype=torch.cdouble))
+            t = keys[tangent_key](torch.randn(2, 3, 4, dtype=torch.cdouble))
+
+            if primal_key == tangent_key:
+                with fwAD.dual_level():
+                    dual = fwAD.make_dual(x, t)
+                    self.assertTrue(fwAD.unpack_dual(dual).tangent is t)
+                    torch.real(dual)
+                    torch.imag(dual)
+            else:
+                with fwAD.dual_level():
+                    dual = fwAD.make_dual(x, t)
+                    self.assertTrue(fwAD.unpack_dual(dual).tangent is not t)
+                    torch.real(dual)
+                    torch.imag(dual)
 
     # The following test functions want to ensure all the following behaviors:
     #   - Ensure that default level system in the python binding works
@@ -6697,6 +6881,26 @@ class TestAutogradForwardMode(TestCase):
             self.assertEqual(counter[0], 1)
             fwAD.make_dual(torch.rand_like(s), s)
             self.assertEqual(counter[0], 1)
+
+    def test_make_dual_forbid_integral_dtype(self):
+        primal_f = torch.ones(2, 2, dtype=torch.float)
+        primal_l = torch.ones(2, 2, dtype=torch.long)
+
+        tangent_f = torch.ones(2, 2, dtype=torch.float)
+        tangent_l = torch.ones(2, 2, dtype=torch.long)
+
+        with fwAD.dual_level():
+            # Float Primal and Long Tangent
+            with self.assertRaisesRegex(ValueError, "Expected tangent to be floating point or complex"):
+                fwAD.make_dual(primal_f, tangent_l)
+
+            # Long Primal and Long Tangent
+            with self.assertRaisesRegex(ValueError, "Expected primal to be floating point or complex"):
+                fwAD.make_dual(primal_l, tangent_l)
+
+            # Long Primal and Float Tangent
+            with self.assertRaisesRegex(ValueError, "Expected primal to be floating point or complex"):
+                fwAD.make_dual(primal_l, tangent_f)
 
     def test_print(self):
         with fwAD.dual_level() as level:
@@ -7067,20 +7271,33 @@ class TestAutogradDeviceType(TestCase):
                 self.assertEqual(x.grad.sum(), 1.)
                 self.assertEqual((x.grad == 1 / 3).sum(), 3)
 
-    def test_scatter_reduce_prod_gradgrad_error(self, device):
+    def test_scatter_index_reduce_amin_amax_backprops_to_all_values(self, device):
+        # tests that gradients are evenly distributed when there are multiple max/min values
+        # tested here instead of adding a SampleInput as the backward for this case is non-differentiable for gradgrad
+        # as is the case for test_min_max_median_backprops_to_all_values above
+        fns = (torch.scatter_reduce, torch.index_reduce)
+        reduces = ('amin', 'amax')
+        for fn, reduction in product(fns, reduces):
+            input = torch.randn((2, 3), device=device, dtype=torch.float64, requires_grad=True)
+            src = input.clone().detach_().requires_grad_(True)
+            idx = torch.arange(2).to(dtype=torch.long, device=device)
+            if fn == torch.scatter_reduce:
+                idx = idx.unsqueeze(-1).expand((2, 3))
+
+            gradcheck(fn, (input, 0, idx, src, reduction), check_batched_grad=False)
+
+    def test_scatter_index_reduce_prod_gradgrad_error(self, device):
         # test that double backward raises an error for the case where 2 zeros in src
         # are scattered to the same position in self
         input = torch.tensor([1.], device=device, dtype=torch.float64, requires_grad=True)
         src = torch.tensor([0., 0.], device=device, dtype=torch.float64, requires_grad=True)
         idx = torch.tensor([0, 0], device=device, dtype=torch.long)
 
-        def fn(input, src):
-            return input.scatter_reduce(0, idx, src, 'prod')
-
-        # check that this case passes on gradcheck
-        gradcheck(fn, [input, src], check_batched_grad=False)
-        with self.assertRaisesRegex(RuntimeError, "Double backward is unsupported for src when"):
-            gradgradcheck(fn, [input, src])
+        for fn in (torch.scatter_reduce, torch.index_reduce):
+            # check that this case passes on gradcheck
+            gradcheck(fn, (input, 0, idx, src, 'prod'), check_batched_grad=False)
+            with self.assertRaisesRegex(RuntimeError, "Double backward is unsupported for"):
+                gradgradcheck(fn, (input, 0, idx, src, 'prod'))
 
     @skipIfMps  # the test doesn't work on MPS as double types are not supported
     def test_parameter_resize(self, device):
@@ -7542,6 +7759,16 @@ class TestAutogradDeviceType(TestCase):
         with fwAD.dual_level():
             dual = fwAD.make_dual(primal, tangent)
             non_dual.copy_(dual)
+
+    def test_copy_forward_ad_same_layout_copies_grad(self, device):
+        primal = torch.tensor([[3.], [4.]], device=device)
+        tangent = torch.tensor([[5.], [6.]], device=device)
+
+        with fwAD.dual_level():
+            x_dual = fwAD.make_dual(primal, tangent)
+            non_dual = torch.tensor([[1.], [2.]])
+            non_dual.copy_(x_dual)
+            self.assertTrue(fwAD.unpack_dual(non_dual).tangent is not tangent)
 
     @onlyCUDA
     def test_simple_reentrant_cross_device(self, device):

@@ -4,10 +4,9 @@ from typing import List
 
 import torch
 import torch.distributed as dist
-import torch.distributed._shard.sharding_spec as shard_spec
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharded_tensor._ops._common import _sharded_op_common
 from torch.distributed._shard.sharded_tensor import (
-    sharded_op_impl,
     ShardedTensor,
 )
 from torch.distributed._shard.sharding_spec._internals import (
@@ -18,13 +17,14 @@ from torch.distributed.nn.functional import (
     all_gather,
     all_to_all_single,
 )
+from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 
 
 def _chunk_sharding_spec_check(spec, op):
     """
     For the given op implementation check if the sharding spec is ChunkShardingSpec.
     """
-    if not isinstance(spec, shard_spec.ChunkShardingSpec):
+    if not isinstance(spec, ChunkShardingSpec):
         raise NotImplementedError(
             f"Only ChunkShardingSpec supported for '{op.__name__}'."
         )
@@ -55,12 +55,11 @@ def _register_sharded_op_on_local_tensor(
         func (Callable): registered implementation for sharded op for
         ``__torch_function__`` dispatch.
     """
-    @sharded_op_impl(op)
+    @custom_sharding_spec_op(ChunkShardingSpec, op)
     @_sharded_op_common(op, early_stop_func, extra_check)
-    def sharded_tensor_op_on_local_shards(types, args=(), kwargs=None, pg=None):
+    def sharded_tensor_op_on_local_tensor(types, args=(), kwargs=None, pg=None):
         st = args[0]
         sharding_spec = st.sharding_spec()
-        _chunk_sharding_spec_check(sharding_spec, op)
         if len(st.local_shards()) != 1:
             raise TypeError(
                 f"torch function '{op.__name__}', with args: {args} and "
@@ -187,8 +186,8 @@ def _result_distribute_with_col_rearrange(
     sharding_dim_size = weight.size(sharding_dim)
     dims = list(results[0].size())
     dims[0] = sharding_dim_size
-    output = torch.empty(*dims, device=input.device)
     combined_results = torch.cat(results)
+    output = torch.empty(*dims, device=combined_results.device, dtype=combined_results.dtype)
 
     # Compute output splits
     split_size = get_split_size(sharding_dim_size, world_size)

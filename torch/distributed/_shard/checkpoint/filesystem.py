@@ -43,9 +43,10 @@ class FileSystemWriter(StorageWriter):
 
     def write_bytes(self, requests: List[BytesWriteRequest]) -> Future[None]:
         for req in requests:
-            (self.path / req.storage_key).write_bytes(
-                req.bytes.getbuffer()
-            )
+            with (self.path / req.storage_key).open("wb") as w:
+                w.write(req.bytes.getbuffer())
+                os.fsync(w.fileno())
+
         fut: Future[None] = Future()
         fut.set_result(None)
         return fut
@@ -67,20 +68,20 @@ class FileSystemWriter(StorageWriter):
             # 2. pickle is not streamable.
             with (self.path / req.storage_key).open("wb") as w:
                 torch.save(req.tensor, w)
+                os.fsync(w.fileno())
 
         fut: Future[None] = Future()
         fut.set_result(None)
         return fut
 
-    # Implementating the abstract function in Storage Writer
-    def write_metadata(self, metadata: Metadata) -> None:
-        with (self.path / ".metadata.tmp").open("wb") as metadata_file:
-            pickle.dump(metadata, metadata_file)
-
     def prepare(self) -> None:
         self.path.mkdir(parents=True, exist_ok=True)
 
-    def finish(self) -> None:
+    def finish(self, metadata: Metadata) -> None:
+        with (self.path / ".metadata.tmp").open("wb") as metadata_file:
+            pickle.dump(metadata, metadata_file)
+            os.fsync(metadata_file.fileno())
+
         (self.path / ".metadata.tmp").rename(self.path / ".metadata")
 
 class FileSystemReader(StorageReader):

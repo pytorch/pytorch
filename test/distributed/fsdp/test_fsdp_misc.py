@@ -2,11 +2,15 @@
 
 import sys
 from contextlib import suppress
+import functools
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+from torch.nn import TransformerEncoderLayer, TransformerDecoderLayer
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import ShardingStrategy
+from torch.distributed.fsdp.wrap import always_wrap_policy
 from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
@@ -14,6 +18,8 @@ from torch.testing._internal.common_fsdp import (
     FSDPTest,
     NestedWrappedModule,
     FSDPInitMode,
+    TransformerWithSharedParams,
+    _validate,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -21,6 +27,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     run_tests,
 )
+
+from torch.distributed.fsdp.wrap import transformer_auto_wrap_policy
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -42,6 +50,67 @@ class TestFSDPMisc(FSDPTest):
     @property
     def process_group(self):
         return dist.distributed_c10d._get_default_group()
+
+    @skip_if_lt_x_gpu(2)
+    @parametrize("use_second_layer", [True, False])
+    @parametrize("sharding_strategy", [ShardingStrategy.NO_SHARD, None])
+    def test_fsdp_module_no_compute_grad(self, use_second_layer, sharding_strategy):
+        # When use_second_layer=True, b is involved in forward computation but does
+        # not receive grad in backward. Otherwise, b is not involved in forward
+        # computation.
+        class MyModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = nn.Linear(10, 10)
+                self.b = nn.Linear(10, 10)
+
+            def forward(self, x, y):
+                out1 = self.a(x)
+                if use_second_layer:
+                    out2 = self.b(y)
+                    return out1, out2
+                else:
+                    return out1
+
+        fsdp = FSDP(
+            MyModel().cuda(),
+            sharding_strategy=sharding_strategy,
+            auto_wrap_policy=always_wrap_policy
+        )
+        x = torch.randn(10, 10, device='cuda')
+        y = torch.randn(10, 10, device='cuda')
+        for i in range(4):
+            if use_second_layer:
+                a, b = fsdp(x, y)
+            else:
+                a = fsdp(x, y)
+            loss = a.sum()
+            loss.backward()
+
+            # self.a receives grad, self.b does not
+            a_grad = fsdp.module.a._fsdp_wrapped_module.flat_param.grad
+            b_grad = fsdp.module.b._fsdp_wrapped_module.flat_param.grad
+            self.assertIsNotNone(a_grad)
+            self.assertIsNone(b_grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_device_id_auto_wrap(self):
+        """
+        Test auto wrapping propagates the device id.
+        """
+        model = TransformerWithSharedParams(group=self.process_group)
+        my_auto_wrap_policy = functools.partial(
+            transformer_auto_wrap_policy,
+            transformer_layer_cls={TransformerEncoderLayer, TransformerDecoderLayer}
+        )
+        wrapped = FSDP(
+            model,
+            auto_wrap_policy=my_auto_wrap_policy,
+            device_id=torch.cuda.current_device()
+        )
+        # All FSDP instances should have device_id set
+        for m in FSDP.fsdp_modules(wrapped):
+            self.assertEqual(m.device_id, torch.device("cuda", torch.cuda.current_device()))
 
     @skip_if_lt_x_gpu(2)
     @parametrize("use_index", [True, False])
@@ -174,11 +243,10 @@ class TestFSDPMisc(FSDPTest):
     def test_fsdp_cpu_init_stays_on_cpu(self):
         """
         Ensure that CPU model input stays on CPU
-        after FSDP init even though sharding, flattening
-        is run on GPU.
+        after FSDP init and we log a warning.
         """
         torch.cuda.set_device(self.rank)
-        regex = "Module is input on CPU"
+        regex = "Module is put on CPU"
         context = self.assertWarnsRegex(
             expected_warning=UserWarning, expected_regex=regex
         )
@@ -199,6 +267,58 @@ class TestFSDPMisc(FSDPTest):
         # CUDA device.
         inp = mod.get_input(device=torch.device("cpu"))
         fsdp(inp[0]).sum().backward()
+
+    @skip_if_lt_x_gpu(2)
+    def test_cpu_init_with_sync_module_raises(self):
+        """
+        CPU module with sync_module_states=True throws appropriate
+        error because it requires GPU comm.
+        """
+        mod = NestedWrappedModule(
+            group=self.process_group,
+            wrap_fsdp=False,
+            wrap_everything=True,
+            fsdp_init_mode=FSDPInitMode.CUDA_NEVER,
+        )
+        with self.assertRaisesRegex(
+            ValueError,
+            "Module has CPU parameters, but sync_module_states=True is specified."
+        ):
+            FSDP(mod, sync_module_states=True)
+
+        # Specifying device_id with sync_module_states=True works.
+        FSDP(mod, device_id=torch.cuda.current_device(), sync_module_states=True)
+
+    @skip_if_lt_x_gpu(2)
+    def test_fsdp_same_model_across_ranks(self):
+        """
+        FSDP broadcasts model from rank 0 to ensure it starts off with the same
+        values.
+        """
+        class MyModel(nn.Module):
+            def __init__(self, rank):
+                super().__init__()
+                # Seed via rank to make model different across ranks
+                torch.manual_seed(rank)
+                torch.cuda.manual_seed(rank)
+                self.lin = nn.Linear(10, 10, bias=False)
+                self.register_buffer("buffer", torch.ones(1) * rank)
+
+        m = MyModel(self.rank).cuda()
+        _validate(m, process_group=self.process_group, assert_fn=self.assertNotEqual)
+        # Passing sync_module_states into FSDP makes model the same during init.
+        fsdp = FSDP(m, sync_module_states=True)
+        with fsdp.summon_full_params(fsdp):
+            _validate(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
+
+        # sync_module_states also works with CPU module with device_id passed in
+        m = MyModel(self.rank)
+        _validate(m, process_group=self.process_group, assert_fn=self.assertNotEqual)
+        # Passing sync_module_states into FSDP makes model the same during init.
+        fsdp = FSDP(m, device_id=torch.cuda.current_device(), sync_module_states=True)
+        with fsdp.summon_full_params(fsdp):
+            _validate(fsdp, process_group=self.process_group, assert_fn=self.assertEqual)
+
 
 instantiate_parametrized_tests(TestFSDPMisc)
 

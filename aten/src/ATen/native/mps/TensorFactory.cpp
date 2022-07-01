@@ -98,7 +98,6 @@ const Tensor& resize_mps_(
     return resize_named_tensor_(self, size, optional_memory_format);
   }
   auto* self_ = self.unsafeGetTensorImpl();
-  //std::cout << "resize mps  size " << size << std::endl;
   resize_impl_mps_(self_, size, /*strides=*/c10::nullopt);
   if (optional_memory_format.has_value()) {
     auto memory_format =

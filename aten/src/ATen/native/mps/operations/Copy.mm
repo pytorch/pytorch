@@ -15,71 +15,155 @@
 namespace at {
 namespace native {
 
-MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
-                             IntArrayRef stride, int64_t storage_offset,
-                             MPSGraphTensor* inputTensor, const Tensor& self) {
+MPSGraphTensor* chainViewOperation(
+  MPSGraph* mpsGraph,
+  IntArrayRef size,
+  IntArrayRef stride,
+  int64_t storage_offset,
+  MPSGraphTensor* inputTensor,
+  const Tensor& self,
+  MPSGraphTensor* &updatesTensor,
+  mps::GatherScatterViewOpType viewOpType,
+  MPSShape* parentShape) {
+  using namespace mps;
   MPSGraphTensor *outputTensor = nil;
-  @autoreleasepool {
-      int32_t* sizeArray = new int32_t[size.size()]();
-      for (int i = 0; i < size.size(); i++) {
-        sizeArray[i] = size[i];
-      }
-      NSData* shapeData = [NSData dataWithBytes : sizeArray
-                                    length : size.size()*sizeof(int32_t)];
+  const size_t shape_size = size.size();
 
-      MPSGraphTensor* shapeTensor =  [mpsGraph constantWithData : shapeData
-                                                        shape : @[[NSNumber numberWithUnsignedInteger: size.size()]]
-                                                      dataType : MPSDataTypeInt32];
-      MPSGraphTensor* storageOffsetTensor = [mpsGraph constantWithScalar :  storage_offset
-                                                            dataType : MPSDataTypeInt32];
-      MPSGraphTensor* strideTensor = [mpsGraph constantWithScalar : stride[self.dim()-1]
-                                                      dataType : MPSDataTypeInt32];
-      MPSGraphTensor* rangeTensor = [mpsGraph coordinateAlongAxis:-1
-                                                      withShapeTensor : shapeTensor
-                                                              name : nil];
-      MPSGraphTensor* indexTensor = [mpsGraph multiplicationWithPrimaryTensor :  rangeTensor
-                                                          secondaryTensor : strideTensor
-                                                              name : nil];
+  @autoreleasepool {
+      std::vector<int32_t> sizeArray(shape_size);
+      const int64_t int_max = std::numeric_limits<int32_t>::max();
+      for (int i = 0; i < shape_size; i++) {
+        TORCH_CHECK(size[i] <= int_max);
+        sizeArray[i] = static_cast<int32_t>(size[i]);
+      }
+      NSData* shapeData = [NSData dataWithBytes: sizeArray.data()
+                                         length: shape_size * sizeof(int32_t)];
+      MPSGraphTensor* shapeTensor =  [mpsGraph constantWithData: shapeData
+                                                          shape: @[[NSNumber numberWithUnsignedInteger: shape_size]]
+                                                       dataType: MPSDataTypeInt32];
+
+      MPSGraphTensor* storageOffsetTensor = [mpsGraph constantWithScalar: storage_offset
+                                                                dataType: MPSDataTypeInt32];
+      MPSGraphTensor* strideTensor = [mpsGraph constantWithScalar: stride[shape_size - 1]
+                                                         dataType: MPSDataTypeInt32];
+      MPSGraphTensor* rangeTensor = [mpsGraph coordinateAlongAxis: -1
+                                                  withShapeTensor: shapeTensor
+                                                             name: nil];
+      MPSGraphTensor* indexTensor = [mpsGraph multiplicationWithPrimaryTensor: rangeTensor
+                                                              secondaryTensor: strideTensor
+                                                                         name: nil];
       MPSGraphTensor* indicesTensor = indexTensor;
       // create stride Tensors for each rank of the input tensor
-      for (int i = 1; i < self.dim(); i++) {
-        strideTensor = [mpsGraph constantWithScalar : stride[self.dim() - i - 1]
-                                        dataType : MPSDataTypeInt32];
-        MPSGraphTensor* rangeTensor = [mpsGraph coordinateAlongAxis: (-i-1)
-                                                        withShapeTensor : shapeTensor
-                                                                name : nil];
-        MPSGraphTensor* indexTensor = [mpsGraph multiplicationWithPrimaryTensor :  rangeTensor
-                                                            secondaryTensor : strideTensor
-                                                                name : nil];
-        indicesTensor = [mpsGraph additionWithPrimaryTensor : indexTensor
-                                          secondaryTensor : indicesTensor
-                                              name : nil];
+      for (int i = 1; i < shape_size; i++) {
+        strideTensor = [mpsGraph constantWithScalar: stride[shape_size - i - 1]
+                                           dataType: MPSDataTypeInt32];
+        MPSGraphTensor* rangeTensor = [mpsGraph coordinateAlongAxis: (-i - 1)
+                                                    withShapeTensor: shapeTensor
+                                                               name: nil];
+        MPSGraphTensor* indexTensor = [mpsGraph multiplicationWithPrimaryTensor: rangeTensor
+                                                                secondaryTensor: strideTensor
+                                                                           name: nil];
+        indicesTensor = [mpsGraph additionWithPrimaryTensor: indexTensor
+                                            secondaryTensor: indicesTensor
+                                                       name: nil];
       }
-      indicesTensor = [mpsGraph additionWithPrimaryTensor : indicesTensor
-                                            secondaryTensor : storageOffsetTensor
-                                                  name : nil];
-      MPSGraphTensor *reshapedInputTensor = [mpsGraph reshapeTensor:inputTensor
-                                                         withShape:@[@-1]
-                                                              name:nil];
-      MPSGraphTensor *reshapedIndicesTensor = [mpsGraph reshapeTensor:indicesTensor
-                                                 withShape:@[@-1]
-                                                      name:nil];
-      // Call gather to coalesce the needed values. Result will be of same shape as flattened indices tensor
-      MPSGraphTensor *gatheredTensor = [mpsGraph gatherWithUpdatesTensor:reshapedInputTensor
-                                                        indicesTensor:reshapedIndicesTensor
-                                                                 axis:0
-                                                      batchDimensions:0
-                                                                 name:nil];
-
-      delete[] sizeArray;
-      // Reshape the data to desired size
-      outputTensor =  [mpsGraph reshapeTensor:gatheredTensor
-                               withShapeTensor:shapeTensor
-                                          name:nil];
+      indicesTensor = [mpsGraph additionWithPrimaryTensor: indicesTensor
+                                          secondaryTensor: storageOffsetTensor
+                                                     name: nil];
+      MPSGraphTensor *reshapedInputTensor = [mpsGraph reshapeTensor: inputTensor
+                                                          withShape: @[@-1]
+                                                               name: nil];
+      MPSGraphTensor *reshapedIndicesTensor = [mpsGraph reshapeTensor: indicesTensor
+                                                            withShape: @[@-1]
+                                                                 name: nil];
+      if (viewOpType == GatherScatterViewOpType::Scatter) {
+        updatesTensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, mps::getMPSDataType(self.scalar_type()));
+        MPSGraphTensor* scatteredTensor = [mpsGraph scatterAlongAxis: 0
+                                                      withDataTensor: reshapedInputTensor
+                                                       updatesTensor: updatesTensor
+                                                       indicesTensor: reshapedIndicesTensor
+                                                                mode: MPSGraphScatterModeSet
+                                                                name: nil];
+        outputTensor = [mpsGraph reshapeTensor: scatteredTensor
+                                     withShape: parentShape
+                                          name: nil];
+      } else {
+        MPSGraphTensor* gatheredTensor = [mpsGraph gatherWithUpdatesTensor: reshapedInputTensor
+                                                             indicesTensor: reshapedIndicesTensor
+                                                                      axis: 0
+                                                           batchDimensions: 0
+                                                                      name: nil];
+        outputTensor = [mpsGraph reshapeTensor: gatheredTensor
+                               withShapeTensor: shapeTensor
+                                          name: nil];
+      }
   }
   return outputTensor;
 }
 
+
+void createCachedGraph(
+  const Tensor& self,
+  IntArrayRef size,
+  IntArrayRef stride,
+  int64_t storage_offset,
+  mps::GatherScatterViewOpType viewOpType) {
+  using namespace mps;
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+    MPSGraphTensor* scatteredTensor_ = nil;
+    MPSGraphTensor* updatesTensor_ = nil;
+  };
+
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  @autoreleasepool {
+    string key = mps::getStridedKey(self, size, stride, storage_offset, viewOpType);
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+    if (!cachedGraph) {
+      MPSGraphTensor *parentInputTensor = nil;
+
+      // Get parent's shape if this is a chained view
+      // Scatter will have the same hierarchy of views as gather
+      string lookup_key_parent = mps::getStridedKey(self, self.sizes(), self.strides(),
+              self.storage_offset(), mps::GatherScatterViewOpType::Gather);
+
+      CachedGraph* parentCachedGraph = static_cast<CachedGraph *>(cache_->LookUp(lookup_key_parent));
+        if (parentCachedGraph) {
+          parentInputTensor = parentCachedGraph->inputTensor_;
+        }
+
+      cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        CachedGraph *newCachedGraph = nil;
+        @autoreleasepool {
+            MPSShape *shape = nil;
+            MPSGraph* mpsGraph = make_mps_graph();
+            newCachedGraph = new CachedGraph(mpsGraph);
+
+            // All chained view operations should use the shape of the first contiguous tensor from which the view was created
+            if (parentInputTensor)
+              shape = [parentInputTensor shape];
+            else
+              shape = getMPSShape(self);
+
+            // Self is the input tensor we are creating view of
+            MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : shape
+                                                                dataType : getMPSDataType(self.scalar_type())
+                                                                    name : nil];
+            newCachedGraph->inputTensor_ = inputTensor;
+            newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size, stride,
+                                                                storage_offset, inputTensor, self,
+                                                                newCachedGraph->updatesTensor_, viewOpType,
+                                                                viewOpType == GatherScatterViewOpType::Scatter ? shape : nil);
+        }
+        return newCachedGraph;
+      }, self.storage().data());
+    }
+  }
+}
 
 // There are few cases we need to consider:
 // Here nodes are the Tensors and the edges are the operations performed on the
@@ -98,8 +182,6 @@ MPSGraphTensor* chainViewOperation(MPSGraph* mpsGraph, IntArrayRef size,
 //            |    /          \   |
 //            |   /            \  |
 //            NonView T         NonView T
-//
-//
 Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
                                  IntArrayRef stride,
                                  optional<int64_t> storage_offset_) {
@@ -113,72 +195,11 @@ Tensor as_strided_tensorimpl_mps(const Tensor& self, IntArrayRef size,
   // 0 sizes won't result in any change in the shape of the Tensor so we can
   // skip it. Also if the memory is contiguous we don't need to do
   // gather-scatter operations using graph.
-  if (size.size() > 0 && (!result.is_contiguous())) {
-
+  if (size.size() > 0) {
     // If self itself was a view tensor, that means we need to chain the graphs
     // else we will create a new entry in the cache
-    struct CachedGraph : public MPSCachedGraph
-    {
-      CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
-      MPSGraphTensor* inputTensor_ = nil;
-      MPSGraphTensor* outputTensor_ = nil;
-      IntArrayRef size_;
-      IntArrayRef stride_;
-      int64_t storage_offset_;
-    };
-
-    MPSGraphCache* cache_ = MPSGraphCache::getInstance();
-
-    @autoreleasepool {
-      string lookup_key = mps::getStridedKey(self, self.sizes(), self.strides(),
-                      self.storage_offset());
-#if _DEBUG
-      std::cout << "Lookup key " << lookup_key << std::endl;
-#endif
-      CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(lookup_key));
-
-      if(!cachedGraph) {
-        string insert_key = mps::getStridedKey(self,size, stride, storage_offset);
-#if _DEBUG
-        std::cout << "Insert key " << insert_key << std::endl;
-#endif
-        CachedGraph* insertCachedGraph = static_cast<CachedGraph *>(cache_->LookUp(insert_key));
-        if (!insertCachedGraph) {
-          MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(insert_key, ^ MPSCachedGraph * () {
-            CachedGraph *newCachedGraph = nil;
-            @autoreleasepool {
-                MPSGraph* mpsGraph = make_mps_graph();
-                newCachedGraph = new CachedGraph(mpsGraph);
-
-                // Self is the input tensor we are creating view of
-                MPSGraphTensor* inputTensor = [mpsGraph placeholderWithShape : getMPSShape(self)
-                                                                    dataType : getMPSDataType(self.scalar_type())
-                                                                    name : nil];
-                newCachedGraph->inputTensor_ = inputTensor;
-                newCachedGraph->outputTensor_ = chainViewOperation(mpsGraph, size,
-                                                                   stride,
-                                                                   storage_offset,
-                                                                   inputTensor,
-                                                                   self);
-                newCachedGraph->size_ = size;
-                newCachedGraph->stride_ = stride;
-                newCachedGraph->storage_offset_ = storage_offset;
-            }
-            return newCachedGraph;
-          });
-          cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
-        }
-      } else {
-        // Else part takes care of the chaining where multiple view operations
-        // were implemented on the same underlying data storage ptr
-        cachedGraph->outputTensor_ = chainViewOperation(cachedGraph->graph(),
-                                      size, stride, storage_offset,
-                                      cachedGraph->outputTensor_, self);
-        cachedGraph->size_ = size;
-        cachedGraph->stride_ = stride;
-        cachedGraph->storage_offset_ = storage_offset;
-      }
-    }
+    // Create a gather cached graph if there is none already in the cache
+    createCachedGraph(self, size, stride, storage_offset, GatherScatterViewOpType::Gather);
   }
   return result;
 }
@@ -201,30 +222,110 @@ void* pageAlignedBlockPtr(
   return (void*)alignedAddress;
 }
 
-static at::Tensor& copy_from_mps_(at::Tensor& self, const at::Tensor& src,
+static bool copy_requires_temporaries(const Tensor& dst, const Tensor& src) {
+  bool same_dtype = src.dtype() == dst.dtype();
+  if (same_dtype && src.is_contiguous() && dst.is_contiguous()) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
+// Copy sourceBuffer into destBuffer, casting sourceBuffer to src.scalar_type().
+// The shapes and dtypes are taken from dst and src, but their storage pointers are not used.
+void copy_cast_mps(at::Tensor& dst, const at::Tensor& src,
+                   id<MTLBuffer> destBuffer, id<MTLBuffer> sourceBuffer) {
+  using namespace mps;
+
+  struct CachedGraph : public MPSCachedGraph
+  {
+    CachedGraph(MPSGraph *graph) : MPSCachedGraph(graph) {}
+    MPSGraphTensor* inputTensor_ = nil;
+    MPSGraphTensor* outputTensor_ = nil;
+  };
+
+  MPSStream* stream = getCurrentMPSStream();
+  MPSGraphCache* cache_ = MPSGraphCache::getInstance();
+
+  MPSDataType dstDType = getMPSDataType(dst.scalar_type());
+  MPSDataType srcDType = getMPSDataType(src.scalar_type());
+  MPSShape* dstShape = getMPSShape(dst);
+  MPSShape* srcShape = getMPSShape(src);
+
+  @autoreleasepool {
+    string key = "copy_cast_mps" + getTensorsStringKey({src, dst});
+    CachedGraph* cachedGraph = static_cast<CachedGraph *>(cache_->LookUp(key));
+
+    if (!cachedGraph) {
+      MPSCachedGraph *tmpCachedGraph = cache_->CreateCachedGraph(key, ^ MPSCachedGraph * () {
+        CachedGraph *newCachedGraph = nil;
+        @autoreleasepool {
+          MPSGraph* mpsGraph = make_mps_graph();
+          newCachedGraph = new CachedGraph(mpsGraph);
+
+          MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
+          MPSGraphTensor* outputTensor = [mpsGraph castTensor:inputTensor toType:dstDType name:@"cast"];
+
+          newCachedGraph->inputTensor_ = inputTensor;
+          newCachedGraph->outputTensor_ = outputTensor;
+        }
+        return newCachedGraph;
+      });
+      cachedGraph = static_cast<CachedGraph *>(tmpCachedGraph);
+    }
+    MPSGraphTensorData* srcData = [[[MPSGraphTensorData alloc]
+                                    initWithMTLBuffer:sourceBuffer shape:srcShape dataType:srcDType]
+                                   autorelease];
+    MPSGraphTensorData* dstData = [[[MPSGraphTensorData alloc]
+                                    initWithMTLBuffer:destBuffer shape:dstShape dataType:dstDType]
+                                   autorelease];
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_: srcData};
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{cachedGraph->outputTensor_: dstData};
+    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+  }
+}
+
+static at::Tensor& copy_from_mps_(at::Tensor& dst_, const at::Tensor& src_,
                            bool non_blocking) {
 
   using namespace mps;
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* stream = getCurrentMPSStream();
-  uint64_t size = src.nbytes();
-  if (size == 0) return self;
-  void* host_dst = self.data_ptr();
+  uint64_t size = src_.nbytes();
+  if (size == 0) return dst_;
+  Tensor dst;
+  Tensor src;
+  if (!dst_.is_contiguous()) {
+    dst = at::empty_like(dst_, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  } else {
+    dst = dst_;
+  }
 
-  // MTLContext* context = static_cast<MTLContext *>(device->device_handle);
-  auto storage_byte_offset = src.storage_offset() * src.itemsize();
-  id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
-
-  if (!src.is_contiguous()) {
-    id<MTLBuffer> gatherTensor = gatherViewTensor(src, sourceBuffer);
+  auto storage_byte_offset = src_.storage_offset() * src_.itemsize();
+  id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
+  if (!src_.is_contiguous()) {
+    id<MTLBuffer> gatherTensor = gatherViewTensor(src_, sourceBuffer);
     if (gatherTensor) {
       sourceBuffer = gatherTensor;
       storage_byte_offset = 0;
+    } else {
+      src = src_.expand_as(dst).contiguous();
+      sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
+      storage_byte_offset = src.storage_offset() * src.itemsize();
     }
+  } else {
+    src = src_;
   }
 
-  if (sourceBuffer == nil) return self;
-  NSUInteger destOffset = 0;
+  void* host_dst = dst.storage().data();
+
+  if (sourceBuffer == nil) return dst_;
+  NSUInteger destOffset = dst.storage_offset() * dst.itemsize();
+
+  // In case of dtype change, first convert src inplace
+  if (src_.dtype() != dst_.dtype()) {
+    copy_cast_mps(dst_, src_, sourceBuffer, sourceBuffer);
+  }
 
   @autoreleasepool {
     MTLResourceOptions options = MTLResourceOptionCPUCacheModeDefault | MTLResourceStorageModeShared;
@@ -261,19 +362,36 @@ static at::Tensor& copy_from_mps_(at::Tensor& self, const at::Tensor& src,
       }
     });
   }
+  if (!dst.is_same(dst_)) {
+    dst_.copy_(dst, non_blocking);
+  }
 
-  return self;
+  return dst_;
 }
 
-static at::Tensor& copy_to_mps_(at::Tensor& self, const at::Tensor& src,
+static at::Tensor& copy_to_mps_(at::Tensor& dst_, const at::Tensor& src_,
                          bool non_blocking) {
   MPSStream* stream = getCurrentMPSStream();
-  const void* host_src = src.data_ptr();
-  uint64_t size = src.nbytes();
+  Tensor dst;
+  Tensor src;
 
   id<MTLDevice> device = MPSDevice::getInstance()->device();
-  auto dst_byte_offset = self.storage_offset() * self.itemsize();
-  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, self.storage().data());
+  auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
+  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst_.storage().data());
+
+
+  if (src_.is_view()) {
+    src = src_.to(dst_.dtype()).expand_as(dst_).contiguous();
+  } else {
+    src = src_;
+    if (src.dtype() != dst_.dtype()) {
+      // In case of dtype change, perform conversion on source device
+      src = src.to(dst_.dtype());
+    }
+  }
+
+  const void* host_src = src.storage().data();
+  uint64_t size = src.nbytes();
 
   NSUInteger sourceOffset = 0;
   @autoreleasepool {
@@ -286,6 +404,8 @@ static at::Tensor& copy_to_mps_(at::Tensor& self, const at::Tensor& src,
                                          options:options
                                      deallocator:nil];
     sourceOffset = uintptr_t(host_src) - uintptr_t(alignedPtr);
+    if (src_.is_view() || !src_.is_contiguous())
+      sourceOffset += src_.storage_offset() * src_.itemsize();
 
     dispatch_sync(stream->queue(), ^() {
       @autoreleasepool {
@@ -309,7 +429,7 @@ static at::Tensor& copy_to_mps_(at::Tensor& self, const at::Tensor& src,
     [sourceBuffer release];
   }
 
-  return self;
+  return dst_;
 }
 
 void copy_blit_mps(void* dst, const void* src, size_t size) {
@@ -334,36 +454,63 @@ void copy_blit_mps(void* dst, const void* src, size_t size) {
 }
 
 
-static at::Tensor& copy_kernel_mps(at::Tensor& dst, const at::Tensor& src,
+static at::Tensor& copy_kernel_mps(at::Tensor& dst_, const at::Tensor& src_,
                             bool non_blocking) {
-  MPSStream* stream = getCurrentMPSStream();
-  uint64_t size = src.nbytes();
+  uint64_t size = src_.nbytes();
+  auto src_byte_offset = src_.storage_offset() * src_.itemsize();
+  id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src_.storage().data());
+  Tensor src;
+  if (!src_.is_contiguous()) {
+    id<MTLBuffer> gatherTensor = gatherViewTensor(src_, sourceBuffer);
+    if (gatherTensor) {
+      sourceBuffer = gatherTensor;
+      src_byte_offset = 0;
+    } else {
+      src = src_.expand_as(dst_).contiguous();
+      sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
+      src_byte_offset = src.storage_offset() * src.itemsize();
+    }
+  } else {
+    src = src_;
+  }
 
-  auto src_byte_offset = src.storage_offset() * src.itemsize();
-  id<MTLBuffer> sourceBuffer = __builtin_bit_cast(id<MTLBuffer>, src.storage().data());
+  // Scatter to `dst` if the memory is not contiguous
+  // If the memory is not contiguous, it means that the tensor has strides and we would not be
+  // able to do the copy using a single blit
+  if (!dst_.is_contiguous()) {
+    // Create a scatter cached graph if there is none already in the cache
+    createCachedGraph(dst_, dst_.sizes(), dst_.strides(), dst_.storage_offset(), mps::GatherScatterViewOpType::Scatter);
+    id<MTLBuffer> scatterTensor = scatterViewTensor(dst_, src_, sourceBuffer);
+    if (scatterTensor) {
+      return dst_;
+    }
+  }
 
-  auto dst_byte_offset = dst.storage_offset() * dst.itemsize();
-  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst.storage().data());
+  src._set_conj(src_.is_conj());
+  src._set_neg(src_.is_neg());
 
-  dispatch_sync(stream->queue(), ^() {
-    @autoreleasepool {
-      id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
-      id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
+  auto dst_byte_offset = dst_.storage_offset() * dst_.itemsize();
+  id<MTLBuffer> destBuffer = __builtin_bit_cast(id<MTLBuffer>, dst_.storage().data());
 
-      [blitEncoder copyFromBuffer:sourceBuffer
-                     sourceOffset:src_byte_offset
-                         toBuffer:destBuffer
-                destinationOffset:dst_byte_offset
-                             size:size];
-      [blitEncoder endEncoding];
-      if (non_blocking) {
-        stream->commit(true);
-      } else {
+  if (src.dtype() == dst_.dtype()) {
+    MPSStream* stream = getCurrentMPSStream();
+    dispatch_sync(stream->queue(), ^() {
+      @autoreleasepool {
+        id<MTLCommandBuffer> commandBuffer = stream->commandBuffer();
+        id<MTLBlitCommandEncoder> blitEncoder = [commandBuffer blitCommandEncoder];
+        [blitEncoder copyFromBuffer:sourceBuffer
+                      sourceOffset:src_byte_offset
+                          toBuffer:destBuffer
+                 destinationOffset:dst_byte_offset
+                              size:size];
+        [blitEncoder endEncoding];
         stream->commitAndWait();
       }
-    }
-  });
-  return dst;
+    });
+  } else {
+    copy_cast_mps(dst_, src_, destBuffer, sourceBuffer);
+  }
+  return dst_;
 }
 
 at::Tensor& mps_copy_(at::Tensor& dst, const at::Tensor& src, bool non_blocking)
