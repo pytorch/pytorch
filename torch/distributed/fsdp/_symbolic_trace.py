@@ -1,6 +1,6 @@
 import contextlib
 import functools
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 
 import torch
@@ -13,24 +13,27 @@ __all__ = ["TracingConfig"]
 class TracingConfig:
     """
     Configurations used in ``ParamExecOrderWrapPolicy`` for symbolic tracing of a model.
-    tracer: An instance of ``torch.fx.Tracer`` that will be used to perform symbolic
-        tracing. ``tracer`` is default to be ``torch.fx.Tracer()``, but can also be instance
-        of some child class of ``torch.fx.Tracer``. For example, one may want to use ``HFTracer``
-        for models in Transformers:
-        .. _Transformers: https://huggingface.co/docs/transformers/index
 
-    concrete_args: Concrete arguments that should not be treated as ``torch.fx.Proxy``
-        when tracing the forward function.
-        ``concrete_args`` allows one to partially specialize the forward function,
-        including removing control flow or data structures.
-        ``concrete_args`` is also the parameter used in ``tracer.trace()``:
-        https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.trace
+    Args:
+        tracer (torch.fx.Tracer): An instance of ``torch.fx.Tracer`` that will be used to perform symbolic
+            tracing. ``tracer`` is default to be ``torch.fx.Tracer()``, but can also be instance
+            of some child class of ``torch.fx.Tracer``. For example, one may want to use ``HFTracer``
+            for models in Transformers:
+            .. _Transformers: https://huggingface.co/docs/transformers/index
+
+        concrete_args (Optional[Dict[str, Any]]): Concrete arguments that should not be treated
+            as ``torch.fx.Proxy`` when tracing the forward function.
+            ``concrete_args`` allows one to partially specialize the forward function,
+            including removing control flow or data structures.
+            ``concrete_args`` is also the parameter used in ``tracer.trace()``:
+            https://pytorch.org/docs/stable/fx.html#torch.fx.Tracer.trace
     """
 
     tracer: torch.fx.Tracer = torch.fx.Tracer()
     concrete_args: Optional[Dict[str, Any]] = None
 
 
+@dataclass
 class _ExecutionInfo:
     """
     Contains the execution order information in the model forward pass.
@@ -53,18 +56,29 @@ class _ExecutionInfo:
             The list of tuple is ordered based on the parameter execution order.
     """
 
-    def __init__(self, root_module: torch.nn.Module) -> None:
-        self.current_module = root_module
-        self.module_forward_order: List[torch.nn.Module] = [root_module]
+    current_module: Optional[torch.nn.Module] = None
+    module_forward_order: List[torch.nn.Module] = field(default_factory=list)
+    module_execution_info_dict: Dict[
+        torch.nn.Module,
+        List[Tuple[torch.nn.Module, List[Tuple[str, torch.nn.Parameter]]]],
+    ] = field(default_factory=dict)
+    param_exec_order: List[torch.nn.Parameter] = field(default_factory=list)
+    _traced_param_set: Set[torch.nn.Parameter] = field(default_factory=set)
 
-        named_params_type = List[Tuple[str, torch.nn.Parameter]]
-        self.module_execution_info_dict: Dict[
-            torch.nn.Module, List[Tuple[torch.nn.Module, named_params_type]]
-        ] = dict()
-        self.module_execution_info_dict[root_module] = []
 
-        self.param_exec_order: List[torch.nn.Parameter] = []
-        self._traced_param_set: Set[torch.nn.Parameter] = set()
+def _init_execution_info(root_module: torch.nn.Module) -> _ExecutionInfo:
+    """
+    Create an instace of _ExecutionInfo with initialization based on ``root_module``.
+
+    Args:
+        root_module (torch.nn.Module): the module to get the execution information
+            via ``tracer.trace()`` inside ``_patch_tracer``.
+    """
+    exec_info = _ExecutionInfo()
+    exec_info.current_module = root_module
+    exec_info.module_forward_order = [root_module]
+    exec_info.module_execution_info_dict[root_module] = []
+    return exec_info
 
 
 def _patched_create_proxy(
@@ -175,8 +189,15 @@ def _patch_tracer(
     ``tracer.trace()``, the forward order of all modules and the parameter
     execution information are recorded. The patches of the input tracer
     will be removed after the context manager exits.
-    ``root_module`` is the top-level module to be traced and should not contain
-    any FSDP modules.
+
+    Args:
+        tracer (torch.fx.Tracer): the input ``tracer`` whose member functions
+            will be patched within the context manager.
+        root_module (torch.nn.Module): the top-level module to be traced
+            and should not contain any FSDP modules.
+        execution_info (_ExecutionInfo): used to record the execution order information
+            when performing ``tracer.trace()`` within the context manager.
+
     """
     from .fully_sharded_data_parallel import FullyShardedDataParallel
 

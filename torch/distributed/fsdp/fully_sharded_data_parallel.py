@@ -58,7 +58,7 @@ from ._optim_utils import (
     _rekey_sharded_optim_state_dict,
     _unflatten_optim_state,
 )
-from ._symbolic_trace import _ExecutionInfo, _patch_tracer, TracingConfig
+from ._symbolic_trace import _init_execution_info, _patch_tracer, TracingConfig
 from ._utils import (
     _apply_to_modules,
     _apply_to_tensors,
@@ -657,7 +657,6 @@ class FullyShardedDataParallel(nn.Module):
                 param_init_fn=param_init_fn,
                 device_id=device_id,
                 sync_module_states=sync_module_states,
-                forward_prefetch=forward_prefetch,
             )
             return
 
@@ -942,7 +941,7 @@ class FullyShardedDataParallel(nn.Module):
             TracingConfig
         ):
             tracer = auto_wrap_policy.tracing_config.tracer
-            execution_info = _ExecutionInfo(module)
+            execution_info = _init_execution_info(module)
             with _patch_tracer(
                 tracer=tracer,
                 root_module=module,
@@ -976,7 +975,9 @@ class FullyShardedDataParallel(nn.Module):
                         self._fsdp_params_exec_order.append(flat_param)
             self._param_exec_order_prep_stage = False
         else:
-            assert auto_wrap_policy.tracing_config is None
+            assert (
+                auto_wrap_policy.tracing_config is None
+            ), "tracing_config should either be an instance of TracingConfig or be None"
 
         for m in self.modules():
             if m is not self and isinstance(m, FullyShardedDataParallel):
