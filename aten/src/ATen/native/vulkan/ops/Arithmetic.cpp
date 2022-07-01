@@ -85,6 +85,8 @@ Tensor arithmetic_scalar(
           other_val,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -104,7 +106,7 @@ Tensor arithmetic_scalar(
           v_self.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -145,6 +147,8 @@ Tensor& arithmetic_scalar_(
           other_val,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -162,7 +166,7 @@ Tensor& arithmetic_scalar_(
               vTensor::Access::Read | vTensor::Access::Write),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -289,6 +293,8 @@ Tensor& arithmetic_tensor_(
           alpha,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -310,7 +316,7 @@ Tensor& arithmetic_tensor_(
           v_other.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }

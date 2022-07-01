@@ -390,6 +390,8 @@ void conv2d_transpose_sliding_window(
 
     uvec3 global_size = v_output.extents();
 
+    api::UniformParamsBuffer params(context, block);
+
     context->dispatch(
         command_buffer,
         {
@@ -425,7 +427,7 @@ void conv2d_transpose_sliding_window(
             vTensor::Stage::Compute),
         // Object lifetime is managed by the resource pool.
         // It is OK not to keep track of the handle.
-        context->resource().pool.uniform(block).object);
+        params.buffer().package());
   }
   command_pool.submit(context->gpu().queue, command_buffer);
 }

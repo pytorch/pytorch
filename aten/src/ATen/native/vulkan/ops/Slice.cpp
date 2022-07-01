@@ -52,6 +52,8 @@ Tensor slice_4d(const Tensor& input, const int64_t dim, const int64_t start, con
           safe_downcast<uint32_t>(step) },
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -72,7 +74,7 @@ Tensor slice_4d(const Tensor& input, const int64_t dim, const int64_t start, con
           src_image,
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     }
     else {
       TORCH_CHECK(false, "Not implemented!");

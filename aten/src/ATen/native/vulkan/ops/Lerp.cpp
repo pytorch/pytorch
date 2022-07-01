@@ -87,6 +87,8 @@ Tensor _lerp_scalar(
           weight,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -110,7 +112,7 @@ Tensor _lerp_scalar(
           v_end.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -157,6 +159,8 @@ Tensor& _lerp_scalar_(
           weight,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -178,7 +182,7 @@ Tensor& _lerp_scalar_(
           v_end.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -238,6 +242,8 @@ Tensor _lerp_tensor(
           0u,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -265,7 +271,7 @@ Tensor _lerp_tensor(
           v_weight.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
@@ -319,6 +325,8 @@ Tensor& _lerp_tensor_(
           0u,
       };
 
+      api::UniformParamsBuffer params(context, block);
+
       context->dispatch(
           command_buffer,
           {
@@ -344,7 +352,7 @@ Tensor& _lerp_tensor_(
           v_weight.image(command_buffer, vTensor::Stage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
-          context->resource().pool.uniform(block).object);
+          params.buffer().package());
     } else {
       TORCH_CHECK(false, "Not implemented!");
     }
