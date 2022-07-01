@@ -16,6 +16,11 @@ inline int64_t normalize(
   return (dimension % n + n) % n;
 }
 
+void pack_staging_to_vtensor(api::VulkanBuffer&, vTensor&);
+
+void pack_vtensor_to_staging(
+    vTensor&, api::VulkanBuffer&, const VkFence fence);
+
 } // namespace utils
 } // namespace ops
 } // namespace vulkan

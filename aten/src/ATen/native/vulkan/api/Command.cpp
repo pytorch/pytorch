@@ -219,6 +219,47 @@ void Command::Buffer::copy(
       &buffer_copy);
 }
 
+void Command::Buffer::copy_image(
+  const api::VulkanImage& source,
+  const api::VulkanImage& destination,
+  const api::utils::uvec3& src_offset,
+  const api::utils::uvec3& dst_offset,
+  const api::utils::uvec3& copy_range) {
+
+  barrier();
+
+  const VkImageSubresourceLayers src_subresource_layers{
+    VK_IMAGE_ASPECT_COLOR_BIT,  // aspectMask
+    0u,  // mipLevel
+    0u,  // baseArrayLayer
+    1u,  // layerCount
+  };
+
+  const VkImageSubresourceLayers dst_subresource_layers{
+    VK_IMAGE_ASPECT_COLOR_BIT,  // aspectMask
+    0u,  // mipLevel
+    0u,  // baseArrayLayer
+    1u,  // layerCount
+  };
+
+  const VkImageCopy copy_details{
+    src_subresource_layers,  // srcSubresource
+    create_offset3d(src_offset),  // srcOffset
+    dst_subresource_layers,  // dstSubresource
+    create_offset3d(dst_offset),  // dstOffset
+    create_extent3d(copy_range),  // extent
+  };
+
+  vkCmdCopyImage(
+      command_buffer_,
+      source.handle(),
+      source.layout(),
+      destination.handle(),
+      destination.layout(),
+      1u,
+      &copy_details);
+}
+
 void Command::Buffer::dispatch(
     const utils::uvec3& global_work_group) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
