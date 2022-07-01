@@ -6519,9 +6519,8 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
         with self.assertRaisesRegex(RuntimeError, r'must have at least 2 dimensions'):
             torch.linalg.slogdet(a)
 
-        # slogdet requires the input to be of float, double, cfloat or cdouble types
         a = torch.randn(2, 2, device=device, dtype=torch.bfloat16)
-        with self.assertRaisesRegex(RuntimeError, r'of float, double, cfloat or cdouble types'):
+        with self.assertRaisesRegex(RuntimeError, r'Low precision dtypes not supported'):
             torch.linalg.slogdet(a)
 
         # if non-empty out tensor with wrong shape is passed a warning is given
@@ -6535,16 +6534,6 @@ scipy_lobpcg  | {:10.2e}  | {:10.2e}  | {:6} | N/A
             # Check warning occurs
             self.assertEqual(len(w), 1)
             self.assertTrue("An output with one or more elements was resized" in str(w[-1].message))
-
-        # dtypes should be safely castable
-        sign_out = torch.empty_like(a).to(torch.int)
-        logabsdet_out = torch.empty_like(a).to(torch.int)
-        with self.assertRaisesRegex(RuntimeError, "but got sign with dtype Int"):
-            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
-
-        sign_out = torch.empty(0, device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "but got logabsdet with dtype Int"):
-            torch.linalg.slogdet(a, out=(sign_out, logabsdet_out))
 
         # device should match
         if torch.cuda.is_available():
