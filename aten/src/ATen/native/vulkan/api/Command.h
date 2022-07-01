@@ -42,7 +42,9 @@ struct Command final {
         VkPipelineLayout pipeline_layout,
         utils::uvec3 local_work_group);
     void bind(const Descriptor::Set& set);
-    void copy(Resource::Buffer::Object source, Resource::Buffer::Object destination);
+    void copy(
+        const api::VulkanBuffer::Package source,
+        const api::VulkanBuffer::Package destination);
     void dispatch(const utils::uvec3& global_work_group);
 
    private:
