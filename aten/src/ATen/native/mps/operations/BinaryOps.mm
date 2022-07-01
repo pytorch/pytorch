@@ -37,6 +37,11 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
   const bool is_other_scalar = other.dim() == 0;
   bool needsScatterOrNotContig = false;
 
+  auto new_size = at::infer_size(self.sizes(), other.sizes());
+  if (!output_.sizes().equals(new_size)) {
+      output_.resize_(new_size);
+  }
+
   Tensor output;
   if (!output_.is_contiguous()) {
     output = output_.contiguous();
@@ -60,14 +65,9 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
     }
   }
 
-  auto new_size = at::infer_size(self.sizes(), other.sizes());
-  if (!output.sizes().equals(new_size)) {
-      output.resize_(new_size);
-  }
-
   MPSGraphCache* cache_ = MPSGraphCache::getInstance();
   @autoreleasepool {
-    string key = op_name + getTensorsStringKey({self, other, output}, /*use_scalar_value*/ false);
+    string key = op_name + getTensorsStringKey({self, other, output_}, /*use_scalar_value*/ false);
     BinaryOpCachedGraph* cachedGraph = static_cast<BinaryOpCachedGraph *>(cache_->LookUp(key));
 
     if(!cachedGraph) {
@@ -93,8 +93,8 @@ void binaryOpTensor(const Tensor& self, const Tensor& other, const Scalar& alpha
           newCachedGraph->outputTensor = binaryBlock(newCachedGraph, primaryCastTensor, secondaryCastTensor);
           // Cast output tensor to an expected type if needed, which addresses discrepancy when int64 scalar is added to int32 tensor
           // Output tensor should have been promoted but it remains an int32 tensor
-          if (output.scalar_type() != common_dtype) {
-            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, output.scalar_type());
+          if (output_.scalar_type() != common_dtype) {
+            newCachedGraph->outputTensor = castMPSTensor(mpsGraph, newCachedGraph->outputTensor, output_.scalar_type());
           }
         }
         return newCachedGraph;
