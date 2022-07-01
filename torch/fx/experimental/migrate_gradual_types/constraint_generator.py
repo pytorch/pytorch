@@ -175,7 +175,7 @@ def cumsum_inference_rule(n: Node, symbols, constraints, counter):
 @register_inference_rule(_assert_is_none)
 def assert_inference_rule(n: Node, symbols, constraints, counter):
     assert len(n.users) == 0
-    raise NotImplementedError('Not yet implemented')
+    return [], counter
 
 
 @register_inference_rule(operator.getitem)
