@@ -79,18 +79,43 @@ def cudagraphs(model, inputs):
     # model here is compiled FX graph, so it should be reasonably efficient
     return model
 
+def aot_autograd_cudagraphs(model, inputs):
+    from functorch.compile import default_decompositions
+    from functorch.compile import min_cut_rematerialization_partition
+    from functorch.compile import ts_compile
+
+    kwargs = {
+        # these are taken from memory_efficient_fusion()
+        "fw_compiler": cudagraphs,
+        "bw_compiler": cudagraphs,
+        "partition_fn": min_cut_rematerialization_partition,
+        "hasher_type": "StaticShapeHasher",
+        "decompositions": default_decompositions,
+    }
+
+    def _wrapped_bw_compiler(*args, **kwargs):
+        # stop TorchDynamo from trying to compile our generated backwards pass
+        return torchdynamo.disable(bw_compiler(*args, **kwargs))
+
+    bw_compiler = kwargs.get("bw_compiler") or kwargs["fw_compiler"]
+    kwargs["bw_compiler"] = _wrapped_bw_compiler
+
+    from functorch.compile import aot_module_simplified
+
+    return aot_module_simplified(model, **kwargs)
+
 
 class TestDynamoCudaGraphs(TestCase):
     def test_basic(self):
         def model(x, y):
             return (x + y) * y
 
-        results = []
-        with torchdynamo.optimize(cudagraphs):
+        with torchdynamo.optimize(aot_autograd_cudagraphs):
             for i in range(5):
-                x = torch.randn(3, device='cuda')
+                x = torch.randn(3, device='cuda', requires_grad=True)
                 y = torch.randn(3, device='cuda')
-                results.append(model(x, y))
+                loss = model(x, y).sum()
+                loss.backward()
 
     def test_dtoh(self):
         def model(x, y):
@@ -98,24 +123,24 @@ class TestDynamoCudaGraphs(TestCase):
             b = a.cpu() * 3
             return b
 
-        results = []
-        with torchdynamo.optimize(cudagraphs):
+        with torchdynamo.optimize(aot_autograd_cudagraphs):
             for i in range(5):
-                x = torch.randn(3, device='cuda')
+                x = torch.randn(3, device='cuda', requires_grad=True)
                 y = torch.randn(3, device='cuda')
-                results.append(model(x, y))
+                loss = model(x, y).sum()
+                loss.backward()
 
     def test_htod(self):
         def model(x, y):
             a = x + y
             return a * 3
 
-        results = []
-        with torchdynamo.optimize(cudagraphs):
+        with torchdynamo.optimize(aot_autograd_cudagraphs):
             for i in range(5):
-                x = torch.randn(3, device='cuda')
+                x = torch.randn(3, device='cuda', requires_grad=True)
                 y = torch.randn((), device='cpu')
-                results.append(model(x, y))
+                loss = model(x, y).sum()
+                loss.backward()
 
 if __name__ == "__main__":
     run_tests()
