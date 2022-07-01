@@ -416,6 +416,24 @@ std::shared_ptr<MaxInfoSpanningTree::Information> MaxRootDomainInfoSpanningTree:
   return from_info;
 }
 
+void SpanningTreePrinter::propagateTvPasC(TensorView* from, TensorView* to) {
+  stream_ << "propagateTvPasC" << std::endl;
+  stream_ << "  from: " << from->toString() << std::endl;
+  stream_ << "  to: " << to->toString() << std::endl;
+}
+
+void SpanningTreePrinter::propagateTvCasP(TensorView* from, TensorView* to) {
+  stream_ << "propagateTvCasP" << std::endl;
+  stream_ << "  from: " << from->toString() << std::endl;
+  stream_ << "  to: " << to->toString() << std::endl;
+}
+
+void SpanningTreePrinter::propagateTvSibling(TensorView* from, TensorView* to) {
+  stream_ << "propagateTvSibling" << std::endl;
+  stream_ << "  from: " << from->toString() << std::endl;
+  stream_ << "  to: " << to->toString() << std::endl;
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

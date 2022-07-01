@@ -232,6 +232,17 @@ class TORCH_CUDA_CU_API MaxRootDomainInfoSpanningTree
             selector) {}
 };
 
+class TORCH_CUDA_CU_API SpanningTreePrinter
+    : public MaxInfoSpanningTree::Propagator {
+  std::ostream& stream_;
+
+ public:
+  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
+  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
+  virtual void propagateTvSibling(TensorView* from, TensorView* to) override;
+  SpanningTreePrinter(std::ostream& stream = std::cout) : stream_(stream) {}
+};
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit
