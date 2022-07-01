@@ -17,7 +17,7 @@ from contextlib import contextmanager, nullcontext
 
 from torch.utils._python_dispatch import TorchDispatchMode
 
-__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict"]
+__all__ = ["ProxyTensor", "PythonKeyTracer", "dispatch_trace", "make_fx", "enable_strict", "DecompositionInterpreter"]
 aten = torch.ops.aten
 
 CURRENT_DECOMPOSITION_TABLE: Dict[torch._ops.OpOverload, Callable] = {}
@@ -224,6 +224,38 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
 
             return wrap_output(inner_res, proxy_res)
 
+
+class DecompositionInterpreter(torch.fx.Interpreter):
+    def __init__(self, module: torch.fx.GraphModule, new_graph: torch.fx.Graph, decomposition_table=None, **kwargs):
+        super().__init__(module, **kwargs)
+        self.new_graph = new_graph
+        self.tracer = torch.fx.proxy.GraphAppendingTracer(self.new_graph)
+        self.decomposition_table = decomposition_table
+        if self.decomposition_table is None:
+            self.decomposition_table = {}
+
+    def placeholder(self, target, args, kwargs):
+        out = super().placeholder(target, args, kwargs)
+        # TODO handle case where the first character of target is '*'
+        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.placeholder(target), self.tracer))
+
+    def get_attr(self, target, args, kwargs):
+        out = super().get_attr(target, args, kwargs)
+        return ProxyTensor(out, torch.fx.Proxy(self.new_graph.get_attr(target), self.tracer))
+
+    # call_function, call_method, call_module get traced automatically by the ProxyTensors.
+
+    def output(self, target, args, kwargs):
+        out = super().output(target, args, kwargs)
+
+        def unwrap(e):
+            return e.proxy.node if isinstance(e, ProxyTensor) else e
+        self.new_graph.output(pytree.tree_map(unwrap, out))
+        return out
+
+    def run(self, *args, **kwargs):
+        with decompose(self.decomposition_table):
+            return super().run(*args, **kwargs)
 
 def make_fx(f, decomposition_table=None, trace_factory_functions=True, use_fake=False):
     if decomposition_table is None:
