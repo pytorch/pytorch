@@ -45,6 +45,7 @@ class Runtime final {
   ~Runtime();
 
   using DeviceMapping = std::pair<PhysicalDevice, int32_t>;
+  using AdapterPtr = std::unique_ptr<Adapter>;
 
  private:
   RuntimeConfiguration config_;
@@ -52,7 +53,7 @@ class Runtime final {
   VkInstance instance_;
 
   std::vector<DeviceMapping> device_mappings_;
-  std::vector<Adapter> adapters_;
+  std::vector<AdapterPtr> adapters_;
   uint32_t default_adapter_i_;
 
   VkDebugReportCallbackEXT debug_report_callback_;
@@ -66,28 +67,14 @@ class Runtime final {
     TORCH_CHECK(
         default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
         "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
-    return &adapters_[default_adapter_i_];
-  }
-
-  inline Adapter& get_adapter() {
-    TORCH_CHECK(
-        default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
-        "Pytorch Vulkan Runtime: Default device adapter is not set correctly!");
-    return adapters_[default_adapter_i_];
+    return adapters_[default_adapter_i_].get();
   }
 
   inline Adapter* get_adapter_p(uint32_t i) {
     TORCH_CHECK(
         i >= 0 && i < adapters_.size(),
         "Pytorch Vulkan Runtime: Adapter at index ", i, " is not available!");
-    return &adapters_[i];
-  }
-
-  inline Adapter& get_adapter(uint32_t i) {
-    TORCH_CHECK(
-        default_adapter_i_ >= 0 && default_adapter_i_ < adapters_.size(),
-        "Pytorch Vulkan Runtime: Adapter at index ", i, " is not available!");
-    return adapters_[i];
+    return adapters_[i].get();
   }
 
   inline uint32_t default_adapter_i() const {
