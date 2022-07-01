@@ -419,17 +419,10 @@ vTensor::vTensor(
     }) {
 }
 
-const vTensor* vTensor::host(
-    api::Command::Buffer& command_buffer) const {
-  view_->staging(command_buffer, Stage::Host, Access::Read);
-  return this;
-}
-
-vTensor* vTensor::host(
+api::VulkanBuffer& vTensor::host_buffer(
     api::Command::Buffer& command_buffer,
-    const Access::Flags access) {
-  view_->staging(command_buffer, Stage::Host, access);
-  return this;
+    const Access::Flags access) & {
+  return view_->staging(command_buffer, Stage::Host, access);
 }
 
 api::VulkanBuffer::Package vTensor::buffer(
@@ -493,7 +486,6 @@ vTensor::View::View(
   : buffer_{},
     image_{},
     staging_{},
-    staging_memory_{},
     fence_{},
     // Context
     context_(context),
@@ -1098,17 +1090,10 @@ api::VulkanFence& vTensor::View::fence(const Access::Flags access) const {
   return fence_;
 }
 
-vTensor::Memory& vTensor::View::wait() const {
+void vTensor::View::wait_for_fence() const {
   if (fence_) {
     fence_.wait();
   }
-
-  staging_memory_ = {
-    staging().vma_allocator(),
-    staging().allocation(),
-  };
-
-  return staging_memory_;
 }
 
 void vTensor::View::verify() const {

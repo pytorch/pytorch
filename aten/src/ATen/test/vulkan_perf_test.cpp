@@ -80,11 +80,6 @@ static void gru_op_perf(benchmark::State& state) {
 
     auto vulkan_output = std::get<0>(out_vulkan);
     auto vulkan_hidden = std::get<1>(out_vulkan);
-
-    // to avoid out-of-memory issues, release resources by waiting and flushing all GPU operations
-    at::native::vulkan::api::context()->wait(vulkan_output);
-    at::native::vulkan::api::context()->wait(vulkan_hidden);
-    at::native::vulkan::api::context()->flush();
   }
 }
 

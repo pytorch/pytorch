@@ -43,11 +43,12 @@ vTensor pack_weights(
       weight.options(),
   };
 
-  using Future = vTensor::Future<float, vTensor::Access::Write>;
-  Future v_weight_future = v_weight.host<float, vTensor::Access::Write>(command_buffer);
-  Future::Payload v_weight_payload = v_weight_future.wait();
+  api::MemoryMap mapping(
+      v_weight.host_buffer(command_buffer, vTensor::Access::Write),
+      api::MemoryAccessType::WRITE);
 
-  float* const dst_weight_ptr = v_weight_payload.get();
+  float* dst_weight_ptr = mapping.template data<float>();
+
   memset(dst_weight_ptr, 0, v_weight.nbytes());
 
   for (const auto src_h : c10::irange(src_kh_sz)) {
@@ -74,7 +75,6 @@ vTensor pack_biases(
   api::Context* const context = api::context();
   api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
-  using Future = vTensor::Future<float, vTensor::Access::Write>;
   if (bias_arg) {
     const Tensor bias = bias_arg->contiguous();
     const IntArrayRef b_sizes = bias.sizes();
@@ -106,10 +106,12 @@ vTensor pack_biases(
         bias_arg->options(),
     };
 
-    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
-    Future::Payload v_bias_payload = v_bias_future.wait();
+    api::MemoryMap mapping(
+        v_bias.host_buffer(command_buffer, vTensor::Access::Write),
+        api::MemoryAccessType::WRITE);
 
-    float* const dst_bias_ptr = v_bias_payload.get();
+    float* dst_bias_ptr = mapping.template data<float>();
+
     memset(dst_bias_ptr, 0, v_bias.nbytes());
 
     for (const auto src_h : c10::irange(src_kh_sz)) {
@@ -131,10 +133,15 @@ vTensor pack_biases(
         {1},
         weight_arg.options(),
     };
-    Future v_bias_future = v_bias.host<float, vTensor::Access::Write>(command_buffer);
-    Future::Payload v_bias_payload = v_bias_future.wait();
+
+    api::MemoryMap mapping(
+        v_bias.host_buffer(command_buffer, vTensor::Access::Write),
+        api::MemoryAccessType::WRITE);
+
+    float* data_ptr = mapping.template data<float>();
+
     memset(
-        v_bias_payload.get(),
+        data_ptr,
         // 2's complement integers and IEEE-754 floating point numbers both
         // have identical bit representations for 0, so can use memset which
         // only accepts uint8_t parameter.
