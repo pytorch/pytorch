@@ -20,7 +20,7 @@ Context::Context(
       queue_(adapter_p_->request_queue()),
       // Resource pools
       command_pool_(device_, queue_.family_index, config_.cmdPoolConfig),
-      descriptor_(gpu()),
+      descriptor_pool_(device_, config_.descriptorPoolConfig),
       fences_(device_),
       querypool_(
         device_,
@@ -63,7 +63,8 @@ DescriptorSet Context::submit_compute_prologue(
   command_buffer.bind_pipeline(
       pipeline, pipeline_layout, local_workgroup_size);
 
-  return descriptor().pool.allocate(shader_layout, shader_layout_signature);
+  return descriptor_pool().get_descriptor_set(
+      shader_layout, shader_layout_signature);
 }
 
 void Context::submit_compute_epilogue(
@@ -127,7 +128,7 @@ void Context::flush() {
   VK_CHECK(vkQueueWaitIdle(queue()));
 
   command_pool_.flush();
-  descriptor().pool.purge();
+  descriptor_pool_.flush();
 
   std::lock_guard<std::mutex> bufferlist_lock(buffer_clearlist_mutex_);
   std::lock_guard<std::mutex> imagelist_lock(image_clearlist_mutex_);
@@ -142,12 +143,24 @@ bool available() {
 Context* context() {
   static const std::unique_ptr<Context> context([]() -> Context* {
     try {
+      const CommandPoolConfig cmd_config{
+        32u,  // cmdPoolInitialSize
+        8u,  // cmdPoolBatchSize
+      };
+
+      const DescriptorPoolConfig descriptor_pool_config{
+        1024u,  // descriptorPoolMaxSets
+        1024u,  // descriptorUniformBufferCount
+        1024u,  // descriptorStorageBufferCount
+        1024u,  // descriptorCombinedSamplerCount
+        1024u,  // descriptorStorageImageCount
+        32u,  // descriptorPileSizes
+      };
+
       const ContextConfig config{
         16u,  // cmdSubmitFrequency
-        {  // cmdPoolConfig
-          32u,  // cmdPoolInitialSize
-          8u,  // cmdPoolBatchSize
-        },
+        cmd_config,  // cmdPoolConfig
+        descriptor_pool_config,  // descriptorPoolConfig
       };
       return new Context(
           runtime()->instance(), runtime()->default_adapter_i(), config);
