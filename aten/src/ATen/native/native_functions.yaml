@@ -13789,8 +13789,7 @@
   autogen: _foobar.out
 
 # Fused Optimizer CUDA kernels.
-# Ideally, I'd like to call params, not self, but this is a hard limitation of codegen of native kernels.
-- func: _fused_adam_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, Scalar lr, Scalar beta1, Scalar beta2, Scalar weight_decay, Scalar eps, bool amsgrad, bool maximize, bool capturable) -> ()
+- func: _fused_adam_(Tensor(a!)[] self, Tensor(b!)[] grads, Tensor(c!)[] exp_avgs, Tensor(d!)[] exp_avg_sqs, Tensor(e!)[] max_exp_avg_sqs, Tensor[] state_steps, *, float lr, float beta1, float beta2, float weight_decay, float eps, bool amsgrad, bool maximize, bool capturable, Tensor? inv_grad_scale=None, Tensor? found_inf=None) -> ()
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:

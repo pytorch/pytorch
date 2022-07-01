@@ -20,7 +20,9 @@ struct FusedAdamMathFunctor {
     const float beta2,
     const float weight_decay,
     const float eps,
-    const bool maximize
+    const bool maximize,
+    const float* inv_grad_scale_ptr,
+    const float* found_inf_ptr
   ) {
     int tensor_loc = tl.block_to_tensor[blockIdx.x];
     int chunk_idx = tl.block_to_chunk[blockIdx.x];
@@ -50,14 +52,16 @@ void _fused_adam_kernel_cuda_(
     at::TensorList exp_avg_sqs,
     at::TensorList max_exp_avg_sqs,
     at::TensorList state_steps,
-    const float lr,
-    const float beta1,
-    const float beta2,
-    const float weight_decay,
-    const float eps,
+    const double lr,
+    const double beta1,
+    const double beta2,
+    const double weight_decay,
+    const double eps,
     const bool amsgrad,
     const bool maximize,
-    const bool capturable
+    const bool capturable,
+    const c10::optional<at::Tensor>& inv_grad_scale,
+    const c10::optional<at::Tensor>& found_inf
 ) {
 
 }
