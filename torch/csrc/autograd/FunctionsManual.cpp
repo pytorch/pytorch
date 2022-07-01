@@ -4121,8 +4121,8 @@ Tensor linalg_det_backward(
         LU_, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
     //// If we want to compute higher-order gradients, we need to recompute the
-    ///LU / decomposition so that autograd computes the correct gradients wrt to
-    ///A / (cf. solve_backward)
+    /// LU / decomposition so that autograd computes the correct gradients wrt
+    /// to A / (cf. solve_backward)
     // auto non_singular =
     //    [](const Tensor& A, const Tensor& d, const Tensor& /*grad*/) {
     //      return at::linalg_solve(A.mH(), d);
