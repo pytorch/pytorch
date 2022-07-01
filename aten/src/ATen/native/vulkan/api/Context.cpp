@@ -18,6 +18,7 @@ Context::Context(const VkInstance instance, size_t adapter_i)
       command_(gpu()),
       descriptor_(gpu()),
       resource_(gpu()),
+      fences_(device_),
       querypool_(
         device_,
         adapter_p_->timestamp_compute_and_graphics(),

@@ -100,7 +100,7 @@ struct Command final {
     void submit(
         VkQueue queue,
         c10::ArrayRef<const Buffer> buffers,
-        Resource::Fence fence = {});
+        const VkFence fence = VK_NULL_HANDLE);
 
    private:
     void invalidate();

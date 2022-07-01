@@ -48,6 +48,7 @@ class Context final {
   Command command_;
   Descriptor descriptor_;
   Resource resource_;
+  FencePool fences_;
   QueryPool querypool_;
   // Memory Management
   std::vector<VulkanBuffer> buffers_to_clear_;
@@ -102,6 +103,10 @@ class Context final {
 
   inline Resource& resource() {
     return resource_;
+  }
+
+  inline FencePool& fences() {
+    return fences_;
   }
 
   inline QueryPool& querypool() {

@@ -345,7 +345,7 @@ class vTensor final {
     api::VulkanImage& image(CMD&, Stage::Flags, Access::Flags) const;
     api::VulkanBuffer& staging() const;
     api::VulkanBuffer& staging(CMD&, Stage::Flags, Access::Flags) const;
-    Fence& fence(Access::Flags) const;
+    api::VulkanFence& fence(Access::Flags) const;
 
     // Validation
     void verify() const;
@@ -356,7 +356,7 @@ class vTensor final {
     mutable api::VulkanImage image_;
     mutable api::VulkanBuffer staging_;
     mutable Memory staging_memory_;
-    mutable Fence fence_;
+    mutable api::VulkanFence fence_;
 
     // Context
     api::Context* context_;
