@@ -2423,7 +2423,7 @@ std::tuple<Tensor, Tensor> eig_kernel_impl(const Tensor& self, bool& eigenvector
                      ? at::empty_strided({n, n}, {1, n}, options)
                      : Tensor();
 
-  auto infos = at::zeros({}, self.options().dtype(kInt));
+  auto infos = at::zeros({}, self_working_copy.options().dtype(kInt));
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(self.scalar_type(), "eig_cuda", [&]{
     apply_eig<scalar_t>(self_working_copy, eigenvectors, out_eigvals, out_eigvecs, infos.data_ptr<int>());
   });
