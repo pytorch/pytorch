@@ -234,10 +234,11 @@ class StagingBuffer final {
   Context* context_p_;
   VulkanBuffer vulkan_buffer_;
  public:
-  StagingBuffer(Context* context_p, const VkDeviceSize size)
+  StagingBuffer(
+      Context* context_p, const VkDeviceSize size, const bool gpuonly = false)
     : context_p_(context_p),
       vulkan_buffer_(
-          context_p_->adapter_ptr()->vma().create_storage_buffer(size, false)) {
+          context_p_->adapter_ptr()->vma().create_storage_buffer(size, gpuonly)) {
   }
 
   StagingBuffer(const StagingBuffer&) = delete;
