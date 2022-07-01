@@ -2547,7 +2547,7 @@ def _svd_meta(
     S = TensorMeta(
         shape=shape_S,
         strides=strides_S,
-        dtype=utils.corresponding_real_dtype(A.dtype),
+        dtype=utils.corresponding_real_dtype(A.dtype) if A.is_complex() else A.dtype,
         device=A.device,
     )
 
