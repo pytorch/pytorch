@@ -824,7 +824,7 @@ def addmm(self: Tensor, mat1: Tensor, mat2: Tensor, beta: int = 1, alpha: int = 
 
 
 # This computes the mean and variance along the specifized normalization dims,
-# then normalizes along those dims. Finally, it returns the mean and variance of
+# then normalizes along those dims. outputly, it returns the mean and variance of
 # the normalized dims. Note that it intentionally leaves outputs upcasted.
 # Example:
 # input: [2, 3, 4, 5], norm_dims: [1, 3]
@@ -1165,51 +1165,86 @@ def cudnn_batch_norm_backward(
 
 @register_decomposition(aten.upsample_bilinear2d.vec)
 def upsample_bilinear2d_vec(
-    input: Tensor,
-    output_size: Optional(List(int)),
-    align_corners: bool,
-    scale_factors: Optional(List(float))
-    ) -> Tensor:
+    input,
+    output_size,
+    align_corners,
+    scale_factors):
 
-    newImage = []
-
-	# Need to figure out how to get these values still
-    originalWidth = 10
-    originalHeight = 10
+    inputShape = input.shape
     
-    finalWidth = 10
-    finalHeight = 10
+    inputHeight = inputShape[2]
+    inputWidth = inputShape[3]
+
+    outputHeight = inputHeight
+    outputWidth = inputWidth
 
 	# Start with getting image width/height
-    
     if (output_size is not None):
-        finalWidth = output_size[0]
-        finalHeight = output_size[1]
+        outputHeight = output_size[0]
+        outputWidth = output_size[1]
     elif (scale_factors is not None):
-        finalWidth = input[0] * scale_factors[0]
-        finalHeight = input[1] * scale_factors[1]
+        outputHeight *= scale_factors[0]
+        outputWidth *= scale_factors[1]
     
-    for i in range(finalWidth):
-        for j in range(finalHeight):
-            OrigX = i / float(finalWidth) * originalWidth
-            OrigY = j / float(finalHeight) * originalHeight
-            
-            OrigIntX = int(OrigX)
-            OrigIntY = int(OrigY)
-            
-            c00 = OrigIntY * (originalWidth + 1) + OrigIntX
-            c10 = OrigIntY * (originalWidth + 1) + OrigIntX + 1
-            c01 = (OrigIntY + 1) * (originalWidth + 1) + OrigIntX
-            c11 = (OrigIntY + 1) * (originalWidth + 1) + OrigIntX + 1
-
-            positionX = OrigX - OrigIntX
-            positionY = OrigY - OrigIntY
-
-            a = c00 * (1 - positionX) + c10 * positionX
-            b = c01 * (1 - positionX) + c11 * positionX
-            newImage.append(a * (1 - positionY) + b * positionY)
+    output = torch.empty((inputShape[0], inputShape[1], int(outputHeight), int(outputWidth)), dtype=input.dtype)
     
-    return newImage
+    for b in range(inputShape[0]):
+        for c in range(inputShape[1]):
+            for i in range(int(outputHeight)):
+                for j in range(int(outputWidth)):
+                    edge_x = False
+                    edge_y = False
+                    corner_case = False
+
+                    OrigY = (i / float(outputHeight - 1)) * (inputHeight - 1)
+                    OrigX = (j / float(outputWidth - 1)) * (inputWidth - 1)
+
+                    OrigIntX = int(OrigX)
+                    OrigIntY = int(OrigY)
+                    
+                    if i == 0 or i == outputHeight - 1:
+                        edge_y = True
+                    
+                    if j == 0 or j == outputWidth - 1:
+                        edge_x = True
+
+                    if (edge_x and edge_y): corner_case = True
+
+                    
+
+                    print (" X ", OrigX, " Y ", OrigY, " EdgeX ", edge_x, " EdgeY ", edge_y)
+
+                    c00 = input[b, c, OrigIntY, OrigIntX]
+
+                    if (edge_x):
+                        c10 = input[b, c, OrigIntY, OrigIntX]
+                    else:
+                        c10 = input[b, c, OrigIntY, OrigIntX + 1]
+
+                    if (edge_y):
+                        c01 = input[b, c, OrigIntY, OrigIntX]
+                    else:
+                        c01 = input[b, c, (OrigIntY + 1), OrigIntX]
+
+                    if (corner_case):
+                        c11 = input[b, c, (OrigIntY), OrigIntX]
+                    else:
+                        if (edge_x):
+                            c11 = input[b, c, OrigIntY + 1, OrigIntX]
+                        elif (edge_y):
+                            c11 = input[b, c, OrigIntY, OrigIntX + 1]
+                        else:
+                            c11 = input[b, c, OrigIntY + 1, OrigIntX + 1]
+                    
+                    positionX = OrigX - OrigIntX
+                    positionY = OrigY - OrigIntY
+                    
+                    aa = c00 * (1 - positionX) + c10 * positionX
+                    bb = c01 * (1 - positionX) + c11 * positionX
+                    output[b, c, i, j] = aa * (1 - positionY) + bb * positionY
+                    #
+    
+    return output
 
 
 @register_decomposition(aten.transpose.int)
