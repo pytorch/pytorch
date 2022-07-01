@@ -420,6 +420,39 @@ void vTensorStorage::transition(
   last_access_.access = cur_access;
 }
 
+void add_buffer_barrier(
+    api::PipelineBarrier& pipeline_barrier,
+    const api::VulkanBuffer& buffer,
+    const api::PipelineStageFlags prev_stage,
+    const api::MemoryAccessFlags prev_access,
+    const api::PipelineStageFlags cur_stage,
+    const api::MemoryAccessFlags cur_access) {
+  // Check for RAW
+  const bool read_requested = (cur_access & api::MemoryAccessType::READ) != 0;
+  const bool prev_written = (prev_access & api::MemoryAccessType::WRITE) != 0;
+
+  const bool is_RAW = read_requested && prev_written;
+
+  if (is_RAW) {
+    VkPipelineStageFlags src_stage = vk_stage(prev_stage);
+    if (0u == src_stage) {
+      src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    }
+    VkPipelineStageFlags dst_stage = vk_stage(cur_stage);
+    if (0u == dst_stage) {
+      dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    }
+
+    pipeline_barrier.stage.src |= src_stage;
+    pipeline_barrier.stage.dst |= dst_stage;
+
+    pipeline_barrier.buffers.push_back(api::BufferMemoryBarrier(
+        vk_access(prev_stage, prev_access),
+        vk_access(cur_stage, cur_access),
+        buffer));
+  }
+}
+
 void verify(const TensorOptions& options) {
   TORCH_CHECK(
       !options.has_requires_grad() || !options.requires_grad(),

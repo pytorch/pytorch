@@ -7,7 +7,10 @@ namespace vulkan {
 namespace ops {
 namespace utils{
 
-void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
+void pack_buffer_to_vtensor(
+    api::VulkanBuffer& buffer,
+    vTensor& v_self,
+    api::PipelineBarrier& pipeline_barrier) {
   api::Context* const context = api::context();
 
   const api::utils::uvec3 extents = v_self.extents();
@@ -29,7 +32,6 @@ void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
   };
 
   api::UniformParamsBuffer params(context, block);
-  api::PipelineBarrier pipeline_barrier{};
 
   context->submit_compute_job(
       // shader layout signature
@@ -53,9 +55,14 @@ void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
           pipeline_barrier,
           api::PipelineStage::Compute,
           api::MemoryAccessType::WRITE),
-      staging,
+      buffer,
       // params buffer
       params.buffer());
+}
+
+void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
+  api::PipelineBarrier pipeline_barrier{};
+  pack_buffer_to_vtensor(staging, v_self, pipeline_barrier);
 }
 
 void pack_vtensor_to_staging(

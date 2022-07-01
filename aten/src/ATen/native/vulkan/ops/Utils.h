@@ -16,6 +16,9 @@ inline int64_t normalize(
   return (dimension % n + n) % n;
 }
 
+void pack_buffer_to_vtensor(
+    api::VulkanBuffer&, vTensor&, api::PipelineBarrier&);
+
 void pack_staging_to_vtensor(api::VulkanBuffer&, vTensor&);
 
 void pack_vtensor_to_staging(

@@ -1660,10 +1660,10 @@ TEST_F(VulkanAPITest, reshape) {
   }
   c10::InferenceMode mode;
 
-  const auto in_cpu = at::rand({47, 11, 83, 97}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto in_cpu = at::rand({7, 11, 8, 9}, at::device(at::kCPU).dtype(at::kFloat));
   const auto in_vulkan = in_cpu.vulkan();
 
-  const std::array<int64_t, 2> shape{47 * 83, 11 * 97};
+  const std::array<int64_t, 2> shape{7 * 8, 11 * 9};
 
   const auto out_cpu = at::reshape(in_cpu, shape);
   const auto out_vulkan = at::reshape(in_vulkan, shape);
@@ -1682,10 +1682,10 @@ TEST_F(VulkanAPITest, reshape_) {
   }
   c10::InferenceMode mode;
 
-  const auto cpu = at::rand({59, 41, 19, 67}, at::device(at::kCPU).dtype(at::kFloat));
+  const auto cpu = at::rand({9, 4, 12, 6}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
 
-  const std::array<int64_t, 3> shape{59, 41 * 67, 19};
+  const std::array<int64_t, 3> shape{9, 4 * 6, 12};
 
   cpu.reshape(shape);
   vulkan.reshape(shape);
