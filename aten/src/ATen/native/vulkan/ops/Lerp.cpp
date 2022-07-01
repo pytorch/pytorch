@@ -103,7 +103,7 @@ Tensor _lerp_scalar(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_start.image(command_buffer, vTensor::Stage::Compute),
@@ -176,7 +176,7 @@ Tensor& _lerp_scalar_(
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
+              api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_end.image(command_buffer, vTensor::Stage::Compute),
@@ -259,7 +259,7 @@ Tensor _lerp_tensor(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_start.image(command_buffer, vTensor::Stage::Compute),
@@ -343,7 +343,7 @@ Tensor& _lerp_tensor_(
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
+              api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_end.image(command_buffer, vTensor::Stage::Compute),

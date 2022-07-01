@@ -20,7 +20,7 @@ Tensor permute_4d(const Tensor& input, const uvec4& in_size, const uvec4& out_si
     auto dst_image = v_output.image(
       command_buffer,
       vTensor::Stage::Compute,
-      vTensor::Access::Read | vTensor::Access::Write);
+      api::MemoryAccessType::READ | api::MemoryAccessType::WRITE);
 
     const Tensor self = input.is_vulkan() ? input : input.vulkan();
     const vTensor& v_self = convert(self);

@@ -67,7 +67,7 @@ Tensor _clamp(
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(
@@ -146,7 +146,7 @@ Tensor& _clamp_(
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
+              api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           params.buffer().package());
@@ -220,7 +220,7 @@ Tensor activation(
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(
@@ -281,7 +281,7 @@ Tensor& activation_(
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
+              api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           params.buffer().package());
@@ -382,7 +382,7 @@ Tensor activation_scalar(
           v_output.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Write),
+              api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(
@@ -446,7 +446,7 @@ Tensor& activation_scalar_(
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
+              api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           params.buffer().package());

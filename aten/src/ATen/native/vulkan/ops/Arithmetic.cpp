@@ -100,7 +100,7 @@ Tensor arithmetic_scalar(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(command_buffer, vTensor::Stage::Compute),
@@ -163,7 +163,7 @@ Tensor& arithmetic_scalar_(
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
+              api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           params.buffer().package());
@@ -236,7 +236,7 @@ Tensor arithmetic_tensor(
           // Write-only access bypasses synchronization but inserts appropriate
           // barriers if necessary.
           v_output.image(
-              command_buffer, vTensor::Stage::Compute, vTensor::Access::Write),
+              command_buffer, vTensor::Stage::Compute, api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(command_buffer, vTensor::Stage::Compute),
@@ -310,7 +310,7 @@ Tensor& arithmetic_tensor_(
           v_self.image(
               command_buffer,
               vTensor::Stage::Compute,
-              vTensor::Access::Read | vTensor::Access::Write),
+              api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_other.image(command_buffer, vTensor::Stage::Compute),

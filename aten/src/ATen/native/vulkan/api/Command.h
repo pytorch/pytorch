@@ -73,8 +73,8 @@ struct Command final {
         operator bool() const;
       } stage;
 
-      c10::SmallVector<Resource::Buffer::Barrier, 4u> buffers;
-      c10::SmallVector<Resource::Image::Barrier, 4u> images;
+      c10::SmallVector<api::BufferMemoryBarrier, 4u> buffer_barriers;
+      c10::SmallVector<api::ImageMemoryBarrier, 4u> image_barriers;
 
       void reset();
     } barriers_;

@@ -37,7 +37,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
               v_self.buffer(
                   command_buffer,
                   vTensor::Stage::Transfer,
-                  vTensor::Access::Write));
+                  api::MemoryAccessType::WRITE));
         }
         command_pool.submit(context->gpu().queue, command_buffer);
       }
@@ -48,7 +48,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
 
         {
           api::MemoryMap mapping(
-              v_self.host_buffer(command_buffer, vTensor::Access::Write),
+              v_self.host_buffer(command_buffer, api::MemoryAccessType::WRITE),
               api::MemoryAccessType::WRITE);
 
           float* data_ptr = mapping.template data<float>();
@@ -69,7 +69,7 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
       if (self.device().is_cpu()) {
         {
           api::MemoryMap mapping(
-            v_src.host_buffer(command_buffer, vTensor::Access::Read),
+            v_src.host_buffer(command_buffer, api::MemoryAccessType::READ),
             api::MemoryAccessType::READ);
 
           v_src.wait_for_fence();

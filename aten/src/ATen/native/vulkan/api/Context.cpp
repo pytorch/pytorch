@@ -17,7 +17,6 @@ Context::Context(const VkInstance instance, size_t adapter_i)
       queue_(adapter_p_->request_queue()),
       command_(gpu()),
       descriptor_(gpu()),
-      resource_(gpu()),
       fences_(device_),
       querypool_(
         device_,
@@ -34,7 +33,6 @@ Context::~Context() {
 void Context::flush() {
   VK_CHECK(vkQueueWaitIdle(queue()));
 
-  resource().pool.purge();
   descriptor().pool.purge();
   command().pool.purge();
 

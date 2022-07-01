@@ -29,7 +29,7 @@ Tensor slice_4d(const Tensor& input, const int64_t dim, const int64_t start, con
       auto dst_image = v_output.image(
         command_buffer,
         vTensor::Stage::Compute,
-        vTensor::Access::Write);
+        api::MemoryAccessType::WRITE);
 
       const struct Block final {
         uvec3 size;                // output texture size
@@ -100,7 +100,7 @@ Tensor slice_width(const Tensor& input, const int64_t start, const int64_t end, 
       auto dst_image = v_output.image(
         command_buffer,
         vTensor::Stage::Transfer,
-        vTensor::Access::Write);
+        api::MemoryAccessType::WRITE);
 
       uvec3 src_offset{};
       uvec3 dst_offset{};
@@ -160,7 +160,7 @@ Tensor slice_height(const Tensor& input, const int64_t start, const int64_t end,
       auto dst_image = v_output.image(
         command_buffer,
         vTensor::Stage::Transfer,
-        vTensor::Access::Write);
+        api::MemoryAccessType::WRITE);
 
       uvec3 src_offset{};
       uvec3 dst_offset{};
