@@ -16,7 +16,6 @@
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/mobile/parse_bytecode.h>
 #include <torch/csrc/jit/mobile/parse_operators.h>
-#include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/serialization/export.h>
 #include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
@@ -175,7 +174,7 @@ TEST(FlatbufferTest, MethodInvocation) { // NOLINT (use =delete in gtest)
   }
 }
 
-#if defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+#if !defined(FB_XPLAT_BUILD)
 TEST(FlatbufferTest, FlatbufferBackPortTest) {
   Module m("m");
   m.define(R"(
@@ -189,7 +188,7 @@ TEST(FlatbufferTest, FlatbufferBackPortTest) {
   bool backPortSuccess = _backport_for_mobile(ss, oss, 5);
   ASSERT_TRUE(backPortSuccess);
 }
-#endif // defined(ENABLE_FLATBUFFER) && !defined(FB_XPLAT_BUILD)
+#endif // !defined(FB_XPLAT_BUILD)
 
 TEST(FlatbufferTest, ExtraFiles) {
   const auto script = R"JIT(
@@ -208,7 +207,6 @@ TEST(FlatbufferTest, ExtraFiles) {
   extra_files["mobile_info.json"] = "{\"key\": 23}";
 
   std::unordered_map<std::string, std::string> loaded_extra_files;
-#if defined ENABLE_FLATBUFFER
   std::stringstream ss;
   module->_save_for_mobile(ss, extra_files, true, /*use_flatbuffer=*/true);
 
@@ -220,17 +218,6 @@ TEST(FlatbufferTest, ExtraFiles) {
 
   // load it twice using the same stream
   auto mobile_module2 = _load_for_mobile(ss, c10::nullopt, loaded_extra_files);
-#else
-  CompilationOptions options;
-  mobile::Module bc = jitModuleToMobile(*module, options);
-  auto buff = save_mobile_module_to_bytes(bc, extra_files);
-
-  loaded_extra_files["metadata.json"] = "";
-  auto* flatbuffer_module =
-      mobile::serialization::GetMutableModule(buff.data());
-
-  parseExtraFiles(flatbuffer_module, loaded_extra_files);
-#endif
 
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
@@ -838,7 +825,6 @@ TEST(FlatbufferTest, DuplicateSetState) {
 
   auto buff = save_mobile_module_to_bytes(bc);
   mobile::Module bc2 = parse_mobile_module(buff.data(), buff.size());
-  ASSERT_TRUE(torch::jit::is_upgraders_map_populated());
   const auto methods2 = bc.get_methods();
   ASSERT_EQ(methods2.size(), expected_n);
 }
@@ -1285,7 +1271,6 @@ Module jitModuleFromBuffer(void* data) {
       mobilem._ivalue(), files, constants, 8);
 }
 
-#if defined(ENABLE_FLATBUFFER)
 TEST(TestSourceFlatbuffer, UpsampleNearest2d) {
   Module m("m");
   m.define(R"(
@@ -1377,7 +1362,6 @@ TEST(TestSourceFlatbuffer,
     AT_ASSERT(resd == refd);
   }
 }
-#endif
 
 #if !defined FB_XPLAT_BUILD
 // The following test run in fbcode only

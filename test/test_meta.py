@@ -5,8 +5,8 @@ import os
 from enum import Enum
 from torch.overrides import resolve_name
 from torch.utils._pytree import tree_map, tree_flatten
+from torch._subclasses.meta_utils import MetaConverter
 import torch.utils._python_dispatch
-from torch._prims.utils import is_complex_dtype, corresponding_real_dtype
 from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
@@ -19,7 +19,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
 )
-from torch.utils._mode_utils import no_dispatch
 from torch.testing._internal.common_methods_invocations import op_db
 from torchgen.utils import YamlLoader
 from torchgen.model import OperatorName
@@ -31,6 +30,8 @@ import re
 from collections import defaultdict
 import unittest
 import warnings
+import weakref
+
 
 bf16 = torch.bfloat16
 f64 = torch.float64
@@ -61,143 +62,6 @@ dtype_abbrs = {
     torch.bool: 'b8',
     torch.uint8: 'u8',
 }
-
-def safe_is_leaf(t):
-    try:
-        return t.is_leaf
-    except RuntimeError:
-        # inference mode can trigger this
-        return False
-
-
-# This is a class for converting multiple tensors into meta tensors which
-# share the same view/storage structure.  The operation model is you allocate
-# one of these, and then call it repeatedly on all the tensors you want to
-# convert.  It's important to use the same object for tensors you want to
-# share storage because this is how we correlate shared storages to the same
-# meta storages; similarly, it's important NOT to use the same object for
-# unrelated groups of tensors because this class will remember all the
-# tensors/storages its seen and therefore leak memory.
-class MetaConverter:
-    def __init__(self):
-        self.storage_memo = {}
-        self.tensor_memo = {}
-        self.hit = 0
-        self.miss = 0
-
-    def successful(self):
-        return self.hit > 0 and self.miss == 0
-
-    # NB: doesn't actually return a storage, because meta storage is
-    # not supported
-    def meta_storage(self, s):
-        # NB: TypedStorage is freshly allocated and cannot be used as hash
-        # key index.
-        if s._cdata not in self.storage_memo:
-            self.storage_memo[s._cdata] = torch.empty(s.size(), dtype=s.dtype, device='meta')
-        return self.storage_memo[s._cdata]
-
-    # This function assumes that it's possible to do the conversion
-    def meta_tensor(self, t):
-        if t not in self.tensor_memo:
-            with torch.inference_mode(t.is_inference()):
-                if t._is_view():
-                    # Construct views in two steps: recursively meta-fy their
-                    # base, and then create the view off that.  NB: doing it
-                    # directly from storage is WRONG because this won't cause
-                    # version counters to get shared.
-                    assert t._is_view()
-                    base = self.meta_tensor(t._base)
-
-                    def is_c_of_r(complex_dtype, real_dtype):
-                        return is_complex_dtype(complex_dtype) and \
-                            corresponding_real_dtype(complex_dtype) == real_dtype
-
-                    if base.dtype == t.dtype:
-                        pass
-                    elif is_c_of_r(base.dtype, t.dtype):
-                        base = torch.view_as_real(base)
-                    elif is_c_of_r(t.dtype, base.dtype):
-                        base = torch.view_as_complex(base)
-                    else:
-                        # This is not guaranteed to succeed.  If it fails, it
-                        # means there is another dtype-converting view function
-                        # that hasn't been handled here
-                        base = base.view(t.dtype)
-
-                    with torch.enable_grad():
-                        r = base.as_strided(t.size(), t.stride(), t.storage_offset())
-                else:
-                    is_leaf = safe_is_leaf(t)
-                    # Fake up some autograd history.
-                    if t.requires_grad:
-                        r = torch.empty((0,), dtype=t.dtype, device='meta', requires_grad=True)
-                        if not is_leaf:
-                            with torch.enable_grad():
-                                # The backward function here will be wrong, but
-                                # that's OK; our goal is just to get the metadata
-                                # looking as close as possible; we're not going to
-                                # actually try to backward() on these produced
-                                # metas.  TODO: would be safer to install some
-                                # sort of unsupported grad_fn here
-                                r = r.clone()
-                    else:
-                        r = torch.empty((0,), dtype=t.dtype, device='meta')
-                    # As long as meta storage is not supported, need to prevent
-                    # redispatching on set_(Storage, ...) which will choke with
-                    # meta storage
-                    s = self.meta_storage(t.storage())
-                    with no_dispatch():
-                        with torch.no_grad():
-                            r.set_(s, t.storage_offset(), t.size(), t.stride())
-
-                torch._C._set_conj(r, t.is_conj())
-                torch._C._set_neg(r, t.is_neg())
-            self.tensor_memo[t] = r
-
-        return self.tensor_memo[t]
-
-    def __call__(self, t):
-        # TODO: zero tensors?  We appear to have eliminated them by
-        # excluding complex for now
-        if type(t) is torch.Tensor or type(t) is torch.nn.Parameter:
-            if any([
-                t.is_sparse_csr, t.is_sparse, t.is_mkldnn, t.is_quantized,
-                t.is_nested, torch._is_functional_tensor(t),
-                # these are supported in meta conversion but the fallbacks
-                # don't work
-                t.is_neg(), t.is_conj(),
-                # conjugate fallback does not support meta tensors
-                t.dtype in (torch.complex128, torch.complex64, torch.complex32),
-                t.device.type in ("lazy", "meta"),
-                # We need a way to test if a tensor is batched but there
-                # is no official APi to do it
-                # torch._C._is_batched(t),
-            ]):
-                # TODO: sparse should support meta
-                # NB technically to('meta') does work but our logging
-                # instrumentation will see the meta conversions and the
-                # tests all break so we just exclude this.  In any case
-                # the to conversion isn't really right anyhow.
-                self.miss += 1
-                return t
-            else:
-                self.hit += 1
-                r = self.meta_tensor(t)
-                if type(t) is torch.nn.Parameter:
-                    r = torch.nn.Parameter(r, requires_grad=r.requires_grad)
-                return r
-        elif torch.overrides.is_tensor_like(t):
-            # Blindly converting tensor subclasses to meta can cause
-            # unpredictable problems; e.g., FX tests will trace meta
-            # tensors into their trace / some subclasses don't correctly
-            # support meta.  Trying to YOLO this is more trouble than it's
-            # worth.
-            self.miss += 1
-            return t
-        else:
-            # non-Tensor types don't count as hit or miss
-            return t
 
 
 class TestMetaConverter(TestCase):
@@ -304,6 +168,35 @@ class TestMetaConverter(TestCase):
         self.assertEqual(m.stride(), y.stride())
         self.assertEqual(m.storage_offset(), y.storage_offset())
 
+    def test_weakref(self):
+        x = torch.randn(4, 4, 4)
+        m = MetaConverter()
+        y = m(x)
+        z = m(x)
+        self.assertIs(y, z)
+        self.assertEqual(len(m.tensor_memo), 1)
+        self.assertEqual(len(m.storage_memo), 1)
+        del x
+        self.assertEqual(len(m.tensor_memo), 0)
+        m.check_for_expired_weak_storages()
+        self.assertEqual(len(m.storage_memo), 0)
+        li = []
+        for i in range(4):
+            li.append(torch.rand([i]))
+            m(li[-1])
+        self.assertEqual(len(m.tensor_memo), 4)
+        del li
+        self.assertEqual(len(m.tensor_memo), 0)
+        m.check_for_expired_weak_storages()
+        self.assertEqual(len(m.storage_memo), 0)
+
+    def test_tensor_outlives_converter(self):
+        m = MetaConverter()
+        ref = weakref.ref(m)
+        x = torch.randn([4, 4])
+        y = m(x)
+        del m
+        self.assertIs(ref(), None)
 
 def assert_ref_meta_equal(test_case, meta_rs, rs, msg_callable):
     flat_meta_rs, _ = tree_flatten(meta_rs)
@@ -440,6 +333,19 @@ def run_meta_crossref(
         if func is torch.tensor_split:
             # Use original indices_or_sections, this argument is data dependent
             meta_args = (meta_args[0], args[1]) + meta_args[2:]
+        elif func is torch.ops.aten.repeat_interleave.Tensor:
+            if kwargs.get("output_size", None) is None:
+                meta_args = args
+        elif func is torch.ops.aten.index.Tensor:
+            # Don't convert boolean tensors to meta as they will have nonzero
+            # called on them
+            indices = []
+            for meta_index, real_index in zip(meta_args[1], args[1]):
+                if meta_index is not None and meta_index.dtype in [torch.int8, torch.bool]:
+                    indices.append(real_index)
+                else:
+                    indices.append(meta_index)
+            meta_args = (meta_args[0], indices)
         try:
             # Suppress warnings, this doesn't matter for test_meta.py
             # but it does matter if you want to use this decorator
@@ -494,55 +400,29 @@ meta disagrees with real impl:
 
 RE_NOT_IMPLEMENTED_MSG = re.compile(r"Could not run '([^']+)' with arguments ")
 
-
 meta_function_expected_failures = {
     torch.Tensor.item: {b8, bf16, c128, c64, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.Tensor.to_sparse: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::to_sparse, aten::to_sparse.sparse_dim
-    torch.addbmm: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::addbmm, aten::addbmm.out
     torch.allclose: {bf16, f16, f32, f64},  # aten::_local_scalar_dense
-    torch.angle: {c32, b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::angle, aten::angle.out
     torch.argwhere: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero
     torch.bincount: {i16, i32, i64, i8, u8},  # aten::bincount
     torch.bucketize: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::bucketize.Tensor, aten::bucketize.Tensor_out
     torch.combinations: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::masked_select
     torch.complex: {f16, f32, f64},  # aten::complex.out
-    torch.conj_physical: {c32},  # aten::conj_physical.out
     torch.corrcoef: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
     torch.count_nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::count_nonzero.dim_IntList
     torch.cov: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense
-    torch.diag: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
-    torch.diagflat: {bf16, b8, f32, f64, i16, i32, i64, i8, u8},  # aten::diag.out
-    torch.fft.fft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.fft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.fftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.fftshift: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
     torch.fft.hfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
     torch.fft.hfft: {b8, f32, f64, i16, i32, i64, i8, u8},
     torch.fft.hfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.ifft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.ifft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.ifftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2c
-    torch.fft.ifftshift: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
-    torch.fft.ihfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.ihfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.ihfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.irfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2r, aten::_fft_c2r.out
-    torch.fft.irfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2r, aten::_fft_c2r.out
-    torch.fft.irfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_c2r, aten::_fft_c2r.out
-    torch.fft.rfft2: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.rfft: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.fft.rfftn: {b8, f32, f64, i16, i32, i64, i8, u8},  # aten::_fft_r2c
-    torch.floor_divide: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::floor_divide, aten::floor_divide.out
     torch.frexp: {bf16, f16, f32, f64},  # aten::frexp.Tensor_out
     torch.functional.istft: {f32, f64},  # aten::view_as_complex
-    torch.functional.stft: {f32, f64},  # aten::_fft_r2c
     torch.functional.unique: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_unique2, aten::unique_dim
     torch.functional.unique_consecutive: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::unique_consecutive
     torch.histc: {bf16, f32, f64},  # aten::histc, aten::histc.out
     torch.histogram: {f32, f64},  # aten::histogram.bin_ct, aten::histogram.bins_tensor
     torch.histogramdd: {f32, f64},  # aten::_histogramdd_bin_edges, aten::_histogramdd_from_bin_tensors
     torch.kthvalue: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::kthvalue.values
-    torch.linalg.qr: {f32, f64},  # aten::_linalg_qr_helper
     torch.logcumsumexp: {bf16, f32, f64},  # aten::_logcumsumexp, aten::_logcumsumexp.out
     torch.masked_select: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::masked_select, aten::masked_select.out
     torch.matrix_exp: {bf16, f32, f64},  # aten::linalg_matrix_exp
@@ -550,17 +430,12 @@ meta_function_expected_failures = {
     torch.mode: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::mode
     torch.multinomial: {bf16, f32, f64},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nanmean: {bf16, f16, f32, f64},
-    torch.nanmedian: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::nanmedian, aten::nanmedian.dim_values
-    torch.nanquantile: {f32, f64},
-    torch.nansum: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nansum, aten::nansum.out
     torch.nn.functional.conv1d: {bf16, f32, f64, i64},
     torch.nn.functional.conv2d: {bf16, f32, f64, i64},
     torch.nn.functional.conv_transpose1d: {f32, f64, i64},
     torch.nn.functional.conv_transpose2d: {f32, f64, i64},
     torch.nn.functional.conv_transpose3d: {f32, f64, i64},
     torch.nn.functional.ctc_loss: {f32, f64},
-    torch.nn.functional.embedding_bag: {f16, f32, f64},  # aten::_embedding_bag_forward_only
     torch.nn.functional.gaussian_nll_loss: {bf16, f32, f64},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f32, f64},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {f32, f64},  # aten::max_pool3d_with_indices
@@ -573,40 +448,27 @@ meta_function_expected_failures = {
     torch.nn.functional.one_hot: {i64},  # aten::_local_scalar_dense
     torch.nn.functional.pdist: {f32, f64},  # aten::_pdist_forward
     torch.nn.functional.prelu: {bf16, f32, f64},  # aten::prelu
-    torch.nn.functional.relu: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::relu
     torch.nn.functional.rrelu: {bf16, f32, f64},  # aten::rrelu_with_noise
     torch.nn.functional.unfold: {bf16, f16, f32, f64},  # aten::im2col
     torch.nonzero: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::nonzero, aten::nonzero.out
     torch.polar: {f32, f64},  # aten::polar.out
     torch.repeat_interleave: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::repeat_interleave.Tensor
-    torch.roll: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::roll
+    torch.segment_reduce: {bf16, f16, f32, f64},  # aten::segment_reduce
     torch.searchsorted: {bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::searchsorted.Tensor, aten::searchsorted.Tensor_out
     torch.symeig: {f32, f64},
     torch.take: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},  # aten::take, aten::take.out
-    torch.trace: {f32, f64, i16, i32, i64, i8, u8},  # aten::trace
     torch.vdot: {bf16, f32, f64, i16, i32, i64, i8, u8},  # aten::vdot
-    torch.qr: {f32, f64},
     torch.ormqr: {f32, f64},
-    torch.lu_solve: {f32, f64},
     torch.cholesky: {f32, f64},  # aten::cholesky, aten::cholesky.out
     torch.cholesky_inverse: {f32, f64},  # aten::cholesky_inverse, aten::cholesky_inverse.out
     torch.cholesky_solve: {f32, f64},  # aten::_cholesky_solve_helper
     torch.eig: {f32, f64},  # aten::_local_scalar_dense
     torch.geqrf: {f32, f64},  # aten::geqrf
-    torch.linalg.cholesky: {f32, f64},  # aten::linalg_cholesky_ex, aten::linalg_cholesky_ex.L
-    torch.linalg.cholesky_ex: {f32, f64},  # aten::linalg_cholesky_ex
-    torch.linalg.det: {f32, f64},  # aten::_det_lu_based_helper
     torch.linalg.eig: {f32, f64},  # aten::linalg_eig
-    torch.linalg.eigh: {f32, f64},
     torch.linalg.eigvals: {f32, f64},
-    torch.linalg.eigvalsh: {f32, f64},  # aten::linalg_eigvalsh.out
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product
     torch.linalg.lstsq: {f32, f64},  # aten::linalg_lstsq.out
-    torch.linalg.slogdet: {f32, f64},  # aten::linalg_slogdet
-    torch.linalg.solve: {f32, f64},  # aten::linalg_solve, aten::linalg_solve.out
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular
-    torch.linalg.tensorsolve: {f32, f64},  # aten::linalg_solve
-    torch.logdet: {f32, f64},  # aten::_local_scalar_dense, aten::nonzero
 }
 
 """
@@ -621,18 +483,18 @@ sys.exit()
 """
 
 meta_function_skips = {
-    torch.Tensor.__getitem__: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8, c32},
     torch.aminmax: {b8, f32, f64, i16, i32, i64, i8, u8},
-    torch.conj_physical: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummax: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.cummin: {b8, bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.diff: {b8},
+    torch.equal: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.functional.cdist: {f32, f64},
+    torch.nanmean: {bf16, f16, f32, f64},
     torch.functional.tensordot: {bf16, f32, f64, i16, i32, i64, i8, u8},
     torch.inner: {bf16, f32, f64, i16, i32, i64, i8, u8},
-    torch.logical_not: {b8, bf16, f16, f32, f64, i16, i32, i64, i8, u8},
     torch.nn.functional.cross_entropy: {bf16, f32, f64},
     torch.nn.functional.interpolate: {bf16, f32, f64, u8},
+    torch.nanmean: {bf16, f16, f32, f64},  # TODO(chilli): Doesn't seem to work for some reason?
     torch.nn.functional.nll_loss: {bf16, f32, f64},  # TODO
     torch.linalg.pinv: {f32, f64},
     torch.empty: {b8, bf16, c128, c64, c32, f16, f32, f64, i16, i32, i64, i8, u8},
@@ -645,11 +507,8 @@ meta_function_device_expected_failures['cpu'] = {
 }
 
 meta_function_device_expected_failures['cuda'] = {
-    torch.addbmm: {f16},  # aten::addbmm, aten::addbmm.out
     torch.corrcoef: {bf16, f16},  # aten::_local_scalar_dense
     torch.cov: {f16},  # aten::_local_scalar_dense
-    torch.diag: {bf16, f16},  # aten::diag.out
-    torch.diagflat: {bf16, f16},  # aten::diag.out
     torch.fft.fft2: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
     torch.fft.fft: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
     torch.fft.fftn: {c32, f16},  # aten::_fft_c2c, aten::_fft_c2c.out
@@ -673,8 +532,6 @@ meta_function_device_expected_failures['cuda'] = {
     torch.geqrf: {f32, f64},  # aten::geqrf
     torch.histc: {i16, i32, i64, i8},  # aten::histc, aten::histc.out
     torch.kthvalue: {f16},  # aten::kthvalue.values
-    torch.linalg.cholesky: {f32, f64},  # aten::linalg_cholesky_ex, aten::linalg_cholesky_ex.L
-    torch.linalg.cholesky_ex: {f32, f64},  # aten::linalg_cholesky_ex
     torch.linalg.householder_product: {f32, f64},  # aten::linalg_householder_product, aten::linalg_householder_product.out
     torch.linalg.solve_triangular: {f32, f64},  # aten::linalg_solve_triangular, aten::linalg_solve_triangular.out
     torch.logcumsumexp: {bf16, f16},  # aten::_logcumsumexp, aten::_logcumsumexp.out
@@ -682,13 +539,11 @@ meta_function_device_expected_failures['cuda'] = {
     torch.median: {f16},  # aten::median, aten::median.dim_values
     torch.multinomial: {f16},  # aten::multinomial, aten::multinomial.out
     torch.mvlgamma: {f16},  # aten::_local_scalar_dense, aten::mvlgamma.out
-    torch.nanmedian: {f16},  # aten::nanmedian, aten::nanmedian.dim_values
     torch.nn.functional.conv1d: {f16, c32},
     torch.nn.functional.conv2d: {f16, c32},
     torch.nn.functional.conv_transpose1d: {bf16, f16},
     torch.nn.functional.conv_transpose2d: {bf16, f16},
     torch.nn.functional.conv_transpose3d: {bf16, f16},
-    torch.nn.functional.embedding_bag: {bf16},  # aten::_embedding_bag_forward_only
     torch.nn.functional.gaussian_nll_loss: {f16},  # aten::_local_scalar_dense
     torch.nn.functional.grid_sample: {f16},  # aten::grid_sampler_2d, aten::grid_sampler_3d
     torch.nn.functional.max_pool3d: {bf16, f16},  # aten::max_pool3d_with_indices
@@ -699,11 +554,8 @@ meta_function_device_expected_failures['cuda'] = {
     torch.nn.functional.multi_margin_loss: {bf16, f16},  # aten::multi_margin_loss
     torch.nn.functional.multilabel_margin_loss: {bf16, f16},  # aten::multilabel_margin_loss_forward
     torch.nn.functional.prelu: {f16},  # aten::prelu
-    torch.nn.functional.relu: {f16},  # aten::relu
     torch.nn.functional.rrelu: {f16},  # aten::rrelu_with_noise
     torch.ormqr: {f32, f64},  # aten::ormqr, aten::ormqr.out
-    torch.qr: {f32, f64},  # aten::_linalg_qr_helper
-    torch.trace: {b8, bf16, f16},  # aten::diag.out
     torch.vdot: {f16},  # aten::vdot
 }
 
@@ -770,36 +622,24 @@ aten = torch.ops.aten
 
 # these always fail
 meta_dispatch_expected_failures = {
-    aten._cdist_forward.default: {f64, f32},
-    aten._conj_physical.default: {c32},
     aten._convolution.default: {c64, i64, f64, c128, bf16, f32},
     aten._ctc_loss.default: {f64, f32},
-    aten._embedding_bag_forward_only.default: {f16, f64, f32},
-    aten._fft_r2c.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten._histogramdd_bin_edges.default: {f64, f32},
     aten._histogramdd_from_bin_cts.default: {f64, f32},
     aten._histogramdd_from_bin_tensors.default: {f64, f32},
     aten._local_scalar_dense.default: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten._pdist_forward.default: {f64, f32},
     aten._unique2.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
-    aten.addbmm.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.addbmm.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.angle.default: {c32, i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.angle.out: {c32, i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.bincount.default: {i8, i64, i16, u8, i32},
     aten.bucketize.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.bucketize.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.col2im.default: {c64, f32, f64, c128},
     aten.complex.default: {c64, f64, c128, f16, f32},
     aten.complex.out: {f16},
-    aten.conj_physical.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, c32, i32},
     aten.convolution.default: {c64, i64, f64, c128, bf16, f32},
     aten.count_nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.count_nonzero.dim_IntList: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.diag.default: {i64, u8, b8, f32, i8, f64, i16, i32, bf16},
-    aten.diag.out: {bf16, i64, u8, b8, f32, i8, f64, i16, i32},
-    aten.floor_divide.default: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
-    aten.floor_divide.out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
+    aten.equal.default: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.frexp.Tensor: {bf16, f16, f64, f32},
     aten.grid_sampler_2d.default: {f64, f32},
     aten.grid_sampler_3d.default: {f64, f32},
@@ -808,14 +648,11 @@ meta_dispatch_expected_failures = {
     aten.histogram.bin_ct: {f64, f32},
     aten.histogram.bins_tensor: {f64, f32},
     aten.im2col.default: {bf16, f16, f64, f32},
-    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},
     aten.kthvalue.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.linalg_matrix_exp.default: {bf16, f64, f32},
     aten.log_sigmoid_forward.output: {bf16, f64, f32},
     aten.logcumsumexp.default: {bf16, f64, f32},
     aten.logcumsumexp.out: {bf16, f64, f32},
-    aten.logical_not.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.logical_not_.default: {bf16, f16, f64, f32},
     aten.masked_select.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.masked_select.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.max_pool3d_with_indices.default: {f64, f32},
@@ -830,33 +667,25 @@ meta_dispatch_expected_failures = {
     aten.multinomial.out: {bf16, f64, f32},
     aten.mvlgamma.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.mvlgamma.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.nanmedian.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.nanmedian.dim: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.nansum.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.nansum.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nll_loss2d_forward.default: {bf16, f64, f32},
     aten.nonzero.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.nonzero.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.polar.default: {f64, f32},
     aten.prelu.default: {bf16, f64, f32},
-    aten.relu.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten.repeat_interleave.Tensor: {c64, i64, c128, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.roll.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.rrelu_with_noise.default: {bf16, f64, f32},
     aten.searchsorted.Tensor: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
     aten.searchsorted.Tensor_out: {i64, bf16, f16, u8, f32, i8, f64, i16, i32},
+    aten.segment_reduce.default: {bf16, f16, f32, f64},
     aten.take.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.take.out: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.tensordot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.to_sparse.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.to_sparse.sparse_dim: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
-    aten.trace.default: {i8, i64, f64, i16, u8, i32, f32},
     aten.unique_consecutive.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.unique_dim.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
     aten.upsample_nearest3d.vec: {bf16, u8, f64, f32},
     aten.vdot.default: {i64, bf16, u8, f32, i8, f64, i16, i32},
     aten.vdot.out: {i64, bf16, u8, f32, i8, f64, i16, i32},
-    aten._det_lu_based_helper.default: {f32, f64},  # aten::_det_lu_based_helper
     aten.cholesky.default: {f32, f64},  # aten::cholesky
     aten.cholesky.out: {f32, f64},  # aten::cholesky.out
     aten.cholesky_inverse.default: {f32, f64},  # aten::cholesky_inverse
@@ -865,23 +694,12 @@ meta_dispatch_expected_failures = {
     aten.cholesky_solve.out: {f32, f64},  # aten::_cholesky_solve_helper
     aten.eig.default: {f32, f64},  # aten::_local_scalar_dense
     aten.geqrf.default: {f32, f64},  # aten::geqrf
-    aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
-    aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
     aten.linalg_eig.default: {f32, f64},  # aten::linalg_eig
-    aten.linalg_eigh.default: {f32, f64},
-    aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
     aten.linalg_lstsq.default: {f32, f64},  # aten::linalg_lstsq.out
-    aten.linalg_qr.default: {f32, f64},  # aten::_linalg_qr_helper
-    aten.linalg_slogdet.default: {f32, f64},  # aten::linalg_slogdet
-    aten.linalg_solve.default: {f32, f64},  # aten::linalg_solve
-    aten.linalg_solve.out: {f32, f64},  # aten::linalg_solve.out
     aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
-    aten.logdet.default: {f32, f64},  # aten::_local_scalar_dense, aten::nonzero
-    aten.lu_solve.default: {f32, f64},  # aten::lu_solve
-    aten.lu_solve.out: {f32, f64},  # aten::lu_solve.out
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.symeig.default: {f32, f64},  # aten::_symeig_helper
@@ -889,6 +707,7 @@ meta_dispatch_expected_failures = {
 
 # these sometimes pass and sometimes fail
 meta_dispatch_skips = {
+    aten.index.Tensor: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32, c32},  # at::nonzero doesn't have a Meta function
     aten._to_copy.default: {i64, bf16, f16, u8, b8, f32, i8, f64, i16, i32},
     aten.aminmax.default: {i64, u8, b8, f32, i8, f64, i16, i32},
     aten.cummax.default: {i64, bf16, u8, b8, f32, i8, f64, i16, i32},
@@ -902,37 +721,21 @@ meta_dispatch_device_expected_failures = defaultdict(dict)
 meta_dispatch_device_skips = defaultdict(dict)
 
 meta_dispatch_device_expected_failures['cuda'] = {
-    aten._conj_physical.default: {f16},  # aten::conj_physical.out
     aten._convolution.default: {f16, c32},
-    aten._embedding_bag_forward_only.default: {bf16},  # aten::_embedding_bag_forward_only
-    aten._fft_c2c.default: {c32, f16},  # aten::_fft_c2c
-    aten._fft_c2c.out: {c32, f16},  # aten::_fft_c2c.out
-    aten._fft_c2r.default: {c32, f16},  # aten::_fft_c2r
-    aten._fft_c2r.out: {c32, f16},  # aten::_fft_c2r.out
-    aten._fft_r2c.default: {f16},  # aten::_fft_r2c
-    aten._fft_r2c.out: {f16},  # aten::_fft_r2c.out
     aten._unique2.default: {f16},  # aten::_unique2
     aten._use_cudnn_ctc_loss.default: {f32, f64},  # aten::_use_cudnn_ctc_loss
-    aten.addbmm.default: {f16},  # aten::addbmm
-    aten.addbmm.out: {f16},  # aten::addbmm.out
     aten.convolution.default: {f16, c32},
     aten.cudnn_grid_sampler.default: {f16, f32, f64},  # aten::cudnn_grid_sampler
-    aten.diag.default: {f16},  # aten::diag.out
-    aten.diag.out: {bf16, f16},  # aten::diag.out
     aten.geqrf.default: {f32, f64},  # aten::geqrf
     aten.grid_sampler_2d.default: {f16},  # aten::grid_sampler_2d
     aten.grid_sampler_3d.default: {f16},  # aten::grid_sampler_3d
     aten.histc.default: {i16, i32, i64, i8},  # aten::histc
     aten.histc.out: {i16, i32, i64, i8},  # aten::histc.out
-    aten.index.Tensor: {c32},  # aten::index.Tensor
     aten.kthvalue.default: {f16},  # aten::kthvalue.values
-    aten.linalg_cholesky_ex.L: {f32, f64},  # aten::linalg_cholesky_ex.L
-    aten.linalg_cholesky_ex.default: {f32, f64},  # aten::linalg_cholesky_ex
     aten.linalg_eigvalsh.out: {f32, f64},  # aten::linalg_eigvalsh.out
     aten.linalg_householder_product.default: {f32, f64},  # aten::linalg_householder_product
     aten.linalg_householder_product.out: {f32, f64},  # aten::linalg_householder_product.out
     aten.linalg_matrix_exp.default: {f16},  # aten::linalg_matrix_exp
-    aten.linalg_qr.default: {f32, f64},  # aten::_linalg_qr_helper
     aten.linalg_solve_triangular.default: {f32, f64},  # aten::linalg_solve_triangular
     aten.linalg_solve_triangular.out: {f32, f64},  # aten::linalg_solve_triangular.out
     aten.log_sigmoid_forward.default: {bf16, f16, f64, f32},
@@ -950,17 +753,13 @@ meta_dispatch_device_expected_failures['cuda'] = {
     aten.multinomial.out: {f16},  # aten::multinomial.out
     aten.mvlgamma.default: {f16},  # aten::_local_scalar_dense
     aten.mvlgamma.out: {f16},  # aten::mvlgamma.out
-    aten.nanmedian.default: {f16},  # aten::nanmedian
-    aten.nanmedian.dim: {f16},  # aten::nanmedian.dim_values
     aten.native_group_norm.default: {bf16, f16},
     aten.nll_loss2d_forward.default: {f16},  # aten::nll_loss2d_forward
     aten.ormqr.default: {f32, f64},  # aten::ormqr
     aten.ormqr.out: {f32, f64},  # aten::ormqr.out
     aten.prelu.default: {f16},  # aten::prelu
-    aten.relu.default: {f16},  # aten::relu
     aten.rrelu_with_noise.default: {f16},  # aten::rrelu_with_noise
     aten.tensordot.out: {f16},  # aten::tensordot.out
-    aten.trace.default: {b8, bf16, f16},  # aten::diag.out
     aten.unique_consecutive.default: {f16},  # aten::unique_consecutive
     aten.unique_dim.default: {f16},  # aten::unique_dim
     aten.upsample_nearest3d.vec: {f16},  # aten::upsample_nearest3d.vec
@@ -1061,6 +860,16 @@ class TestMeta(TestCase):
 
 instantiate_device_type_tests(TestMeta, globals())
 
+def print_op_str_if_not_supported(op_str):
+    op = OperatorName.parse(op_str)
+    packet = getattr(torch.ops.aten, str(op.name))
+    overload = getattr(packet, op.overload_name if op.overload_name else "default")
+    if any(overload in d for d in [meta_dispatch_skips, meta_dispatch_device_skips['cuda']]):
+        print(f"{overload}  # SKIP")
+    if any(overload in d for d in [meta_dispatch_expected_failures, meta_dispatch_device_expected_failures['cuda']]):
+        print(overload)
+
+
 if __name__ == "__main__":
     COMPARE_XLA = os.getenv('PYTORCH_COMPARE_XLA', None)
     if COMPARE_XLA is not None:
@@ -1068,13 +877,14 @@ if __name__ == "__main__":
             d = yaml.load(f, Loader=YamlLoader)
             ops = d.get("full_codegen", []) + d.get("supported", []) + d.get("autograd", [])
             for op_str in ops:
-                op = OperatorName.parse(op_str)
-                packet = getattr(torch.ops.aten, str(op.name))
-                overload = getattr(packet, op.overload_name if op.overload_name else "default")
-                if any(overload in d for d in [meta_dispatch_skips, meta_dispatch_device_skips['cuda']]):
-                    print(f"{overload}  # SKIP")
-                if any(overload in d for d in [meta_dispatch_expected_failures, meta_dispatch_device_expected_failures['cuda']]):
-                    print(overload)
+                print_op_str_if_not_supported(op_str)
+        sys.exit(0)
+
+    COMPARE_TEXT = os.getenv('PYTORCH_COMPARE_TEXT', None)
+    if COMPARE_TEXT is not None:
+        with open(COMPARE_TEXT, "r") as f:
+            for op_str in f:
+                print_op_str_if_not_supported(op_str.strip())
         sys.exit(0)
 
     run_tests()

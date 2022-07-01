@@ -7,7 +7,7 @@ from torch.library import Library
 from torch.cuda.jiterator import _create_jit_fn
 import unittest
 from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ROCM, IS_WINDOWS
-from torch.utils._mode_utils import no_dispatch
+from torch.utils._mode_utils import no_dispatch, find_outermost_mode, all_same_mode, all_same_mode_scope
 from torch.testing._internal.logging_tensor import LoggingTensor, LoggingTensorReentrant, LoggingTensorMode, \
     log_input, capture_logs, capture_logs_with_logging_tensor_mode
 from torch.utils._pytree import tree_map
@@ -15,6 +15,7 @@ from torch.utils._python_dispatch import enable_torch_dispatch_mode, push_torch_
 
 import logging
 from functools import partial
+
 
 class TestPythonRegistration(TestCase):
     def test_override_aten_ops_with_multiple_libraries(self) -> None:
@@ -35,7 +36,8 @@ class TestPythonRegistration(TestCase):
         # RuntimeError: impl("aten::neg", ...):
         # Explicitly provided namespace (aten) in operator name does not match ...
         with self.assertRaisesRegex(RuntimeError, "operator name does not match namespace"):
-            my_lib3 = Library("foo", "IMPL")
+            my_lib3 = Library("foo", "DEF")
+            my_lib3.define("neg(Tensor self) -> Tensor")
             my_lib3.impl(torch.ops.aten.neg.default, my_neg, "AutogradCPU")
             del my_lib3
 
@@ -64,6 +66,11 @@ class TestPythonRegistration(TestCase):
         # Validate that the old behavior is restored for neg and mul
         self.assertFalse(torch.neg(x).is_neg())
         self.assertTrue(torch.mul(x, y)._is_zerotensor())
+
+    def test_error_if_fn_not_callable(self):
+        with self.assertRaisesRegex(TypeError, "Input function is required to be a callable"):
+            my_lib = Library("aten", "IMPL")
+            my_lib.impl(torch.ops.aten.neg.default, [], "AutogradCPU")
 
     def test_override_cpu_sum(self) -> None:
         # Example 1
@@ -271,6 +278,7 @@ class TestPythonRegistration(TestCase):
 
         test_helper("CONSERVATIVE")
 
+
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
         with capture_logs() as logs:
@@ -294,6 +302,7 @@ class TestPythonDispatch(TestCase):
 $0 = input('x')
 $1 = torch._ops.aten.mul.Tensor($0, $0)
 $2 = input('grad_y')
+True = torch._ops.aten.is_same_size.default($1, $2)
 $3 = torch._ops.aten.mul.Tensor($2, $0)
 $4 = torch._ops.aten.mul.Tensor($2, $0)
 $5 = torch._ops.aten.add.Tensor($4, $3)''')
@@ -313,7 +322,6 @@ $5 = torch._ops.aten.add.Tensor($4, $3)''')
 $0 = input('x')
 $1 = input('y')
 $2 = torch._ops.aten.abs.out($0, out=$1)''')
-
 
     def test_kwarg_only(self) -> None:
         with capture_logs() as logs:
@@ -545,6 +553,7 @@ $0 = input('x')
 $1 = input('x.grad')
 $2 = torch._ops.aten.pow.Tensor_Scalar($0, 2)
 $3 = input('grad_output')
+True = torch._ops.aten.is_same_size.default($2, $3)
 $4 = torch._ops.aten.mul.Tensor($3, 2)
 $5 = torch._ops.aten.mul.Tensor($4, $0)
 $6 = torch._ops.aten.add_.Tensor($1, $5)''')
@@ -850,7 +859,7 @@ $3 = torch._ops.aten.add.Tensor($1, $2)""")
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        x = TestMode(inner=None)
+        x = TestMode()
         y = torch.tensor([2.])
         with enable_torch_dispatch_mode(x):
             y + y
@@ -974,7 +983,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
         class A(TorchDispatchMode):
             pass
         with self.assertRaisesRegex(ValueError, 'instance of TorchDispatchMode'):
-            with push_torch_dispatch_mode(A(inner=None)):
+            with push_torch_dispatch_mode(A()):
                 pass
 
     def test_push_mode_returns_unrelated(self):
@@ -982,8 +991,273 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             with push_torch_dispatch_mode(lambda *, inner: None):
                 pass
 
-    def test_missing_inner_mode_ctor(self):
-        self.assertRaisesRegex(TypeError, 'push_torch_dispatch_mode', lambda: TorchDispatchMode())
+    def test_ctor_no_inner(self):
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return torch.zeros([])
+
+        with enable_torch_dispatch_mode(A()):
+            x = torch.randn((3, 4))
+
+        self.assertEqual(x, torch.zeros([]))
+
+    def test_with_mode(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA()
+
+        with self.assertRaises(ErrorA):
+            with A():
+                torch.empty([])
+
+    def test_with_mode_created_separately(self):
+        class ErrorA(RuntimeError):
+            pass
+
+        class A(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA()
+
+        x = A()
+        with self.assertRaises(ErrorA):
+            with x:
+                torch.empty([])
+
+    def test_with_nested_modes(self):
+        class ErrorA(RuntimeError):
+            def __init__(self, msg):
+                return super().__init__(msg)
+
+        class A(TorchDispatchMode):
+            def __init__(self, msg):
+                self.msg = msg
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                raise ErrorA(self.msg)
+
+        with self.assertRaisesRegex(ErrorA, "layer2"):
+            with A("layer1"):
+                with A("layer2"):
+                    torch.empty([])
+
+    def test_make_subclass_with_modes(self):
+        class ModeTensor(torch.Tensor):
+            def __new__(cls, elem, mode):
+                r = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
+                r.elem = elem
+                r.mode = mode
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
+                    return func(*args, **kwargs)
+
+        class Mode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    if isinstance(e, ModeTensor):
+                        return e.elem
+                    else:
+                        return e
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor):
+                        return ModeTensor(t, self)
+                    else:
+                        return t
+
+                return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
+
+        class BasicMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                return func(*args, **kwargs)
+
+        x = torch.tensor(4.)
+        with Mode():
+            y = x + x
+            z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        with Mode():
+            with BasicMode():  # we can't nest two modes that call make_subclass because it only accepts vanilla tensors
+                y = x + x
+                z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        assert self.assertRaisesRegex(RuntimeError, "subclass Mode but.* associated to a python object of type Mode")
+
+    def test_make_wrapper_subclass_with_modes(self):
+        class ModeTensor(torch.Tensor):
+            def __new__(cls, elem, mode):
+                r = torch.Tensor._make_wrapper_subclass(cls, elem.shape)
+                r.elem = elem
+                r.mode = mode
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                modes = (arg.mode for arg in args + tuple(kwargs.values()) if isinstance(arg, ModeTensor))
+                outermost = find_outermost_mode(modes)
+                with outermost.restore():
+                    return func(*args, **kwargs)
+
+        class Mode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                def unwrap(e):
+                    if isinstance(e, ModeTensor):
+                        return e.elem
+                    else:
+                        return e
+
+                def wrap(t):
+                    if isinstance(t, torch.Tensor):
+                        return ModeTensor(t, self)
+                    else:
+                        return t
+
+                return wrap(func(*tuple(unwrap(a) for a in args), **kwargs))
+
+        x = torch.tensor(4.)
+        with Mode():
+            y = x + x
+            z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+        with Mode():
+            with Mode():
+                y = x + x
+                z = y + y
+        self.assertIsInstance(y, ModeTensor)
+        self.assertIsInstance(z, ModeTensor)
+
+    def test_error_using_same_mode(self):
+        class A(TorchDispatchMode):
+            pass
+
+        x = A()
+        with x:
+            with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+                with x:
+                    pass
+
+    def test_error_using_class_method_on_mode(self):
+        class A(TorchDispatchMode):
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                return func(args, kwargs)
+
+        x = torch.tensor(5.)
+        with self.assertRaisesRegex(RuntimeError, "should be a normal method not a class method"):
+            with A():
+                x + x
+
+    def test_error_with_ancestor(self):
+        x = LoggingTensorMode()
+        with x:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "has already been used as a mode. Please use a fresh version"):
+            with x:
+                pass
+
+    def test_restore_errors(self):
+        with self.assertRaisesRegex(RuntimeError, "does not have any ancestors. Use the standard version instead"):
+            with LoggingTensorMode().restore():
+                pass
+
+        x = LoggingTensorMode()
+        with LoggingTensorMode():
+            with x:
+                pass
+
+        with LoggingTensorMode():  # a different mode instance than the one above
+            with self.assertRaisesRegex(RuntimeError, "the current mode is not its ancestor"):
+                with x.restore():
+                    pass
+
+    def test_restore_ancestor_mode(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        z = LoggingTensorMode()
+        with y.restore():
+            with z:
+                pass
+
+        with x.restore():
+            with z.restore():
+                pass
+
+    def test_find_outermost_mode(self):
+        self.assertIsNone(find_outermost_mode([None, None]))
+
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        self.assertEqual(find_outermost_mode([x, y]), y)
+
+        z = LoggingTensorMode()
+        with y.restore():
+            with z:
+                pass
+
+        self.assertEqual(find_outermost_mode([z, x]), z)
+        i = LoggingTensorMode()
+
+        with self.assertRaisesRegex(RuntimeError, "doesn't have ancestors set so the ordering with other modes"):
+            find_outermost_mode([i, x, y, z])
+
+        k = LoggingTensorMode()
+        with k:
+            pass
+
+        with self.assertRaisesRegex(RuntimeError, "don't come from the same scope"):
+            find_outermost_mode([k, x, y, z])
+
+    def test_all_same_mode(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        self.assertTrue(all_same_mode([x, x, x]))
+        self.assertFalse(all_same_mode([x, None]))
+        self.assertFalse(all_same_mode([x, y]))
+
+    def test_all_same_mode_scope(self):
+        x = LoggingTensorMode()
+        y = LoggingTensorMode()
+        z = LoggingTensorMode()
+        with x:
+            with y:
+                pass
+
+        with x.restore():
+            with z:
+                pass
+
+        i = LoggingTensorMode()
+
+        self.assertTrue(all_same_mode_scope([x, y], y))
+        self.assertTrue(all_same_mode_scope([x, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, z], y))
+        self.assertFalse(all_same_mode_scope([x, y, z], z))
+        self.assertFalse(all_same_mode_scope([x, y, i], y))
+
+        no_ancestor = LoggingTensorMode()
+        self.assertFalse(all_same_mode_scope([x, y, z], no_ancestor))
 
     def test_tolist_numpy_with_torch_dispatch_mode(self) -> None:
         x = LoggingTensor(torch.tensor([2.0, 3.0]))
@@ -1253,7 +1527,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor1(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1262,7 +1536,7 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor2(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -1273,14 +1547,13 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             class ExampleTensor3(torch.Tensor):
                 @staticmethod
                 def __new__(cls, data, wrapper):
-                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_strides=True)
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
 
                 @classmethod
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.is_contiguous:
                         return not_contiguous_data.is_contiguous()
                     return NotImplemented
-
 
             err_msg = "no implementation found for 'torch.ops.aten.is_contiguous'"
             e = ExampleTensor1(torch.randn(3, 3), use_wrapper_subclass)
@@ -1346,6 +1619,146 @@ $1 = torch._ops.aten.add.Tensor($0, $0)""")
             self.assertEqual(e.device.type, 'meta')
             self.assertEqual(ten.type_as(e).device.type, 'meta')
 
+    def test_dim_slowpath(self):
+        data = torch.randn(3, 3)
+
+        for use_wrapper_subclass in [True, False]:
+            class DimNotImplementedTensor(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class DimImplementedTensor(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.aten.dim'"
+            e = DimNotImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.dim()
+
+            t = DimImplementedTensor(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(t.dim(), 2)
+
+    def test_maybe_tuple_bug(self):
+        class T(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, *args, **kwargs):
+                pass
+        a = torch.rand(3)
+
+        a[[T(), T()]]
+
+    def test_standard_is_not_subclass(self):
+        # https://github.com/pytorch/pytorch/issues/79079
+        self.assertFalse(torch._C._dispatch_isTensorSubclassLike(torch.empty(0)))
+
+    def test_strides_slow_path(self):
+        for use_wrapper_subclass in [True, False]:
+            class StridesNotImplemented(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    return NotImplemented
+
+            class StridesCustomReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func == torch.ops.aten.stride:
+                        return (4, 2)
+                    return NotImplemented
+
+            class StridesDefaultReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="strides")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func == torch.ops.aten.stride:
+                        return None
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.aten.stride'"
+            e = StridesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.stride()
+
+            e = StridesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.stride(), (4, 2))
+
+            e = StridesDefaultReturn(torch.randn(6, 2), use_wrapper_subclass)
+            self.assertEqual(e.stride(), (2, 1))
+
+    def test_sizes_slow_path(self):
+        for use_wrapper_subclass in [True, False]:
+            data = torch.randn(6, 2)
+
+            class SizesNotImplemented(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    return NotImplemented
+
+            class SizesCustomReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    if func.overloadpacket == torch.ops.aten.size:
+                        return (5, 3)
+                    return NotImplemented
+
+            class SizesDefaultReturn(torch.Tensor):
+                @staticmethod
+                def __new__(cls, data, wrapper):
+                    return TestPythonDispatch.subclass_helper(cls, data, wrapper, dispatch_sizes_strides_policy="sizes")
+
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args, kwargs):
+                    if func.overloadpacket == torch.ops.aten.dim:
+                        return data.dim()
+                    if func.overloadpacket == torch.ops.aten.size:
+                        return None
+                    return NotImplemented
+
+            err_msg = "no implementation found for 'torch.ops.aten.size'"
+            e = SizesNotImplemented(torch.randn(3, 3), use_wrapper_subclass)
+            with self.assertRaisesRegex(TypeError, err_msg):
+                e.size()
+
+            e = SizesCustomReturn(torch.randn(3, 3), use_wrapper_subclass)
+            self.assertEqual(e.size(), (5, 3))
+
+            e = SizesDefaultReturn(torch.randn(4, 2), use_wrapper_subclass)
+            self.assertEqual(e.size(), (4, 2))
 
 if __name__ == '__main__':
     run_tests()

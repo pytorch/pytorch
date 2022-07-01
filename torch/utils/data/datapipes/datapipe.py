@@ -3,6 +3,11 @@ import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator
 
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
+from torch.utils.data.datapipes.utils.common import (
+    _deprecation_warning,
+    _iter_deprecated_functional_names,
+    _map_deprecated_functional_names,
+)
 from torch.utils.data.dataset import Dataset, IterableDataset
 
 try:
@@ -105,10 +110,14 @@ class IterDataPipe(IterableDataset[T_co], metaclass=_IterDataPipeMeta):
     str_hook: Optional[Callable] = None
     repr_hook: Optional[Callable] = None
     _valid_iterator_id: Optional[int] = None
+    _number_of_samples_yielded: int = 0
     _restored: bool = False
 
     def __getattr__(self, attribute_name):
         if attribute_name in IterDataPipe.functions:
+            if attribute_name in _iter_deprecated_functional_names:
+                kwargs = _iter_deprecated_functional_names[attribute_name]
+                _deprecation_warning(**kwargs)
             function = functools.partial(IterDataPipe.functions[attribute_name], self)
             return function
         else:
@@ -232,6 +241,9 @@ class MapDataPipe(Dataset[T_co], metaclass=_DataPipeMeta):
 
     def __getattr__(self, attribute_name):
         if attribute_name in MapDataPipe.functions:
+            if attribute_name in _map_deprecated_functional_names:
+                kwargs = _map_deprecated_functional_names[attribute_name]
+                _deprecation_warning(**kwargs)
             function = functools.partial(MapDataPipe.functions[attribute_name], self)
             return function
         else:
