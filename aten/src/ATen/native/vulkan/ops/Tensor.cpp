@@ -256,7 +256,15 @@ vTensor::vTensor(
 api::VulkanImage& vTensor::image(
     api::Command::Buffer& command_buffer,
     const api::PipelineStageFlags stage) const & {
-  view_->transition(command_buffer, stage, api::MemoryAccessType::READ);
+  //view_->transition(command_buffer, stage, api::MemoryAccessType::READ);
+
+  return view_->image_;
+}
+
+api::VulkanImage& vTensor::image(
+    api::PipelineBarrier& pipeline_barrier,
+    const api::PipelineStageFlags stage) const & {
+  view_->transition(pipeline_barrier, stage, api::MemoryAccessType::READ);
 
   return view_->image_;
 }
@@ -265,7 +273,16 @@ api::VulkanImage& vTensor::image(
     api::Command::Buffer& command_buffer,
     const api::PipelineStageFlags stage,
     const api::MemoryAccessFlags access) & {
-  view_->transition(command_buffer, stage, access);
+  //view_->transition(command_buffer, stage, access);
+
+  return view_->image_;
+}
+
+api::VulkanImage& vTensor::image(
+    api::PipelineBarrier& pipeline_barrier,
+    const api::PipelineStageFlags stage,
+    const api::MemoryAccessFlags access) & {
+  view_->transition(pipeline_barrier, stage, access);
 
   return view_->image_;
 }
@@ -360,6 +377,47 @@ void vTensorStorage::transition(
 
     command_buffer.barrier(pipeline_barrier);
   }
+}
+
+void vTensorStorage::transition(
+    api::PipelineBarrier& pipeline_barrier,
+    const api::PipelineStageFlags cur_stage,
+    const api::MemoryAccessFlags cur_access) {
+  // Get last stage access
+  api::PipelineStageFlags prev_stage = last_access_.stage;
+  api::MemoryAccessFlags prev_access = last_access_.access;
+
+  const VkImageLayout cur_layout = image_.layout();
+  const VkImageLayout new_layout = vk_layout(cur_stage, cur_access);
+
+  const bool layout_changed = cur_layout != new_layout;
+  const bool prev_written = (prev_access & api::MemoryAccessType::WRITE) != 0;
+
+  if (prev_written || layout_changed) {
+    VkPipelineStageFlags src_stage = vk_stage(prev_stage);
+    if (0u == src_stage) {
+      src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    }
+    VkPipelineStageFlags dst_stage = vk_stage(cur_stage);
+    if (0u == dst_stage) {
+      dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+    }
+
+    pipeline_barrier.stage.src |= src_stage;
+    pipeline_barrier.stage.dst |= dst_stage;
+
+    pipeline_barrier.images.push_back(api::ImageMemoryBarrier(
+        vk_access(prev_stage, prev_access),
+        vk_access(cur_stage, cur_access),
+        cur_layout,
+        new_layout,
+        image_));
+
+    image_.set_layout(new_layout);
+  }
+
+  last_access_.stage = cur_stage;
+  last_access_.access = cur_access;
 }
 
 void verify(const TensorOptions& options) {
