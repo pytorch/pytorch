@@ -96,7 +96,8 @@ class TestONNXOpset(TestCase):
             }
         ]
         ops_10 = [
-            {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]}
+            {"op_name": "Constant"},
+            {"op_name": "TopK", "attributes": [{"name": "axis", "i": -1, "type": 2}]},
         ]
         ops = {9: ops_9, 10: ops_10}
         x = torch.arange(1.0, 6.0, requires_grad=True)
@@ -253,10 +254,12 @@ class TestONNXOpset(TestCase):
             {"op_name": "Shape"},
             {"op_name": "Constant"},
             {"op_name": "Gather", "attributes": [{"name": "axis", "i": 0, "type": 2}]},
+            {"op_name": "Constant"},
             {
                 "op_name": "Unsqueeze",
                 "attributes": [{"name": "axes", "i": 0, "type": 7}],
             },
+            {"op_name": "Constant"},
             {"op_name": "Constant"},
             {"op_name": "Slice", "attributes": []},
         ]
@@ -426,6 +429,7 @@ class TestONNXOpset(TestCase):
         )
 
         ops_9 = [
+            {"op_name": "Constant"},
             {"op_name": "Shape"},
             {"op_name": "Slice"},
             {"op_name": "Cast"},
@@ -438,6 +442,7 @@ class TestONNXOpset(TestCase):
             },
         ]
         ops_10 = [
+            {"op_name": "Constant"},
             {"op_name": "Shape"},
             {"op_name": "Constant"},
             {"op_name": "Constant"},
