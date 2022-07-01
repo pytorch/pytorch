@@ -73,12 +73,10 @@ def _init_execution_info(root_module: torch.nn.Module) -> _ExecutionInfo:
         root_module (torch.nn.Module): the module to get the execution information
             via ``tracer.trace()`` inside ``_patch_tracer``.
     """
-    module_execution_info_dict = dict()
-    module_execution_info_dict[root_module] = []
     return _ExecutionInfo(
         current_module=root_module,
         module_forward_order=[root_module],
-        module_execution_info_dict=module_execution_info_dict,
+        module_execution_info_dict={root_module: []},
     )
 
 
