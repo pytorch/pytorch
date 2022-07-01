@@ -216,7 +216,6 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();
 
   const int64_t src_w = weight.size(Layout::Filter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
