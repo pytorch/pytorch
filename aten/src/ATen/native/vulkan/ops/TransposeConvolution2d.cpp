@@ -112,7 +112,6 @@ vTensor pack_biases(
   }
 
   api::Context* const context = api::context();
-  api::Command::Buffer& command_buffer = context->command().pool.stream();  // Don't collect the timestamp since the command buffer doesn't record anything
 
   const int64_t src_w = weight.size(Layout::TransposedFilter::output);
   const int64_t packed_w = div_up(src_w, INT64_C(4));
