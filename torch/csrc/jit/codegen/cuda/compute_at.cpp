@@ -165,7 +165,7 @@ void ComputeAt::runAt(
     TensorView* consumer,
     unsigned int consumer_position,
     ComputeAtMode mode) {
-  FUSER_PERF_SCOPE("ComputeAt::run");
+  FUSER_PERF_SCOPE("ComputeAt::runAt");
 
   // Make sure the correct fusion is setup between this and consumer.
   TORCH_CHECK(
@@ -174,6 +174,10 @@ void ComputeAt::runAt(
       " and ",
       consumer,
       " are not in the same fusion.");
+
+  if (mode == ComputeAtMode::MostInlined) {
+    consumer_position = consumer->nDims();
+  }
 
   FusionGuard fg(producer->fusion());
 
@@ -205,6 +209,10 @@ void ComputeAt::runWith(
       " and ",
       consumer,
       " are not in the same fusion.");
+
+  if (mode == ComputeAtMode::MostInlined) {
+    producer_position = producer->nDims();
+  }
 
   FusionGuard fg(producer->fusion());
 
