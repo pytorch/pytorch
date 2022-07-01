@@ -667,9 +667,19 @@ def signbit(a):
     return prims.signbit(a)
 
 
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT)
+def sgn(a):
+    return prims.sgn(a)
+
+
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
 def sin(a):
     return prims.sin(a)
+
+
+@_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
+def sinc(a):
+    return prims.sinc(a)
 
 
 @_make_elementwise_unary_reference(ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT)
