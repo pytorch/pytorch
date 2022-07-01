@@ -194,6 +194,13 @@ class TORCH_CUDA_CU_API TransformPropagator
   TransformPropagator(TensorView* from, int64_t pos = -1);
 };
 
+struct TORCH_CUDA_CU_API MostInlinedTransformPropagator
+    : public MaxRootDomainInfoSpanningTree::Propagator {
+  virtual void propagateTvPasC(TensorView* from, TensorView* to) override;
+  virtual void propagateTvCasP(TensorView* from, TensorView* to) override;
+  virtual void propagateTvSibling(TensorView* from, TensorView* to) override;
+};
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

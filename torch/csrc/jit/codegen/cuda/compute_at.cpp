@@ -184,13 +184,20 @@ void ComputeAt::runAt(
   auto selected = getPropagationSubgraph(producer, consumer);
   InlinePropagatorSelector selector(selected);
 
-  TransformPropagator propagator(consumer, consumer_position);
   InlinePropagator inline_propagator(
       selector.selected(), consumer, consumer_position, mode);
   MaxProducerPosUpdater updater;
 
   MaxRootDomainInfoSpanningTree path(consumer, consumer_position, &selector);
-  path.traverse(&propagator);
+
+  if (mode == ComputeAtMode::MostInlined) {
+    MostInlinedTransformPropagator propagator;
+    path.traverse(&propagator);
+  } else {
+    TransformPropagator propagator(consumer, consumer_position);
+    path.traverse(&propagator);
+  }
+
   path.traverse(&inline_propagator);
   path.traverse(&updater);
 }
@@ -219,13 +226,19 @@ void ComputeAt::runWith(
   auto selected = getPropagationSubgraph(producer, consumer);
   InlinePropagatorSelector selector(selected);
 
-  TransformPropagator propagator(producer, producer_position);
   InlinePropagator inline_propagator(
       selector.selected(), producer, producer_position, mode);
   MaxProducerPosUpdater updater;
 
   MaxRootDomainInfoSpanningTree path(producer, producer_position, &selector);
-  path.traverse(&propagator);
+
+  if (mode == ComputeAtMode::MostInlined) {
+    MostInlinedTransformPropagator propagator;
+    path.traverse(&propagator);
+  } else {
+    TransformPropagator propagator(producer, producer_position);
+    path.traverse(&propagator);
+  }
   path.traverse(&inline_propagator);
   path.traverse(&updater);
 }

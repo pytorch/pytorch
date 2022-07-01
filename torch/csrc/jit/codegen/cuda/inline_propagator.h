@@ -51,18 +51,18 @@ class MaxPosCalculator {
       bool allow_unmappable) const;
 
  public:
-  // Returns the position at which tv can be relayed within.
+  // Returns the position at which tv can be inlined within.
   size_t getMaxPosSelf(
       TensorView* tv,
       bool allow_reduction,
       bool allow_vectorize,
       bool allow_unmappable) const;
 
-  // Returns the maximum position producer can be replayed based on consumer
+  // Returns the maximum position producer can be inlined based on consumer
   // given the set ComputeAtMode
   size_t getMaxPosPasC(TensorView* producer, TensorView* consumer) const;
 
-  // Returns the maximum position consumer can be replayed based on producer
+  // Returns the maximum position consumer can be inlined based on producer
   // given the set ComputeAtMode
   size_t getMaxPosCasP(TensorView* consumer, TensorView* producer) const;
 
@@ -74,34 +74,34 @@ class InlinePropagator : public MaxInfoSpanningTree::Propagator {
   // that can be shared across both directions.
   size_t getMaxPosAll(TensorView* tv);
 
-  // Returns position of getMaxPosAll while also hoisting outside broadcast
-  // dimensions.
-  size_t adjustComputeAtPos(TensorView* tv, size_t pos);
-
-  // Returns the replay position in consumer that producer should be replayed as
+  // Returns the inline position in consumer that producer should be inlined as
   // based on consumer, taking into consideration the max possible returned by
   // getMaxPos{PasC, CasP}, the compute at mode type.
-  size_t getReplayPosPasC(TensorView* producer, TensorView* consumer);
+  size_t getFromPosPasC(TensorView* producer, TensorView* consumer);
 
-  // Returns the replay position in producer that consumer should be replayed as
+  // Returns the inline position in producer that consumer should be inlined as
   // based on producer, taking into consideration the max possible returned by
   // getMaxPos{PasC, CasP}, the compute at mode type.
-  size_t getReplayPosCasP(TensorView* consumer, TensorView* producer);
+  size_t getFromPosCasP(TensorView* consumer, TensorView* producer);
 
-  // Sets the compute at position of tv and records the position in
-  // replayed_pos_
-  void recordReplayedPos(TensorView* tv, size_t pos);
+  // We use mapped_reference_pos_ to keep track of the outer axes information of
+  // the reference tensor. That is, mapped_reference_pos_[tv] answers the
+  // question "What outer axes in tv are shared with the specified reference
+  // tensor's outer axes?". However, when we actually set the CA position of tv,
+  // we might not want to set it as mapped_reference_pos_[tv] because because we
+  // don't want to inline certain things (such as vectorized dimensions, inner
+  // most broadcasting, etc.).
+  std::unordered_map<TensorView*, size_t> mapped_reference_pos_;
 
-  // Returns the entry for tv in replayed_pos_ if it exists, else returns the
-  // compute at position of tv.
-  size_t retrieveReplayedPos(TensorView* tv);
+  // Actually set the computeAt position. This does not necessarily equal to
+  // mapped_reference_pos_[tv] because we don't want to inline certain things.
+  void setCAPos(TensorView* tv, size_t pos);
 
   const MaxPosCalculator max_pos_calc;
   std::unordered_set<TensorView*> selected_;
   TensorView* reference_;
   size_t reference_pos_;
   ComputeAtMode mode_ = ComputeAtMode::Standard;
-  std::unordered_map<TensorView*, size_t> replayed_pos_;
   bool is_first_ = true;
 
  public:

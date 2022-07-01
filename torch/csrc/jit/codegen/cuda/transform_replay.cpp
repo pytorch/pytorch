@@ -922,6 +922,63 @@ TransformPropagator::TransformPropagator(TensorView* from, int64_t pos) {
   replayed_pos_[from] = pos;
 }
 
+void MostInlinedTransformPropagator::propagateTvPasC(
+    TensorView* from,
+    TensorView* to) {
+  int pos = from->nDims();
+  // See note [Using multiple TransformPropagators]
+  int new_pos =
+      TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, pos);
+  if (new_pos < 0) {
+    auto replay = TransformReplay::replayPasC(to, from, pos);
+    TORCH_INTERNAL_ASSERT(
+        validateDomain(to, replay.first),
+        "Tried to set the domain of ",
+        to,
+        " to ",
+        replay.first,
+        " but that would invalidate previously compute at position or max producer position.");
+    to->setDomain(replay.first);
+  }
+}
+
+void MostInlinedTransformPropagator::propagateTvCasP(
+    TensorView* from,
+    TensorView* to) {
+  int pos = from->nDims();
+  // See note [Using multiple TransformPropagators]
+  int new_pos =
+      TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, pos);
+  if (new_pos < 0) {
+    auto replay = TransformReplay::replayCasP(to, from, pos);
+    TORCH_INTERNAL_ASSERT(
+        validateDomain(to, replay.first),
+        "Tried to set the domain of ",
+        to,
+        " to ",
+        replay.first,
+        " but that would invalidate previously compute at position or max producer position.");
+    to->setDomain(replay.first);
+  }
+}
+
+void MostInlinedTransformPropagator::propagateTvSibling(
+    TensorView* from,
+    TensorView* to) {
+  // See note [Using multiple TransformPropagators]
+  if (!TransformReplay::fullSelfMatching(to, from)) {
+    auto replay = TransformReplay::fullSelfReplay(to->domain(), from->domain());
+    TORCH_INTERNAL_ASSERT(
+        validateDomain(to, replay),
+        "Tried to set the domain of ",
+        to,
+        " to ",
+        replay,
+        " but that would invalidate previously compute at position or max producer position.");
+    to->setDomain(replay);
+  }
+}
+
 } // namespace cuda
 } // namespace fuser
 } // namespace jit

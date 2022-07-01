@@ -178,22 +178,11 @@ size_t InlinePropagator::getMaxPosAll(TensorView* tv) {
   return max_pos;
 }
 
-size_t InlinePropagator::adjustComputeAtPos(TensorView* tv, size_t pos) {
-  pos = std::min<size_t>(pos, getMaxPosAll(tv));
-
-  // hoist inner most broadcast
-  while (pos > 0 && tv->axis(pos - 1)->isBroadcast()) {
-    pos--;
-  }
-
-  return pos;
-}
-
-size_t InlinePropagator::getReplayPosPasC(
+size_t InlinePropagator::getFromPosPasC(
     TensorView* producer,
     TensorView* consumer) {
   size_t max_pos = max_pos_calc.getMaxPosPasC(producer, consumer);
-  size_t pos = retrieveReplayedPos(consumer);
+  size_t pos = mapped_reference_pos_.at(consumer);
 
   if (mode_ == ComputeAtMode::BestEffort) {
     return std::min(pos, max_pos);
@@ -203,10 +192,10 @@ size_t InlinePropagator::getReplayPosPasC(
 
   TORCH_INTERNAL_ASSERT(
       pos <= max_pos,
-      "Invalid compute at position detected in compute at when trying to replay producer: ",
-      producer,
-      " as consumer: ",
+      "Invalid compute at position detected in compute at when trying to propagate the CA position from consumer: ",
       consumer,
+      " to producer: ",
+      producer,
       " tried to do this at position: ",
       pos,
       " but max position that's allowed is ",
@@ -214,11 +203,11 @@ size_t InlinePropagator::getReplayPosPasC(
   return pos;
 }
 
-size_t InlinePropagator::getReplayPosCasP(
+size_t InlinePropagator::getFromPosCasP(
     TensorView* consumer,
     TensorView* producer) {
   size_t max_pos = max_pos_calc.getMaxPosCasP(consumer, producer);
-  size_t pos = retrieveReplayedPos(producer);
+  size_t pos = mapped_reference_pos_.at(producer);
 
   if (mode_ == ComputeAtMode::BestEffort) {
     return std::min(pos, max_pos);
@@ -228,10 +217,10 @@ size_t InlinePropagator::getReplayPosCasP(
 
   TORCH_INTERNAL_ASSERT(
       pos <= max_pos,
-      "Invalid compute at position detected in compute at when trying to replay consumer: ",
-      consumer,
-      " as producer: ",
+      "Invalid compute at position detected in compute at when trying to propagate the CA position from producer: ",
       producer,
+      " to consumer: ",
+      consumer,
       " tried to do this at position: ",
       pos,
       " but max position that's allowed is ",
@@ -239,29 +228,15 @@ size_t InlinePropagator::getReplayPosCasP(
   return pos;
 }
 
-void InlinePropagator::recordReplayedPos(TensorView* tv, size_t pos) {
-  if (selected_.count(tv)) {
-    auto new_pos = adjustComputeAtPos(tv, pos);
-    if (pos != new_pos) {
-      replayed_pos_[tv] = pos;
-      pos = new_pos;
+void InlinePropagator::setCAPos(TensorView* tv, size_t pos) {
+  if (selected_.count(tv) && !tv->isFusionInput()) {
+    pos = std::min<size_t>(pos, getMaxPosAll(tv));
+    // hoist inner most broadcast
+    while (pos > 0 && tv->axis(pos - 1)->isBroadcast()) {
+      pos--;
     }
-    if (!tv->isFusionInput()) {
-      tv->setComputeAt(pos);
-    } else {
-      replayed_pos_[tv] = pos;
-    }
-  } else {
-    replayed_pos_[tv] = pos;
+    tv->setComputeAt(pos);
   }
-}
-
-size_t InlinePropagator::retrieveReplayedPos(TensorView* tv) {
-  auto it = replayed_pos_.find(tv);
-  if (it != replayed_pos_.end()) {
-    return it->second;
-  }
-  return tv->getComputeAtPosition();
 }
 
 InlinePropagator::InlinePropagator(
@@ -288,101 +263,62 @@ InlinePropagator::InlinePropagator(
       ".");
 }
 
-namespace {
-
-// Make sure if tv is set to new_td it doesn't violate set compute at and max
-// produce at positions.
-bool validateDomain(TensorView* tv, TensorDomain* new_td) {
-  auto first_mismatch =
-      BestEffortReplay::findFirstMismatchedID(tv->domain(), new_td);
-  return first_mismatch >= (int)tv->getMaxProducerPosition() &&
-      first_mismatch >= (int)tv->getComputeAtPosition();
-}
-
-} // namespace
-
 void InlinePropagator::propagateTvPasC(TensorView* from, TensorView* to) {
   if (is_first_) {
     is_first_ = false;
-    recordReplayedPos(reference_, reference_pos_);
+    setCAPos(reference_, reference_pos_);
+    mapped_reference_pos_[reference_] = reference_pos_;
   }
-  int pos = getReplayPosPasC(to, from);
+  int from_pos = getFromPosPasC(to, from);
   auto to_pos =
-      TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, pos);
-  if (mode_ != ComputeAtMode::MostInlined) {
-    TORCH_CHECK(
-        to_pos >= 0,
-        "Unable to propagate CA position from consumer ",
-        from,
-        " to producer ",
-        to,
-        " because this would require replay.");
-  }
-  if (to_pos < 0) {
-    auto replay = TransformReplay::replayPasC(to, from, pos);
-    TORCH_INTERNAL_ASSERT(
-        validateDomain(to, replay.first),
-        "Tried to set the domain of ",
-        to,
-        " to ",
-        replay.first,
-        " but that would invalidate previously compute at position or max producer position.");
-    to->setDomain(replay.first);
-    to_pos = replay.second;
-  }
-  recordReplayedPos(to, to_pos);
+      TransformReplay::getMatchedLeafPosWithoutReplayPasC(to, from, from_pos);
+  TORCH_CHECK(
+      to_pos >= 0,
+      "Unable to propagate CA position from consumer ",
+      from,
+      " to producer ",
+      to,
+      " because this would require replay.");
+  setCAPos(to, to_pos);
+  mapped_reference_pos_[to] = to_pos;
 }
 
 void InlinePropagator::propagateTvCasP(TensorView* from, TensorView* to) {
   if (is_first_) {
     is_first_ = false;
-    recordReplayedPos(reference_, reference_pos_);
+    setCAPos(reference_, reference_pos_);
+    mapped_reference_pos_[reference_] = reference_pos_;
   }
-  int pos = getReplayPosCasP(to, from);
+  int from_pos = getFromPosCasP(to, from);
   auto to_pos =
-      TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, pos);
-  if (mode_ != ComputeAtMode::MostInlined) {
-    TORCH_CHECK(
-        to_pos >= 0,
-        "Unable to propagate CA position from producer ",
-        from,
-        " to consumer ",
-        to,
-        " because this would require replay.");
-  }
-  if (to_pos < 0) {
-    auto replay = TransformReplay::replayCasP(to, from, pos);
-    TORCH_INTERNAL_ASSERT(
-        validateDomain(to, replay.first),
-        "Tried to set the domain of ",
-        to,
-        " to ",
-        replay.first,
-        " but that would invalidate previously compute at position or max producer position.");
-    to->setDomain(replay.first);
-    to_pos = replay.second;
-  }
-  recordReplayedPos(to, to_pos);
+      TransformReplay::getMatchedLeafPosWithoutReplayCasP(to, from, from_pos);
+  TORCH_CHECK(
+      to_pos >= 0,
+      "Unable to propagate CA position from producer ",
+      from,
+      " to consumer ",
+      to,
+      " because this would require replay.");
+  setCAPos(to, to_pos);
+  mapped_reference_pos_[to] = to_pos;
 }
 
 void InlinePropagator::propagateTvSibling(TensorView* from, TensorView* to) {
   if (is_first_) {
     is_first_ = false;
-    recordReplayedPos(reference_, reference_pos_);
+    setCAPos(reference_, reference_pos_);
+    mapped_reference_pos_[reference_] = reference_pos_;
   }
-  auto from_pos = retrieveReplayedPos(from);
-  if (!TransformReplay::fullSelfMatching(to, from)) {
-    auto replay = TransformReplay::fullSelfReplay(to->domain(), from->domain());
-    TORCH_INTERNAL_ASSERT(
-        validateDomain(to, replay),
-        "Tried to set the domain of ",
-        to,
-        " to ",
-        replay,
-        " but that would invalidate previously compute at position or max producer position.");
-    to->setDomain(replay);
-  }
-  recordReplayedPos(to, from_pos);
+  auto from_pos = mapped_reference_pos_.at(from);
+  TORCH_CHECK(
+      TransformReplay::fullSelfMatching(to, from),
+      "Unable to propagate CA position from ",
+      from,
+      " to sibling ",
+      to,
+      " because this would require replay.");
+  setCAPos(to, from_pos);
+  mapped_reference_pos_[to] = from_pos;
 }
 
 namespace {

@@ -157,6 +157,7 @@ enum class ComputeAtMode { Standard, BestEffort, MostInlined };
 class InlinePropagator;
 class MaxProducerPosUpdater;
 class TransformPropagator;
+struct MostInlinedTransformPropagator;
 class TransformIter;
 class TransformReplay;
 class OptOutMutator;
@@ -457,6 +458,7 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   void applyMmaSwizzle(MmaOptions options);
 
   friend TORCH_CUDA_CU_API TransformPropagator;
+  friend TORCH_CUDA_CU_API MostInlinedTransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;
   friend TORCH_CUDA_CU_API InlinePropagator;
