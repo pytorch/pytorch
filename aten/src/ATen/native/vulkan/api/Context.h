@@ -17,6 +17,11 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+struct ContextConfig final {
+  uint32_t cmdSubmitFrequency;
+  CommandPoolConfig cmdPoolConfig;
+};
+
 //
 // Vulkan Context holds onto all relevant Vulkan state as it pertains to our
 // use of Vulkan in PyTorch.  A Context is associated with one, and only one,
@@ -28,7 +33,8 @@ namespace api {
 
 class Context final {
  public:
-  explicit Context(const VkInstance instance, size_t adapter_i);
+  explicit Context(
+      const VkInstance instance, size_t adapter_i, const ContextConfig);
 
   Context(const Context&) = delete;
   Context& operator=(const Context&) = delete;
@@ -39,16 +45,24 @@ class Context final {
   ~Context();
 
  private:
+  // Config
+  ContextConfig config_;
+  // Important handles
   VkInstance instance_;
   Adapter* adapter_p_;
-  // Handles
   VkDevice device_;
   Adapter::Queue queue_;
   // Resource Pools
+  CommandPool command_pool_;
   Command command_;
   Descriptor descriptor_;
   FencePool fences_;
   QueryPool querypool_;
+  // Command buffers submission
+  CommandBuffer cmd_;
+  uint32_t submit_count_;
+  VulkanFence fence_;
+  std::vector<VkCommandBuffer> cmd_submit_list_;
   // Memory Management
   std::vector<VulkanBuffer> buffers_to_clear_;
   std::vector<VulkanImage> images_to_clear_;
@@ -71,6 +85,15 @@ class Context final {
   inline Adapter* adapter_ptr() {
     return adapter_p_;
   }
+
+  inline VkDevice device() {
+    return device_;
+  }
+
+  inline VkQueue queue() {
+    return queue_.handle;
+  }
+
 
   // Device Caches
 
@@ -119,6 +142,29 @@ class Context final {
 
   // GPU RPC
 
+ private:
+
+  inline void set_cmd() {
+    if (!cmd_) {
+      cmd_ = command_pool_.get_new_cmd();
+      cmd_.begin();
+    }
+  }
+
+  Descriptor::Set submit_compute_prologue(
+      CommandBuffer&,
+      const ShaderLayout::Signature&,
+      const ShaderSource&,
+      const utils::uvec3&);
+
+  void submit_compute_epilogue(
+      CommandBuffer&,
+      const Descriptor::Set&,
+      const PipelineBarrier&,
+      const utils::uvec3&);
+
+ public:
+
   template<typename... Arguments>
   void dispatch(
       Command::Buffer& command_buffer,
@@ -128,27 +174,37 @@ class Context final {
       const utils::uvec3& local_work_group_size,
       Arguments&&... arguments);
 
-  // This function is expensive and its use consequential for performance. Only
-  // use this function for debugging or as a short term hack on way to a more
-  // performant solution.
+  template<typename... Arguments>
+  void submit_compute_job(
+      const ShaderLayout::Signature&,
+      const ShaderSource&,
+      const PipelineBarrier&,
+      const utils::uvec3&,
+      const utils::uvec3&,
+      const VkFence fence_handle,
+      Arguments&&...);
 
-  void flush();
+  void submit_texture_copy(
+      const PipelineBarrier& pipeline_barrier,
+      const api::VulkanImage&,
+      const api::VulkanImage&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const api::utils::uvec3&,
+      const VkFence fence_handle);
 
  private:
 
-  inline VkDevice device() {
-    return device_;
-  }
+  void submit_cmd_to_gpu(const VkFence fence_handle = VK_NULL_HANDLE);
 
-  inline VkQueue queue() {
-    return queue_.handle;
-  }
+ public:
 
+  void flush();
 };
 
 class UniformParamsBuffer final {
  private:
-  api::Context* context_p_;
+  Context* context_p_;
   VulkanBuffer vulkan_buffer_;
  public:
   template<typename Block>
@@ -175,7 +231,7 @@ class UniformParamsBuffer final {
 
 class StagingBuffer final {
  private:
-  api::Context* context_p_;
+  Context* context_p_;
   VulkanBuffer vulkan_buffer_;
  public:
   StagingBuffer(Context* context_p, const VkDeviceSize size)
@@ -260,6 +316,44 @@ inline void Context::dispatch(
       command_buffer,
       descriptor_set,
       global_work_group);
+}
+
+template<typename... Arguments>
+inline void Context::submit_compute_job(
+    const ShaderLayout::Signature& shader_layout_signature,
+    const ShaderSource& shader_descriptor,
+    const PipelineBarrier& pipeline_barrier,
+    const utils::uvec3& global_work_group,
+    const utils::uvec3& local_work_group_size,
+    const VkFence fence_handle,
+    Arguments&&... arguments) {
+  set_cmd();
+
+  // Factor out template parameter independent code to minimize code bloat.
+  Descriptor::Set descriptor_set = submit_compute_prologue(
+      cmd_,
+      shader_layout_signature,
+      shader_descriptor,
+      local_work_group_size);
+
+  detail::bind(
+      descriptor_set,
+      std::index_sequence_for<Arguments...>{},
+      std::forward<Arguments>(arguments)...);
+
+  // Factor out template parameter independent code to minimize code bloat.
+  submit_compute_epilogue(
+      cmd_,
+      descriptor_set,
+      pipeline_barrier,
+      global_work_group);
+
+  submit_count_++;
+  if (fence_handle != VK_NULL_HANDLE ||
+      submit_count_ >= config_.cmdSubmitFrequency) {
+    submit_cmd_to_gpu(fence_handle);
+  }
+
 }
 
 } // namespace api
