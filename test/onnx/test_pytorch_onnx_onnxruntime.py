@@ -4882,6 +4882,8 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
                 return (
                     torch.argmin(input),
                     torch.argmax(input),
+                    torch.argmin(input, keepdim=True),
+                    torch.argmax(input, keepdim=True),
                     torch.argmin(input, dim=0, keepdim=True),
                     torch.argmax(input, dim=1, keepdim=True),
                 )
@@ -4896,7 +4898,7 @@ class TestONNXRuntime(test_onnx_common._TestONNXRuntime):
     # "select_last_index" was added in opset 12 to deal with corner case where the
     # same value appears multiple times in the tensor
     @skipIfUnsupportedMinOpsetVersion(12)
-    def test_argmin_argmax_select_last_index(self):
+    def test_argmin_argmz_select_last_index(self):
         input = torch.tensor([[1.0, 2.0, 3.0], [1.0, 1.0, 2.0]])
         self._argmin_argmax_model(input)
 
