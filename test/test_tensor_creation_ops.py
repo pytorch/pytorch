@@ -2472,124 +2472,143 @@ class TestTensorCreation(TestCase):
             self.assertEqual(len(w), 1)
 
     # TODO: this test should be updated
-    @onlyCPU
     def test_arange(self, device):
-        res = torch.tensor(range(10000))
-        res1 = torch.arange(0, 10000)  # Use a larger number so vectorized code can be triggered
-        res2 = torch.tensor([], dtype=torch.int64)
+        res = torch.tensor(range(10000), device=device)
+        res1 = torch.arange(0, 10000, device=device)  # Use a larger number so vectorized code can be triggered
+        res2 = torch.tensor([], dtype=torch.int64, device=device)
         torch.arange(0, 10000, out=res2)
         self.assertEqual(res, res1, atol=0, rtol=0)
         self.assertEqual(res, res2, atol=0, rtol=0)
 
         # Vectorization on non-contiguous tensors
-        res = torch.rand(3, 3, 300000).to(torch.int64)
+        res = torch.rand(3, 3, 300000, device=device).to(torch.int64)
         res = res.permute(2, 0, 1)
         torch.arange(0, 300000 * 3 * 3, out=res)
-        self.assertEqual(res.flatten(), torch.arange(0, 300000 * 3 * 3))
+        self.assertEqual(res.flatten(), torch.arange(0, 300000 * 3 * 3, device=device))
 
         # Check arange with only one argument
-        res1 = torch.arange(10)
-        res2 = torch.arange(0, 10)
+        res1 = torch.arange(10, device=device)
+        res2 = torch.arange(0, 10, device=device)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # Check arange for non-contiguous tensors.
-        x = torch.zeros(2, 3)
+        x = torch.zeros(2, 3, device=device)
         torch.arange(0, 4, out=x.narrow(1, 1, 2))
-        res2 = torch.tensor(((0., 0., 1.), (0., 2., 3.)))
+        res2 = torch.tensor(((0., 0., 1.), (0., 2., 3.)), device=device)
         self.assertEqual(x, res2, atol=1e-16, rtol=0)
 
         # Check negative
-        res1 = torch.tensor((1., 0.))
-        res2 = torch.tensor([])
+        res1 = torch.tensor((1., 0.), device=device)
+        res2 = torch.tensor([], device=device)
         torch.arange(1, -1, -1, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # Equal bounds
-        res1 = torch.ones(1)
-        res2 = torch.tensor([])
+        res1 = torch.ones(1, device=device)
+        res2 = torch.tensor([], device=device)
         torch.arange(1, 0, -1, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
         torch.arange(1, 2, 1, out=res2)
         self.assertEqual(res1, res2, atol=0, rtol=0)
 
         # FloatTensor
-        res1 = torch.arange(0.6, 0.89, 0.1, out=torch.FloatTensor())
+        out=torch.tensor([], dtype=torch.float, device=device)
+        res1 = torch.arange(0.6, 0.89, 0.1, out=out)
         self.assertEqual(res1, [0.6, 0.7, 0.8])
-        res1 = torch.arange(1, 10, 0.3, out=torch.FloatTensor())
+        out=torch.tensor([], dtype=torch.float, device=device)
+        res1 = torch.arange(1, 10, 0.3, out=out)
         self.assertEqual(res1.size(0), 30)
         self.assertEqual(res1[0], 1)
         self.assertEqual(res1[29], 9.7)
 
         # DoubleTensor
-        res1 = torch.arange(0.6, 0.89, 0.1, out=torch.DoubleTensor())
+        out=torch.tensor([], dtype=torch.double, device=device)
+        res1 = torch.arange(0.6, 0.89, 0.1, out=out)
         self.assertEqual(res1, [0.6, 0.7, 0.8])
-        res1 = torch.arange(1, 10, 0.3, out=torch.DoubleTensor())
+        out=torch.tensor([], dtype=torch.double, device=device)
+        res1 = torch.arange(1, 10, 0.3, out=out)
         self.assertEqual(res1.size(0), 30)
         self.assertEqual(res1[0], 1)
         self.assertEqual(res1[29], 9.7)
 
         # Bool Input matching numpy semantics
-        r = torch.arange(True)
+        r = torch.arange(True, device=device)
         self.assertEqual(r[0], 0)
-        r2 = torch.arange(False)
+        r2 = torch.arange(False, device=device)
         self.assertEqual(len(r2), 0)
         self.assertEqual(r.dtype, torch.int64)
         self.assertEqual(r2.dtype, torch.int64)
 
         # Check that it's exclusive
-        r = torch.arange(0, 5)
+        r = torch.arange(0, 5, device=device)
         self.assertEqual(r.min(), 0)
         self.assertEqual(r.max(), 4)
         self.assertEqual(r.numel(), 5)
 
-        r = torch.arange(0, 5, 2)
+        r = torch.arange(0, 6, 3, device=device)
+        self.assertEqual(r.min(), 0)
+        self.assertEqual(r.max(), 3)
+        self.assertEqual(r.numel(), 2)
+
+        r = torch.arange(0, 5, 2, device=device)
         self.assertEqual(r.min(), 0)
         self.assertEqual(r.max(), 4)
         self.assertEqual(r.numel(), 3)
 
-        r1 = torch.arange(0, 5 + 1e-6)
+        r = torch.arange(0, -5, -2, device=device)
+        self.assertEqual(r.min(), -4)
+        self.assertEqual(r.max(), 0)
+        self.assertEqual(r.numel(), 3)
+
+        r1 = torch.arange(0, 5 + 1e-6, device=device)
         # NB: without the dtype, we'll infer output type to be int64
-        r2 = torch.arange(0, 5, dtype=torch.float32)
-        r3 = torch.arange(0, 5 - 1e-6)
+        r2 = torch.arange(0, 5, dtype=torch.float32, device=device)
+        r3 = torch.arange(0, 5 - 1e-6, device=device)
         self.assertEqual(r1[:-1], r2, atol=0, rtol=0)
         self.assertEqual(r2, r3, atol=0, rtol=0)
 
-        r1 = torch.arange(10, -1 + 1e-6, -1)
+        r1 = torch.arange(10, -1 + 1e-6, -1, device=device)
         # NB: without the dtype, we'll infer output type to be int64
-        r2 = torch.arange(10, -1, -1, dtype=torch.float32)
-        r3 = torch.arange(10, -1 - 1e-6, -1)
+        r2 = torch.arange(10, -1, -1, dtype=torch.float32, device=device)
+        r3 = torch.arange(10, -1 - 1e-6, -1, device=device)
         self.assertEqual(r1, r2, atol=0, rtol=0)
         self.assertEqual(r2, r3[:-1], atol=0, rtol=0)
 
+        w = 1449629115440469
+        r = torch.arange(0, 100 * w, w, device=device)
+        self.assertEqual(r.numel(), 100)
+
+        r1 = torch.arange(-1.5, 1.5, dtype=torch.int32, device=device)
+        self.assertEqual(r1.numel(), 3)
+        r2= torch.arange(-1.5, 1.5, dtype=torch.int64, device=device)
+        self.assertEqual(r1, r2, exact_dtype=False, atol=0, rtol=0)
+
         # Test Rounding Errors
-        line = torch.zeros(size=(1, 49))
+        line = torch.zeros(size=(1, 49), device=device)
         self.assertWarnsRegex(UserWarning, 'The out tensor will be resized',
                               lambda: torch.arange(-1, 1, 2. / 49, dtype=torch.float32, out=line))
         self.assertEqual(line.shape, [50])
 
         x = torch.empty(1).expand(10)
         self.assertRaises(RuntimeError, lambda: torch.arange(10, out=x))
+
         msg = "unsupported range"
-        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf')))
-        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf')))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(-5, float('nan'), device=device))
+        # check with step size
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('-inf'), -1, device=device))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf'), device=device))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('-inf'), 10, device=device))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), 10, device=device))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf'), device=device))
+        self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), device=device))
 
-        for device in get_all_device_types():
-            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(-5, float('nan'), device=device))
-            # check with step size
-            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('-inf'), -1, device=device))
-            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(0, float('inf'), device=device))
-            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('-inf'), 10, device=device))
-            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), 10, device=device))
-            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('inf'), device=device))
-            self.assertRaisesRegex(RuntimeError, msg, lambda: torch.arange(float('nan'), device=device))
+        self.assertRaisesRegex(
+            RuntimeError, "overflow",
+            lambda: torch.arange(1.175494351e-38, 3.402823466e+38, device=device))
 
-            self.assertRaisesRegex(
-                RuntimeError, "overflow",
-                lambda: torch.arange(1.175494351e-38, 3.402823466e+38, device=device))
-
-            # check that it holds a consistent output shape on precision-cornered step sizes
-            d = torch.arange(-4.0, 4.0, 0.01, dtype=torch.float32, device=device)
-            self.assertEqual(d.shape[0], 800)
+        # check that it holds a consistent output shape on precision-cornered step sizes
+        d = torch.arange(-4.0, 4.0, 0.01, dtype=torch.float32, device=device)
+        self.assertEqual(d.shape[0], 800)
 
     # TODO: this test should be updated
     @onlyCPU
