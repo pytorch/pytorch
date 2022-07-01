@@ -285,6 +285,12 @@ void recordThreadInfo() {
 #endif // USE_KINETO
 }
 
+void registerProfilerFactory(child_activity_profiler_factory_t factory) {
+#ifdef USE_KINETO
+  libkineto::api().registerProfilerFactory(factory);
+#endif // USE_KINETO
+}
+
 } // namespace kineto
 } // namespace impl
 } // namespace profiler

@@ -21,6 +21,9 @@ namespace libkineto {
 enum class ActivityType;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
+class IActivityProfiler;
+using ChildActivityProfilerFactory =
+  std::function<std::unique_ptr<IActivityProfiler>()>;
 } // namespace libkineto
 #endif
 
@@ -50,12 +53,15 @@ const DeviceAndResource kineto_ids();
 #ifdef USE_KINETO
 using trace_t = libkineto::CpuTraceBuffer;
 using interface_trace_t = libkineto::ActivityTraceInterface;
+using child_activity_profiler_factory_t = libkineto::ChildActivityProfilerFactory;
 #else
 struct DummyTraceBuffer {};
 struct DummyTraceInterface {};
+struct DummyChildActivityProfilerFactory {};
 
 using trace_t = DummyTraceBuffer;
 using interface_trace_t = DummyTraceBuffer;
+using child_activity_profiler_factory_t = DummyChildActivityProfilerFactory;
 #endif // USE_KINETO
 
 // Subset of `libkineto::ActivityType` for `addCPUActivity`.
@@ -126,6 +132,7 @@ void pushUserCorrelationId(uint64_t correlation_id);
 void popCorrelationId();
 void popUserCorrelationId();
 void recordThreadInfo();
+void registerProfilerFactory(child_activity_profiler_factory_t factory);
 
 } // namespace kineto
 } // namespace impl

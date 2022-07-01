@@ -375,6 +375,9 @@ TORCH_API void enableProfilerWithEventPostProcess(
 
 TORCH_API std::unique_ptr<ProfilerResult> disableProfiler();
 
+TORCH_API void registerProfilerFactory(
+    torch::profiler::impl::kineto::child_activity_profiler_factory_t factory);
+
 TORCH_API void prepareProfiler(
     const torch::profiler::impl::ProfilerConfig& config,
     const std::set<torch::profiler::impl::ActivityType>& activities);
