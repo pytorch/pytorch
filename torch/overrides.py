@@ -967,6 +967,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.spmm: lambda input, mat2: -1,
         torch.softmax: lambda input, dim, dtype=None: -1,
         torch.linalg.solve: lambda A, B, left=True, out=None: -1,
+        torch.linalg.solve_ex: lambda A, B, left=True, check_errors=False, out=None: -1,
         torch.sort: lambda input, dim=-1, descending=False, *, stable=False, out=None: -1,
         torch.split: lambda tensor, split_size_or_sections, dim=0: -1,
         torch.split_with_sizes: lambda tensor, split_size_or_sections, dim=0: -1,

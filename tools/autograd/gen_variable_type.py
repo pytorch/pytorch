@@ -341,7 +341,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "pixel_unshuffle",
     "linalg_lu_solve",
     "_linalg_slogdet",
-    "_linalg_solve",
+    "_linalg_solve_ex",
 }
 
 GRADIENT_IMPLEMENTED_FOR_SPARSE_COMPLEX = {
