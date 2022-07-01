@@ -469,7 +469,6 @@ void vTensorStorage::CMD::barrier(StorageState::Transition transition) {
         TORCH_INTERNAL_ASSERT(
             from.layout == view_.image().layout(),
             "Invalid image layout!");
-        api::VulkanImage::Package package = view_.image().package();
 
         barrier.images.push_back(
             api::ImageMemoryBarrier(
