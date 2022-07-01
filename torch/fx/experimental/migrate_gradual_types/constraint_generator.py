@@ -231,8 +231,9 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
     assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
     assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
 
-    # This node will not have been used later
-    # TODO: add an assert
+    # We make sure this node will not be used again. We do not
+    # generate a constriant about that node. Only about the operands.
+    assert len(n.users) == 1
 
     e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
     e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]

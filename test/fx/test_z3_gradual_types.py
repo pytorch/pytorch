@@ -1,12 +1,13 @@
 # Owner(s): ["oncall: fx"]
-
+import operator
 import unittest
 from torch.fx import GraphModule, symbolic_trace
 from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT, DVar, TVar, T
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
 from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint
 from torch.fx.experimental.migrate_gradual_types.operation import op_precision, op_matching, op_consistency
-from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints
+from torch.fx.experimental.migrate_gradual_types.transform_to_z3 import transform_all_constraints,\
+    evaluate_conditional_with_constraints
 from torch.fx.experimental.migrate_gradual_types.z3_types import tensor_type, D
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.tensor_type import Dyn, TensorType
@@ -151,7 +152,6 @@ class HFOperations(unittest.TestCase):
                 mul = embed_tokens * 32.0
                 return mul
 
-        B = BasicBlock().forward(torch.ones([2, 4], dtype=torch.long)).size()
 
         # print(B)
 
@@ -176,6 +176,55 @@ class HFOperations(unittest.TestCase):
 
         mul_result = z3.Const(12, tensor_type)
         assert s.model()[mul_result] == s.model()[embedding_result]
+
+
+    def test_conditional(self):
+        """
+        This test case is for the HFmodels interface.
+        A function takes a node and a graph and considers
+        the conditional the node represents and its negation
+        and solves each formula with the remaining sets of constraints
+        Returns:
+
+        """
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
+
+            def forward(self, x: TensorType([Dyn, 4])):
+                size = x.size()
+                getitem = size[-1]
+                view = x.view(-1, getitem)
+                embed_tokens = self.embed_tokens(view)
+                mul = embed_tokens * 32.0
+                getitem_1 = size[-1]
+                gt = getitem_1 > 1
+                return gt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+
+        # The node we are considering is the gt node
+        for n in graph.nodes:
+            if n.target == operator.gt:
+                node = n
+
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.unsat)
+
+        # change the annotation to Dyn
+        for n in graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        # here, both should be SAT since the input is Dyn
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+
+        self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.sat)
+
 
 
 class ComposeOperationsGradualTypes(unittest.TestCase):
