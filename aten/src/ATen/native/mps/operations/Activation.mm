@@ -1625,12 +1625,12 @@ TORCH_IMPL_FUNC(softplus_backward_out_mps) (
                                                                   name:nil];
               MPSGraphTensor* expBxTensor = [mpsGraph exponentWithTensor:bxTensor
                                                                   name:nil];
-              MPSGraphTensor* rTensor = [mpsGraph multiplicationWithPrimaryTensor:gradOutputTensor
-                                                                secondaryTensor:expBxTensor
-                                                                  name:nil];
               MPSGraphTensor* unitExpBxTensor = [mpsGraph additionWithPrimaryTensor:expBxTensor
                                                                     secondaryTensor:unitTensor
                                                                                name:nil];
+              MPSGraphTensor* rTensor = [mpsGraph multiplicationWithPrimaryTensor:gradOutputTensor
+                                                                secondaryTensor:expBxTensor
+                                                                  name:nil];
               rTensor = [mpsGraph divisionWithPrimaryTensor:rTensor
                                             secondaryTensor:unitExpBxTensor
                                                        name:nil];
