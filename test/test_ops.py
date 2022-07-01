@@ -1531,12 +1531,40 @@ class TestRefsOpsInfo(TestCase):
         '_refs.nn.functional.tanhshrink',
         '_refs.swap_axes',
         # CompositeImplicitAutograd
+        '_refs.atleast_1d',
+        '_refs.atleast_2d',
+        '_refs.atleast_3d',
+        '_refs.broadcast_to',
+        '_refs.chunk',
+        '_refs.column_stack',
+        '_refs.dsplit',
+        '_refs.dstack',
+        '_refs.fill',
+        '_refs.flatten',
+        '_refs.fliplr',
+        '_refs.flipud',
+        '_refs.float_power',
+        '_refs.hsplit',
+        '_refs.hstack',
+        '_refs.isclose',
         '_refs.isfinite',
+        '_refs.narrow',
+        '_refs.positive',
+        '_refs.ravel',
+        '_refs.reshape',
         '_refs.square',
+        '_refs.tensor_split',
         '_refs.true_divide',
         '_refs.trunc_divide',
-        # missing kwargs
-        '_refs.empty_like',
+        '_refs.vsplit',
+        '_refs.vstack',
+        # ref implementation missing kwargs
+        '_refs.empty',  # missing "pin_memory"
+        '_refs.empty_like',  # missing "layout"
+        '_refs.full_like',  # missing "layout"
+        '_refs.ones_like',  # missing "layout"
+        '_refs.round',  # missing "decimals"
+        '_refs.zeros_like',  # missing "layout"
         # not sure
         '_refs.copy_to',
         '_refs.clone',

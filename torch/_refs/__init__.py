@@ -467,7 +467,7 @@ def exp2(a):
 
 
 # Fill has its own implementation because it has a value parameter
-@register_ref_decomposition(torch.ops.aten.fill)
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a,"),
@@ -645,7 +645,7 @@ def neg(a):
 
 
 # positive does not use _make_elementwise_unary_reference because it does not support out
-@register_ref_decomposition(torch.ops.aten.positive)
+# CompositeImplicitAutograd - don't register decomp
 def positive(a: TensorLikeType) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     if a.dtype is torch.bool:
@@ -660,7 +660,6 @@ def reciprocal(a):
 
 
 # TODO: round takes additional kwargs
-@register_ref_decomposition(torch.ops.aten.round)
 @_make_elementwise_unary_reference(
     ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
     aten_op=None,  # TODO: this does need a decomp, but kwarg handling is needed
@@ -915,7 +914,6 @@ eq = _make_elementwise_binary_reference(
 # TODO: add docstring
 # Float power has its own implementation because it has unique type promotion.
 # NB: aten_op not registered because CompositeExplicitAutograd
-@register_ref_decomposition(torch.ops.aten.float_power)
 @out_wrapper
 def float_power(
     a: Union[TensorLikeType, NumberType],
@@ -1083,7 +1081,7 @@ igammac = _make_elementwise_binary_reference(
 )
 
 
-@register_ref_decomposition(torch.ops.aten.isclose)
+# CompositeImplicitAutograd - don't register decomp
 def isclose(
     a: TensorLikeType,
     b: TensorLikeType,
@@ -1882,7 +1880,7 @@ def addr(
             return beta * self + alpha * torch.outer(vec1, vec2)
 
 
-@register_ref_decomposition(torch.ops.aten.atleast_1d)
+# CompositeImplicitAutograd - don't register decomp
 def atleast_1d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
@@ -1906,7 +1904,7 @@ def _unsqueeze_atleast(
     return unsqueeze(arg_, dim)
 
 
-@register_ref_decomposition(torch.ops.aten.atleast_2d)
+# CompositeImplicitAutograd - don't register decomp
 def atleast_2d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
@@ -1921,7 +1919,7 @@ def atleast_2d(
     return res if len(res) > 1 else res[0]
 
 
-@register_ref_decomposition(torch.ops.aten.atleast_3d)
+# CompositeImplicitAutograd - don't register decomp
 def atleast_3d(
     arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
 ) -> Union[TensorLikeType, Tuple[TensorLikeType, ...]]:
@@ -1951,7 +1949,7 @@ def broadcast_tensors(*tensors) -> List[TensorLikeType]:
     return list(_maybe_broadcast(*tensors, preserve_cpu_scalar_tensors=False))
 
 
-@register_ref_decomposition(torch.ops.aten.broadcast_to)
+# CompositeImplicitAutograd - don't register decomp
 def broadcast_to(a: TensorLikeType, size: ShapeType) -> TensorLikeType:
     start = len(size) - len(a.shape)
     dims = tuple(range(start, len(a.shape) + start))
@@ -1993,7 +1991,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     return prims.cat(filtered, dim)
 
 
-@register_ref_decomposition(torch.ops.aten.column_stack)
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper
 def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     aligned_tensors = tuple(
@@ -2003,7 +2001,7 @@ def column_stack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
-@register_ref_decomposition(torch.ops.aten.dstack)
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper
 def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "dstack expects a non-empty TensorList")
@@ -2011,7 +2009,7 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 2)
 
 
-@register_ref_decomposition(torch.ops.aten.chunk)
+# CompositeImplicitAutograd - don't register decomp
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = "Expected at least one chunk, but got {0}!".format(chunks)
@@ -2036,7 +2034,7 @@ def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType,
 # Note: flatten, unlike prim.collapse and prim.collapse_view has an inclusive end_dim
 # Note: flatten, unlike other shape operators, returns the input tensor on a no-op (unless
 # a 0D tensor is flattened, in which case it's returned in 1D)
-@register_ref_decomposition(torch.ops.aten.flatten)
+# CompositeImplicitAutograd - don't register decomp
 def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorLikeType:
     start_dim = utils.canonicalize_dim(a.ndim, start_dim)
     end_dim = utils.canonicalize_dim(a.ndim, end_dim)
@@ -2064,7 +2062,7 @@ def flip(a: TensorLikeType, dims: DimsSequenceType) -> TensorLikeType:
     return prims.rev(a, dims)
 
 
-@register_ref_decomposition(torch.ops.aten.fliplr)
+# CompositeImplicitAutograd - don't register decomp
 def fliplr(a: TensorLikeType) -> TensorLikeType:
     if a.ndim < 2:
         raise RuntimeError("Input must be >= 2-d.")
@@ -2072,7 +2070,7 @@ def fliplr(a: TensorLikeType) -> TensorLikeType:
     return flip(a, (1,))
 
 
-@register_ref_decomposition(torch.ops.aten.flipud)
+# CompositeImplicitAutograd - don't register decomp
 def flipud(a: TensorLikeType) -> TensorLikeType:
     if a.ndim < 1:
         raise RuntimeError("Input must be >= 1-d.")
@@ -2080,7 +2078,7 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
     return flip(a, (0,))
 
 
-@register_ref_decomposition(torch.ops.aten.narrow)
+# CompositeImplicitAutograd - don't register decomp
 def narrow(a: TensorLikeType, dim: int, start: int, length: int) -> TensorLikeType:
     dim = utils.canonicalize_dim(a.ndim, dim)
     return prims.slice_in_dim(a, start, start + length, axis=dim)
@@ -2321,7 +2319,7 @@ def _reshape_view_helper(
 
 
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
-@register_ref_decomposition(torch.ops.aten.reshape)
+# CompositeImplicitAutograd - don't register decomp
 def reshape(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=True)
 
@@ -2446,7 +2444,7 @@ def softmax(
     )  # type: ignore[return-value]
 
 
-@register_ref_decomposition(torch.ops.aten.hstack)
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper
 def hstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "hstack expects a non-empty TensorList")
@@ -2456,7 +2454,7 @@ def hstack(tensors: TensorSequenceType) -> TensorLikeType:
     return cat(aligned_tensors, 1)
 
 
-@register_ref_decomposition(torch.ops.aten.vstack)
+# CompositeImplicitAutograd - don't register decomp
 @out_wrapper
 def vstack(tensors: TensorSequenceType) -> TensorLikeType:
     check(len(tensors) > 0, lambda: "vstack expects a non-empty TensorList")
@@ -2484,7 +2482,7 @@ def squeeze(a: TensorLikeType, dim: Optional[int] = None) -> TensorLikeType:
 
 
 # Note: does not work with TensorMetas because of data-dependent control-flow
-@register_ref_decomposition(torch.ops.aten.tensor_split)
+# CompositeImplicitAutograd - don't register decomp
 def tensor_split(
     a: TensorLikeType,
     indices_or_sections: Union[Tensor, DimsType],
@@ -2561,7 +2559,7 @@ def tensor_split(
         return tuple(splits)
 
 
-@register_ref_decomposition(torch.ops.aten.hsplit)
+# CompositeImplicitAutograd - don't register decomp
 def hsplit(
     a: TensorLikeType, indices_or_sections: DimsType
 ) -> Tuple[TensorLikeType, ...]:
@@ -2604,7 +2602,7 @@ def hsplit(
     return tensor_split(a, split_sizes, dim)
 
 
-@register_ref_decomposition(torch.ops.aten.vsplit)
+# CompositeImplicitAutograd - don't register decomp
 def vsplit(
     a: TensorLikeType, indices_or_sections: DimsType
 ) -> Tuple[TensorLikeType, ...]:
@@ -2645,7 +2643,7 @@ def vsplit(
     return tensor_split(a, split_sizes, 0)
 
 
-@register_ref_decomposition(torch.ops.aten.dsplit)
+# CompositeImplicitAutograd - don't register decomp
 def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
     if a.ndim < 3:
         raise RuntimeError(
@@ -2707,7 +2705,7 @@ def view(a: TensorLikeType, shape: ShapeType) -> TensorLikeType:
     return _reshape_view_helper(a, shape, allow_copy=False)
 
 
-@register_ref_decomposition(torch.ops.aten.ravel)
+# CompositeImplicitAutograd - don't register decomp
 def ravel(a: TensorLikeType) -> TensorLikeType:
     return reshape(a, (-1,))
 
@@ -2801,7 +2799,6 @@ ones = partial(full, fill_value=True)
 register_ref_decomposition(torch.ops.aten.ones)(ones)
 
 ones_like = partial(full_like, fill_value=True)
-register_ref_decomposition(torch.ops.aten.ones_like)(ones_like)
 
 
 @register_ref_decomposition(torch.ops.aten.scalar_tensor)
@@ -2820,7 +2817,6 @@ zeros = partial(full, fill_value=False)
 register_ref_decomposition(torch.ops.aten.zeros)(zeros)
 
 zeros_like = partial(full_like, fill_value=False)
-register_ref_decomposition(torch.ops.aten.zeros_like)(zeros_like)
 
 
 @register_ref_decomposition(torch.ops.aten.uniform)
