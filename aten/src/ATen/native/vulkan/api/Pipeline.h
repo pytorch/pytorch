@@ -13,7 +13,7 @@ namespace vulkan {
 namespace api {
 
 struct PipelineBarrier final {
-  struct Stage final {
+  struct Stages final {
     VkPipelineStageFlags src;
     VkPipelineStageFlags dst;
   } stage;
@@ -29,15 +29,13 @@ struct PipelineBarrier final {
   }
 };
 
-struct PipelineStage final {
-  using Flags = uint8_t;
+using PipelineStageFlags = uint8_t;
 
-  enum Type : Flags {
-    None = 0u << 0u,
-    Compute = 1u << 0u,
-    Host = 1u << 1u,
-    Transfer = 1u << 2u,
-  };
+enum PipelineStage : PipelineStageFlags {
+  None = 0u << 0u,
+  Compute = 1u << 0u,
+  Host = 1u << 1u,
+  Transfer = 1u << 2u,
 };
 
 class PipelineLayout final {

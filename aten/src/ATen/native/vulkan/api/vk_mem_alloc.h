@@ -1580,7 +1580,7 @@ objects and allocations out of them. Allocating from the default pool is suffici
 <b>When:</b>
 Any resources that you frequently write and read on GPU,
 e.g. images used as color attachments (aka "render targets"), depth-stencil attachments,
-images/buffers used as storage image/buffer (aka "Unordered Access View (UAV)").
+images/buffers used as storage image/buffer (aka "Unordered Access vTensorStorage (UAV)").
 
 <b>What to do:</b>
 Create them in video memory that is fastest to access from GPU using

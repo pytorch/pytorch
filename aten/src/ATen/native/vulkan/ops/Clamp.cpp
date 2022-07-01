@@ -66,13 +66,13 @@ Tensor _clamp(
           // barriers if necessary.
           v_output.image(
               command_buffer,
-              vTensor::Stage::Compute,
+              api::PipelineStage::Compute,
               api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute),
+              api::PipelineStage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           params.buffer().package());
@@ -145,7 +145,7 @@ Tensor& _clamp_(
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute,
+              api::PipelineStage::Compute,
               api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
@@ -219,13 +219,13 @@ Tensor activation(
           // barriers if necessary.
           v_output.image(
               command_buffer,
-              vTensor::Stage::Compute,
+              api::PipelineStage::Compute,
               api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute),
+              api::PipelineStage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           params.buffer().package());
@@ -280,7 +280,7 @@ Tensor& activation_(
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute,
+              api::PipelineStage::Compute,
               api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
@@ -381,13 +381,13 @@ Tensor activation_scalar(
           // barriers if necessary.
           v_output.image(
               command_buffer,
-              vTensor::Stage::Compute,
+              api::PipelineStage::Compute,
               api::MemoryAccessType::WRITE),
           // Read-only access is implied on const tensors and triggers an async
           // synchronization if necessary.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute),
+              api::PipelineStage::Compute),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.
           params.buffer().package());
@@ -445,7 +445,7 @@ Tensor& activation_scalar_(
           // and inserts appropriate barriers if hazards are detected.
           v_self.image(
               command_buffer,
-              vTensor::Stage::Compute,
+              api::PipelineStage::Compute,
               api::MemoryAccessType::READ | api::MemoryAccessType::WRITE),
           // Object lifetime is managed by the resource pool.
           // It is OK not to keep track of the handle.

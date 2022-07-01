@@ -66,7 +66,7 @@ struct Command final {
     } bound_;
 
     struct Barrier final {
-      struct Stage final {
+      struct Stages final {
         VkPipelineStageFlags src;
         VkPipelineStageFlags dst;
 

@@ -25,10 +25,10 @@ Tensor slice_4d(const Tensor& input, const int64_t dim, const int64_t start, con
     if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       auto src_image = v_self.image(
               command_buffer,
-              vTensor::Stage::Compute);
+              api::PipelineStage::Compute);
       auto dst_image = v_output.image(
         command_buffer,
-        vTensor::Stage::Compute,
+        api::PipelineStage::Compute,
         api::MemoryAccessType::WRITE);
 
       const struct Block final {
@@ -96,10 +96,10 @@ Tensor slice_width(const Tensor& input, const int64_t start, const int64_t end, 
     if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       auto src_image = v_self.image(
               command_buffer,
-              vTensor::Stage::Transfer);
+              api::PipelineStage::Transfer);
       auto dst_image = v_output.image(
         command_buffer,
-        vTensor::Stage::Transfer,
+        api::PipelineStage::Transfer,
         api::MemoryAccessType::WRITE);
 
       uvec3 src_offset{};
@@ -156,10 +156,10 @@ Tensor slice_height(const Tensor& input, const int64_t start, const int64_t end,
     if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
       auto src_image = v_self.image(
               command_buffer,
-              vTensor::Stage::Transfer);
+              api::PipelineStage::Transfer);
       auto dst_image = v_output.image(
         command_buffer,
-        vTensor::Stage::Transfer,
+        api::PipelineStage::Transfer,
         api::MemoryAccessType::WRITE);
 
       uvec3 src_offset{};
