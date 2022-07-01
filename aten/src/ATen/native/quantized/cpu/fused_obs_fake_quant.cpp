@@ -7,7 +7,7 @@
 #ifdef USE_FBGEMM
 #include <fbgemm/QuantUtils.h>
 #endif
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 
 namespace {
 void calculate_moving_average(

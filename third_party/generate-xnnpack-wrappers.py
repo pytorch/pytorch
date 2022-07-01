@@ -109,10 +109,10 @@ def gen_wrappers(xnnpack_path):
         print(BANNER, file=wrapper_defs)
         print('"""', file=wrapper_defs)
         for name in WRAPPER_SRC_NAMES:
-            print(name + ' = [', file=wrapper_defs)
+            print('\n' + name + ' = [', file=wrapper_defs)
             for file_name in sources[name]:
                 print('    "xnnpack_wrappers/{}",'.format(file_name), file=wrapper_defs)
-            print(']\n', file=wrapper_defs)
+            print(']', file=wrapper_defs)
 
     # update xnnpack_src_defs.bzl file under the same folder
     with open(os.path.join(os.path.dirname(__file__), "xnnpack_src_defs.bzl"), 'w') as src_defs:
@@ -120,10 +120,10 @@ def gen_wrappers(xnnpack_path):
         print(BANNER, file=src_defs)
         print('"""', file=src_defs)
         for name in SRC_NAMES:
-            print(name + ' = [', file=src_defs)
+            print('\n' + name + ' = [', file=src_defs)
             for file_name in sources[name]:
                 print('    "XNNPACK/src/{}",'.format(file_name), file=src_defs)
-            print(']\n', file=src_defs)
+            print(']', file=src_defs)
 
 
 def main(argv):
@@ -132,6 +132,8 @@ def main(argv):
     else:
         gen_wrappers(argv[0])
 
-# the first argument is the path of XNNPACK's parent folder
+# The first argument is the place where the "xnnpack_wrappers" folder will be created.
+# Run it without arguments will generate "xnnpack_wrappers" in the current path.
+# The two .bzl files will always be generated in the current path.
 if __name__ == "__main__":
     main(sys.argv[1:])
