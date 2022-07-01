@@ -10,26 +10,25 @@ namespace ops {
 void copy_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
   api::Context* const context = api::context();
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    command_buffer.copy_image(
-        // source image
-        src.image(
-            command_buffer,
-            api::PipelineStage::Transfer),
-        // destination image
-        dst.image(
-            command_buffer,
-            api::PipelineStage::Transfer,
-            api::MemoryAccessType::WRITE),
-        // offsets
-        {0u, 0u, 0u},
-        {0u, 0u, 0u},
-        // copy range
-        src.extents());
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  api::PipelineBarrier pipeline_barrier{};
+
+  context->submit_texture_copy(
+      // pipeline barrier
+      pipeline_barrier,
+      // images
+      src.image(
+          pipeline_barrier,
+          api::PipelineStage::Transfer),
+      dst.image(
+          pipeline_barrier,
+          api::PipelineStage::Transfer,
+          api::MemoryAccessType::WRITE),
+      // copy details
+      src.extents(),
+      {0u, 0u, 0u},
+      {0u, 0u, 0u},
+      // fence handle
+      VK_NULL_HANDLE);
 }
 
 void copy_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
@@ -55,11 +54,11 @@ void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
   api::StagingBuffer staging(context, src.buffer_bytes());
 
   api::VulkanFence fence = context->fences().get_fence();
+
   utils::pack_vtensor_to_staging(
       src, staging.buffer(), fence.get_submit_handle());
 
   fence.wait();
-  context->fences().return_fence(fence);
 
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::READ);
@@ -72,6 +71,9 @@ void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
         data_ptr,
         std::min(src.nbytes(), dst.nbytes()));
   }
+
+  context->flush();
+  context->fences().return_fence(fence);
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src) {
@@ -105,11 +107,6 @@ Tensor& copy_(Tensor& self, const Tensor& src) {
     else {
       TORCH_CHECK(false, "Unsupported!");
     }
-
-    // Transfer back to CPU is interpreted as a sync point.
-    // Flushes GPU resources.
-    api::Context* const context = api::context();
-    context->flush();
   }
   else {
     TORCH_INTERNAL_ASSERT(

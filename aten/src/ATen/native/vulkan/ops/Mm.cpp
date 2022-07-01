@@ -224,8 +224,7 @@ Tensor context_run(
     const c10::impl::GenericList& packed_context,
     const c10::impl::GenericList& unpacked_context,
     const float alpha,
-    const float beta,
-    const std::string& op_name) {
+    const float beta) {
   api::Context* const context = api::context();
 
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
@@ -244,11 +243,6 @@ Tensor context_run(
       "combination with the provided weight and bias tensors are unsupported by "
       "Vulkan impl.");
 
-  c10::SmallVector<int64_t, 4u> output_sizes{
-      v_input.sizes()[Layout::Parameter::height],
-      unpacked_weight.sizes()[Layout::Parameter::width],
-  };
-
   vTensor v_output {
       context,
       {
@@ -258,123 +252,111 @@ Tensor context_run(
       input.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+  if (unpacked_bias && unpacked_bias->defined()) {
+    const struct {
+      uvec3 size;
+      int32_t K;
+      vec2 multiplier;
+    } block {
+        v_output.extents(),
+        safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+        {
+          alpha,
+          beta,
+        },
+    };
 
-    if (true &&
-        true &&
-        true) {
-      if (unpacked_bias && unpacked_bias->defined()) {
-        const struct {
-          uvec3 size;
-          int32_t K;
-          vec2 multiplier;
-        } block {
-            v_output.extents(),
-            safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
-            {
-              alpha,
-              beta,
-            },
-        };
+    api::UniformParamsBuffer params(context, block);
+    api::PipelineBarrier pipeline_barrier{};
 
-        api::UniformParamsBuffer params(context, block);
-
-        context->dispatch(
-            command_buffer,
-            {
-                VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            },
-            VK_KERNEL(addmm),
-            {
-              safe_downcast<uint32_t>(div_up(unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
-              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
-              1,
-            },
-            {8, 8, 1},
-            // Write-only access bypasses synchronization but inserts appropriate
-            // barriers if necessary.
-            v_output.image(
-                command_buffer,
-                api::PipelineStage::Compute,
-                api::MemoryAccessType::WRITE),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            v_input.image(
-                command_buffer,
-                api::PipelineStage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            packed_v_weight.image(
-                command_buffer,
-                api::PipelineStage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            packed_v_bias.image(
-                command_buffer,
-                api::PipelineStage::Compute),
-            // Object lifetime is managed by the resource pool.
-            // It is OK not to keep track of the handle.
-            params.buffer().package());
-      }
-      else {
-        const struct {
-          uvec3 size;
-          int32_t K;
-        } block_no_bias {
-            v_output.extents(),
-            safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
-        };
-
-        api::UniformParamsBuffer params(context, block_no_bias);
-
-        context->dispatch(
-            command_buffer,
-            {
-                VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-            },
-            VK_KERNEL(mm),
-            {
-              safe_downcast<uint32_t>(div_up(unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
-              safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
-              1,
-            },
-            {8, 8, 1},
-            // Write-only access bypasses synchronization but inserts appropriate
-            // barriers if necessary.
-            v_output.image(
-                command_buffer,
-                api::PipelineStage::Compute,
-                api::MemoryAccessType::WRITE),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            v_input.image(
-                command_buffer,
-                api::PipelineStage::Compute),
-            // Read-only access is implied on const tensors and triggers an async
-            // synchronization if necessary.
-            packed_v_weight.image(
-                command_buffer,
-                api::PipelineStage::Compute),
-            // Object lifetime is managed by the resource pool.
-            // It is OK not to keep track of the handle.
-            params.buffer().package());
-      }
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
+    context->submit_compute_job(
+        // shader layout signature
+        {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        // shader descriptor
+        VK_KERNEL(addmm),
+        // pipeline barrier
+        pipeline_barrier,
+        // global work group size
+        {
+          safe_downcast<uint32_t>(div_up(unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+          safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+          1,
+        },
+        // local work group size
+        {8, 8, 1},
+        // fence handle
+        VK_NULL_HANDLE,
+        // shader arguments
+        v_output.image(
+            pipeline_barrier,
+            api::PipelineStage::Compute,
+            api::MemoryAccessType::WRITE),
+        v_input.image(
+            pipeline_barrier,
+            api::PipelineStage::Compute),
+        packed_v_weight.image(
+            pipeline_barrier,
+            api::PipelineStage::Compute),
+        packed_v_bias.image(
+            pipeline_barrier,
+            api::PipelineStage::Compute),
+        // params buffer
+        params.buffer());
   }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  else {
+    const struct {
+      uvec3 size;
+      int32_t K;
+    } block_no_bias {
+        v_output.extents(),
+        safe_downcast<int32_t>(div_up(v_input.sizes()[Layout::Parameter::width], INT64_C(2))),
+    };
+
+    api::UniformParamsBuffer params(context, block_no_bias);
+    api::PipelineBarrier pipeline_barrier{};
+
+    context->submit_compute_job(
+        // shader layout signature
+        {
+            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+        },
+        // shader descriptor
+        VK_KERNEL(mm),
+        // pipeline barrier
+        pipeline_barrier,
+        // global work group size
+        {
+          safe_downcast<uint32_t>(div_up(unpacked_weight.sizes()[Layout::Parameter::width], INT64_C(2))),
+          safe_downcast<uint32_t>(div_up(v_input.sizes()[Layout::Parameter::height], INT64_C(2))),
+          1,
+        },
+        // local work group size
+        {8, 8, 1},
+        // fence handle
+        VK_NULL_HANDLE,
+        // shader arguments
+        v_output.image(
+            pipeline_barrier,
+            api::PipelineStage::Compute,
+            api::MemoryAccessType::WRITE),
+        v_input.image(
+            pipeline_barrier,
+            api::PipelineStage::Compute),
+        packed_v_weight.image(
+            pipeline_barrier,
+            api::PipelineStage::Compute),
+        // params buffer
+        params.buffer());
+  }
 
   return convert(v_output);
 }
@@ -393,8 +375,7 @@ Tensor addmm(
     vulkan_context.get_packed(),
     vulkan_context.get_unpacked(),
     alpha.to<float>(),
-    beta.to<float>(),
-    "aten::addmm");
+    beta.to<float>());
 }
 
 Tensor mm(
@@ -410,8 +391,7 @@ Tensor mm(
     vulkan_context.get_packed(),
     vulkan_context.get_unpacked(),
     1.0f,
-    1.0f,
-    "aten::mm");
+    1.0f);
 }
 
 #ifdef USE_VULKAN_API
@@ -436,9 +416,8 @@ Tensor linear_context_run(
     const c10::impl::GenericList& packed_context,
     const c10::impl::GenericList& unpacked_context,
     const float alpha,
-    const float beta,
-    const std::string& op_name) {
-  return context_run(input_arg, packed_context, unpacked_context, alpha, beta, op_name);
+    const float beta) {
+  return context_run(input_arg, packed_context, unpacked_context, alpha, beta);
 }
 
 c10::intrusive_ptr<VulkanOpContext> create_linear_context(
@@ -458,8 +437,7 @@ Tensor run_linear_context(
     vulkan_context->get_packed(),
     vulkan_context->get_unpacked(),
     1.0,
-    1.0,
-    "prepacked::linear_clamp_run_vulkan");
+    1.0);
 }
 
 /* Backwards compatibility */
@@ -480,15 +458,13 @@ LinearOpContext LinearOpContext::create(
 Tensor LinearOpContext::run(
     const Tensor& input_arg,
     const float alpha,
-    const float beta,
-    const std::string& op_name) const {
+    const float beta) const {
   return linear_context_run(
     input_arg,
     vulkan_context_.get_packed(),
     vulkan_context_.get_unpacked(),
     alpha,
-    beta,
-    op_name);
+    beta);
 }
 
 LinearOpContext::State LinearOpContext::unpack() const {
@@ -514,7 +490,7 @@ c10::intrusive_ptr<LinearOpContext> linear_prepack(
 Tensor linear_run(
     const Tensor& input,
     const c10::intrusive_ptr<LinearOpContext>& context) {
-  return context->run(input, 1.0, 1.0, "prepacked::linear_clamp_run");
+  return context->run(input, 1.0, 1.0);
 }
 
 } // namespace ops
