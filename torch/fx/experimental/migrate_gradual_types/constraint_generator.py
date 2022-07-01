@@ -40,44 +40,42 @@ def generate_flatten_constraints(start_dim, end_dim, input, flattened, n, counte
 def long_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule("type_as")
 def type_as_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule("int")
 def int_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule("ne")
 def ne_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    # print(n.args)
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule(getattr)
 def get_attr_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 # TODO:
 @register_inference_rule("expand")
 def expand_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 
 # TODO:
@@ -85,7 +83,7 @@ def expand_inference_rule(n: Node, symbols, constraints, counter):
 def to_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 
 # TODO:
@@ -93,7 +91,7 @@ def to_inference_rule(n: Node, symbols, constraints, counter):
 def masked_fill_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 
 @register_inference_rule(torch.nn.modules.sparse.Embedding)
@@ -171,13 +169,13 @@ def size_inference_rule(n: Node, symbols, constraints, counter):
 def cumsum_inference_rule(n: Node, symbols, constraints, counter):
     """
     """
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 
 @register_inference_rule(_assert_is_none)
 def assert_inference_rule(n: Node, symbols, constraints, counter):
     assert len(n.users) == 0
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 
 @register_inference_rule(operator.getitem)
@@ -229,24 +227,22 @@ def mul_inference_rule(n: Node, symbols, constraints, counter):
 # TODO
 @register_inference_rule(operator.gt)
 def gt_inference_rule(n: Node, symbols, constraints, counter):
-    assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
-    assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule(operator.lt)
 def lt_inference_rule(n: Node, symbols, constraints, counter):
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule(torch.full)
 def full_inference_rule(n: Node, symbols, constraints, counter):
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 # TODO
 @register_inference_rule(torch.arange)
 def arange_inference_rule(n: Node, symbols, constraints, counter):
-    return [], counter
+    raise NotImplementedError('Not yet implemented')
 
 @register_inference_rule(torch.add)
 @register_inference_rule(operator.add)
@@ -272,7 +268,7 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
         return [c1, c2, c3], counter
     else:
         # TODO generate add constraints for scalar addition
-        return [], counter
+        raise NotImplementedError('Addition not yet implemented')
 
 
 @register_inference_rule(torch.flatten)
@@ -549,7 +545,7 @@ class ConstraintGenerator:
         # TODO
         elif n.op == 'get_attr':
             # t = get_parameter(self.traced, n.target)  # type: ignore[arg-type]
-            return [], counter
+            raise NotImplementedError('Not yet implemented')
 
         elif n.op == 'output':
             return [], counter
