@@ -1561,9 +1561,13 @@ class TestRefsOpsInfo(TestCase):
         # ref implementation missing kwargs
         '_refs.empty',  # missing "pin_memory"
         '_refs.empty_like',  # missing "layout"
+        '_refs.full',  # missing "layout"
         '_refs.full_like',  # missing "layout"
+        '_refs.ones',  # missing "layout"
         '_refs.ones_like',  # missing "layout"
         '_refs.round',  # missing "decimals"
+        '_refs.scalar_tensor',  # missing "layout"
+        '_refs.zeros',  # missing "layout"
         '_refs.zeros_like',  # missing "layout"
         # not sure
         '_refs.copy_to',
