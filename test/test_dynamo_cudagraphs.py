@@ -1,4 +1,6 @@
 import torch
+from torch.utils._pytree import tree_map
+from torch.fx.passes.backends.cudagraphs import partition_cudagraphs
 from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
@@ -17,35 +19,65 @@ if not TEST_CUDA or not TEST_DYNAMO:
 
 torchdynamo.config.verify_correctness = True
 
+class RunCudaGraph():
+    warmed_up = False
+
+    # these are all None or all filled
+    graph = None
+    static_inputs = None
+    static_outputs = None
+
+    def __call__(self, gm, *args):
+        def cloner(t):
+            if isinstance(t, torch.Tensor):
+                return t.clone()
+            else:
+                return t
+
+        # TODO: once we've recorded here, we'd like to replace this with
+        # compiled bytecode that copies into static, replays the cuda graph,
+        # then copies out.  First condition is the hotpath, needs optimizing
+        if self.graph is not None:
+            assert len(args) == len(self.static_inputs)
+            for dst, src in zip(self.static_inputs, args):
+                dst.copy_(src)
+            self.graph.replay()
+            return tree_map(cloner, self.static_outputs)
+
+        elif self.warmed_up:
+            # record
+            self.static_inputs = [x.clone() for x in args]
+            self.graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(self.graph):
+                # TODO: this is wrong but required due to _wrapped_call
+                self.static_outputs = super(type(gm), gm).__call__(*self.static_inputs)
+            return tree_map(cloner, self.static_outputs)
+
+        else:
+            # warmup
+            stream = torch.cuda.Stream()
+            stream.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(stream):
+                # TODO: this is wrong but required due to _wrapped_call
+                r = super(type(gm), gm).__call__(*args)
+            torch.cuda.current_stream().wait_stream(stream)
+            self.warmed_up = True
+            return r
+
 def cudagraphs(model, inputs):
-    assert isinstance(inputs, (list, tuple))
-    static_inputs = [torch.zeros_like(x) for x in inputs]
+    model = partition_cudagraphs(model, inputs)
 
-    # warmup
-    torch.cuda.synchronize()
-    stream = torch.cuda.Stream()
-    stream.wait_stream(torch.cuda.current_stream())
-    with torch.cuda.stream(stream):
-        model(*inputs)
-    stream.synchronize()
-    torch.cuda.current_stream().wait_stream(stream)
-    torch.cuda.synchronize()
+    # Do some swizzling
+    for node in model.graph.nodes:
+        # TODO: this is wrong, cribbed from
+        # https://github.com/pytorch/pytorch/pull/80591
+        if "fused_" in node.name:
+            fused_module = getattr(model, node.name)
+            # TODO: this is also wrong
+            fused_module._wrapped_call = RunCudaGraph()
 
-    # record
-    graph = torch.cuda.CUDAGraph()
-    with torch.cuda.graph(graph, stream=stream):
-        static_outputs = model(*static_inputs)
-    if not isinstance(static_outputs, (list, tuple)):
-        static_outputs = (static_outputs,)
-
-    def run(*new_inputs):
-        assert len(static_inputs) == len(new_inputs)
-        for dst, src in zip(static_inputs, new_inputs):
-            dst.copy_(src)
-        graph.replay()
-        return [x.clone() for x in static_outputs]
-
-    return run
+    # model here is compiled FX graph, so it should be reasonably efficient
+    return model
 
 
 class TestDynamoCudaGraphs(TestCase):
