@@ -154,7 +154,8 @@ class TORCH_CUDA_CU_API ComplexDouble : public Val {
 //! the compute at position to maximum possible through traversal.
 enum class ComputeAtMode { Standard, BestEffort, MostInlined };
 
-class ComputeAt;
+class InlinePropagator;
+class MaxProducerPosUpdater;
 class TransformPropagator;
 class TransformIter;
 class TransformReplay;
@@ -458,7 +459,8 @@ class TORCH_CUDA_CU_API TensorView : public Val {
   friend TORCH_CUDA_CU_API TransformPropagator;
   friend TORCH_CUDA_CU_API TransformReplay;
   friend TORCH_CUDA_CU_API OptOutMutator;
-  friend ComputeAt;
+  friend TORCH_CUDA_CU_API InlinePropagator;
+  friend TORCH_CUDA_CU_API MaxProducerPosUpdater;
   friend class ir_utils::TVDomainGuard;
   friend TORCH_CUDA_CU_API void groupReductions(
       const std::vector<TensorView*>&);
