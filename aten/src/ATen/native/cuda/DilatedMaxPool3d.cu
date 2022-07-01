@@ -47,27 +47,27 @@ __global__ static void max_pool3d_with_indices_single_out_frame(
   int offsetZ,
   bool channels_last)
 {
-  int oColumn;
-  if (!channels_last) {
-    oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  } else {
-    oColumn = blockIdx.z * blockDim.z + threadIdx.z;
-  }
+  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame;
-  int64_t slice;
+  int oFrame = 0;
+  // used only for channels-first indexing
+  int64_t slice = 0;
+  // used only for channels-last indexing
+  int batch = 0;
+  int channel = 0;
   if (!channels_last) {
+    // indexing order: batch, channel, time
     oFrame = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % otime; // output frame/time
     slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / otime; // output slice/feature
   } else {
-    oFrame = (blockIdx.x * blockDim.x + threadIdx.x + offsetZ) % otime; // output frame/time
-    slice = (blockIdx.x * blockDim.x + threadIdx.x + offsetZ) / otime; // output slice/feature
+    // indexing order: batch, time, channel
+    channel = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % features; // output feature (channel)
+    slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / features; // output slice (batch + time)
+    batch = slice / otime;
+    oFrame = slice % otime;
   }
+
   // For int64_t data type, see https://github.com/pytorch/pytorch/issues/52822
-
-  int batch = slice / features;
-  int channel = slice % features;
-
   if (oRow < oheight && oColumn < owidth && oFrame < otime && channel < features && batch < obatch)
   {
     int tStart = oFrame  * dT - pT;
@@ -137,7 +137,7 @@ void max_pool3d_with_indices_out_frame(
   const Tensor& output,
   const Tensor& indices,
   int features,
-  int totalZ,
+  int64_t totalZ,
   int itime, int iheight, int iwidth,
   int obatch, int otime, int oheight, int owidth,
   int kT, int kH, int kW,
@@ -152,28 +152,16 @@ void max_pool3d_with_indices_out_frame(
   int threadZ = 1;
   int stepZ = 65535;
   if (channels_last) {
-    threadX = 1;
-    threadY = 2;
-    threadZ = 512;
+    threadX = 2;
+    threadY = 4;
+    threadZ = 64;
   }
-  dim3 _block(threadX, threadY, threadZ);
-  dim3 _block_channels_last(threadZ, threadY, threadX);
-  dim3 block = _block;
-  if (channels_last) {
-    block = _block_channels_last;
-  }
+  dim3 block(threadX, threadY, threadZ);
 
   while (totalZ > 0) {
-    dim3 _grid(ceil_div(owidth, static_cast<int>(block.x)),
+    dim3 grid(ceil_div(owidth, static_cast<int>(block.x)),
               ceil_div(oheight, static_cast<int>(block.y)),
-              totalZ > stepZ*threadZ ? stepZ : ceil_div(totalZ, static_cast<int>(threadZ)));
-    dim3 _grid_channels_last(totalZ > stepZ*threadZ ? stepZ : ceil_div(totalZ, static_cast<int>(threadZ)),
-              ceil_div(oheight, static_cast<int>(block.y)),
-              ceil_div(owidth, static_cast<int>(block.z)));
-    dim3 grid = _grid;
-    if (channels_last) {
-        grid = _grid_channels_last;
-    }
+              totalZ > stepZ*threadZ ? stepZ : ceil_div(totalZ, static_cast<int64_t>(threadZ)));
 
     max_pool3d_with_indices_single_out_frame
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -208,24 +196,26 @@ __global__ static void max_pool3d_with_indices_backward_single_out_frame(
   int offsetZ,
   bool channels_last)
 {
-  int oColumn;
-  if (!channels_last) {
-    oColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  } else {
-    oColumn = blockIdx.z * blockDim.z + threadIdx.z;
-  }
+  int oColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int oRow = blockIdx.y * blockDim.y + threadIdx.y;
-  int oFrame;
-  int slice;
+
+  int oFrame = 0;
+  // used only for channels-first indexing
+  int64_t slice = 0;
+  // used only for channels-last indexing
+  int batch = 0;
+  int channel = 0;
   if (!channels_last) {
+    // indexing order: batch, channel, time
     oFrame = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % otime; // output frame/time
     slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / otime; // output slice/feature
   } else {
-    oFrame = (blockIdx.x * blockDim.x + threadIdx.x + offsetZ) % otime; // output frame/time
-    slice = (blockIdx.x * blockDim.x + threadIdx.x + offsetZ) / otime; // output slice/feature
+    // indexing order: batch, time, channel
+    channel = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) % features; // output feature (channel)
+    slice = (blockIdx.z * blockDim.z + threadIdx.z + offsetZ) / features; // output slice (batch + time)
+    batch = slice / otime;
+    oFrame = slice % otime;
   }
-  int batch = slice / features;
-  int channel = slice % features;
 
   if (oRow < oheight && oColumn < owidth && oFrame < otime && batch < obatch && channel < features)
   {
@@ -265,28 +255,16 @@ void max_pool3d_with_indices_backward_out_frame(
   int threadZ = 1;
   int stepZ = 65535;
   if (channels_last) {
-    threadX = 1;
-    threadY = 2;
-    threadZ = 512;
+    threadX = 2;
+    threadY = 4;
+    threadZ = 64;
   }
-  dim3 _block(threadX, threadY, threadZ);
-  dim3 _block_channels_last(threadZ, threadY, threadX);
-  dim3 block = _block;
-  if (channels_last) {
-    block = _block_channels_last;
-  }
+  dim3 block(threadX, threadY, threadZ);
 
   while (totalZ > 0) {
-    dim3 _grid(ceil_div(owidth, static_cast<int>(block.x)),
+    dim3 grid(ceil_div(owidth, static_cast<int>(block.x)),
               ceil_div(oheight, static_cast<int>(block.y)),
               totalZ > stepZ*threadZ ? stepZ : ceil_div(totalZ, static_cast<int64_t>(block.z)));
-    dim3 _grid_channels_last(totalZ > stepZ*threadZ ? stepZ : ceil_div(totalZ, static_cast<int64_t>(threadZ)),
-              ceil_div(oheight, static_cast<int>(block.y)),
-              ceil_div(owidth, static_cast<int>(block.z)));
-    dim3 grid = _grid;
-    if (channels_last) {
-        grid = _grid_channels_last;
-    }
 
     max_pool3d_with_indices_backward_single_out_frame
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -414,7 +392,7 @@ void max_pool3d_with_indices_out_cuda_template(
     "max_pool3d_with_indices_out_frame",
     [&]{
       scalar_t *input_data = work_input.data_ptr<scalar_t>();
-      int64_t totalZ = otime * nslices * nbatch;
+      const int64_t totalZ = otime * nslices * nbatch;
 
       max_pool3d_with_indices_out_frame(
         input_data, work_output, work_indices,
