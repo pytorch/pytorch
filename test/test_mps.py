@@ -2790,6 +2790,8 @@ class TestNLLLoss(TestCase):
             self.assertEqual(two_three_keepdim_std, two_three_dim_keepstd_cpu)
 
         helper((4, 5, 6, 7))
+        # verify if a change in shape of input would cause problems with graph caching
+        helper((9, 5, 6, 7))
 
     # Test var
     def test_var(self):
@@ -2888,6 +2890,8 @@ class TestNLLLoss(TestCase):
             self.assertEqual(two_three_keepdim_var, two_three_dim_keepvar_cpu)
 
         helper((4, 5, 6, 7))
+        # verify if a change in shape of input would cause problems with graph caching
+        helper((9, 5, 6, 7))
 
     # Test forward amax
     def test_amax(self):
