@@ -2762,7 +2762,6 @@ def full(
     return fill(e, fill_value)
 
 
-@register_decomposition(torch.ops.aten.full_like)
 def full_like(
     a: TensorLikeType,
     fill_value: NumberType,
