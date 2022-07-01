@@ -1,4 +1,3 @@
-#include <ATen/native/vulkan/api/Helper.h>
 #include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
 #include <c10/util/irange.h>

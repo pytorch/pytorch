@@ -18,7 +18,6 @@ Context::Context(
       device_(adapter_p_->device_handle()),
       queue_(adapter_p_->request_queue()),
       command_pool_(device_, queue_.family_index, config_.cmdPoolConfig),
-      command_(gpu()),
       descriptor_(gpu()),
       fences_(device_),
       querypool_(
@@ -108,9 +107,7 @@ void Context::flush() {
   VK_CHECK(vkQueueWaitIdle(queue()));
 
   command_pool_.flush();
-
   descriptor().pool.purge();
-  command().pool.purge();
 
   buffers_to_clear_.clear();
   images_to_clear_.clear();
@@ -160,42 +157,6 @@ struct VulkanImpl final : public at::vulkan::VulkanImplInterface {
   }
 };
 static at::vulkan::VulkanImplRegistrar g_vulkan_impl(new VulkanImpl());
-
-Descriptor::Set dispatch_prologue(
-    Command::Buffer& command_buffer,
-    const ShaderLayout::Signature& shader_layout_signature,
-    const ShaderSource& shader_descriptor,
-    const utils::uvec3& local_work_group_size) {
-  Context* const context = api::context();
-  Descriptor& descriptor = context->descriptor();
-  ShaderLayoutCache& shader_layout_cache = context->shader_layout_cache();
-  ShaderCache& shader_cache = context->shader_cache();
-  PipelineLayoutCache& pipeline_layout_cache = context->pipeline_layout_cache();
-  ComputePipelineCache& pipeline_cache = context->pipeline_cache();
-
-  const VkDescriptorSetLayout shader_layout = shader_layout_cache.retrieve(
-      shader_layout_signature);
-
-  const VkPipelineLayout pipeline_layout = \
-      pipeline_layout_cache.retrieve(shader_layout);
-
-  const VkPipeline pipeline = pipeline_cache.retrieve({
-      pipeline_layout_cache.retrieve(shader_layout),
-      shader_cache.retrieve(shader_descriptor),
-      local_work_group_size});
-
-  command_buffer.bind(pipeline, pipeline_layout, local_work_group_size);
-
-  return descriptor.pool.allocate(shader_layout, shader_layout_signature);
-}
-
-void dispatch_epilogue(
-    Command::Buffer& command_buffer,
-    const Descriptor::Set& descriptor_set,
-    const utils::uvec3& global_work_group) {
-  command_buffer.bind(descriptor_set);
-  command_buffer.dispatch(global_work_group);
-}
 
 } // namespace api
 } // namespace vulkan
