@@ -60,7 +60,7 @@ Tensor softmax_internal(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_input.has_image()) {
+    if C10_LIKELY(true) {
       const struct Block final {
         uvec3 iextents;
         int last_texel_end_offset;

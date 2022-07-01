@@ -1,139 +1,122 @@
 #include <ATen/native/vulkan/api/OpProfiler.h>
 #include <ATen/native/vulkan/ops/Common.h>
+#include <ATen/native/vulkan/ops/Utils.h>
 
 namespace at {
 namespace native {
 namespace vulkan {
 namespace ops {
 
-Tensor& copy_(Tensor& self, const Tensor& src) {
+void copy_vulkan_to_vulkan(vTensor& src, vTensor& dst) {
   api::Context* const context = api::context();
 
   api::Command::Pool& command_pool = context->command().pool;
+  api::Command::Buffer& command_buffer = command_pool.stream();
   {
-    // X -> Vulkan
-    if (at::kVulkan == self.device().type()) {
-      vTensor& v_self = convert(self);
+    command_buffer.copy_image(
+        // source image
+        src.image(
+            command_buffer,
+            api::PipelineStage::Transfer),
+        // destination image
+        dst.image(
+            command_buffer,
+            api::PipelineStage::Transfer,
+            api::MemoryAccessType::WRITE),
+        // offsets
+        {0u, 0u, 0u},
+        {0u, 0u, 0u},
+        // copy range
+        src.extents());
+  }
+  command_pool.submit(context->gpu().queue, command_buffer);
+}
 
-      // Vulkan -> Vulkan
-      if (at::kVulkan == src.device().type()) {
-       api::Command::Buffer& command_buffer = command_pool.stream();
-       {
-          api::OpProfiler profiler(command_buffer, context->querypool(), "copy_");
+void copy_cpu_to_vulkan(const Tensor& src, vTensor& dst) {
+  api::Context* const context = api::context();
 
-          command_buffer.copy(
-              // - Read-only access is implied on const tensors.  Memory barriers
-              //   are automatically inserted if a RAW hazard is detected.
-              // - Recording any potential pending sync operations into the same
-              //   command buffer prevents an expensive queue submission.
-              convert(src).buffer(
-                  command_buffer,
-                  api::PipelineStage::Transfer),
-              // - Write-only access never triggers a sync as the contents will be
-              //   overwritten regardless.  Having said that, appropriate barriers
-              //   are inserted automatically if WAR or WAW hazards are detected.
-              // - Recording pending sync operations into the same command buffer
-              //   prevents an expensive queue submission.
-              v_self.buffer(
-                  command_buffer,
-                  api::PipelineStage::Transfer,
-                  api::MemoryAccessType::WRITE));
-        }
-        command_pool.submit(context->gpu().queue, command_buffer);
-      }
-      // CPU -> Vulkan
-      else {
-        api::Command::Buffer& command_buffer = command_pool.stream(); // Don't collect the timestamp since the command buffer doesn't record anything
-        const Tensor cpu_src = src.device().is_cpu() ? src : src.cpu();
+  api::StagingBuffer staging(context, dst.buffer_bytes());
+  {
+    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
 
-        {
-          api::MemoryMap mapping(
-              v_self.host_buffer(command_buffer, api::MemoryAccessType::WRITE),
-              api::MemoryAccessType::WRITE);
+    float* data_ptr = mapping.template data<float>();
 
-          float* data_ptr = mapping.template data<float>();
+    memcpy(
+      data_ptr,
+      src.contiguous().data_ptr<float>(),
+      std::min(src.nbytes(), src.nbytes()));
+  }
+  utils::pack_staging_to_vtensor(staging.buffer(), dst);
+}
 
-          memcpy(
-            data_ptr,
-            cpu_src.contiguous().data_ptr<float>(),
-            std::min(src.nbytes(), self.nbytes()));
-        }
-      }
-    }
-    // Vulkan -> X
-    else if (at::kVulkan == src.device().type()) {
-      api::Command::Buffer& command_buffer = command_pool.stream(); // Don't collect the timestamp since the command buffer doesn't record anything
+void copy_vulkan_to_cpu(vTensor& src, Tensor& dst) {
+  api::Context* const context = api::context();
+
+  api::StagingBuffer staging(context, src.buffer_bytes());
+
+  api::VulkanFence fence = context->fences().get_fence();
+  utils::pack_vtensor_to_staging(
+      src, staging.buffer(), fence.get_submit_handle());
+
+  fence.wait();
+  context->fences().return_fence(fence);
+
+  {
+    api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::READ);
+    mapping.invalidate();
+
+    float* data_ptr = mapping.template data<float>();
+
+    memcpy(
+        dst.data_ptr<float>(),
+        data_ptr,
+        std::min(src.nbytes(), dst.nbytes()));
+  }
+}
+
+Tensor& copy_(Tensor& self, const Tensor& src) {
+  // Check that sizes are equal
+  TORCH_CHECK(
+      self.sizes() == src.sizes(),
+      "Vulkan copy_: Tensor sizes are mismatched!");
+
+  // X -> Vulkan
+  if (at::kVulkan == self.device().type()) {
+    vTensor& v_self = convert(self);
+
+    // Vulkan -> Vulkan
+    if (at::kVulkan == src.device().type()) {
       vTensor& v_src = convert(src);
-
-      // Vulkan -> CPU
-      if (self.device().is_cpu()) {
-        {
-          api::MemoryMap mapping(
-            v_src.host_buffer(command_buffer, api::MemoryAccessType::READ),
-            api::MemoryAccessType::READ);
-
-          v_src.wait_for_fence();
-          mapping.invalidate();
-
-          float* data_ptr = mapping.template data<float>();
-
-          memcpy(
-              self.data_ptr<float>(),
-              data_ptr,
-              std::min(src.nbytes(), self.nbytes()));
-        }
-      }
-      else {
-        TORCH_CHECK(false, "Unsupported!");
-      }
-
-      //
-      // WARNING
-      //
-
-      // This is not great.  We almost never want to flush the GPU pipeline as
-      // that has far reaching consequences, especially if PyTorch is not the only
-      // process accessing the GPU.  If we have done our job properly, above
-      // synchronization mechanisms should be enough to ensure correctness at a more
-      // modest cost, as there is no need to flush the entirety of jobs in flight
-      // if one is only interested on waiting on computation affecting one single
-      // tensor to finish.
-      //
-      // Having said that, we still do need to release all pool resources at one
-      // point per inference run or we will run out of memory otherwise. There is
-      // no perfect answer to this problem that checks all boxes, which leaves us
-      // with one of several design decisions:
-      //
-      // 1) Use graph mode to gain an understanding of the computation graph,
-      //    itself allowing us to place pool purges intelligently.  Best option
-      //    for performance and memory consumption.  Not without its downsides if
-      //    flexibility is a top priority.
-      // 2) If on eager mode, and hence are seeing operations one at a time, expose
-      //    this release of resources to the user as a Python / C++ function.  This
-      //    makes for suboptimal user experience but is efficient in terms of
-      //    performance.
-      // 3) If on eager mode, and interested in keeping this bookkeeping transparent
-      //    to the user, release all resources somewhere ... like here.  This is
-      //    not ideal since it requires a pipeline flush to make sure these objects
-      //    are not already in use by a workload in flight.  Cannot do much better
-      //    within the constraints of this approach.  Good for user experience,
-      //    suboptimal for performance.
-      // 4) If on eager mode, and interested in keeping this bookkeeping transparent
-      //    to the user, and performance does not matter, make CPU and GPU run in
-      //    lockstep.  Obviously this is just bad.  Mentioned for the sake of
-      //    completeness.
-
-      context->flush();
+      copy_vulkan_to_vulkan(v_src, v_self);
     }
+    // CPU -> Vulkan
     else {
-      TORCH_INTERNAL_ASSERT(
-          false,
-          "Invalid code path taken! Either the source or the destination tensor "
-          "was expected to be Vulkan a tensor!  Incorrect dispatch?");
+      copy_cpu_to_vulkan(src, v_self);
     }
   }
-  // No queue submission here.  All queue submissions must have been handled
-  // above either explicitly or as a result of calling tensor.host().
+  // Vulkan -> X
+  else if (at::kVulkan == src.device().type()) {
+    vTensor& v_src = convert(src);
+
+    // Vulkan -> CPU
+    if (self.device().is_cpu()) {
+      copy_vulkan_to_cpu(v_src, self);
+    }
+    else {
+      TORCH_CHECK(false, "Unsupported!");
+    }
+
+    // Transfer back to CPU is interpreted as a sync point.
+    // Flushes GPU resources.
+    api::Context* const context = api::context();
+    context->flush();
+  }
+  else {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Invalid code path taken! Either the source or the destination tensor "
+        "was expected to be Vulkan a tensor!  Incorrect dispatch?");
+  }
 
   return self;
 }

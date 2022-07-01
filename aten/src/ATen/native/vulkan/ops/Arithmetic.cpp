@@ -73,7 +73,7 @@ Tensor arithmetic_scalar(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY (true && true) {
       const float other_val = alpha_arg
           ? other.to<float>() * alpha_arg->to<float>()
           : other.to<float>();
@@ -135,7 +135,7 @@ Tensor& arithmetic_scalar_(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY (v_self.has_image()) {
+    if C10_LIKELY (true) {
       const float other_val = alpha_arg
           ? other.to<float>() * alpha_arg->to<float>()
           : other.to<float>();
@@ -202,7 +202,7 @@ Tensor arithmetic_tensor(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY (v_self.has_image() && v_other.has_image()) {
+    if C10_LIKELY (true && true) {
       const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
       const struct Block final {
         uvec3 extents;
@@ -279,7 +279,7 @@ Tensor& arithmetic_tensor_(
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
     if C10_LIKELY (
-        v_self.has_image() && v_other.has_image() && !self.is_same(other)) {
+        true && true && !self.is_same(other)) {
       const float alpha = alpha_arg ? alpha_arg->to<float>() : 1.0;
       const struct Block final {
         uvec3 extents;

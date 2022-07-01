@@ -172,18 +172,18 @@ Descriptor::Set& Descriptor::Set::bind(
 
 Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
-    const VulkanImage::Package& package) {
+    const VulkanImage& image) {
   update(Item{
       binding,
       shader_layout_signature_[binding],
       {
         .image = {
-          package.image_sampler,
-          package.image_view,
+          image.sampler(),
+          image.image_view(),
           [](const VkDescriptorType type, const VkImageLayout layout) {
             return (VK_DESCRIPTOR_TYPE_STORAGE_IMAGE == type) ?
                     VK_IMAGE_LAYOUT_GENERAL : layout;
-          }(shader_layout_signature_[binding], package.image_layout),
+          }(shader_layout_signature_[binding], image.layout()),
         },
       },
     });

@@ -69,7 +69,7 @@ struct Descriptor final {
     ~Set() = default;
 
     Set& bind(uint32_t binding, const VulkanBuffer::Package&);
-    Set& bind(uint32_t binding, const VulkanImage::Package&);
+    Set& bind(uint32_t binding, const VulkanImage&);
 
     VkDescriptorSet handle() const;
 

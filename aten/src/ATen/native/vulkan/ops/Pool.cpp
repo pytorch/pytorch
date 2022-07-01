@@ -39,7 +39,7 @@ Tensor adaptive_avg_pool2d(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), "aten::_adaptive_avg_pool2d");
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY(true) {
       const uvec3 v_output_size = v_output.extents();
       const uvec3 v_self_size = v_self.extents();
 
@@ -183,7 +183,7 @@ Tensor pool2d(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY(v_self.has_image()) {
+    if C10_LIKELY(true) {
       const struct Block final {
         uvec3 extents;
         int32_t range;

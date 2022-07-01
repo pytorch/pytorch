@@ -10,8 +10,8 @@ namespace helper {
 
 void copy_texture_to_texture(
     api::Command::Buffer& command_buffer,
-    api::VulkanImage::Package& src_image,
-    api::VulkanImage::Package& dst_image,
+    api::VulkanImage& src_image,
+    api::VulkanImage& dst_image,
     api::utils::uvec3 copy_extents,
     api::utils::uvec3 src_offset,
     api::utils::uvec3 dst_offset) {
@@ -33,8 +33,8 @@ void copy_texture_to_texture(
   // To use vkCmdCopyImage, the stage of src & dst image must be set to api::PipelineStage::Transfer.
   vkCmdCopyImage(
     command_buffer.handle(),
-    src_image.handle, VK_IMAGE_LAYOUT_GENERAL,
-    dst_image.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+    src_image.handle(), VK_IMAGE_LAYOUT_GENERAL,
+    dst_image.handle(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
     1,
     &copy_info);
 }

@@ -112,6 +112,17 @@ inline bool operator==(
           _1.data[2u] == _2.data[2u]);
 }
 
+inline VkOffset3D create_offset3d(const utils::uvec3& offsets) {
+  return VkOffset3D{
+    static_cast<int32_t>(offsets.data[0u]),
+    static_cast<int32_t>(offsets.data[1u]),
+    static_cast<int32_t>(offsets.data[2u])};
+}
+
+inline VkExtent3D create_extent3d(const utils::uvec3& extents) {
+  return VkExtent3D{extents.data[0u], extents.data[1u], extents.data[2u]};
+}
+
 } // namespace api
 } // namespace vulkan
 } // namespace native

@@ -35,7 +35,7 @@ Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
       ch_interval += tensor.sizes()[1];
     }
 
-    auto dst_image = v_output.image(
+    api::VulkanImage& dst_image = v_output.image(
       command_buffer,
       api::PipelineStage::Compute,
       api::MemoryAccessType::READ | api::MemoryAccessType::WRITE);
@@ -43,8 +43,8 @@ Tensor cat_feature(const TensorList tensors, vTensor& v_output) {
     for (const auto& tensor : tensors) {
       const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
       const vTensor& v_self = convert(self);
-      if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
-        auto src_image = v_self.image(
+      if C10_LIKELY(true && true) {
+        api::VulkanImage& src_image = v_self.image(
                 command_buffer,
                 api::PipelineStage::Compute);
 
@@ -116,7 +116,7 @@ Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
     }
     const int64_t depth_interval = ch_interval / 4;
 
-    auto dst_image = v_output.image(
+    api::VulkanImage& dst_image = v_output.image(
       command_buffer,
       api::PipelineStage::Transfer,
       api::MemoryAccessType::WRITE);
@@ -126,8 +126,8 @@ Tensor cat_feature_mult4ch(const TensorList tensors, vTensor& v_output) {
     for (const auto& tensor : tensors) {
       const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
       const vTensor& v_self = convert(self);
-      if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
-        auto src_image = v_self.image(
+      if C10_LIKELY(true && true) {
+        api::VulkanImage& src_image = v_self.image(
                 command_buffer,
                 api::PipelineStage::Transfer);
 
@@ -170,24 +170,20 @@ Tensor cat_height(const TensorList tensors, vTensor& v_output) {
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), "aten::_cat (cat_width)");
 
-    auto dst_image = v_output.image(
-      command_buffer,
-      api::PipelineStage::Transfer,
-      api::MemoryAccessType::WRITE);
-
     uvec3 src_offset{};
     uvec3 dst_offset{};
     for (const auto& tensor : tensors) {
       const Tensor self = tensor.is_vulkan() ? tensor : tensor.vulkan();
       const vTensor& v_self = convert(self);
-      if C10_LIKELY(v_output.has_image() && v_self.has_image()) {
-        auto src_image = v_self.image(
-                command_buffer,
-                api::PipelineStage::Transfer);
-
+      if C10_LIKELY(true && true) {
         api::helper::copy_texture_to_texture(command_buffer,
-          src_image,
-          dst_image,
+          v_self.image(
+              command_buffer,
+              api::PipelineStage::Transfer),
+          v_output.image(
+              command_buffer,
+              api::PipelineStage::Transfer,
+              api::MemoryAccessType::WRITE),
           v_self.extents(),
           src_offset,
           dst_offset);

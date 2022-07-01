@@ -69,7 +69,7 @@ Tensor _lerp_scalar(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY (v_start.has_image() && v_end.has_image()) {
+    if C10_LIKELY (true && true) {
       const float weight = weight_arg.to<float>();
       const struct Block final {
         uvec3 extents;
@@ -145,7 +145,7 @@ Tensor& _lerp_scalar_(
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
     if C10_LIKELY (
-        v_self.has_image() && v_end.has_image() && !self.is_same(end)) {
+        true && true && !self.is_same(end)) {
       const float weight = weight_arg.to<float>();
       const struct Block final {
         uvec3 extents;
@@ -221,7 +221,7 @@ Tensor _lerp_tensor(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY (v_start.has_image() && v_end.has_image() && v_weight.has_image()) {
+    if C10_LIKELY (true && true && true) {
       const struct Block final {
         uvec3 extents;
         uint32_t fill_0;
@@ -308,7 +308,7 @@ Tensor& _lerp_tensor_(
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
     if C10_LIKELY (
-        v_self.has_image() && v_end.has_image() && v_weight.has_image() && !self.is_same(end)) {
+        true && true && true && !self.is_same(end)) {
       const struct Block final {
         uvec3 extents;
         uint32_t fill_0;

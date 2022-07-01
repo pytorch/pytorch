@@ -155,18 +155,48 @@ class UniformParamsBuffer final {
   UniformParamsBuffer(Context* context_p, const Block& block)
     : context_p_(context_p),
       vulkan_buffer_(
-                    context_p_->adapter_ptr()->vma().create_params_buffer(block)) {
-        }
+          context_p_->adapter_ptr()->vma().create_params_buffer(block)) {
+  }
+
   UniformParamsBuffer(const UniformParamsBuffer&) = delete;
   UniformParamsBuffer& operator=(const UniformParamsBuffer&) = delete;
+
   UniformParamsBuffer(UniformParamsBuffer&&) = delete;
   UniformParamsBuffer& operator=(UniformParamsBuffer&&) = delete;
+
   ~UniformParamsBuffer() {
-      context_p_->register_buffer_cleanup(vulkan_buffer_);
-    }
+    context_p_->register_buffer_cleanup(vulkan_buffer_);
+  }
+
   VulkanBuffer& buffer() {
-      return vulkan_buffer_;
-    }
+    return vulkan_buffer_;
+  }
+};
+
+class StagingBuffer final {
+ private:
+  api::Context* context_p_;
+  VulkanBuffer vulkan_buffer_;
+ public:
+  StagingBuffer(Context* context_p, const VkDeviceSize size)
+    : context_p_(context_p),
+      vulkan_buffer_(
+          context_p_->adapter_ptr()->vma().create_storage_buffer(size, false)) {
+  }
+
+  StagingBuffer(const StagingBuffer&) = delete;
+  StagingBuffer& operator=(const StagingBuffer&) = delete;
+
+  StagingBuffer(StagingBuffer&&) = delete;
+  StagingBuffer& operator=(StagingBuffer&&) = delete;
+
+  ~StagingBuffer() {
+    context_p_->register_buffer_cleanup(vulkan_buffer_);
+  }
+
+  VulkanBuffer& buffer() {
+    return vulkan_buffer_;
+  }
 };
 
 bool available();

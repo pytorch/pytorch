@@ -58,7 +58,7 @@ Tensor mean(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), "aten::mean.dim");
 
-    if C10_LIKELY(v_input.has_image()) {
+    if C10_LIKELY(true) {
       const struct Block final {
         uvec3 extents;
         int32_t range;

@@ -42,7 +42,7 @@ Tensor cumsum(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), "aten::cumsum");
 
-    if C10_LIKELY(v_input.has_image()) {
+    if C10_LIKELY(true) {
       const struct Block final {
         int32_t axis;
       } block {

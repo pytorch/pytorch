@@ -61,7 +61,7 @@ Tensor pad2d(
   {
     api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
 
-    if C10_LIKELY (v_output.has_image() && v_self.has_image()) {
+    if C10_LIKELY (true && true) {
       const struct Block final {
         uvec3 extents;
         uint32_t _;
