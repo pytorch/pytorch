@@ -31,10 +31,6 @@ bool almostEqual(const at::Tensor& a, const at::Tensor& b) {
   return checkRtol(a - b, {a, b});
 }
 
-bool exactlyEqual(const at::Tensor& a, const at::Tensor& b) {
-  return (a - b).abs().max().item<float>() == 0.0f;
-}
-
 void showRtol(const at::Tensor& a, const at::Tensor& b) {
   const auto diff = (a - b).abs();
 
@@ -730,7 +726,7 @@ TEST_F(VulkanAPITest, copy) {
   const auto cpu = at::rand({13, 17, 37, 19}, at::device(at::kCPU).dtype(at::kFloat));
   const auto vulkan = cpu.vulkan();
 
-  const auto check = exactlyEqual(cpu, vulkan.cpu());
+  const auto check = almostEqual(cpu, vulkan.cpu());
   if (!check) {
     showRtol(cpu, vulkan.cpu());
   }

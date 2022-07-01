@@ -10,9 +10,6 @@ namespace utils{
 void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
   api::Context* const context = api::context();
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-
   const api::utils::uvec3 extents = v_self.extents();
   const uint32_t plane = extents.data[0u] * extents.data[1u];
 
@@ -32,34 +29,38 @@ void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
   };
 
   api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-  context->dispatch(
-      command_buffer,
-      { // shader layout
+  context->submit_compute_job(
+      // shader layout signature
+      {
         VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
-      VK_KERNEL(nchw_to_image),  // shader
-      extents,  // global work group size
-      adaptive_work_group_size(extents),  // local work group size
-      // shader inputs
+      // shader descriptor
+      VK_KERNEL(nchw_to_image),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      extents,
+      // local work group size
+      adaptive_work_group_size(extents),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
       v_self.image(
-        command_buffer,
-        api::PipelineStage::Compute, api::MemoryAccessType::WRITE),
-      staging.package(),
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      staging,
       // params buffer
-      params.buffer().package());
-
-  command_pool.submit(context->gpu().queue, command_buffer);
+      params.buffer());
 }
 
 void pack_vtensor_to_staging(
-    vTensor& v_self, api::VulkanBuffer& staging, const VkFence fence) {
+    vTensor& v_self, api::VulkanBuffer& staging, const VkFence fence_handle) {
   api::Context* const context = api::context();
-
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
 
   const api::utils::uvec3 extents = v_self.extents();
   const uint32_t plane = extents.data[0u] * extents.data[1u];
@@ -80,28 +81,33 @@ void pack_vtensor_to_staging(
   };
 
   api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-  context->dispatch(
-      command_buffer,
-      { // shader layout
+  context->submit_compute_job(
+      // shader layout signature
+      {
         VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
         VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
         VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
       },
-      VK_KERNEL(image_to_nchw),  // shader
-      extents,  // global work group size
-      adaptive_work_group_size(extents),  // local work group size
-      // shader inputs
+      // shader descriptor
+      VK_KERNEL(image_to_nchw),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      extents,
+      // local work group size
+      adaptive_work_group_size(extents),
+      // fence handle
+      fence_handle,
+      // shader arguments
       v_self.image(
-        command_buffer,
-        api::PipelineStage::Compute),
-      staging.package(),
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      staging,
       // params buffer
-      params.buffer().package());
-
-  command_pool.submit(context->gpu().queue, command_buffer, fence);
+      params.buffer());
 }
-
 
 } // namespace utils
 } // namespace ops

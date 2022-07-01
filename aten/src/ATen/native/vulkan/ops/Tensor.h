@@ -72,6 +72,12 @@ class vTensorStorage final {
     const api::PipelineStageFlags,
     const api::MemoryAccessFlags);
 
+  // Memory barrier insertion
+  void transition(
+    api::PipelineBarrier&,
+    const api::PipelineStageFlags,
+    const api::MemoryAccessFlags);
+
   // Validation
   void verify() const;
 };
@@ -116,7 +122,16 @@ class vTensor final {
       const api::PipelineStageFlags) const &;
 
   api::VulkanImage& image(
+      api::PipelineBarrier&,
+      const api::PipelineStageFlags) const &;
+
+  api::VulkanImage& image(
       api::Command::Buffer&,
+      const api::PipelineStageFlags,
+      const api::MemoryAccessFlags) &;
+
+  api::VulkanImage& image(
+      api::PipelineBarrier&,
       const api::PipelineStageFlags,
       const api::MemoryAccessFlags) &;
 

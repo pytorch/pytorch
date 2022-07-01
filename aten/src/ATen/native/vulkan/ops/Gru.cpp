@@ -208,14 +208,14 @@ std::tuple<Tensor, Tensor> gru_context_run(
     const auto&  cxt_hn = packed_linear_op_contexts[i * linear_op_contexts_per_layer + 5].toCustomClass<VulkanOpContext>();
 
     const auto&  r = at::sigmoid(
-      linear_context_run(x, cxt_ir->get_packed(), cxt_ir->get_unpacked(), 1.0f, 1.0f, "aten::addmm")
-       + linear_context_run(h, cxt_hr->get_packed(), cxt_hr->get_unpacked(), 1.0f, 1.0f, "aten::addmm"));
+      linear_context_run(x, cxt_ir->get_packed(), cxt_ir->get_unpacked(), 1.0f, 1.0f)
+       + linear_context_run(h, cxt_hr->get_packed(), cxt_hr->get_unpacked(), 1.0f, 1.0f));
     const auto&  z = at::sigmoid(
-      linear_context_run(x, cxt_iz->get_packed(), cxt_iz->get_unpacked(), 1.0f, 1.0f, "aten::addmm")
-       + linear_context_run(h, cxt_hz->get_packed(), cxt_hz->get_unpacked(), 1.0f, 1.0f, "aten::addmm"));
+      linear_context_run(x, cxt_iz->get_packed(), cxt_iz->get_unpacked(), 1.0f, 1.0f)
+       + linear_context_run(h, cxt_hz->get_packed(), cxt_hz->get_unpacked(), 1.0f, 1.0f));
     const auto&  n = at::tanh(
-      linear_context_run(x, cxt_in->get_packed(), cxt_in->get_unpacked(), 1.0f, 1.0f, "aten::addmm")
-       + r * (linear_context_run(h, cxt_hn->get_packed(), cxt_hn->get_unpacked(), 1.0f, 1.0f, "aten::addmm")));
+      linear_context_run(x, cxt_in->get_packed(), cxt_in->get_unpacked(), 1.0f, 1.0f)
+       + r * (linear_context_run(h, cxt_hn->get_packed(), cxt_hn->get_unpacked(), 1.0f, 1.0f)));
     h = (z * (-1) + 1) * n + z * h;
     x = h;  // next input
     h_n_list.emplace_back(h.reshape({1, 1, h.size(0), h.size(1)}));  // 2D to 4D for cat op

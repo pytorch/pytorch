@@ -18,13 +18,13 @@ Tensor upsample_nearest2d(
     const c10::optional<double> scales_w) {
   api::Context* const context = api::context();
 
+  TORCH_CHECK(
+      (4 == input_arg.sizes().size()) && (2 == output_sizes.size()),
+      "Invalid input!");
+
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
   const vTensor& v_input = convert(input);
   const auto v_input_sizes = v_input.sizes();
-
-  TORCH_CHECK(
-      (4 == v_input_sizes.size()) && (2 == output_sizes.size()),
-      "Invalid input!");
 
   vTensor v_output{
     context,
@@ -34,71 +34,63 @@ Tensor upsample_nearest2d(
       output_sizes[Layout::Parameter::height],
       output_sizes[Layout::Parameter::width],
     },
-    input.options(),
+    input_arg.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), "aten::upsample_nearest2d");
+  const struct Block final {
+    uvec3 extents;
+    uint32_t _;
+    ivec2 iextents;
+    vec2 scale;
+  } block {
+    v_output.extents(),
+    0u,
+    {
+      safe_downcast<int32_t>(input_arg.size(Layout::Activation4D::width) - 1),
+      safe_downcast<int32_t>(input_arg.size(Layout::Activation4D::height) - 1),
+    },
+    {
+      compute_scales_value<float>(
+          scales_w,
+          v_input_sizes[Layout::Activation4D::width],
+          output_sizes[Layout::Parameter::width]),
+      compute_scales_value<float>(
+          scales_h,
+          v_input_sizes[Layout::Activation4D::height],
+          output_sizes[Layout::Parameter::height]),
+    },
+  };
 
-    if C10_LIKELY(true) {
-      const struct Block final {
-        uvec3 extents;
-        uint32_t _;
-        ivec2 iextents;
-        vec2 scale;
-      } block {
-        v_output.extents(),
-        0u,
-        {
-          safe_downcast<int32_t>(input.size(Layout::Activation4D::width) - 1),
-          safe_downcast<int32_t>(input.size(Layout::Activation4D::height) - 1),
-        },
-        {
-            compute_scales_value<float>(
-                scales_w,
-                v_input_sizes[Layout::Activation4D::width],
-                output_sizes[Layout::Parameter::width]),
-            compute_scales_value<float>(
-                scales_h,
-                v_input_sizes[Layout::Activation4D::height],
-                output_sizes[Layout::Parameter::height]),
-        },
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      api::UniformParamsBuffer params(context, block);
-
-      context->dispatch(
-          command_buffer,
-          {
-            VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-            VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          VK_KERNEL(upsample_nearest2d),
-          v_output.extents(),
-          adaptive_work_group_size(v_output.extents()),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer,
-              api::PipelineStage::Compute,
-              api::MemoryAccessType::WRITE),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_input.image(
-              command_buffer,
-              api::PipelineStage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          params.buffer().package());
-    }
-    else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader layout signature
+      {
+        VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+        VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+        VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      VK_KERNEL(upsample_nearest2d),
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      v_input.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
 }

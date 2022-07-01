@@ -154,15 +154,15 @@ Descriptor::Set& Descriptor::Set::operator=(Set&& set) {
 
 Descriptor::Set& Descriptor::Set::bind(
     const uint32_t binding,
-    const VulkanBuffer::Package& package) {
+    const VulkanBuffer& package) {
   update({
       binding,
       shader_layout_signature_[binding],
       {
         .buffer = {
-          package.handle,
-          package.buffer_offset,
-          package.buffer_range,
+          package.handle(),
+          package.mem_offset(),
+          package.mem_range(),
         },
       },
     });

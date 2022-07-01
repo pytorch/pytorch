@@ -12,9 +12,9 @@ namespace {
 using namespace api::utils;
 
 Tensor pad2d(
-    const Tensor& self_arg, IntArrayRef padding,
-    const api::ShaderSource& shader_descriptor,
-    const std::string& op_name) {
+    const Tensor& self_arg,
+    IntArrayRef padding,
+    const api::ShaderSource& shader_descriptor) {
   const int pad_dim = padding.size();
   const IntArrayRef input_size = self_arg.sizes();
   const int input_dim = input_size.size();
@@ -56,64 +56,61 @@ Tensor pad2d(
       v_self.options(),
   };
 
-  api::Command::Pool& command_pool = context->command().pool;
-  api::Command::Buffer& command_buffer = command_pool.stream();
-  {
-    api::OpProfiler profiler(command_buffer, context->querypool(), op_name);
+  const struct Block final {
+    uvec3 extents;
+    uint32_t _;
+    uvec4 padding;
+  } block{
+      v_output.extents(),
+      0u,
+      {
+        safe_downcast<uint32_t>(pad_left),
+        safe_downcast<uint32_t>(pad_right),
+        safe_downcast<uint32_t>(pad_top),
+        safe_downcast<uint32_t>(pad_bottom)
+      },
+  };
 
-    if C10_LIKELY (true && true) {
-      const struct Block final {
-        uvec3 extents;
-        uint32_t _;
-        uvec4 padding;
-      } block{
-          v_output.extents(),
-          0u,
-          {
-            safe_downcast<uint32_t>(pad_left),
-            safe_downcast<uint32_t>(pad_right),
-            safe_downcast<uint32_t>(pad_top),
-            safe_downcast<uint32_t>(pad_bottom)
-          },
-      };
+  api::UniformParamsBuffer params(context, block);
+  api::PipelineBarrier pipeline_barrier{};
 
-      api::UniformParamsBuffer params(context, block);
-
-      context->dispatch(
-          command_buffer,
-          {
-              VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
-              VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-              VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-          },
-          shader_descriptor,
-          v_output.extents(),
-          context->gpu().adapter->local_work_group_size(),
-          // Write-only access bypasses synchronization but inserts appropriate
-          // barriers if necessary.
-          v_output.image(
-              command_buffer, api::PipelineStage::Compute, api::MemoryAccessType::WRITE),
-          // Read-only access is implied on const tensors and triggers an async
-          // synchronization if necessary.
-          v_self.image(command_buffer, api::PipelineStage::Compute),
-          // Object lifetime is managed by the resource pool.
-          // It is OK not to keep track of the handle.
-          params.buffer().package());
-    } else {
-      TORCH_CHECK(false, "Not implemented!");
-    }
-  }
-  command_pool.submit(context->gpu().queue, command_buffer);
+  context->submit_compute_job(
+      // shader layout signature
+      {
+          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+      },
+      // shader descriptor
+      shader_descriptor,
+      // pipeline barrier
+      pipeline_barrier,
+      // global work group size
+      v_output.extents(),
+      // local work group size
+      adaptive_work_group_size(v_output.extents()),
+      // fence handle
+      VK_NULL_HANDLE,
+      // shader arguments
+      v_output.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute,
+          api::MemoryAccessType::WRITE),
+      v_self.image(
+          pipeline_barrier,
+          api::PipelineStage::Compute),
+      // params buffer
+      params.buffer());
 
   return convert(v_output);
 }
 
 Tensor reflection_pad2d(const Tensor& self_arg, IntArrayRef padding) {
-  return pad2d(self_arg, padding, VK_KERNEL(reflection_pad2d), "aten::reflection_pad2d");
+  return pad2d(self_arg, padding, VK_KERNEL(reflection_pad2d));
 }
 
 Tensor replication_pad2d(const Tensor& self_arg, IntArrayRef padding) {
-  return pad2d(self_arg, padding, VK_KERNEL(replication_pad2d), "aten::replication_pad2d");
+  return pad2d(self_arg, padding, VK_KERNEL(replication_pad2d));
 }
 
 #ifdef USE_VULKAN_API

@@ -77,20 +77,24 @@ class VulkanBuffer final {
   VkBuffer handle_;
 
  public:
-  VmaAllocator vma_allocator() const {
+  inline VmaAllocator vma_allocator() const {
     return allocator_;
   }
 
-  VmaAllocation allocation() const {
+  inline VmaAllocation allocation() const {
     return allocation_;
   }
 
-  Package package() const {
-    return {
-      handle_,
-      buffer_properties_.mem_offset,
-      buffer_properties_.mem_range
-    };
+  inline VkBuffer handle() const {
+    return handle_;
+  }
+
+  inline VkDeviceSize mem_offset() const {
+    return buffer_properties_.mem_offset;
+  }
+
+  inline VkDeviceSize mem_range() const {
+    return buffer_properties_.mem_range;
   }
 
   operator bool() const {

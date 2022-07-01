@@ -19,7 +19,7 @@ inline int64_t normalize(
 void pack_staging_to_vtensor(api::VulkanBuffer&, vTensor&);
 
 void pack_vtensor_to_staging(
-    vTensor&, api::VulkanBuffer&, const VkFence fence);
+    vTensor&, api::VulkanBuffer&, const VkFence fence_handle = VK_NULL_HANDLE);
 
 } // namespace utils
 } // namespace ops
