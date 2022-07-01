@@ -88,4 +88,10 @@ void exclusive_sum(const scalar_t *input, scalar_t *output, int64_t n) {
   return exclusive_sum_in_common_type(input, output, n);
 }
 
+void mask_exclusive_sum(const uint8_t *mask, int64_t *output_idx, int64_t n);
+inline void mask_exclusive_sum(const bool *mask, int64_t *output_idx, int64_t n) {
+  return mask_exclusive_sum(
+      reinterpret_cast<const uint8_t*>(mask), output_idx, n);
+}
+
 }}}  // namespace at::cuda::cub

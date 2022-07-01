@@ -5262,6 +5262,11 @@
     SparseCPU: log_softmax_backward_sparse_cpu
     SparseCUDA: log_softmax_backward_sparse_cuda
 
+- func: _spdiags(Tensor diagonals, Tensor offsets, int[] shape, Layout? layout=None) -> Tensor
+  python_module: sparse
+  dispatch:
+    CPU: spdiags
+
 - func: norm.ScalarOpt_dtype(Tensor self, Scalar? p, *, ScalarType dtype) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
@@ -9450,6 +9455,7 @@
   python_module: nn
   dispatch:
     CPU, CUDA: glu_out
+    MPS: glu_out_mps
 
 - func: glu(Tensor self, int dim=-1) -> Tensor
   structured_delegate: glu.out
@@ -9461,12 +9467,14 @@
   dispatch:
     CPU: glu_backward_cpu_out
     CUDA: glu_backward_cuda_out
+    MPS: glu_backward_mps_out
 
 - func: glu_backward(Tensor grad_output, Tensor self, int dim) -> Tensor
   python_module: nn
   dispatch:
     CPU: glu_backward_cpu
     CUDA: glu_backward_cuda
+    MPS: glu_backward_mps
 
 - func: glu_jvp(Tensor glu, Tensor x, Tensor dx, int dim) -> Tensor
   python_module: nn
