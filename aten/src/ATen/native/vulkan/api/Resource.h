@@ -252,8 +252,20 @@ class VulkanImage final {
     return allocation_;
   }
 
+  inline VkExtent3D extents() const {
+    return image_properties_.image_extents;
+  }
+
   inline VkImage handle() const {
     return handles_.image;
+  }
+
+  inline VkImageView image_view() const {
+    return handles_.image_view;
+  }
+
+  inline VkSampler sampler() const {
+    return handles_.sampler;
   }
 
   Package package() const {
