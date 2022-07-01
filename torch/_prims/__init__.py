@@ -619,7 +619,7 @@ def _cbrt_aten(a: torch.Tensor) -> Tensor:
     # which is a complex number.
     # For more info see the section Note in
     # https://en.cppreference.com/w/cpp/numeric/math/cbrt
-    return torch.sign(a) * (torch.abs(a) ** (1.0 / 3.0))
+    return torch.copysign(torch.pow(a.abs(), 1/3), a)
 
 
 cbrt = _make_elementwise_unary_prim(
