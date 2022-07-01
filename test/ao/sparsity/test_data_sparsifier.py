@@ -11,6 +11,7 @@ from typing import Tuple
 from torch import nn
 import itertools
 import math
+import copy
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -26,7 +27,7 @@ class ImplementedSparsifier(BaseDataSparsifier):
         linear_state['step_count'] = linear_state.get('step_count', 0) + 1
 
 
-class TestBaseDataSparsiferRunner(TestCase):
+class _BaseDataSparsiferTestCase(TestCase):
     r"""This helper test class takes in any supported type of and runs some tests.
         The user is required to pass in the data that needs to sparsified and the
         runner will run some tests that needs to be passed in order for the data
@@ -34,117 +35,125 @@ class TestBaseDataSparsiferRunner(TestCase):
         TODO: Change the structure by creating a separate test case class for each
               member function
     """
-    def __init__(self, data_list, defaults, data_with_config):
-        self.data_list = data_list
-        self.defaults = defaults
-        self.data_with_config = data_with_config
+    def run_all_checks(self, data_list, data_with_config, defaults):
+        self.check_constructor(data_list, data_with_config, defaults)
+        self.check_squash_mask(data_list, data_with_config, defaults)
+        self.check_add_data(data_list, data_with_config, defaults)
+        self.check_step(data_list, data_with_config, defaults)
+        self.check_state_dict(data_list, data_with_config, defaults)
 
-    def get_name_data_config(self, some_data):
+    @staticmethod
+    def _get_name_data_config(some_data, defaults=None):
         if isinstance(some_data, Tuple):
             # dealing with data_list
             name, data = some_data
-            config = self.defaults
+            config = defaults
         else:
             # dealing with data_with_config
             name, data, config = some_data['name'], some_data['data'], some_data['config']
         return name, data, config
 
-    def get_sparsifier(self):
-        sparsifier = ImplementedSparsifier(data_list=self.data_list, **self.defaults)
-        assert len(sparsifier.data_groups) == len(self.data_list)
-        for data_config_dict in self.data_with_config:
+    @staticmethod
+    def _make_sparsifier(data_list, data_with_config, defaults,
+                         sparsifier_type=None, sparsifier_kwargs=None):
+        if sparsifier_type is None:
+            sparsifier = ImplementedSparsifier(data_list=data_list, **defaults)
+        else:
+            kwargs = copy.deepcopy(defaults)
+            kwargs.update(sparsifier_kwargs)
+            kwargs['data_list'] = data_list
+            sparsifier = sparsifier_type(**kwargs)
+        assert len(sparsifier.data_groups) == len(data_list)
+        for data_config_dict in data_with_config:
             name, data, config = data_config_dict['name'], data_config_dict['data'], data_config_dict['config']
             sparsifier.add_data(name=name, data=data, **config)
         return sparsifier
 
-    def test_constructor(self):
-        sparsifier = self.get_sparsifier()
-        assert len(sparsifier.data_groups) == len(self.data_list) + len(self.data_with_config)
+    def check_constructor(self, data_list, data_with_config, defaults, **kwargs):
+        sparsifier = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
+        self.assertEqual(len(sparsifier.data_groups),
+                         len(data_list) + len(data_with_config),
+                         msg="Sparsifier data groups don't match the input "
+                         f"({len(sparsifier.data_groups)} vs. "
+                         f"{len(data_list) + len(data_with_config)}).")
 
-        all_data = self.data_list + self.data_with_config
+        all_data = data_list + data_with_config
 
         for some_data in all_data:
-            name, _, config = self.get_name_data_config(some_data)
-            assert name in sparsifier.data_groups
-            assert sparsifier.data_groups[name] == config
+            name, _, config = self._get_name_data_config(some_data, defaults=defaults)
+            self.assertIn(name, sparsifier.data_groups)
+            self.assertEqual(sparsifier.data_groups[name], config)
 
-    def test_step(self):
-        sparsifier = self.get_sparsifier()
-        all_data = self.data_list + self.data_with_config
+    def check_step(self, data_list, data_with_config, defaults, **kwargs):
+        sparsifier = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
+        all_data = data_list + data_with_config
 
         # Check data and mask before doing the step
         for some_data in all_data:
-            name, data, _ = self.get_name_data_config(some_data)
+            name, data, _ = self._get_name_data_config(some_data)
             data = sparsifier._extract_weight(data)
             sparsified_data = sparsifier.get_data(name=name, return_original=False)
             original_data = sparsifier.get_data(name=name, return_original=True)
             mask = sparsifier.get_mask(name=name)
-            assert torch.all(sparsified_data == data)
-            assert torch.all(original_data == data)
-            assert torch.all(mask[0] == 1)
+            self.assertEqual(sparsified_data, data)
+            self.assertEqual(original_data, data)
+            self.assertEqualBroadcasting(mask[0], 1)
 
         step_count = 3
 
         for _ in range(0, step_count):
             sparsifier.step()
         for some_data in all_data:
-            name, data, _ = self.get_name_data_config(some_data)
+            name, data, _ = self._get_name_data_config(some_data)
             data = sparsifier._extract_weight(data)
             sparsified_data = sparsifier.get_data(name=name, return_original=False)
             original_data = sparsifier.get_data(name=name, return_original=True)
             mask = sparsifier.get_mask(name=name)
-            assert torch.all(sparsified_data[0] == 0)
-            assert torch.all(original_data == data)
-            assert torch.all(mask[0] == 0)
+            self.assertEqualBroadcasting(sparsified_data[0], 0)
+            self.assertEqual(original_data, data)
+            self.assertEqualBroadcasting(mask[0], 0)
             assert 'step_count' in sparsifier.state[name]
             assert sparsifier.state[name]['step_count'] == 3
 
-    def test_squash_mask(self):
-        sparsifier = self.get_sparsifier()
-        all_data = self.data_list + self.data_with_config
+    def check_squash_mask(self, data_list, data_with_config, defaults, **kwargs):
+        sparsifier = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
+        all_data = data_list + data_with_config
         for some_data in all_data:
-            name, _, _ = self.get_name_data_config(some_data)
+            name, _, _ = self._get_name_data_config(some_data)
             assert hasattr(sparsifier._container, name)
             assert is_parametrized(sparsifier._container, name)
         sparsifier.step()
         sparsifier.squash_mask()
 
         for some_data in all_data:
-            name, _, _ = self.get_name_data_config(some_data)
+            name, _, _ = self._get_name_data_config(some_data)
             assert not is_parametrized(sparsifier._container, name)  # not parametrized anymore
             with self.assertRaises(ValueError):
                 sparsifier.get_data(name, return_original=True)
 
-    def test_add_data(self):
-        sparsifier = self.get_sparsifier()
-        all_data = self.data_list + self.data_with_config
+    def check_add_data(self, data_list, data_with_config, defaults, **kwargs):
+        sparsifier = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
+        all_data = data_list + data_with_config
         for some_data in all_data:
-            name1, data1, _ = self.get_name_data_config(some_data)
+            name1, data1, _ = self._get_name_data_config(some_data)
             data1 = sparsifier._extract_weight(data1)
             assert torch.all(data1 == sparsifier.get_data(name=name1))
             # get some other data at random and with the same name
             rand_idx = random.randint(0, len(all_data) - 1)
-            _, data2, _ = self.get_name_data_config(all_data[rand_idx])
+            _, data2, _ = self._get_name_data_config(all_data[rand_idx])
             data2 = sparsifier._extract_weight(data2)
             sparsifier.add_data(name=name1, data=data2)
             assert torch.all(data2 == sparsifier.get_data(name=name1))
 
-    def run_tests(self):
-        self.test_constructor()
-        self.test_squash_mask()
-        self.test_add_data()
-        self.test_step()
-        self.test_state_dict()
-
-    def test_state_dict(self):
-        sparsifier1 = self.get_sparsifier()
-        sparsifier2 = ImplementedSparsifier(data_list=[self.data_list[0]])
+    def check_state_dict(self, data_list, data_with_config, defaults, **kwargs):
+        sparsifier1 = self._make_sparsifier(data_list, data_with_config, defaults=defaults, **kwargs)
+        sparsifier2 = self._make_sparsifier(data_list=[data_list[0]], data_with_config=[], defaults=defaults, **kwargs)
         sparsifier1.step()
 
         state_dict1 = sparsifier1.state_dict()
 
         assert sparsifier1.state != sparsifier2.state
-        name, _, _ = self.get_name_data_config(self.data_list[0])
+        name, _, _ = self._get_name_data_config(data_list[0])
         self.assertNotEqual(sparsifier1.get_mask(name), sparsifier2.get_mask(name))
 
         sparsifier2.load_state_dict(state_dict1)
@@ -175,85 +184,29 @@ class TestBaseDataSparsiferRunner(TestCase):
                 assert hasattr(param2, 'mask')
                 self.assertEqual(param1.__dict__, param2.__dict__)
 
-
-class TestBaseDataSparsifier(TestCase):
-    """To add unit tests to support new data types for the BaseDataSparsifier, create the following
-        data_list: List of tuples of name, data to be added to the constructor
-        defaults: default config for the above data in data_list
-        data_with_config: list of dictionaries defining name, data and config (look test_tensors())
-
-    Once the above is done, create an instance of TestBaseDataSparsifierType and call all the run_tests()
-    """
-    def test_tensors(self):
-        tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
-        tensor4, tensor5 = torch.randn(1, 1), torch.randn(4, 4)
-        data_list = [('tensor1', tensor1), ('tensor2', tensor2), ('tensor3', tensor3)]
-        defaults = {'test': 3}
-
-        data_with_config = [
-            {
-                'name': 'tensor4', 'data': tensor4, 'config': {'test': 7}
-            },
-            {
-                'name': 'tensor5', 'data': tensor5, 'config': {'test': 8}
-            },
-        ]
-        tensor_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
-                                                  data_with_config=data_with_config)
-        tensor_test.run_tests()
-
-    def test_nn_parameters(self):
-        param1, param2, param3 = nn.Parameter(torch.randn(3, 3)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
-        param4, param5 = nn.Parameter(torch.randn(1, 1)), nn.Parameter(torch.randn(4, 4))
-        data_list = [('param1', param1), ('param2', param2), ('param3', param3)]
-        defaults = {'test': 3}
-
-        data_with_config = [
-            {
-                'name': 'param4', 'data': param4, 'config': {'test': 7}
-            },
-            {
-                'name': 'param5', 'data': param5, 'config': {'test': 8}
-            },
-        ]
-        param_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
-                                                 data_with_config=data_with_config)
-        param_test.run_tests()
-
-    def test_nn_embeddings(self):
-        emb1, emb2, = nn.Embedding(10, 3), nn.Embedding(20, 3)
-        emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
-
-        emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
-        data_list = [('emb1', emb1), ('emb1_bag', emb1_bag), ('emb2', emb2), ('emb2_bag', emb2_bag)]
-        defaults = {'test': 3}
-
-        data_with_config = [
-            {
-                'name': 'emb3', 'data': emb3, 'config': {'test': 7}
-            },
-            {
-                'name': 'emb3_bag', 'data': emb3_bag, 'config': {'test': 8}
-            },
-        ]
-        emb_test = TestBaseDataSparsiferRunner(data_list=data_list, defaults=defaults,
-                                               data_with_config=data_with_config)
-        emb_test.run_tests()
-
-
-class TestNormDataSparsifierRunner(TestBaseDataSparsiferRunner):
+class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
     r"""This helper test class takes in any supported type of and runs some tests.
         This inherits the TestBaseDataSparsifierRuner wherein some functions are
         over-ridden to take accomodate the specific sparsifier.
         TODO: Change the structure by creating a separate test case class for each
               member function
     """
-    def __init__(self, data_list, defaults, data_with_config, norm_type='L1'):
-        super().__init__(data_list=data_list, defaults=defaults, data_with_config=data_with_config)
-        assert norm_type in ['L1']
-        self.norm_type = norm_type
+    def run_all_checks(self, data_list, defaults, data_with_config, norm_type='L1'):
+        assert norm_type in ['L1', 'L2']
+        kwargs = {
+            'sparsifier_type': DataNormSparsifier,
+            'sparsifier_kwargs': {'norm': norm_type}
+        }
+        self.check_constructor(data_list, data_with_config, defaults, **kwargs)
+        self.check_squash_mask(data_list, data_with_config, defaults, **kwargs)
+        self.check_add_data(data_list, data_with_config, defaults, **kwargs)
+        self.check_state_dict(data_list, data_with_config, defaults, **kwargs)
+        self.check_step(data_list, data_with_config, defaults, norm_type=norm_type)
+        self.check_step_2_of_4(norm_type=norm_type)
+        self.check_sparsity_level(data_list, data_with_config, defaults, norm_type=norm_type)
 
-    def get_bounds_on_actual_sparsity(self, config, tensor_shape):
+    @staticmethod
+    def _get_bounds_on_actual_sparsity(config, tensor_shape):
         r"""This function gets the bounds on actual sparsity.
             Note::
                 Although we specify the sparsity_level parameter, this does not mean that
@@ -282,39 +235,37 @@ class TestNormDataSparsifierRunner(TestBaseDataSparsiferRunner):
             lower_bound, upper_bound = round(lower_bound, 3), round(upper_bound, 3)
             return lower_bound, upper_bound
 
-    def get_sparsifier(self):
-        sparsifier = DataNormSparsifier(data_list=self.data_list, **self.defaults)
-        assert len(sparsifier.data_groups) == len(self.data_list)
-        for data_config_dict in self.data_with_config:
-            name, data, config = data_config_dict['name'], data_config_dict['data'], data_config_dict['config']
-            sparsifier.add_data(name=name, data=data, **config)
-        return sparsifier
-
-    def test_step(self):
-        sparsifier = self.get_sparsifier()
-        all_data = self.data_list + self.data_with_config
+    def check_step(self, data_list, data_with_config, defaults, norm_type='L1'):
+        sparsifier = self._make_sparsifier(data_list, data_with_config, defaults,
+                                           sparsifier_type=DataNormSparsifier,
+                                           sparsifier_kwargs={'norm': norm_type})
+        all_data = data_list + data_with_config
 
         # mask before step() should not be sparsified
         for some_data in all_data:
-            name, _, _ = self.get_name_data_config(some_data)
+            name, _, _ = self._get_name_data_config(some_data)
             mask = sparsifier.get_mask(name=name)
             assert (1.0 - mask.mean()) == 0  # checking sparsity level is 0
 
         sparsifier.step()
 
         for some_data in all_data:
-            name, _, _ = self.get_name_data_config(some_data)
+            name, _, _ = self._get_name_data_config(some_data)
             mask = sparsifier.get_mask(name=name)
             config = sparsifier.data_groups[name]
-            lb, ub = self.get_bounds_on_actual_sparsity(config, mask.shape)
+            lb, ub = self._get_bounds_on_actual_sparsity(config, mask.shape)
             mask = mask.to(torch.float)
             actual_sparsity = round(1 - mask.mean().item(), 3)
             assert actual_sparsity >= lb and actual_sparsity <= ub
             assert actual_sparsity > 0.0  # exact sparsity level cannot be achieved due to size of tensor
 
         iters_before_collapse = 100
-        if self.norm_type == 'L1':
-            test_sparsifier = DataNormSparsifier(sparsity_level=0.5, sparse_block_shape=(1, 4), zeros_per_block=4)
+
+        test_sparsifier = DataNormSparsifier(sparsity_level=0.5,
+                                             sparse_block_shape=(1, 4),
+                                             zeros_per_block=4,
+                                             norm=norm_type)
+
         for _ in range(iters_before_collapse):
             new_data = torch.randn(20, 20)
             test_sparsifier.add_data(name='test_data', data=new_data)
@@ -323,16 +274,16 @@ class TestNormDataSparsifierRunner(TestBaseDataSparsiferRunner):
             mask = mask.to(torch.float)
             assert (1.0 - mask.mean().item()) > 0  # some sparsity achieved
 
-    def test_step_2_of_4(self):
+    def check_step_2_of_4(self, norm_type):
         # overriding default config for test purposes
         default_config = {'sparsity_level': 1.0, 'zeros_per_block': 2, 'sparse_block_shape': (1, 4)}
         data_list = [('test_data', torch.randn(4, 4))]
-        if self.norm_type == 'L1':
-            sparsifier = DataNormSparsifier(data_list=data_list, **default_config)
+
+        sparsifier = DataNormSparsifier(data_list=data_list, norm=norm_type, **default_config)
         sparsifier.step()
 
         for some_data in data_list:
-            name, data = some_data
+            name, _ = some_data
             mask = sparsifier.get_mask(name=name)
             mask = mask.to(torch.float)
             self.assertAlmostEqual(1.0 - mask.mean().item(), 0.5, places=2)
@@ -343,19 +294,23 @@ class TestNormDataSparsifierRunner(TestBaseDataSparsiferRunner):
                     assert (block[:2] == 0).all()
                     assert (block[2:] != 0).all()
 
-    def test_sparsity_level(self):
+    def check_sparsity_level(self, data_list, data_with_config, defaults, norm_type='L1'):
         sparsity_levels = [-1.0, 0.0, 0.5, 1.0, 2.0]
         sparse_block_shapes = [(1, 1), (1, 4), (2, 2), (4, 1)]
         zeros_per_blocks = [0, 1, 2, 3, 4]
-        sparsifier = self.get_sparsifier()
+        sparsifier = DataNormSparsifier(data_list=data_list, norm=norm_type)
+
         testcases = itertools.tee(itertools.product(sparsity_levels,
                                                     sparse_block_shapes,
                                                     zeros_per_blocks))
 
+        assert len(data_with_config) > 0 and 'name' in data_with_config[0] and 'data' in data_with_config[0]
         # get some data
-        name, data, _ = self.data_with_config['name'], self.data_with_config['data']
-        for sl, sbs, zpb in testcases[0]:
-            new_name = f'{name}_{sl}_{sbs}_{zpb}'
+        name, data = data_with_config[0]['name'], data_with_config[0]['data']
+        for idx, (sl, sbs, zpb) in enumerate(testcases[0]):
+            new_name = f'{name}_{idx}'
+            if zpb > sbs[0] * sbs[1]:
+                continue
             current_config = {'sparsity_level': sl, 'sparse_block_shape': sbs, 'zeros_per_block': zpb}
             sparsifier.add_data(name=new_name, data=data, **current_config)
             if zpb > sbs[0] * sbs[1]:
@@ -363,8 +318,8 @@ class TestNormDataSparsifierRunner(TestBaseDataSparsiferRunner):
 
         sparsifier.step()
         sparsifier.squash_mask()
-        for sl, sbs, zpb in testcases[0]:
-            new_name = f'{name}_{sl}_{sbs}_{zpb}'
+        for idx, (sl, sbs, zpb) in enumerate(testcases[0]):
+            new_name = f'{name}_{idx}'
             sparsified_data = sparsifier.get_data(name=new_name, original=False)
             # sparse mask
             sparse_mask = (sparsified_data == 0).float()
@@ -376,22 +331,73 @@ class TestNormDataSparsifierRunner(TestBaseDataSparsiferRunner):
                 true_sl = true_sl * zpb / sbs[0] / sbs[1]
                 assert sparse_mask.mean() == true_sl
 
-    def run_tests(self):
-        self.test_constructor()
-        self.test_squash_mask()
-        self.test_add_data()
-        self.test_state_dict()
-        self.test_step()
-        self.test_step_2_of_4()
+
+class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
+    """To add unit tests to support new data types for the BaseDataSparsifier, create the following
+        data_list: List of tuples of name, data to be added to the constructor
+        defaults: default config for the above data in data_list
+        data_with_config: list of dictionaries defining name, data and config (look test_tensors())
+
+    Once the above is done, create an instance of TestBaseDataSparsifierType and call all the run_tests()
+    """
+    def test_tensors(self):
+        tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
+        tensor4, tensor5 = torch.randn(1, 1), torch.randn(4, 4)
+        data_list = [('tensor1', tensor1), ('tensor2', tensor2), ('tensor3', tensor3)]
+        defaults = {'test': 3}
+
+        data_with_config = [
+            {
+                'name': 'tensor4', 'data': tensor4, 'config': {'test': 7}
+            },
+            {
+                'name': 'tensor5', 'data': tensor5, 'config': {'test': 8}
+            },
+        ]
+        self.run_all_checks(data_list=data_list, defaults=defaults, data_with_config=data_with_config)
+
+    def test_nn_parameters(self):
+        param1, param2, param3 = nn.Parameter(torch.randn(3, 3)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
+        param4, param5 = nn.Parameter(torch.randn(1, 1)), nn.Parameter(torch.randn(4, 4))
+        data_list = [('param1', param1), ('param2', param2), ('param3', param3)]
+        defaults = {'test': 3}
+
+        data_with_config = [
+            {
+                'name': 'param4', 'data': param4, 'config': {'test': 7}
+            },
+            {
+                'name': 'param5', 'data': param5, 'config': {'test': 8}
+            },
+        ]
+        self.run_all_checks(data_list=data_list, defaults=defaults, data_with_config=data_with_config)
+
+    def test_nn_embeddings(self):
+        emb1, emb2, = nn.Embedding(10, 3), nn.Embedding(20, 3)
+        emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
+
+        emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
+        data_list = [('emb1', emb1), ('emb1_bag', emb1_bag), ('emb2', emb2), ('emb2_bag', emb2_bag)]
+        defaults = {'test': 3}
+
+        data_with_config = [
+            {
+                'name': 'emb3', 'data': emb3, 'config': {'test': 7}
+            },
+            {
+                'name': 'emb3_bag', 'data': emb3_bag, 'config': {'test': 8}
+            },
+        ]
+        self.run_all_checks(data_list=data_list, defaults=defaults, data_with_config=data_with_config)
 
 
-class TestNormDataSparsifiers(TestCase):
+class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
     """To add unit tests to support new data types for the NormDataSparsifier, create the following
         data_list: List of tuples of name, data to be added to the constructor
         defaults: default config for the above data in data_list
         data_with_config: list of dictionaries defining name, data and config (look test_tensors())
 
-        Once the above is done, create an instance of TestNormDataSparsifierRunner and call run_tests()
+        Once the above is done, create an instance of _NormDataSparsifierTestRunner and call run_tests()
     """
     def test_tensors(self):
         tensor1, tensor2, tensor3 = torch.randn(3, 3), torch.randn(4, 4), torch.randn(5, 5)
@@ -409,9 +415,10 @@ class TestNormDataSparsifiers(TestCase):
                 'config': {'sparsity_level': 0.3, 'sparse_block_shape': (2, 3), 'zeros_per_block': 6}
             },
         ]
-        tensor_test_l1 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
-                                                      data_with_config=data_with_config, norm_type='L1')
-        tensor_test_l1.run_tests()
+        self.run_all_checks(data_list=data_list, defaults=defaults,
+                            data_with_config=data_with_config, norm_type='L1')
+        self.run_all_checks(data_list=data_list, defaults=defaults,
+                            data_with_config=data_with_config, norm_type='L2')
 
     def test_nn_parameters(self):
         param1, param2, param3 = nn.Parameter(torch.randn(3, 3)), nn.Parameter(torch.randn(4, 4)), nn.Parameter(torch.randn(5, 5))
@@ -429,9 +436,10 @@ class TestNormDataSparsifiers(TestCase):
                 'config': {'sparsity_level': 0.3, 'sparse_block_shape': (2, 3), 'zeros_per_block': 6}
             },
         ]
-        param_test_l1 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
-                                                     data_with_config=data_with_config, norm_type='L1')
-        param_test_l1.run_tests()
+        self.run_all_checks(data_list=data_list, defaults=defaults,
+                            data_with_config=data_with_config, norm_type='L1')
+        self.run_all_checks(data_list=data_list, defaults=defaults,
+                            data_with_config=data_with_config, norm_type='L2')
 
     def test_nn_embeddings(self):
         emb1, emb2, = nn.Embedding(10, 3), nn.Embedding(20, 3)
@@ -451,6 +459,8 @@ class TestNormDataSparsifiers(TestCase):
                 'config': {'sparsity_level': 0.3, 'sparse_block_shape': (2, 3), 'zeros_per_block': 6}
             },
         ]
-        emb_test_l1 = TestNormDataSparsifierRunner(data_list=data_list, defaults=defaults,
-                                                   data_with_config=data_with_config, norm_type='L1')
-        emb_test_l1.run_tests()
+        self.run_all_checks(data_list=data_list, defaults=defaults,
+                            data_with_config=data_with_config, norm_type='L1')
+
+        self.run_all_checks(data_list=data_list, defaults=defaults,
+                            data_with_config=data_with_config, norm_type='L2')
