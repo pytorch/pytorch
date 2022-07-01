@@ -11,6 +11,48 @@ namespace native {
 namespace vulkan {
 namespace api {
 
+class DescriptorSet final {
+ public:
+  explicit DescriptorSet(
+      const VkDevice,
+      const VkDescriptorSet,
+      const ShaderLayout::Signature&);
+
+  DescriptorSet(const DescriptorSet&) = delete;
+  DescriptorSet& operator=(const DescriptorSet&) = delete;
+
+  DescriptorSet(DescriptorSet&&) noexcept;
+  DescriptorSet& operator=(DescriptorSet&&) noexcept;
+
+  ~DescriptorSet() = default;
+
+  struct ResourceBinding final {
+    uint32_t binding_idx;
+    VkDescriptorType descriptor_type;
+    bool is_image;
+
+    union {
+      VkDescriptorBufferInfo buffer_info;
+      VkDescriptorImageInfo image_info;
+    } resource_info;
+  };
+
+ private:
+  VkDevice device_;
+  VkDescriptorSet handle_;
+  ShaderLayout::Signature shader_layout_signature_;
+  c10::SmallVector<ResourceBinding, 6u> bindings_;
+
+ public:
+  DescriptorSet& bind(const uint32_t, const VulkanBuffer&);
+  DescriptorSet& bind(const uint32_t, const VulkanImage&);
+
+  VkDescriptorSet get_bind_handle() const;
+
+ private:
+  void add_binding(const ResourceBinding& resource);
+};
+
 //
 // This struct defines caches of descriptor pools, and descriptor sets allocated
 // from those pools, intended to minimize redundant object reconstructions or
@@ -53,54 +95,6 @@ namespace api {
 
 struct Descriptor final {
   //
-  // Set
-  //
-
-  class Set final {
-   public:
-    Set(
-        VkDevice device,
-        VkDescriptorSet descriptor_set,
-        ShaderLayout::Signature shader_layout_signature);
-    Set(const Set&) = delete;
-    Set& operator=(const Set&) = delete;
-    Set(Set&&);
-    Set& operator=(Set&&);
-    ~Set() = default;
-
-    Set& bind(uint32_t binding, const VulkanBuffer&);
-    Set& bind(uint32_t binding, const VulkanImage&);
-
-    VkDescriptorSet handle() const;
-
-   private:
-    void invalidate();
-
-   private:
-    struct Item final {
-      uint32_t binding;
-      VkDescriptorType type;
-
-      union {
-        VkDescriptorBufferInfo buffer;
-        VkDescriptorImageInfo image;
-      } info;
-    };
-
-    void update(const Item& item);
-
-   private:
-    VkDevice device_;
-    VkDescriptorSet descriptor_set_;
-    ShaderLayout::Signature shader_layout_signature_;
-
-    struct {
-      c10::SmallVector<Item, 6u> items;
-      mutable bool dirty;
-    } bindings_;
-  };
-
-  //
   // Pool
   //
 
@@ -113,7 +107,7 @@ struct Descriptor final {
     Pool& operator=(Pool&&);
     ~Pool();
 
-    Set allocate(
+    DescriptorSet allocate(
         const VkDescriptorSetLayout handle,
         const ShaderLayout::Signature& signature);
     void purge();
