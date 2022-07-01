@@ -252,7 +252,9 @@ try:
             node: node that represents a conditional
             counter: variable tracking
 
-        Returns:
+        Returns: Two sets of constraints. One with a conjunction with the
+        the conditional constraint and the other with a conjunction with
+        its negation.
 
         """
         dimension_dict = {}  # type: ignore[var-annotated]
