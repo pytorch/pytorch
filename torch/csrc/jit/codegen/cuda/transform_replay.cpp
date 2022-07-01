@@ -644,101 +644,160 @@ std::pair<TensorDomain*, unsigned int> TransformReplay::replayCasP(
   return replayCasP(consumer, producer, compute_at_axis, root_map);
 }
 
-namespace {
-
-int getMatchedLeafPosWithoutReplay(
+int TransformReplay::getMatchedLeafPosWithoutReplayPasC(
     const TensorView* producer,
     const TensorView* consumer,
-    int consumer_or_producer_pos,
-    bool consumer_pos = true) {
-  FUSER_PERF_SCOPE("transform_replay.cpp::getMatchedLeafPosWithoutReplay");
+    int consumer_pos) {
+  FUSER_PERF_SCOPE("transform_replay.cpp::getMatchedLeafPosWithoutReplayPasC");
 
-  const auto c2p_root_map =
-      PairwiseRootDomainMap(producer, consumer)
-          .mapConsumerToProducer(consumer->domain(), producer->domain());
+  const auto pairwise_map = PairwiseRootDomainMap(producer, consumer);
+  id_map c2p_root_map = pairwise_map.mapConsumerToProducer(
+      consumer->domain(), producer->domain());
 
-  // IterDomains in consumer root also in producer root
+  // IterDomains in `consumer` root also in `producer` root
+  const auto consumer_domain = consumer->domain()->domain();
+
   std::unordered_set<Val*> mapped_consumer_roots;
   for (auto entry : c2p_root_map) {
     mapped_consumer_roots.emplace(entry.first);
   }
 
-  const auto consumer_domain = consumer->domain()->domain();
-
-  auto mapped_consumer_domain_ids_vec = DependencyCheck::getAllValsBetween(
+  auto unskippable_consumer_ids_vec = DependencyCheck::getAllValsBetween(
       mapped_consumer_roots, {consumer_domain.begin(), consumer_domain.end()});
 
-  std::unordered_set<Val*> mapped_consumer_domain_ids(
-      mapped_consumer_domain_ids_vec.begin(),
-      mapped_consumer_domain_ids_vec.end());
+  std::unordered_set<Val*> unskippable_consumer_ids(
+      unskippable_consumer_ids_vec.begin(), unskippable_consumer_ids_vec.end());
 
+  // IterDomains in `producer` root also in `consumer` root
   const auto producer_domain = producer->domain()->domain();
 
   auto it_consumer = consumer_domain.begin();
   auto it_producer = producer_domain.begin();
 
-  auto best_effort_PasC = BestEffortReplay::replayPasC(
-      producer, consumer, -1, PairwiseRootDomainMap(producer, consumer));
-
-  auto c2p_map = best_effort_PasC.getReplay();
+  id_map c2p_map =
+      BestEffortReplay::replayPasC(producer, consumer, -1, pairwise_map)
+          .getReplay();
 
   int mismatched_consumer_pos = 0;
   int mismatched_producer_pos = 0;
   while (it_consumer != consumer_domain.end()) {
+    if (consumer_pos == mismatched_consumer_pos) {
+      return mismatched_producer_pos;
+    }
+
     auto consumer_id = *it_consumer;
-    if (!mapped_consumer_domain_ids.count(consumer_id)) {
+    if (unskippable_consumer_ids.count(consumer_id) == 0) {
       ++it_consumer;
-      mismatched_consumer_pos++;
+      ++mismatched_consumer_pos;
       continue;
+    }
+
+    if (it_producer == producer_domain.end()) {
+      return -1;
     }
 
     auto c2p_it = c2p_map.find(consumer_id);
     if (c2p_it == c2p_map.end()) {
-      break;
-    }
-
-    if (it_producer == producer_domain.end()) {
-      break;
+      return -1;
     }
 
     auto producer_id = *it_producer;
-
     if (c2p_it->second == producer_id) {
       ++mismatched_consumer_pos;
       ++mismatched_producer_pos;
       ++it_consumer;
       ++it_producer;
-      if (consumer_pos) {
-        if (consumer_or_producer_pos == mismatched_consumer_pos) {
-          return mismatched_producer_pos;
-        }
-      } else {
-        if (consumer_or_producer_pos == mismatched_producer_pos) {
-          return mismatched_consumer_pos;
-        }
-      }
     } else {
-      break;
+      return -1;
     }
   }
+  if (consumer_pos == mismatched_consumer_pos) {
+    return mismatched_producer_pos;
+  }
   return -1;
-}
-
-} // namespace
-
-int TransformReplay::getMatchedLeafPosWithoutReplayPasC(
-    const TensorView* producer,
-    const TensorView* consumer,
-    int consumer_pos) {
-  return getMatchedLeafPosWithoutReplay(producer, consumer, consumer_pos, true);
 }
 
 int TransformReplay::getMatchedLeafPosWithoutReplayCasP(
     const TensorView* consumer,
     const TensorView* producer,
     int producer_pos) {
-  return getMatchedLeafPosWithoutReplay(
-      producer, consumer, producer_pos, false);
+  FUSER_PERF_SCOPE("transform_replay.cpp::getMatchedLeafPosWithoutReplayCasP");
+
+  const auto pairwise_map = PairwiseRootDomainMap(producer, consumer);
+  id_map p2c_root_map = pairwise_map.mapProducerToConsumer(
+      producer->domain(), consumer->domain());
+
+  // IterDomains in `producer` root that are not reduction
+  const auto producer_domain = producer->domain()->domain();
+  auto unskippable_producer_ids_vec =
+      TensorDomain::noReductions(producer_domain);
+  std::unordered_set<IterDomain*> unskippable_producer_ids(
+      unskippable_producer_ids_vec.begin(), unskippable_producer_ids_vec.end());
+
+  // IterDomains in `consumer` root also in `producer` root
+  const auto consumer_domain = consumer->domain()->domain();
+
+  std::unordered_set<Val*> mapped_consumer_roots;
+  for (auto entry : p2c_root_map) {
+    mapped_consumer_roots.emplace(entry.second);
+  }
+
+  auto unskippable_consumer_ids_vec = DependencyCheck::getAllValsBetween(
+      mapped_consumer_roots, {consumer_domain.begin(), consumer_domain.end()});
+
+  std::unordered_set<Val*> unskippable_consumer_ids(
+      unskippable_consumer_ids_vec.begin(), unskippable_consumer_ids_vec.end());
+
+  auto it_producer = producer_domain.begin();
+  auto it_consumer = consumer_domain.begin();
+
+  id_map replay_map =
+      BestEffortReplay::replayCasP(consumer, producer, -1, pairwise_map)
+          .getReplay();
+
+  int mismatched_producer_pos = 0;
+  int mismatched_consumer_pos = 0;
+  while (it_producer != producer_domain.end()) {
+    if (producer_pos == mismatched_producer_pos) {
+      return mismatched_consumer_pos;
+    }
+
+    auto producer_id = *it_producer;
+    if (unskippable_producer_ids.count(producer_id) == 0) {
+      ++it_producer;
+      ++mismatched_producer_pos;
+      continue;
+    }
+
+    if (it_consumer == consumer_domain.end()) {
+      return -1;
+    }
+
+    auto consumer_id = *it_consumer;
+    if (unskippable_consumer_ids.count(consumer_id) == 0) {
+      ++it_consumer;
+      ++mismatched_consumer_pos;
+      continue;
+    }
+
+    auto replay_it = replay_map.find(producer_id);
+    if (replay_it == replay_map.end()) {
+      return -1;
+    }
+
+    if (replay_it->second == consumer_id) {
+      ++mismatched_producer_pos;
+      ++mismatched_consumer_pos;
+      ++it_producer;
+      ++it_consumer;
+    } else {
+      return -1;
+    }
+  }
+  if (producer_pos == mismatched_producer_pos) {
+    return mismatched_consumer_pos;
+  }
+  return -1;
 }
 
 bool TransformReplay::fullSelfMatching(

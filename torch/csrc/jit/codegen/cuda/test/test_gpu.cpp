@@ -24079,6 +24079,72 @@ TEST_F(NVFuserTest, FusionIssue1785Repro_CUDA) {
   testValidate(&fusion, cg_outputs, {in1, in2}, {tv_ref}, __LINE__, __FILE__);
 }
 
+TEST_F(NVFuserTest, FusionSkipReplay_CUDA) {
+  struct TransformPropagatorWithCheck : public TransformPropagator {
+   public:
+    virtual void propagateTvPasC(TensorView* from, TensorView* to) override {
+      TransformPropagator::propagateTvPasC(from, to);
+      auto from_pos = replayed_pos_.at(from);
+      auto to_pos = replayed_pos_.at(to);
+      TORCH_CHECK(
+          TransformReplay::getMatchedLeafPosWithoutReplayPasC(
+              to, from, from_pos) == to_pos);
+    }
+    virtual void propagateTvCasP(TensorView* from, TensorView* to) override {
+      TransformPropagator::propagateTvCasP(from, to);
+      auto from_pos = replayed_pos_.at(from);
+      auto to_pos = replayed_pos_.at(to);
+      TORCH_CHECK(
+          TransformReplay::getMatchedLeafPosWithoutReplayCasP(
+              to, from, from_pos) == to_pos);
+    }
+    virtual void propagateTvSibling(TensorView* from, TensorView* to) override {
+      TransformPropagator::propagateTvCasP(from, to);
+      auto from_pos = replayed_pos_.at(from);
+      auto to_pos = replayed_pos_.at(to);
+      TORCH_CHECK(from_pos == to_pos);
+      TORCH_CHECK(TransformReplay::fullSelfMatching(from, to));
+    }
+    using TransformPropagator::TransformPropagator;
+  };
+
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* tv0 = makeContigTensor(1);
+    TensorView* tv1 = makeContigTensor(2);
+    fusion.addInput(tv0);
+    fusion.addInput(tv1);
+
+    auto tv2 = broadcast(tv0, {false, true});
+    auto tv3 = add(tv2, tv1);
+    fusion.addOutput(tv3);
+
+    tv3->split(1, 2, false);
+
+    TransformPropagatorWithCheck propagator(tv3);
+    MaxRootDomainInfoSpanningTree(tv3).traverse(&propagator);
+  }
+
+  {
+    Fusion fusion;
+    FusionGuard fg(&fusion);
+
+    TensorView* tv0 = makeContigTensor(3);
+    fusion.addInput(tv0);
+
+    auto tv1 = sum(tv0, {0, 2});
+    auto tv2 = sin(tv1);
+    fusion.addOutput(tv2);
+
+    tv0->split(1, 2, false);
+
+    TransformPropagatorWithCheck propagator(tv0);
+    MaxRootDomainInfoSpanningTree(tv0).traverse(&propagator);
+  }
+}
+
 } // namespace jit
 } // namespace torch
 #endif // #if defined(USE_CUDA)

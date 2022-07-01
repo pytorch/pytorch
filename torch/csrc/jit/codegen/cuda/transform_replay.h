@@ -179,6 +179,7 @@ class TORCH_CUDA_CU_API TransformReplay {
 
 class TORCH_CUDA_CU_API TransformPropagator
     : public MaxRootDomainInfoSpanningTree::Propagator {
+ protected:
   std::unordered_map<TensorView*, size_t> replayed_pos_;
 
  public:
