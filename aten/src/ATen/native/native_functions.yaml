@@ -9219,6 +9219,14 @@
     CPU: _convert_indices_from_csr_to_coo_structured_cpu
     CUDA: _convert_indices_from_csr_to_coo_structured_cuda
 
+- func: _compressed_to_batched_compressed_indices(Tensor compressed_indices, int n_batch, *, bool out_int32=False) -> Tensor
+  structured_delegate: _compressed_to_batched_compressed_indices.out
+
+- func: _compressed_to_batched_compressed_indices.out(Tensor compressed_indices, int n_batch, *, bool out_int32=False, Tensor(a!) out) -> Tensor(a!)
+  structured: True
+  dispatch:
+    CPU: _compressed_to_batched_compressed_indices_structured_cpu
+
 ## NN wrappers
 
 - func: mse_loss.out(Tensor self, Tensor target, int reduction=Mean, *, Tensor(a!) out) -> Tensor(a!)

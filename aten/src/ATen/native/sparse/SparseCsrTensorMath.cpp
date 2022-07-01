@@ -19,6 +19,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Operators.h>
 #else
+#include <ATen/ops/_compressed_to_batched_compressed_indices_native.h>
 #include <ATen/ops/_conj_physical_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr_native.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo_native.h>
@@ -90,10 +91,10 @@
 #include <ATen/ops/sin_native.h>
 #include <ATen/ops/sinh.h>
 #include <ATen/ops/sinh_native.h>
-#include <ATen/ops/sqrt.h>
-#include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/sparse_mask.h>
 #include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/sqrt.h>
+#include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/tan.h>
 #include <ATen/ops/tan_native.h>
 #include <ATen/ops/tanh.h>
@@ -130,6 +131,22 @@ TORCH_META_FUNC(_convert_indices_from_csr_to_coo)
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = crow_indices.options().dtype(scalar_type);
   set_output_raw_strided(0, {2, col_indices.numel()}, {}, options, {});
+}
+
+TORCH_META_FUNC(_compressed_to_batched_compressed_indices)
+(const Tensor& compressed_indices,
+ const int64_t n_batch,
+ const bool out_int32) {
+  TORCH_CHECK(
+      compressed_indices.dim() == 1,
+      "Compressed indices is supposed to be a vector");
+  ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
+  c10::TensorOptions options = compressed_indices.options().dtype(scalar_type);
+  // The compressed indices are nrow_b/ncol_b + 1, so the batched shape is
+  // n_batch, nrow/ncol + 1
+  // The input compressed shape nrow_b/ncol_b is the row/col len * n_batch
+  const int64_t n_compressed = (compressed_indices.size(0) - 1) / n_batch;
+  set_output_raw_strided(0, {n_batch, n_compressed + 1}, {}, options);
 }
 
 } // namespace meta

@@ -2440,16 +2440,14 @@ class TestSparseCSR(TestCase):
 
         TODO: Eventually this is meant to be merged into test_compressed_layout_conversions_coverage
         """
-        if layout is torch.sparse_bsc:
-            # TODO: Remove this once support has been enabled
-            return
-
         shapes = [(6, 10), (0, 10), (6, 0), (0, 0)]
 
         blocksizes = [(2, 2)]
         batch_sizes = [(3, )]
 
-        if layout is torch.sparse_bsr:
+        batched_supported = (torch.sparse_bsr, torch.sparse_bsc)
+
+        if layout in batched_supported:
             blocksizes += [(3, 5), (6, 10)]
             batch_sizes += [(2, 3), (1, 1, 1, 2)]
 
@@ -2472,7 +2470,7 @@ class TestSparseCSR(TestCase):
             _test_matrix(pt_matrix, dense, layout, blocksize)
             self.assertEqual(dense, pt_matrix.to_dense())
 
-        if layout is not torch.sparse_bsr:
+        if layout not in batched_supported:
             # TODO: Remove this once support has been enabled
             return
 

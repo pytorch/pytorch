@@ -756,9 +756,87 @@ Tensor dense_to_sparse_bsr(const Tensor& self, IntArrayRef blocksize) {
 }
 
 Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize) {
-  AT_ERROR(
-      "Conversion from ", self.layout(), " to SparseBsc is currently not supported.");
-  return self;
+  TORCH_CHECK(
+      blocksize[0] > 0 && blocksize[1] > 0,
+      "blocksize needs to be non zero, but got ",
+      blocksize);
+  TORCH_CHECK(
+      self.size(-2) % blocksize[0] == 0,
+      "Tensor size(-2) ",
+      self.size(-2),
+      " needs to be divisible by blocksize[0] ",
+      blocksize[0]);
+  TORCH_CHECK(
+      self.size(-1) % blocksize[1] == 0,
+      "Tensor size(-1) ",
+      self.size(-1),
+      " needs to be divisible by blocksize[1] ",
+      blocksize[1]);
+
+  auto block_size_1 = self.size(-1) / blocksize[1];
+  auto n_batch_dim = self.dim() - 2;
+
+  auto values = _batch_tile_tensor(self, blocksize);
+  auto not_zero_mask = _batch_tile_tensor((self != 0), blocksize);
+  not_zero_mask = not_zero_mask.any(-1).any(-1);
+
+  if (n_batch_dim > 0) {
+    if (n_batch_dim > 1) {
+      not_zero_mask = not_zero_mask.flatten(0, n_batch_dim - 1);
+    }
+    TORCH_CHECK(
+        not_zero_mask.size(0) > 0,
+        "to_sparse_bsc: Expected product of batch dimensions to be non-zero.");
+
+    // If the input is ND we assert that the same sparsity pattern
+    // is used across matrices. That means the same number of materialized
+    // values per block
+
+    auto not_zero_mask_0 = not_zero_mask.select(0, 0);
+    auto nse_per_batch = not_zero_mask_0.sum().repeat(not_zero_mask.size(0));
+    TORCH_CHECK(
+        not_zero_mask.sum({-2, -1}).equal(nse_per_batch),
+        "Expect the same number of specified elements per batch.");
+
+    // Permute + flatten re-orders the mask so that the compressed axis has
+    // length (l * b) where l is the length of the compressed axis in the
+    // eventual output and b is the number of batches.
+    // This shape is required for our efficent re-batching of compressed indices
+    // algorithim.
+
+    not_zero_mask = not_zero_mask.permute({1, 0, 2}).flatten(1, -1);
+  }
+
+  Tensor col_indices;
+  Tensor row_indices;
+  std::tie(row_indices, col_indices) = _not_zero_mask_to_col_row_indices(
+      not_zero_mask.permute({1, 0}), at::kLong, not_zero_mask.device());
+  Tensor ccol_indices = at::_convert_indices_from_coo_to_csr(
+      col_indices, not_zero_mask.size(-1), false /*out_int32*/);
+
+  values = values.reshape({-1, values.size(-2), values.size(-1)})
+               .index_select(0, _mask_to_indices(not_zero_mask.flatten()));
+  if (n_batch_dim > 0) {
+    ccol_indices = at::_compressed_to_batched_compressed_indices(
+        ccol_indices,
+        not_zero_mask.size(-1) / block_size_1,
+        false /*out_int32*/);
+    auto batch_shape = self.sizes().slice(0, n_batch_dim);
+    auto batch_sizes_nnz = DimVector(batch_shape);
+    row_indices = row_indices.unflatten(0, batch_shape);
+    ccol_indices = ccol_indices.unflatten(0, batch_shape);
+    batch_sizes_nnz.push_back(-1);
+    values = values.unflatten(0, batch_sizes_nnz);
+  }
+
+  return at::native::_sparse_bsc_tensor_unsafe(
+      ccol_indices,
+      row_indices,
+      values,
+      self.sizes(),
+      values.scalar_type(),
+      c10::kSparseBsc,
+      values.device());
 }
 
 Tensor sparse_compressed_to_sparse_csr(const Tensor& self) {
@@ -928,6 +1006,35 @@ void convert_indices_from_csr_to_coo_cpu(
         }
       });
 }
+template <typename input_t, typename output_t>
+void compressed_to_batched_compressed_indices(
+    const Tensor& batched,
+    const Tensor& compressed,
+    const int64_t n_batch) {
+  auto compressed_ = compressed.expect_contiguous();
+  TORCH_INTERNAL_ASSERT(batched.is_contiguous());
+  input_t* compressed_data_in = compressed_->data_ptr<input_t>();
+  output_t* batched_data_out = batched.data_ptr<output_t>();
+  int64_t mat_dim_length = batched.size(-1) - 1;
+  at::parallel_for(
+      0, n_batch, at::internal::GRAIN_SIZE, [&](int64_t start, int64_t end) {
+        for (const auto b : c10::irange(start, end)) {
+          input_t* comp_start = compressed_data_in + (b * mat_dim_length);
+          input_t* comp_end = comp_start + (mat_dim_length + 1);
+          output_t* batched_start =
+              batched_data_out + (b * (mat_dim_length + 1));
+          const auto idx_delta = static_cast<output_t>(b * mat_dim_length);
+          std::transform(
+              comp_start,
+              comp_end,
+              batched_start,
+              [&idx_delta](input_t compressed_idx) {
+                return static_cast<output_t>(compressed_idx) - idx_delta;
+              });
+        }
+      });
+}
+
 } // namespace
 
 TORCH_IMPL_FUNC(_convert_indices_from_coo_to_csr_structured_cpu)
@@ -967,6 +1074,30 @@ TORCH_IMPL_FUNC(_convert_indices_from_csr_to_coo_structured_cpu)
         crow_indices.scalar_type(), "convert_indices_from_csr_to_coo_cpu", [&] {
           convert_indices_from_csr_to_coo_cpu<scalar_t, int64_t>(
               result, crow_indices, col_indices, transpose);
+        });
+  }
+}
+
+TORCH_IMPL_FUNC(_compressed_to_batched_compressed_indices_structured_cpu)
+(const Tensor& compressed_indices,
+ const int64_t n_batch,
+ const bool out_int32,
+ const Tensor& result) {
+  if (out_int32) {
+    AT_DISPATCH_INTEGRAL_TYPES(
+        compressed_indices.scalar_type(),
+        "compressed_to_batched_compressed_indices_cpu",
+        [&] {
+          compressed_to_batched_compressed_indices<scalar_t, int32_t>(
+              result, compressed_indices, n_batch);
+        });
+  } else {
+    AT_DISPATCH_INTEGRAL_TYPES(
+        compressed_indices.scalar_type(),
+        "compressed_to_batched_compressed_indices_cpu",
+        [&] {
+          compressed_to_batched_compressed_indices<scalar_t, int64_t>(
+              result, compressed_indices, n_batch);
         });
   }
 }
@@ -1263,5 +1394,5 @@ std::vector<Tensor> to_meta(const at::TensorList& t_list) {
   }
   return outs;
 }
-
-}} // namespace at::native
+} // namespace native
+} // namespace at
