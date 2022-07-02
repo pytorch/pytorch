@@ -8188,6 +8188,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 C10_MAPPINGS = collections.OrderedDict(
     [
         ("cuda::compat::", ("hip::compat::", API_C10)),
+        ("c10/cuda/CUDAAlgorithm.h", ("c10/hip/HIPAlgorithm.h", API_C10)),
         ("c10/cuda/CUDAException.h", ("c10/hip/HIPException.h", API_C10)),
         ("c10/cuda/CUDAMacros.h", ("c10/hip/HIPMacros.h", API_C10)),
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
