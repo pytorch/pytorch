@@ -118,19 +118,30 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str,
         os.chdir(temp_dir)
 
         # Download and extract all the reports (both GHA and S3)
+        print("::group::Downloading artifacts from S3")
         s3_paths = download_s3_artifacts(
             "test-report", workflow_run_id, workflow_run_attempt
         )
+        print("::endgroup::")
+
+        print("::group::Unzipping S3 artifacts")
         for path in s3_paths:
             unzip(path)
+        print("::endgroup::")
 
+        print("::group::Downloading artifacts from GitHub Actions")
         artifact_paths = download_gha_artifacts(
             "test-report", workflow_run_id, workflow_run_attempt
         )
+        print("::endgroup::")
+
+        print("::group::Unzipping GHA artifacts")
         for path in artifact_paths:
             unzip(path)
+        print("::endgroup::")
 
         # Parse the reports and transform them to JSON
+        print("::group::Parsing test reports")
         test_cases = []
         for xml_report in Path(".").glob("**/*.xml"):
             test_cases.extend(
@@ -141,6 +152,7 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str,
                     workflow_run_attempt,
                 )
             )
+        print("::endgroup::")
 
         return test_cases
 
