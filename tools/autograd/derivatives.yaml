@@ -495,8 +495,13 @@
 
 - name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
   A: linalg_det_backward(grad, result, A, LU, pivots)
-  result: at::linalg_lu_solve(LU, pivots, A_t).diagonal(0, -2, -1).sum(-1) * result
+  result: at::linalg_lu_solve(LU, pivots, A_t, /*left*/true, /*adjoint*/!A_p.is_complex() && A_p.is_contiguous()).diagonal(0, -2, -1).sum(-1) * result
   output_differentiability: [True, False, False]
+
+- name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
+  A: slogdet_backward(grad_sign, grad_logabsdet, A, sign, LU, pivots)
+  sign, logabsdet: slogdet_jvp(LU, pivots, A_t, sign, A_p.is_contiguous() && !A_p.is_complex())
+  output_differentiability: [True, True, False, False]
 
 - name: block_diag(Tensor[] tensors) -> Tensor
   tensors: block_diag_backward(grad, to_args_sizes(tensors), to_args_scalartypes(tensors))
@@ -934,9 +939,6 @@
 
 - name: special_zeta.other_scalar(Tensor self, Scalar other) -> Tensor
   self: not_implemented("zeta")
-
-- name: logdet(Tensor self) -> Tensor
-  self: logdet_backward(grad, self, result)
 
 - name: log_normal_(Tensor(a!) self, float mean=1, float std=2, *, Generator? generator=None) -> Tensor(a!)
   self: zeros_like(grad)
@@ -1435,18 +1437,10 @@
   src: grad.contiguous().as_strided(size, stride, storage_offset)
   result: auto_linear
 
-- name: slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  self: slogdet_backward(grad, self, sign, logabsdet)
-  output_differentiability: [false, true]
-
-- name: linalg_slogdet(Tensor self) -> (Tensor sign, Tensor logabsdet)
-  self: slogdet_backward(grad, self, sign, logabsdet)
-  output_differentiability: [false, true]
-
-- name: _linalg_solve(Tensor A, Tensor B, *, bool left=True) -> (Tensor result, Tensor LU, Tensor pivots)
+- name: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)
   A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
   result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
-  output_differentiability: [True, False, False]  # LU is an auxiliary tensor not exposed to the user
+  output_differentiability: [True, False, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward(grad, dim, indices, self.sizes(), true)
@@ -2144,6 +2138,9 @@
   self: fractional_max_pool3d_backward(grad, self, kernel_size, output_size, result1)
   result0: gather(self_t.flatten(-3), -1, result1.flatten(-3)).view_as(result1)
   output_differentiability: [True, False]
+
+- name: linear(Tensor input, Tensor weight, Tensor? bias=None) -> Tensor
+  input, weight, bias: linear_backward(input, grad, weight, grad_input_mask)
 
 #mps
 - name: _mps_max_pool2d(Tensor self, int[2] kernel_size, int[2] stride=[], int[2] padding=0, int[2] dilation=1, bool ceil_mode=False) -> Tensor
@@ -2905,6 +2902,9 @@
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
   self: non_differentiable
 
+- name: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
+  x: non_differentiable
+
 - name: special_scaled_modified_bessel_k1(Tensor x) -> Tensor
   x: non_differentiable
 
@@ -2946,4 +2946,7 @@
   n: non_differentiable
 
 - name: special_shifted_chebyshev_polynomial_w.n_scalar(Tensor x, Scalar n) -> Tensor
+  x: non_differentiable
+
+- name: special_spherical_bessel_j0(Tensor x) -> Tensor
   x: non_differentiable
