@@ -264,6 +264,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
         m, "_ExtraFields_Allocation");
     py::class_<ExtraFields<EventType::PyCall>>(m, "_ExtraFields_PyCall");
     py::class_<ExtraFields<EventType::PyCCall>>(m, "_ExtraFields_PyCCall");
+    py::class_<ExtraFields<EventType::Kineto>>(m, "_ExtraFields_Kineto");
 
     py::class_<Result, std::shared_ptr<Result>>(m, "_ProfilerEvent")
         .def("name", &Result::name)

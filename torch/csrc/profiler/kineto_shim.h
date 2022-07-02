@@ -132,9 +132,7 @@ void recordThreadInfo();
 
 namespace autograd {
 namespace profiler {
-#ifdef USE_KINETO
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type);
-#endif // USE_KINETO
 
 TORCH_API void addMetadataJson(
     const std::string& key,

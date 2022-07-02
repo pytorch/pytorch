@@ -26,11 +26,14 @@ enum class EventType : uint8_t {
   Backend,
   Allocation,
   PyCall,
-  PyCCall
+  PyCCall,
+  Kineto
 };
 
 template <EventType>
 struct ExtraFields;
+
+struct Result;
 
 struct TorchOpBasicFields {
   int64_t sequence_number_;
@@ -181,6 +184,15 @@ struct ExtraFields<EventType::PyCCall> : public PyExtraFieldsBase {
   at::StringView function_name_;
 };
 
+template <>
+struct ExtraFields<EventType::Kineto> {
+  std::string name_;
+  int64_t duration_us_;
+  uint64_t correlation_id_;
+  libkineto::ActivityType activity_type_;
+  std::weak_ptr<Result> linked_activity_{};
+};
+
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   template <typename... Args>
   [[nodiscard]] static std::shared_ptr<Result> create(Args... args) {
@@ -202,7 +214,8 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       ExtraFields<EventType::Backend>,
       ExtraFields<EventType::Allocation>,
       ExtraFields<EventType::PyCall>,
-      ExtraFields<EventType::PyCCall>>
+      ExtraFields<EventType::PyCCall>,
+      ExtraFields<EventType::Kineto>>
       extra_fields_;
 
   std::weak_ptr<Result> parent_;
@@ -420,7 +433,10 @@ class TORCH_API RecordQueue {
   void stop();
 
   // NB: This is a destructive operation.
-  std::vector<std::shared_ptr<Result>> getRecords(
+  std::pair<
+      std::vector<std::shared_ptr<Result>>,
+      std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
+  getRecords(
       std::function<time_t(approx_time_t)> time_converter,
       uint64_t start_time_us,
       uint64_t end_time_us);

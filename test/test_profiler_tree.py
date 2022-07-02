@@ -48,6 +48,11 @@ class ProfilerTree:
             return out
 
         flat_nodes = flatten(profiler.kineto_results.experimental_event_tree())
+
+        # Profiler inserts a `cudaDeviceSynchronize` at the end of profiling.
+        if flat_nodes and flat_nodes[-1][1] == "cudaDeviceSynchronize":
+            flat_nodes = flat_nodes[:-1]
+
         min_depth = min([d + 1 for d, name in flat_nodes if "begin_unit_test_marker" in name] or [0])
         return textwrap.indent(
             "\n".join([f"{'  ' * (d - min_depth)}{name.rstrip()}" for d, name in flat_nodes if d >= min_depth]),
@@ -75,6 +80,11 @@ class ProfilerTree:
             # We don't want to have to update this test every time PyTorch changes.
             lineno = lineno if os.path.split(filename.strip())[1] == "test_profiler_tree" else "..."
             return f"{filename}.py({lineno}): {fn}"
+
+        name = re.sub(
+            r"void at::native::vectorized_elementwise_kernel<.+>\(",
+            "void at::native::vectorized_elementwise_kernel<...>(",
+            name)
 
         return re.sub(
             "object at 0x[0-9a-fA-F]+>",
@@ -535,6 +545,100 @@ class TestProfilerTree(TestCase):
                       torch/autograd/profiler.py(...): __exit__
                         <built-in method _disable_profiler of PyCapsule object at 0xXXXXXXXXXXXX>"""
         )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @ProfilerTree.test
+    def test_profiler_experimental_tree_cuda(self):
+        with torch.profiler.profile(profile_memory=True) as p:
+            weight = torch.ones(1, device="cuda", requires_grad=True)
+            x = torch.ones(1, device="cuda")
+            y = torch.add(weight, x)
+            loss = torch.pow(y, 2)
+            loss.backward()
+            torch.optim.SGD([weight], lr=0.01, momentum=0.9).step()
+
+        self.assertTreesMatch(
+            ProfilerTree.format(p.profiler, 12),
+            """\
+            aten::ones
+              aten::empty
+                [memory]
+              aten::fill_
+                cudaLaunchKernel
+                  void at::native::vectorized_elementwise_kernel<...>(int, at::native::FillFunctor<float>, at::detail::Array<char*, 1>)
+            aten::ones
+              aten::empty
+                [memory]
+              aten::fill_
+                cudaLaunchKernel
+                  void at::native::vectorized_elementwise_kernel<...>(int, at::native::FillFunctor<float>, at::detail::Array<char*, 1>)
+            aten::add
+              cudaLaunchKernel
+                void at::native::vectorized_elementwise_kernel<...>(int, at::native::CUDAFunctor_add<float>, at::detail::Array<char*, 3>)
+              [memory]
+            aten::pow
+              cudaLaunchKernel
+                void at::native::vectorized_elementwise_kernel<...>(at::TensorIteratorBase&, float)::{lambda(float)#1}, at::detail::Array<char*, 2>)
+              aten::result_type
+              aten::to
+              [memory]
+            aten::ones_like
+              aten::empty_like
+                aten::empty_strided
+                  [memory]
+              aten::fill_
+                cudaLaunchKernel
+                  void at::native::vectorized_elementwise_kernel<...>(int, at::native::FillFunctor<float>, at::detail::Array<char*, 1>)
+            autograd::engine::evaluate_function: PowBackward0
+              PowBackward0
+                aten::pow
+                  aten::result_type
+                  aten::to
+                  [memory]
+                  aten::copy_
+                    cudaMemcpyAsync
+                      Memcpy DtoD (Device -> Device)
+                aten::mul
+                  [memory]
+                  aten::mul
+                    cudaLaunchKernel
+                      void at::native::vectorized_elementwise_kernel<...>(int, at::native::AUnaryFunctor<float, float, float, at::native::MulFunctor<float> >, at::detail::Array<char*, 2>)
+                    [memory]
+                  [memory]
+                aten::mul
+                  cudaLaunchKernel
+                    void at::native::vectorized_elementwise_kernel<...>(int, at::native::BinaryFunctor<float, float, float, at::native::MulFunctor<float> >, at::detail::Array<char*, 3>)
+                  [memory]
+                [memory]
+                [memory]
+            autograd::engine::evaluate_function: AddBackward0
+              AddBackward0
+            autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+              torch::autograd::AccumulateGrad
+                aten::detach
+                  detach
+            [memory]
+            aten::zeros
+              aten::empty
+                [memory]
+              aten::zero_
+            Optimizer.step#SGD.step
+              aten::empty
+                [memory]
+              [memory]
+              [memory]
+              aten::clone
+                aten::empty_strided
+                  [memory]
+                aten::copy_
+                  cudaMemcpyAsync
+                    Memcpy DtoD (Device -> Device)
+              aten::detach
+                detach
+              aten::add_
+                cudaLaunchKernel
+                  void at::native::vectorized_elementwise_kernel<...>(int, at::native::CUDAFunctor_add<float>, at::detail::Array<char*, 3>)
+            [memory]""")
 
 if __name__ == '__main__':
     run_tests()

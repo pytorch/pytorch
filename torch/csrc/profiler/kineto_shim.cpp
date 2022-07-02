@@ -6,6 +6,8 @@
 #include <libkineto.h>
 #endif
 
+#include <c10/util/Exception.h>
+
 namespace torch {
 namespace profiler {
 namespace impl {
@@ -278,7 +280,6 @@ void recordThreadInfo() {
 
 namespace autograd {
 namespace profiler {
-#ifdef USE_KINETO
 c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
   // fallthrough
   switch (activity_type) {
@@ -297,13 +298,14 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::PYTHON_FUNCTION:
       return c10::DeviceType::CPU;
     default: {
-      LOG(WARNING) << "Unknown activity type (" << (uint8_t)activity_type
-                   << "), assuming CPU device";
+      TORCH_WARN(
+          "Unknown activity type (",
+          (uint8_t)activity_type,
+          "), assuming CPU device");
       return c10::DeviceType::CPU;
     }
   }
 }
-#endif // USE_KINETO
 
 void addMetadataJson(const std::string& key, const std::string& value) {
 #ifdef USE_KINETO

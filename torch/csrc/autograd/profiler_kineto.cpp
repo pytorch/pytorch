@@ -70,6 +70,12 @@ struct EventFieldsVisitor {
       : kineto_activity_{result->kineto_activity_},
         kineto_event_{kineto_event},
         post_process_{post_process} {
+
+    c10::guts::if_constexpr<torch::profiler::kKinetoAvailable>([&](auto _) {
+      kineto_event.deviceIndex(_(result->kineto_info_).device);
+      kineto_event.deviceResourceId(_(result->kineto_info_).resource);
+    });
+
     pushPythonMetadata(result->parent_.lock());
     c10::visit(*this, result->extra_fields_);
     handleStack(result->parent_);
@@ -177,6 +183,13 @@ struct EventFieldsVisitor {
 
   void operator()(const ExtraFields<EventType::PyCCall>& py_call) {
     addPythonAnnotations(py_call);
+  }
+
+  void operator()(const ExtraFields<EventType::Kineto>& e) {
+    const auto linked = e.linked_activity_.lock();
+    if (linked) {
+      kineto_event_.get().linkedCorrelationId(linked->correlationID());
+    }
   }
 
   void pushPythonMetadata(std::shared_ptr<Result> parent) {
@@ -296,7 +309,13 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
   finalizeTrace() {
     auto end_time = getTimeUs();
     record_queue_.stop();
-    materializeOpEvents(end_time);
+
+    std::lock_guard<std::mutex> guard(state_mutex_);
+    auto converter = clock_converter_.makeConverter();
+    auto records_and_trace =
+        record_queue_.getRecords(converter, start_time_, end_time);
+
+    materializeOpEvents(records_and_trace.first);
 
     // finalizeCPUTrace(cpu_trace_.get());
 
@@ -309,23 +328,11 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             [](const auto& i) { return i.is_python_function_; }),
         kineto_events_.end());
 
-    if (config().state != ProfilerState::KINETO_ONDEMAND) {
-      auto trace = torch::profiler::impl::kineto::stopTrace();
-      TORCH_CHECK(trace || !torch::profiler::kKinetoAvailable);
-      addTraceEvents(trace);
-      return std::make_unique<
-          torch::profiler::impl::kineto::ActivityTraceWrapper>(
-          std::move(trace));
-    } else {
-      return nullptr;
-    }
+    return std::move(records_and_trace.second);
   }
 
-  void materializeOpEvents(uint64_t end_time) {
-    std::lock_guard<std::mutex> guard(state_mutex_);
-    auto converter = clock_converter_.makeConverter();
-
-    for (auto& e : record_queue_.getRecords(converter, start_time_, end_time)) {
+  void materializeOpEvents(std::vector<std::shared_ptr<Result>>& events) {
+    for (auto& e : events) {
       if (e->parent_.expired()) {
         event_tree_.push_back(e);
       }
@@ -339,7 +346,8 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             .durationUs((e->endTimeNS() - e->start_time_ns_) / 1000)
             .correlationId(e->correlationID())
             .deviceType(e->deviceType())
-            .startThreadId(e->start_tid_);
+            .startThreadId(e->start_tid_)
+            .activityType((uint8_t)e->kinetoType());;
 
         EventFieldsVisitor set_fields_and_metadata(
             e, kineto_events_.back(), getEventPostProcessingCallback());
@@ -425,38 +433,6 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
     }
   }
 #endif // USE_KINETO
-
-  void addTraceEvents(
-      torch::profiler::impl::kineto::ActivityTraceWrapper& trace) {
-#ifdef USE_KINETO
-    const auto& events = *(trace.get()->activities());
-    for (const auto& ev_ptr : events) {
-      if (ev_ptr == nullptr) {
-        continue;
-      }
-      const auto& activity = *ev_ptr;
-      // These events are already processed
-      if (activity.type() != libkineto::ActivityType::CPU_OP &&
-          activity.type() != libkineto::ActivityType::CPU_INSTANT_EVENT &&
-          activity.type() != libkineto::ActivityType::USER_ANNOTATION &&
-          activity.type() != libkineto::ActivityType::PYTHON_FUNCTION) {
-        kineto_events_.emplace_back();
-        auto& kineto_event = kineto_events_.back();
-        kineto_event.name(activity.name())
-            .deviceIndex(activity.deviceId())
-            .deviceResourceId(activity.resourceId())
-            .startUs(activity.timestamp())
-            .durationUs(activity.duration())
-            .activityType((uint8_t)activity.type());
-        if (activity.linkedActivity()) {
-          kineto_event.linkedCorrelationId(
-              activity.linkedActivity()->correlationId());
-        }
-        kineto_event.deviceType(deviceTypeFromActivity(activity.type()));
-      }
-    }
-#endif // USE_KINETO
-  }
 
   uint64_t start_time_;
   torch::profiler::impl::ApproximateClockToUnixTimeConverter clock_converter_;
