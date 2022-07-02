@@ -581,11 +581,11 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   //     !hasComputeAt(), "Cannot rfactor tensors after compute at has been
   //     set.");
   TORCH_INTERNAL_ASSERT(nDims() > 0, "Tried to rFactor a 0-dim TensorView");
-  TORCH_INTERNAL_ASSERT(definition()->isA<ReductionOp>());
   FusionGuard fg(fusion());
   TORCH_CHECK(
       definition() != nullptr &&
-          definition()->getExprType() == ExprType::ReductionOp,
+              definition()->getExprType() == ExprType::ReductionOp ||
+          definition()->getExprType() == ExprType::MmaOp,
       "Error rfactoring ",
       this,
       " its definition is either a nullptr or not a reduction.");
@@ -595,8 +595,6 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   TORCH_CHECK(
       !definition()->isA<GroupedReductionOp>(),
       "For GroupedReducitonOp, use TensorView::rFactor(const std::vector<int>& axes, const std::vector<TensorView*>& tvs)");
-
-  ReductionOp* this_definition = definition()->as<ReductionOp>();
 
   // Split tensor view into 2 parts
   auto domain_pair = domain()->rFactor(axes);
@@ -614,21 +612,38 @@ TensorView* TensorView::rFactor(const std::vector<int>& axes) {
   setDomain(consumer_domain);
   TensorView* consumer = this;
 
-  // Setup dependency chain, inserting producer before this op.
-  // Expr* producer_definition =
-  IrBuilder::create<ReductionOp>(
-      this_definition->getReductionOpType(),
-      this_definition->init(),
-      producer,
-      this_definition->in());
+  if (auto this_reduction = dynamic_cast<ReductionOp*>(definition())) {
+    // Setup dependency chain, inserting producer before this op.
+    // Expr* producer_definition =
+    IrBuilder::create<ReductionOp>(
+        this_reduction->getReductionOpType(),
+        this_reduction->init(),
+        producer,
+        this_reduction->in());
 
-  // Expr* consumer_definition =
-  IrBuilder::create<ReductionOp>(
-      this_definition->getReductionOpType(),
-      this_definition->init(),
-      consumer,
-      producer);
+    // Expr* consumer_definition =
+    IrBuilder::create<ReductionOp>(
+        this_reduction->getReductionOpType(),
+        this_reduction->init(),
+        consumer,
+        producer);
+  } else if (auto this_mma = dynamic_cast<MmaOp*>(definition())) {
+    // Initial reduction that still uses mma to combine
+    //  the input.
+    IrBuilder::create<MmaOp>(
+        producer,
+        this_mma->inA(),
+        this_mma->inB(),
+        this_mma->init(),
+        this_mma->options());
 
+    // Remaining reduction that can be scheduled cross
+    //  warp or cta.
+    IrBuilder::create<ReductionOp>(
+        BinaryOpType::Add, this_mma->init(), consumer, producer);
+  } else {
+    TORCH_INTERNAL_ASSERT(false, "RFactor: unsupported tensor definition");
+  }
   return producer;
 }
 

@@ -171,8 +171,26 @@ namespace {
 //  to the given mma dimension. See [MMA dimension matching].
 std::vector<IterDomain*> getMmaDomains(MmaOp* mma, MmaDimension dimension) {
   // This utility is user facing so shouldn't ever see tensor index here.
-  auto accumulator_domain =
-      mma->out()->as<TensorView>()->getMaybeRFactorDomain();
+
+  // Note: [Use Root Domain in Accumulator TV]
+  //  Have to use root domain for accumulator tv since the operands do not have
+  //  root/rfactor domains that map to the rfactor domain of output.
+  //  For example:
+  //   C[I,I,R,R] = mma (A[I,B,I,I], B[B,I,I,I]),
+  //  if we do
+  //    c->split(-1,4);
+  //    c->rfactor(-1);
+  //  on the mma stage we get:
+  //   C[I,I,R,Io,R(4)] = mma (A[I,B,I,I], B[B,I,I,I]),
+  //  and in this case Io and R(4) would not be able to find root mapping
+  //  in A or B.
+  //
+  //  Essentially in the case of rfactor, this utility does producer side
+  //   matching so looking at root domain would be required.
+  //  This matching pattern should support most common matmul applications,
+  //   but in follow ups we may need to extend RFactor matching if there
+  //   are more complex scheduling patterns that we want to support.
+  auto accumulator_domain = mma->out()->as<TensorView>()->getRootDomain();
   auto a_domain = TensorDomain::noReductions(
       mma->inA()->as<TensorView>()->getMaybeRFactorDomain());
   auto b_domain = TensorDomain::noReductions(
@@ -269,10 +287,17 @@ std::vector<IterDomain*> getMmaRootDimensions(
 
   std::vector<IterDomain*> result;
 
+  // Need to use root domain for accumulator tv and maybe rfactor domain
+  //  otherwise. See [Use Root Domain in Accumulator TV].
+  auto is_mma_output =
+      tv->definition() != nullptr && tv->definition()->isA<MmaOp>();
+  const auto& tv_root_domain =
+      is_mma_output ? tv->getRootDomain() : tv->getMaybeRFactorDomain();
+
   // Loop through tensorview's root domains and accumulate all the
   //  root domain IterDomain's that maps to any of the collected
   //  mma root dimension from the mma accumulator tv.
-  for (auto tv_id : tv->getMaybeRFactorDomain()) {
+  for (auto tv_id : tv_root_domain) {
     if (std::any_of(
             mma_root_dimensions.begin(),
             mma_root_dimensions.end(),
@@ -483,7 +508,8 @@ void scheduleLdMatrix(TensorView* tv, MmaOptions options) {
         "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
     TORCH_INTERNAL_ASSERT(
         canValidateIsInnerDim(k_dims.back(), tv->axis(-1), 16),
-        "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain");
+        "MMA swizzle: requires instruction tile iterdomains on the innermost side of the tensordomain",
+        tv->toString());
 
     //[16m, 16k]
     tv->split(-2, 8);
