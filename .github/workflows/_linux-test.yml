@@ -15,6 +15,13 @@ on:
         required: true
         type: string
         description: Docker image to run in.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
