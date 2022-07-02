@@ -36,6 +36,17 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
     bool is_global = true,
     std::unordered_map<IterDomain*, IterDomain*> c2p_map = {});
 
+//! Indexing interface for calculating predicate index returns IndexFromIdGraph
+//! which the IndexCompute object can be queried from directly for the produced
+//! indexing If is_start_predicate, will produce indexing math for the start
+//! predicates.
+IndexFromIdGraph getPredicateIndexingFromIdGraph(
+    const std::vector<kir::ForLoop*>& loops,
+    TensorView* consumer_tv,
+    kir::ForLoop* unswitch_or_vec_loop,
+    IterDomain* double_buffer_axis,
+    bool is_start_predicate);
+
 //! getTensorIndexFromIdGraph is the function that index_compute will call very
 //! straightforwardly. However, for implementing the new indexing logic that
 //! starts to abstract some of the indexing away from index_compute we need to

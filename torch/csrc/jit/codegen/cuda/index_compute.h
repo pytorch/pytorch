@@ -345,8 +345,7 @@ class Index {
   //! this is not a bool value as if we have an unswitch loop with a vectorized
   //! loop inside, we only want to base the "unswitch" like predicate on the
   //! vectorized loop.
-  static std::pair<std::vector<RootPredicateInfo>, ReferenceTensor>
-  getReferenceRootPredicates(
+  static std::vector<RootPredicateInfo> getReferenceRootPredicates(
       TensorView* consumer_tv,
       const std::vector<kir::ForLoop*>& loops,
       kir::ForLoop* unswitch_or_vec_loop,

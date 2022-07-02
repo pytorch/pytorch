@@ -268,6 +268,179 @@ IndexingParameters getNonGlobalInitialIndexParameters(
   return index_parameters;
 }
 
+//! Initial index parameters for predicate, adjusts loop to indexing
+//!  may according to the information annotated on the loop nest.
+//!
+//! TODO:
+//!  This function is mostly copy pasted from previous implementation
+//! at this step, further clean up is possible since:
+//!  1. Much of the loop-to-ind adjustment will be issued from idgraph
+//!  2. Much of the initial index logic could be shared across all
+//! the 3 variants.
+IndexingParameters getPredicateInitialIndexParameters(
+    const LoopIndexing& loop_indexing,
+    TensorView* consumer_tv,
+    kir::ForLoop* unswitch_or_vec_loop,
+    IterDomain* double_buffer_axis,
+    bool is_start_predicate) {
+  IndexingParameters index_parameters;
+  const auto& loops = loop_indexing.loops();
+  const auto& loop_domains = loop_indexing.loopDomains();
+
+  // This shouldn't be needed.
+  TORCH_INTERNAL_ASSERT(
+      loops.size() <= loop_domains.size(),
+      "Loop domain didn't replay all loops");
+
+  std::unordered_map<kir::ForLoop*, Val*> loop_to_ind_map;
+
+  // Fill initial index with each forloop's index.
+  std::transform(
+      loops.begin(),
+      loops.end(),
+      std::inserter(loop_to_ind_map, loop_to_ind_map.begin()),
+      [](kir::ForLoop* fl) { return std::make_pair(fl, fl->index()); });
+
+  // Generate unswitch loop to index map.
+  if (unswitch_or_vec_loop != nullptr) {
+    // Vectorized predicates are different from unswitch. Unswitch predicates
+    // all loops within the unswitch (the outer most unswitch) are generated
+    // with loop->extent-1 as the index. With vectorized predicates, only the
+    // vectorized loop should be like this.
+    bool vectorized_pred =
+        unswitch_or_vec_loop->iter_domain()->getParallelType() ==
+        ParallelType::Vectorize;
+
+    bool within_unswitch = false;
+
+    for (const auto loop_i : c10::irange(loops.size())) {
+      auto loop = loops[loop_i];
+      auto loop_id = loop->iter_domain();
+      auto loop_pt = loop_id->getParallelType();
+      auto ref_id = loop_domains.at(loop_i);
+
+      if (loop == unswitch_or_vec_loop) {
+        within_unswitch = true;
+      }
+
+      if (within_unswitch) {
+        // Rely on the reference to check broadcasting. The for loop could be
+        // broadcasted on a constant value from an unroll split. Since reference
+        // may convert this to an iter domain, that for loop could be valid to
+        // generate predication from.
+
+        // Note that loop->stop() is not used below. Instead,
+        // loop->iter_domain()->extent() is used, which is uniform
+        // across the mapped domains irrespective of halo. Predicates are
+        // compared with each to pick the most restrictive ones. The
+        // comparison is done by only using the offset, which is the
+        // term added to the index. So, the index term must be the
+        // same among all predicates, otherwise the comparison would
+        // be invalid. The effect by halo is added to the offset
+        // term. See getUnswitchStopOffset.
+
+        if (ref_id->isBroadcast()) {
+          // Ignore indexing into broadcasted dimensions.
+          continue;
+        } else if (loop_id->isThread()) {
+          // When parallelized, if the loop stop is the same as the
+          // extent of the associated IterDomain, i.e., no extra
+          // iterations for halo, predicating with the threading index
+          // is sufficient for both the start and stop
+          // predicates. That isn't the case if the loop has halo, and
+          // in the case either the minimum and maximum values of the
+          // iteration domain needs to be used.
+          //
+          // Note: Better performance was obtained if using
+          // threadIdx in unswitch predicates was avoided. More
+          // specifically, in the Hdiff stencil example, instead of
+          // predicating with threadIdx.x for both the start and stop
+          // predicates, using zero and (blockDim.x - 1) for the start
+          // and stop predicates, respectively, resulted in less
+          // register pressure. The alternative codegen can be done by
+          // adding this to the first if condition:
+          // loop_id->isBlockDim(). This would not be a concern if the
+          // else part could be omitted, so canOmitElseClause should
+          // be used as well.
+          if (loop->stop() == loop_id->extent()) {
+            loop_to_ind_map[loop] = loop->start();
+          } else if (is_start_predicate) {
+            loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
+          } else {
+            // Note that the parallel dimension is used rather than
+            // loop-stop(). See the above comment.
+            loop_to_ind_map[loop] =
+                GpuLower::current()->parallelDimensionMap().get(loop_pt);
+          }
+        } else if (is_start_predicate) {
+          loop_to_ind_map[loop] = GpuLower::current()->kernel()->zeroVal();
+        } else {
+          // Similar to the above, loop_id()->extent() is
+          // used here instead of loop->stop(). See the above comment.
+          loop_to_ind_map[loop] = SimplifyingIrBuilder::subExpr(
+              loop_id->extent(), GpuLower::current()->kernel()->oneVal());
+        }
+      }
+
+      // If a vectorized predicate, bail after the vectorized loop was found.
+      // Don't continue unswitching loops.
+      if (vectorized_pred && within_unswitch) {
+        break;
+      }
+    }
+  }
+
+  // Modify trivial loops to use the loop start value.
+  //  FIXME: eventually should be all lifted in idgraph.
+  for (const auto loop : loops) {
+    auto& idx = loop_to_ind_map.at(loop);
+    // If the loop is trivial, the loop index can only be the loop
+    // start value.
+    if (idx == loop->index() && loop->isTrivial()) {
+      idx = loop->start();
+    }
+  }
+
+  // Increment double buffer loop index
+  if (double_buffer_axis != nullptr) {
+    auto db_loop = GpuLower::current()->doubleBufferInfo().getDoubleBufferLoop(
+        double_buffer_axis, loops, true);
+    if (db_loop != nullptr) {
+      auto loop_to_ind_map_it = loop_to_ind_map.find(db_loop);
+      TORCH_INTERNAL_ASSERT(loop_to_ind_map_it != loop_to_ind_map.end());
+      auto cur_index = loop_to_ind_map_it->second;
+      // if cur_index is not the same as the index of db_loop, it must
+      // be true that that index has been modified to support
+      // unswitch. In that case, it is not necessary to move ahead the
+      // index for double buffering.
+      if (cur_index == db_loop->index()) {
+        loop_to_ind_map[db_loop] = SimplifyingIrBuilder::addExpr(
+            cur_index, GpuLower::current()->kernel()->oneVal());
+      }
+    }
+  }
+
+  // Convert loop-to-ind map to concrete-to-ind map
+  for (int loop_idx : c10::irange(loops.size())) {
+    auto loop = loops.at(loop_idx);
+    auto concrete_loop_domain =
+        ir_utils::caMapExactConcreteId(loop_domains.at(loop_idx));
+    index_parameters.initial_concrete_id_index[concrete_loop_domain] =
+        loop_to_ind_map.at(loop);
+  }
+
+  insertMagicZero(
+      loops,
+      loop_indexing.loopDomains(),
+      index_parameters.initial_concrete_id_index);
+
+  // Derive the halo extents from the loop indexing result.
+  index_parameters.concrete_id_to_halo_extent =
+      GpuLower::current()->haloInfo().buildConcreteHaloExtentMap(loop_indexing);
+
+  return index_parameters;
+}
+
 } // namespace
 
 class LoopIndexingAnalysis {
@@ -707,6 +880,74 @@ IndexFromIdGraph getTensorIndexFromIdGraph(
   } else {
     fillConsumerVectorizedContigRootDomains(consumer_tv, contig_finder);
   }
+
+  return IndexFromIdGraph(
+      target_indexing,
+      indexing,
+      index_parameters.initial_concrete_id_index,
+      loop_indexing.loopDomains());
+}
+
+IndexFromIdGraph getPredicateIndexingFromIdGraph(
+    const std::vector<kir::ForLoop*>& loops,
+    TensorView* consumer_tv,
+    kir::ForLoop* unswitch_or_vec_loop,
+    IterDomain* double_buffer_axis,
+    bool is_start_predicate) {
+  // Run replay pass on the loop nest to generate the deterministic
+  //  traversal info from loop structure.
+  auto loop_indexing =
+      LoopIndexingAnalysis::fromLoopAndConsumer(loops, consumer_tv);
+
+  // Bind initial index variables to the loop nodes and adjust
+  //  according to loop and unswitch info.
+  auto index_parameters = getPredicateInitialIndexParameters(
+      loop_indexing,
+      consumer_tv,
+      unswitch_or_vec_loop,
+      double_buffer_axis,
+      is_start_predicate);
+
+  // Run first backward traversal to generate
+  //  loop nest based indexing math.
+  IndexCompute indexing(
+      index_parameters.initial_concrete_id_index,
+      index_parameters.zero_domains,
+      index_parameters.preferred_concrete_ids,
+      index_parameters.concrete_id_to_halo_extent);
+
+  indexing.run(loop_indexing);
+
+  // Map the concrete id indexing back to consumer tv
+  std::unordered_map<IterDomain*, IterDomain*> index_update_map;
+
+  // First collect all iterdomains in consumer transform history.
+  auto all_consumer_vals = DependencyCheck::getAllValsBetween(
+      {consumer_tv->getMaybeRFactorDomain().begin(),
+       consumer_tv->getMaybeRFactorDomain().end()},
+      {consumer_tv->domain()->domain().begin(),
+       consumer_tv->domain()->domain().end()});
+
+  for (IterDomain* consumer_id :
+       ir_utils::filterByType<IterDomain>(all_consumer_vals)) {
+    // Track the non-concrete id we were trying to bind index
+    //  to, whether from producer or consumer.
+    auto exact_concrete_id = ir_utils::caMapExactConcreteId(consumer_id);
+    index_update_map[exact_concrete_id] = consumer_id;
+  }
+
+  // No contiguity info is used in the predicate indexing pass,
+  //  the predicate generation logic that uses the index math
+  //  generated here will take contiguity into account.
+  ContigIDs contig_finder(
+      consumer_tv->domain()->domain(),
+      consumer_tv->getMaybeRFactorDomain(),
+      std::vector<bool>(consumer_tv->getMaybeRFactorDomain().size(), false),
+      {});
+
+  // Run second backward traversal to map back to the consumer_tv
+  auto target_indexing = indexing.updateIndexCompute(
+      consumer_tv->domain(), index_update_map, contig_finder);
 
   return IndexFromIdGraph(
       target_indexing,
