@@ -4390,6 +4390,33 @@ class TestCudaFuser(JitTestCase):
             t_jit = torch.jit.script(t)
             self._run_helper(t_jit, t, x)
 
+
+    @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
+    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+                     "Requires fusion optimization pass to be effective")
+    def test_to_copy(self):
+        x = torch.randn(4, 2, device="cuda")
+
+        with nvfuser_singleton_fusion(True):
+            def t(x, dtype : torch.dtype):
+                o = torch.ops.aten._to_copy(x, dtype=dtype)
+                return o
+
+            t.__disable_jit_function_caching__ = True
+
+            t_jit = torch.jit.script(t)
+            for dtype in [torch.float16, torch.bool, torch.float64]:
+                self._run_helper(t_jit, t, x, dtype)
+
+            def t_none(x):
+                with torch.jit.strict_fusion():
+                    o = torch.ops.aten._to_copy(x, dtype=None)
+                return o
+
+            t_jit_none = torch.jit.script(t_none)
+            self._run_helper(t_jit_none, t_none, x)
+
+
     @unittest.skipIf(ALIAS_TEST_DISABLED, "skipping this test since reshape is disabled now")
     @unittest.skipIf(not RUN_NVFUSER, "requires CUDA")
     @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING,
