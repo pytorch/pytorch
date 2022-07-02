@@ -209,6 +209,8 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
 
+  torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
+
  private:
   template <EventType E>
   Result(
@@ -419,7 +421,9 @@ class TORCH_API RecordQueue {
 
   // NB: This is a destructive operation.
   std::vector<std::shared_ptr<Result>> getRecords(
-      std::function<time_t(approx_time_t)> time_converter);
+      std::function<time_t(approx_time_t)> time_converter,
+      uint64_t start_time_us,
+      uint64_t end_time_us);
 
  private:
   uint32_t id_;

@@ -390,6 +390,26 @@ auto steal_or_default(T& it) {
   }
 }
 
+void addKinetoEvents(
+    std::vector<std::shared_ptr<Result>>& results,
+    uint64_t start_time_us,
+    uint64_t end_time_us) {
+  torch::profiler::impl::kineto::TraceWrapper cpu_trace(
+      start_time_us, "PyTorch Profiler");
+
+  for (auto& e : results) {
+    e->kineto_activity_ = cpu_trace.addCPUActivity(
+        e->name(),
+        e->kinetoType(),
+        e->kineto_info_,
+        e->correlationID(),
+        e->start_time_ns_ / 1000,
+        e->endTimeNS() / 1000);
+  }
+
+  cpu_trace.transferCpuTrace(end_time_us);
+}
+
 struct EvaluateFunctionVisitor {
   void operator()(
       ExtraFields<EventType::TorchOp>& first,
@@ -514,7 +534,9 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 } // namespace
 
 std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
-    std::function<time_t(approx_time_t)> time_converter) {
+    std::function<time_t(approx_time_t)> time_converter,
+    uint64_t start_time_us,
+    uint64_t end_time_us) {
   auto converter = [&](approx_time_t t) {
     return t == std::numeric_limits<approx_time_t>::min()
         ? std::numeric_limits<time_t>::min()
@@ -589,6 +611,7 @@ std::vector<std::shared_ptr<Result>> RecordQueue::getRecords(
     tracer.clear();
   }
 
+  addKinetoEvents(out, start_time_us, end_time_us);
   build_tree(out);
   return out;
 }
