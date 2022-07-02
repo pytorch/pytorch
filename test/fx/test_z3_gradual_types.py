@@ -2,6 +2,7 @@
 import operator
 import unittest
 from torch.fx import GraphModule, symbolic_trace
+from torch.fx.experimental.meta_tracer import symbolic_trace as meta_symbolic_trace
 from torch.fx.experimental.migrate_gradual_types.constraint import BinConstraintT, DVar, TVar, T
 from torch.fx.experimental.migrate_gradual_types.constraint_generator import ConstraintGenerator
 from torch.fx.experimental.migrate_gradual_types.constraint_transformation import transform_constraint
@@ -30,6 +31,49 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 
 class HFOperations(unittest.TestCase):
+
+    def test_arange(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4])):
+                size = x.size()
+                getitem = size[-1]
+                arange = torch.arange(getitem)
+                return arange
+
+        B = BasicBlock().forward(torch.rand(2, 4))
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+        arange_result = z3.Const(5, tensor_type)
+        self.assertNotEqual(s.model()[arange_result].arg(0).arg(0).as_long(), 0)
+        self.assertEqual(s.model()[arange_result].arg(0).arg(1).as_long(), B.size()[0])
+
+        # change the annotation to Dyn. This will migrate to an arbitirary type
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([Dyn, Dyn, Dyn, Dyn])
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+
 
     def test_embedding(self):
         class BasicBlock(torch.nn.Module):
@@ -137,7 +181,6 @@ class HFOperations(unittest.TestCase):
 
         self.assertEquals(s.check(), z3.unsat)
 
-
     def test_view_mul(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
@@ -176,6 +219,7 @@ class HFOperations(unittest.TestCase):
 
         mul_result = z3.Const(12, tensor_type)
         assert s.model()[mul_result] == s.model()[embedding_result]
+
 
 
     def test_conditional(self):
