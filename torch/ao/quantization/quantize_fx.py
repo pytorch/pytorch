@@ -1,12 +1,9 @@
-import copy
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, Optional, Set, Tuple, Union
 import warnings
 
 import torch
 from torch.fx import GraphModule
-from torch.fx._symbolic_trace import Tracer
-from torch.fx.node import Target, Node, Argument
-from torch.nn.intrinsic import _FusedModule
+from .fx.tracer import QuantizationTracer
 from .fx import fuse  # noqa: F401
 from .fx import prepare  # noqa: F401
 from .fx.convert import convert
@@ -19,6 +16,7 @@ from .fx.custom_config import (
 )
 from .fx.utils import graph_pretty_str  # noqa: F401
 from .fx.utils import get_custom_module_class_keys  # noqa: F401
+from .fx.utils import get_skipped_module_name_and_classes
 from .qconfig_mapping import QConfigMapping
 
 def _check_is_graph_module(model: torch.nn.Module) -> None:
@@ -118,63 +116,6 @@ class ScopeContextManager(object):
         return
 
 
-class QuantizationTracer(Tracer):
-    def __init__(
-        self, skipped_module_names: List[str], skipped_module_classes: List[Callable]
-    ):
-        super().__init__()
-        self.skipped_module_names = skipped_module_names
-        self.skipped_module_classes = skipped_module_classes
-        # NB: initialized the module_type of top level module to None
-        # we are assuming people won't configure the model with the type of top level
-        # module here, since people can use "" for global config
-        # We can change this if there is a use case that configures
-        # qconfig using top level module type
-        self.scope = Scope("", None)
-        self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
-        self.record_stack_traces = True
-
-    def is_leaf_module(self, m: torch.nn.Module, module_qualified_name: str) -> bool:
-        return (
-            (
-                m.__module__.startswith("torch.nn")
-                and not isinstance(m, torch.nn.Sequential)
-            )
-            or module_qualified_name in self.skipped_module_names
-            or type(m) in self.skipped_module_classes
-            or isinstance(m, _FusedModule)
-        )
-
-    def call_module(
-        self,
-        m: torch.nn.Module,
-        forward: Callable[..., Any],
-        args: Tuple[Any, ...],
-        kwargs: Dict[str, Any],
-    ) -> Any:
-        module_qualified_name = self.path_of_module(m)
-        # Creating scope with information of current module
-        # scope will be restored automatically upon exit
-        with ScopeContextManager(self.scope, m, module_qualified_name):
-            return super().call_module(m, forward, args, kwargs)
-
-    def create_node(
-        self,
-        kind: str,
-        target: Target,
-        args: Tuple[Argument, ...],
-        kwargs: Dict[str, Argument],
-        name: Optional[str] = None,
-        type_expr: Optional[Any] = None,
-    ) -> Node:
-        node = super().create_node(kind, target, args, kwargs, name, type_expr)
-        self.node_name_to_scope[node.name] = (
-            self.scope.module_path,
-            self.scope.module_type,
-        )
-        return node
-
-
 def _prepare_fx(
     model: torch.nn.Module,
     qconfig_mapping: Union[QConfigMapping, Dict[str, Any]],
@@ -207,20 +148,13 @@ forward graph of the parent module,
             "in a future version. Please pass in a PrepareCustomConfig instead.")
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
-    skipped_module_names = copy.copy(prepare_custom_config.non_traceable_module_names)
-    skipped_module_classes = copy.copy(prepare_custom_config.non_traceable_module_classes)
-
     # swap FloatFunctional with FXFloatFunctional
     _swap_ff_with_fxff(model)
 
-    # symbolically trace the model
-    if not is_standalone_module:
-        # standalone module and custom module config are applied in top level module
-        skipped_module_names += list(prepare_custom_config.standalone_module_names.keys())
-        skipped_module_classes += list(prepare_custom_config.standalone_module_classes.keys())
-        skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
-
+    skipped_module_names, skipped_module_classes = \
+        get_skipped_module_name_and_classes(prepare_custom_config, is_standalone_module)
     preserved_attributes = prepare_custom_config.preserved_attributes
+    # symbolically trace the model
     tracer = QuantizationTracer(skipped_module_names, skipped_module_classes)  # type: ignore[arg-type]
     graph_module = GraphModule(model, tracer.trace(model))
     for attr_name in preserved_attributes:
