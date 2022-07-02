@@ -37,6 +37,8 @@ def drosenbrock(tensor):
     return torch.tensor((-400 * x * (y - x ** 2) - 2 * (1 - x), 200 * (y - x ** 2)))
 
 
+# TODO(crcrpar): Add following test cases:
+#   - FusedAdam vs Adam with & without GradScaler
 class TestOptim(TestCase):
     exact_dtype = True
 
