@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build:
+    if: false # https://github.com/pytorch/pytorch/issues/80314
     name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
     with:
@@ -21,6 +22,7 @@ jobs:
       artifact-name: pytorch-linux-xenial-cuda10.2-cudnn7-py3-gcc7
 
   linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-test:
+    if: false # https://github.com/pytorch/pytorch/issues/80314
     name: linux-xenial-cuda10.2-py3-gcc7-slow-gradcheck
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-xenial-cuda10_2-py3-gcc7-slow-gradcheck-build
@@ -65,6 +67,7 @@ jobs:
       artifact-name: pytorch-linux-bionic-rocm5.1-py3.7-distributed
 
   linux-bionic-rocm5_1-py3_7-distributed-test:
+    if: false # https://github.com/pytorch/pytorch/issues/80529
     name: linux-bionic-rocm5.1-py3.7-distributed
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-bionic-rocm5_1-py3_7-distributed-build
@@ -121,6 +124,19 @@ jobs:
           { config: "default", shard: 3, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
           { config: "default", shard: 4, num_shards: 4, runner: "linux.4xlarge.nvidia.gpu" },
         ]}
+
+  ios-12-5-1-x86-64-coreml:
+    name: ios-12-5-1-x86-64-coreml
+    uses: ./.github/workflows/_ios-build-test.yml
+    with:
+      build-environment: ios-12-5-1-x86-64-coreml
+      ios-platform: SIMULATOR
+      ios-arch: x86_64
+    secrets:
+      IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
+      IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET}}
+      IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID}}
+      IOS_SIGN_KEY_2022: ${{ secrets.IOS_SIGN_KEY_2022 }}
 
   ios-12-5-1-arm64:
     name: ios-12-5-1-arm64

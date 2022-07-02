@@ -7,6 +7,7 @@ on:
       - master
       - main
       - release/*
+      - landchecks/*
   workflow_dispatch:
 
 concurrency:
@@ -139,6 +140,8 @@ jobs:
           { config: "default", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
           { config: "crossref", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
           { config: "crossref", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 2, runner: "linux.2xlarge" },
         ]}
 
   linux-bionic-cuda11_3-py3_7-clang9-build:
