@@ -5680,27 +5680,34 @@ class TestRNNMPS(TestCase):
         hx = torch.zeros(2, 3, 4, device="cpu")
         cx = torch.zeros(2, 3, 4, device="cpu")
 
-        cpu_output, _ = rnn(input, (hx, cx))
+        cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
 
         rnn = rnn.to(device)
         input = input.to(device)
         hx = hx.to(device)
         cx = cx.to(device)
-        output, _ = rnn(input, (hx, cx))
+        output, (hn, cn) = rnn(input, (hx, cx))
+
         self.assertEqual(cpu_output, output)
+        self.assertEqual(cpu_hn, hn)
+        self.assertEqual(cpu_cn, cn)
 
         # test batch_first
         rnn = nn.LSTM(1, 4, 2, device="cpu", batch_first=True)
         input = torch.randn(3, 2, 1, device="cpu")
         hx = torch.zeros(2, 3, 4, device="cpu")
         cx = torch.zeros(2, 3, 4, device="cpu")
-        cpu_output, _ = rnn(input, (hx, cx))
+        cpu_output, (cpu_hn, cpu_cn) = rnn(input, (hx, cx))
+
         rnn = rnn.to(device)
         input = input.to(device)
         hx = hx.to(device)
         cx = cx.to(device)
-        output, _ = rnn(input, (hx, cx))
+        output, (hn, cn) = rnn(input, (hx, cx))
+
         self.assertEqual(cpu_output, output)
+        self.assertEqual(cpu_hn, hn)
+        self.assertEqual(cpu_cn, cn)
 
     @unittest.skipIf(True, "Backward of lstm returns wrong result")
     def test_lstm_2(self, device="mps", dtype=torch.float32):
