@@ -40,6 +40,7 @@ jobs:
           - docker-image-name: pytorch-linux-xenial-py3.7-gcc7
           - docker-image-name: pytorch-linux-focal-py3.7-gcc7
           - docker-image-name: pytorch-linux-focal-py3-clang7-asan
+          - docker-image-name: pytorch-linux-focal-py3-clang10-onnx
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
     steps:
@@ -64,6 +65,7 @@ jobs:
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
+          skip_push: false
           force_push: true
 
       - name: Pull docker image
