@@ -277,7 +277,7 @@ class TestIterableDataPipeBasic(TestCase):
 
     def test_listdirfiles_iterable_datapipe(self):
         temp_dir = self.temp_dir.name
-        datapipe = dp.iter.FileLister(temp_dir, '')
+        datapipe: IterDataPipe = dp.iter.FileLister(temp_dir, '')
 
         count = 0
         for pathname in datapipe:
@@ -294,6 +294,14 @@ class TestIterableDataPipeBasic(TestCase):
 
         temp_files = self.temp_files
         datapipe = dp.iter.FileLister([temp_dir, *temp_files])
+        count = 0
+        for pathname in datapipe:
+            count += 1
+            self.assertTrue(pathname in self.temp_files)
+        self.assertEqual(count, 2 * len(self.temp_files))
+
+        # test functional API
+        datapipe = datapipe.list_files()
         count = 0
         for pathname in datapipe:
             count += 1
@@ -595,6 +603,11 @@ def _worker_init_fn(worker_id):
     torch.utils.data.graph_settings.apply_sharding(datapipe, num_workers, worker_id)
 
 
+lambda_fn1 = lambda x: x  # noqa: E731
+lambda_fn2 = lambda x: x % 2  # noqa: E731
+lambda_fn3 = lambda x: x >= 5  # noqa: E731
+
+
 class TestFunctionalIterDataPipe(TestCase):
 
     def _serialization_test_helper(self, datapipe, use_dill):
@@ -694,16 +707,41 @@ class TestFunctionalIterDataPipe(TestCase):
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.iter.IterableWrapper(range(10))
-        unpicklable_datapipes: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
-            (dp.iter.Collator, (lambda x: x,), {}),
-            (dp.iter.Demultiplexer, (2, lambda x: x % 2,), {}),
-            (dp.iter.Filter, (lambda x: x >= 5,), {}),
-            (dp.iter.Grouper, (lambda x: x >= 5,), {}),
-            (dp.iter.Mapper, (lambda x: x,), {}),
+
+        datapipes_with_lambda_fn: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
+            (dp.iter.Collator, (lambda_fn1,), {}),
+            (dp.iter.Demultiplexer, (2, lambda_fn2,), {}),
+            (dp.iter.Filter, (lambda_fn3,), {}),
+            (dp.iter.Grouper, (lambda_fn3,), {}),
+            (dp.iter.Mapper, (lambda_fn1,), {}),
         ]
+
+        def _local_fns():
+            def _fn1(x):
+                return x
+
+            def _fn2(x):
+                return x % 2
+
+            def _fn3(x):
+                return x >= 5
+
+            return _fn1, _fn2, _fn3
+
+        fn1, fn2, fn3 = _local_fns()
+
+        datapipes_with_local_fn: List[Tuple[Type[IterDataPipe], Tuple, Dict[str, Any]]] = [
+            (dp.iter.Collator, (fn1,), {}),
+            (dp.iter.Demultiplexer, (2, fn2,), {}),
+            (dp.iter.Filter, (fn3,), {}),
+            (dp.iter.Grouper, (fn3,), {}),
+            (dp.iter.Mapper, (fn1,), {}),
+        ]
+
         dp_compare_children = {dp.iter.Demultiplexer}
+
         if HAS_DILL:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
+            for dpipe, dp_args, dp_kwargs in datapipes_with_lambda_fn + datapipes_with_local_fn:
                 if dpipe in dp_compare_children:
                     dp1, dp2 = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                     self._serialization_test_for_dp_with_children(dp1, dp2, use_dill=True)
@@ -711,13 +749,16 @@ class TestFunctionalIterDataPipe(TestCase):
                     datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
                     self._serialization_test_for_single_dp(datapipe, use_dill=True)
         else:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
-                with warnings.catch_warnings(record=True) as wa:
-                    datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                    self.assertEqual(len(wa), 1)
-                    self.assertRegex(str(wa[0].message), r"^Lambda function is not supported for pickle")
-                    with self.assertRaises(AttributeError):
-                        p = pickle.dumps(datapipe)
+            msgs = (
+                r"^Lambda function is not supported by pickle",
+                r"^Local function is not supported by pickle"
+            )
+            for dps, msg in zip((datapipes_with_lambda_fn, datapipes_with_local_fn), msgs):
+                for dpipe, dp_args, dp_kwargs in dps:
+                    with self.assertWarnsRegex(UserWarning, msg):
+                        datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                    with self.assertRaises((pickle.PicklingError, AttributeError)):
+                        pickle.dumps(datapipe)
 
     def test_iterable_wrapper_datapipe(self):
 
@@ -1137,42 +1178,43 @@ class TestFunctionalIterDataPipe(TestCase):
         def fn_nn(d0, d1):
             return -d0, -d1, d0 + d1
 
-        def _helper(ref_fn, fn, input_col=None, output_col=None):
+        def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             for constr in (list, tuple):
                 datapipe = dp.iter.IterableWrapper([constr((0, 1, 2)), constr((3, 4, 5)), constr((6, 7, 8))])
-                res_dp = datapipe.map(fn, input_col, output_col)
-                ref_dp = datapipe.map(ref_fn)
-                self.assertEqual(list(res_dp), list(ref_dp))
-                # Reset
-                self.assertEqual(list(res_dp), list(ref_dp))
+                if ref_fn is None:
+                    with self.assertRaises(error):
+                        res_dp = datapipe.map(fn, input_col, output_col)
+                        list(res_dp)
+                else:
+                    res_dp = datapipe.map(fn, input_col, output_col)
+                    ref_dp = datapipe.map(ref_fn)
+                    self.assertEqual(list(res_dp), list(ref_dp))
+                    # Reset
+                    self.assertEqual(list(res_dp), list(ref_dp))
 
         # Replacing with one input column and default output column
         _helper(lambda data: (data[0], -data[1], data[2]), fn_11, 1)
         _helper(lambda data: (data[0], (-data[1], data[1]), data[2]), fn_1n, 1)
         # The index of input column is out of range
-        with self.assertRaises(IndexError):
-            _helper(None, fn_1n, 3)
+        _helper(None, fn_1n, 3, error=IndexError)
         # Unmatched input columns with fn arguments
-        with self.assertRaises(TypeError):
-            _helper(None, fn_n1, 1)
+        _helper(None, fn_n1, 1, error=TypeError)
+
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: (data[1], data[2] + data[0]), fn_n1, [2, 0])
         _helper(lambda data: (data[0], (-data[2], -data[1], data[2] + data[1])), fn_nn, [2, 1])
 
         # output_col can only be specified when input_col is not None
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, 1)
+        _helper(None, fn_n1, None, 1, error=ValueError)
         # output_col can only be single-element list or tuple
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, [0, 1])
+        _helper(None, fn_n1, None, [0, 1], error=ValueError)
         # Single-element list as output_col
         _helper(lambda data: (-data[1], data[1], data[2]), fn_11, 1, [0])
         # Replacing with one input column and single specified output column
         _helper(lambda data: (-data[1], data[1], data[2]), fn_11, 1, 0)
         _helper(lambda data: (data[0], data[1], (-data[1], data[1])), fn_1n, 1, 2)
         # The index of output column is out of range
-        with self.assertRaises(IndexError):
-            _helper(None, fn_1n, 1, 3)
+        _helper(None, fn_1n, 1, 3, error=IndexError)
         _helper(lambda data: (data[0], data[0] + data[2], data[2]), fn_n1, [0, 2], 1)
         _helper(lambda data: ((-data[1], -data[2], data[1] + data[2]), data[1], data[2]), fn_nn, [1, 2], 0)
 
@@ -1205,38 +1247,39 @@ class TestFunctionalIterDataPipe(TestCase):
                     del _data[idx]
             return _data
 
-        def _helper(ref_fn, fn, input_col=None, output_col=None):
+        def _helper(ref_fn, fn, input_col=None, output_col=None, error=None):
             datapipe = dp.iter.IterableWrapper(
                 [{"x": 0, "y": 1, "z": 2},
                  {"x": 3, "y": 4, "z": 5},
                  {"x": 6, "y": 7, "z": 8}]
             )
-            res_dp = datapipe.map(fn, input_col, output_col)
-            ref_dp = datapipe.map(ref_fn)
-            self.assertEqual(list(res_dp), list(ref_dp))
-            # Reset
-            self.assertEqual(list(res_dp), list(ref_dp))
+            if ref_fn is None:
+                with self.assertRaises(error):
+                    res_dp = datapipe.map(fn, input_col, output_col)
+                    list(res_dp)
+            else:
+                res_dp = datapipe.map(fn, input_col, output_col)
+                ref_dp = datapipe.map(ref_fn)
+                self.assertEqual(list(res_dp), list(ref_dp))
+                # Reset
+                self.assertEqual(list(res_dp), list(ref_dp))
 
         # Replacing with one input column and default output column
         _helper(lambda data: _dict_update(data, {"y": -data["y"]}), fn_11, "y")
         _helper(lambda data: _dict_update(data, {"y": (-data["y"], data["y"])}), fn_1n, "y")
         # The key of input column is not in dict
-        with self.assertRaises(KeyError):
-            _helper(None, fn_1n, "a")
+        _helper(None, fn_1n, "a", error=KeyError)
         # Unmatched input columns with fn arguments
-        with self.assertRaises(TypeError):
-            _helper(None, fn_n1, "y")
+        _helper(None, fn_n1, "y", error=TypeError)
         # Replacing with multiple input columns and default output column (the left-most input column)
         _helper(lambda data: _dict_update(data, {"z": data["x"] + data["z"]}, ["x"]), fn_n1, ["z", "x"])
         _helper(lambda data: _dict_update(
             data, {"z": (-data["z"], -data["y"], data["y"] + data["z"])}, ["y"]), fn_nn, ["z", "y"])
 
         # output_col can only be specified when input_col is not None
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, "x")
+        _helper(None, fn_n1, None, "x", error=ValueError)
         # output_col can only be single-element list or tuple
-        with self.assertRaises(ValueError):
-            _helper(None, fn_n1, None, ["x", "y"])
+        _helper(None, fn_n1, None, ["x", "y"], error=ValueError)
         # Single-element list as output_col
         _helper(lambda data: _dict_update(data, {"x": -data["y"]}), fn_11, "y", ["x"])
         # Replacing with one input column and single specified output column
@@ -1491,14 +1534,18 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertEqual(sorted(res), exp)
 
             # Test Deterministic
-            for num_workers in (0, 1, 2):
+            for num_workers, pw in itertools.product((0, 1, 2), (True, False)):
+                if num_workers == 0 and pw:
+                    continue
+
                 mp_ctx = "spawn" if num_workers > 0 else None
                 dl = DataLoader(
                     shuffle_dp,
                     num_workers=num_workers,
                     shuffle=True,
                     multiprocessing_context=mp_ctx,
-                    worker_init_fn=_worker_init_fn
+                    worker_init_fn=_worker_init_fn,
+                    persistent_workers=pw
                 )
 
                 # No seed
@@ -1520,46 +1567,6 @@ class TestFunctionalIterDataPipe(TestCase):
                 self.assertEqual(len(dl_res[0]), len(dl_res[2]))
                 self.assertNotEqual(dl_res[0], dl_res[2])
                 self.assertEqual(sorted(dl_res[0]), sorted(dl_res[2]))
-
-                if num_workers == 0:
-                    continue
-
-                # Persistent workers
-                ps_dl_res = []
-                for _ in range(2):
-                    dl = DataLoader(
-                        shuffle_dp,
-                        num_workers=num_workers,
-                        shuffle=True,
-                        multiprocessing_context="spawn",
-                        worker_init_fn=_worker_init_fn,
-                        persistent_workers=True
-                    )
-                    ps_res = []
-                    torch.manual_seed(123)
-                    for epoch in range(2):
-                        ps_res.extend(list(dl))
-                    ps_dl_res.append(ps_res)
-                self.assertEqual(ps_dl_res[0], ps_dl_res[1])
-
-                # Different Seeds
-                dl = DataLoader(
-                    shuffle_dp,
-                    num_workers=num_workers,
-                    shuffle=True,
-                    multiprocessing_context="spawn",
-                    worker_init_fn=_worker_init_fn,
-                    persistent_workers=True
-                )
-                ps_res = []
-                torch.manual_seed(321)
-                for epoch in range(2):
-                    ps_res.extend(list(dl))
-                ps_dl_res.append(ps_res)
-
-                self.assertEqual(len(ps_dl_res[0]), len(ps_dl_res[2]))
-                self.assertNotEqual(ps_dl_res[0], ps_dl_res[2])
-                self.assertEqual(sorted(ps_dl_res[0]), sorted(ps_dl_res[2]))
 
 
         shuffle_dp_nl = IDP_NoLen(range(20)).shuffle(buffer_size=5)
@@ -1645,24 +1652,41 @@ class TestFunctionalMapDataPipe(TestCase):
     def test_serializable_with_dill(self):
         """Only for DataPipes that take in a function as argument"""
         input_dp = dp.map.SequenceWrapper(range(10))
-        unpicklable_datapipes: List[
+
+        datapipes_with_lambda_fn: List[
             Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
         ] = [
-            (dp.map.Mapper, (lambda x: x,), {}),
+            (dp.map.Mapper, (lambda_fn1,), {}),
         ]
+
+        def _local_fns():
+            def _fn1(x):
+                return x
+
+            return _fn1
+
+        fn1 = _local_fns()
+
+        datapipes_with_local_fn: List[
+            Tuple[Type[MapDataPipe], Tuple, Dict[str, Any]]
+        ] = [
+            (dp.map.Mapper, (fn1,), {}),
+        ]
+
         if HAS_DILL:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
+            for dpipe, dp_args, dp_kwargs in datapipes_with_lambda_fn + datapipes_with_local_fn:
                 _ = dill.dumps(dpipe(input_dp, *dp_args, **dp_kwargs))  # type: ignore[call-arg]
         else:
-            for dpipe, dp_args, dp_kwargs in unpicklable_datapipes:
-                with warnings.catch_warnings(record=True) as wa:
-                    datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
-                    self.assertEqual(len(wa), 1)
-                    self.assertRegex(
-                        str(wa[0].message), r"^Lambda function is not supported for pickle"
-                    )
-                    with self.assertRaises(AttributeError):
-                        p = pickle.dumps(datapipe)
+            msgs = (
+                r"^Lambda function is not supported by pickle",
+                r"^Local function is not supported by pickle"
+            )
+            for dps, msg in zip((datapipes_with_lambda_fn, datapipes_with_local_fn), msgs):
+                for dpipe, dp_args, dp_kwargs in dps:
+                    with self.assertWarnsRegex(UserWarning, msg):
+                        datapipe = dpipe(input_dp, *dp_args, **dp_kwargs)  # type: ignore[call-arg]
+                    with self.assertRaises((pickle.PicklingError, AttributeError)):
+                        pickle.dumps(datapipe)
 
     def test_sequence_wrapper_datapipe(self):
         seq = list(range(10))
@@ -2615,6 +2639,121 @@ class TestIterDataPipeSingletonConstraint(TestCase):
         with self.assertRaisesRegex(RuntimeError, "This iterator has been invalidated"):
             next(it1)
         self.assertEqual(1, next(it3))
+
+class TestIterDataPipeCountSampleYielded(TestCase):
+
+    def _yield_count_test_helper(self, datapipe, n_expected_samples):
+
+        # Functional Test: Check if number of samples yielded is as expected
+        res = list(datapipe)
+        self.assertEqual(len(res), datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check if the count is correct when DataPipe is partially read
+        it = iter(datapipe)
+        res = []
+        for i, value in enumerate(it):
+            res.append(value)
+            if i == n_expected_samples - 1:
+                break
+        self.assertEqual(n_expected_samples, datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check for reset behavior and if iterator also works
+        it = iter(datapipe)  # reset the DataPipe
+        res = list(it)
+        self.assertEqual(len(res), datapipe._number_of_samples_yielded)
+
+    def test_iterdatapipe_sample_yielded_generator_function(self):
+        # Functional Test: `__iter__` is a generator function
+        datapipe: IterDataPipe = dp.iter.IterableWrapper(range(10))
+        self._yield_count_test_helper(datapipe, n_expected_samples=5)
+
+    def test_iterdatapipe_sample_yielded_generator_function_exception(self):
+        # Functional Test: `__iter__` is a custom generator function with exception
+        class _CustomGeneratorFnDataPipe(IterDataPipe):
+            # This class's `__iter__` has a Runtime Error
+            def __iter__(self):
+                yield 0
+                yield 1
+                yield 2
+                raise RuntimeError("Custom test error after yielding 3 elements")
+                yield 3
+
+        # Functional Test: Ensure the count is correct even when exception is raised
+        datapipe: IterDataPipe = _CustomGeneratorFnDataPipe()
+        with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
+            list(datapipe)
+        self.assertEqual(3, datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check for reset behavior and if iterator also works
+        it = iter(datapipe)  # reset the DataPipe
+        with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
+            list(it)
+        self.assertEqual(3, datapipe._number_of_samples_yielded)
+
+    def test_iterdatapipe_sample_yielded_return_self(self):
+        class _CustomGeneratorDataPipe(IterDataPipe):
+            # This class's `__iter__` is not a generator function
+            def __init__(self):
+                self.source = iter(range(10))
+
+            def __iter__(self):
+                return self.source
+
+            def reset(self):
+                self.source = iter(range(10))
+
+        datapipe: IterDataPipe = _CustomGeneratorDataPipe()
+        self._yield_count_test_helper(datapipe, n_expected_samples=5)
+
+    def test_iterdatapipe_sample_yielded_next(self):
+        class _CustomNextDataPipe(IterDataPipe):
+            # This class's `__iter__` returns `self` and has a `__next__`
+            def __init__(self):
+                self.source = iter(range(10))
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                return next(self.source)
+
+            def reset(self):
+                self.source = iter(range(10))
+
+        datapipe: IterDataPipe = _CustomNextDataPipe()
+        self._yield_count_test_helper(datapipe, n_expected_samples=5)
+
+    def test_iterdatapipe_sample_yielded_next_exception(self):
+        class _CustomNextDataPipe(IterDataPipe):
+            # This class's `__iter__` returns `self` and has a `__next__`
+            def __init__(self):
+                self.source = iter(range(10))
+                self.count = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.count == 3:
+                    raise RuntimeError("Custom test error after yielding 3 elements")
+                self.count += 1
+                return next(self.source)
+
+            def reset(self):
+                self.count = 0
+                self.source = iter(range(10))
+
+        # Functional Test: Ensure the count is correct even when exception is raised
+        datapipe: IterDataPipe = _CustomNextDataPipe()
+        with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
+            list(datapipe)
+        self.assertEqual(3, datapipe._number_of_samples_yielded)
+
+        # Functional Test: Check for reset behavior and if iterator also works
+        it = iter(datapipe)  # reset the DataPipe
+        with self.assertRaisesRegex(RuntimeError, "Custom test error after yielding 3 elements"):
+            list(it)
+        self.assertEqual(3, datapipe._number_of_samples_yielded)
 
 if __name__ == '__main__':
     run_tests()

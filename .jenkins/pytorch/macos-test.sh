@@ -12,19 +12,19 @@ pip install -q hypothesis "expecttest==0.1.3" "librosa>=0.6.2" "numba<=0.49.1" p
 pip install "unittest-xml-reporting<=3.2.0,>=2.0.0" \
   pytest
 
-if [ -z "${IN_CI}" ]; then
+if [ -z "${CI}" ]; then
   rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
 fi
 
 export CMAKE_PREFIX_PATH=${WORKSPACE_DIR}/miniconda3/
 
 # Test PyTorch
-if [ -z "${IN_CI}" ]; then
+if [ -z "${CI}" ]; then
   export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
 fi
 
 # Download torch binaries in the test jobs
-if [ -z "${IN_CI}" ]; then
+if [ -z "${CI}" ]; then
   rm -rf "${WORKSPACE_DIR}"/miniconda3/lib/python3.6/site-packages/torch*
   aws s3 cp s3://ossci-macos-build/pytorch/"${IMAGE_COMMIT_TAG}".7z "${IMAGE_COMMIT_TAG}".7z
   7z x "${IMAGE_COMMIT_TAG}".7z -o"${WORKSPACE_DIR}/miniconda3/lib/python3.6/site-packages"
@@ -161,6 +161,12 @@ test_jit_hooks() {
   assert_git_not_dirty
 }
 
+test_dynamo() {
+  pushd ../torchdynamo
+  pytest tests
+  popd
+}
+
 if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
   test_python_shard "${SHARD_NUMBER}"
   if [[ "${SHARD_NUMBER}" == 1 ]]; then
@@ -171,9 +177,11 @@ if [[ $NUM_TEST_SHARDS -gt 1 ]]; then
     test_custom_backend
   fi
 else
+  checkout_install_torchdynamo
   test_python_all
   test_libtorch
   test_custom_script_ops
   test_jit_hooks
   test_custom_backend
+  test_dynamo
 fi
