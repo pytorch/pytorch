@@ -79,6 +79,38 @@ class HFOperations(unittest.TestCase):
 
         self.assertEquals(s.check(), z3.sat)
 
+    def test_size_two_args(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, 2, Dyn])):
+                size = x.size(-1)
+                return size
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        d1, d2 = z3.Int(39), z3.Int(2)
+        d4, d5 = z3.Int('input_d1'), z3.Int('input_d2')
+
+        # migrate the third dimension
+        s.add(d1 != 0)
+
+        self.assertEqual(s.check(), z3.sat)
+        input = z3.Const(1, tensor_type)
+        s.add(input == tensor_type.tensor3(D(3, 39), D(1, 2), D(d4, d5)))
+
+        # check if the item we got is the right one
+        self.assertEqual(s.check(), z3.sat)
+        self.assertEqual(s.model()[d5], s.model()[d2])
+        self.assertEqual(s.model()[d1], s.model()[d4])
+
     def test_size_getitem(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
