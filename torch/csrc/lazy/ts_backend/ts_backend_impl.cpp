@@ -4,18 +4,20 @@
 #include <torch/csrc/lazy/backend/backend_device.h>
 #include <torch/csrc/lazy/generated/LazyNativeFunctions.h>
 #include <torch/csrc/lazy/ts_backend/config.h>
-#include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/csrc/lazy/ts_backend/ir_builder.h>
+#include <torch/csrc/lazy/ts_backend/ts_eager_fallback.h>
 #include <torch/csrc/lazy/ts_backend/ts_lowering_context.h>
+#include <memory>
 
 namespace at {
 // This function is defined in the codegenerated RegisterDispatchKey.cpp file.
-// For the TorchScript backend, we have a special case where the registration does not happen
-// immediately (at static initialization time), so that if an external backend is loaded,
-// it has a chance to register itself, and TorchScript only registers itself if explicitly initialized
+// For the TorchScript backend, we have a special case where the registration
+// does not happen immediately (at static initialization time), so that if an
+// external backend is loaded, it has a chance to register itself, and
+// TorchScript only registers itself if explicitly initialized
 extern TORCH_API void RegisterTorchScriptLazyNativeFunctions();
 extern TORCH_API void RegisterTorchScriptAutogradLazyNativeFunctions();
-}
+} // namespace at
 
 namespace torch {
 namespace lazy {
@@ -23,7 +25,7 @@ namespace lazy {
 struct TSBackendDeviceType : public BackendDeviceType {
   TSBackendDeviceType() = delete;
   TSBackendDeviceType(c10::DeviceType deviceType)
-  :BackendDeviceType((int8_t)deviceType) {
+      : BackendDeviceType((int8_t)deviceType) {
     TORCH_CHECK(deviceType == at::kCPU || deviceType == at::kCUDA);
   }
 
@@ -41,7 +43,8 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   TSBackendImpl() : default_device_type_(at::kCPU) {
     // TODO(whc) unify how all our flags are set and parsed as envs
     static bool env_use_cuda = std::getenv("LTC_TS_CUDA") != nullptr;
-    auto type = (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
+    auto type =
+        (env_use_cuda || FLAGS_torch_lazy_ts_cuda) ? at::kCUDA : at::kCPU;
     default_device_type_ = TSBackendDeviceType(type);
   }
 
@@ -89,8 +92,8 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       return std::make_shared<TSData>(
           tensor.to(options, /*non_blocking=*/true), shape, device);
     } else if (tensor.device().type() == at::kCPU && tensor.numel() == 1) {
-      // calling .item() on singleton cpu tensor is fast, and using fill is a safe,
-      // async way to copy cpu to cuda for a single value
+      // calling .item() on singleton cpu tensor is fast, and using fill is a
+      // safe, async way to copy cpu to cuda for a single value
       auto device_tensor = at::full(tensor.sizes(), tensor.item(), options);
       return std::make_shared<TSData>(device_tensor, shape, device);
     } else {
@@ -131,7 +134,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
       std::vector<torch::lazy::ComputationPtr> instances) const override;
 
   std::vector<torch::lazy::BackendDataPtr> ExecuteComputation(
-      torch::lazy::Computation& computation,
+      torch::lazy::ComputationPtr computation,
       c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
       const torch::lazy::BackendDevice& device) const override;
 
@@ -182,7 +185,6 @@ torch::lazy::BackendDataPtr TSBackendImpl::CreateDataPlaceholder(
 
 std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
     std::vector<torch::lazy::ComputationPtr> instances) const {
-
   for (const auto& instance : instances) {
     auto ts_computation =
         static_cast<torch::lazy::TSComputation*>(instance.get());
@@ -194,11 +196,13 @@ std::vector<torch::lazy::ComputationPtr> TSBackendImpl::Compile(
 }
 
 std::vector<torch::lazy::BackendDataPtr> TSBackendImpl::ExecuteComputation(
-    torch::lazy::Computation& computation,
+    torch::lazy::ComputationPtr computation,
     c10::ArrayRef<torch::lazy::BackendDataPtr> arguments,
     const torch::lazy::BackendDevice& device) const {
-  torch::jit::GraphExecutor& graph_executor =
-      static_cast<torch::lazy::TSComputation&>(computation).graph_executor();
+  auto ts_computation =
+      std::dynamic_pointer_cast<torch::lazy::TSComputation>(computation);
+  TORCH_CHECK(ts_computation, "Computation isn't TSComputation");
+  torch::jit::GraphExecutor& graph_executor = ts_computation->graph_executor();
   std::vector<torch::jit::IValue> stack;
   for (const auto& argument : arguments) {
     const auto ts_data = std::static_pointer_cast<TSData>(argument);
