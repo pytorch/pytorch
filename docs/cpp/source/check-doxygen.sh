@@ -16,7 +16,7 @@ pushd "$(dirname "$0")/../../.."
 
 cp torch/_utils_internal.py tools/shared
 
-python -m torchgen.gen
+python -m torchgen.gen --source-path aten/src/ATen
 
 python tools/setup_helpers/generate_code.py                 \
   --native-functions-path aten/src/ATen/native/native_functions.yaml \
