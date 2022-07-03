@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <limits>
 #include <queue>
-#include "c10/util/Exception.h"
 
 #include <fmt/format.h>
 
