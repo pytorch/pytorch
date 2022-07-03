@@ -750,12 +750,12 @@ template<typename T1, typename T2, typename Operation>
 void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
       Operation op;
-      T1 out = self_data[0];
+      T1 out = c10::load(self_data);
       int idx = 0;
       for (const auto i : c10::irange(self_dim_size)) {
-        T1 curr_elem = self_data[i*self_stride];
+        T1 curr_elem = c10::load(&self_data[i*self_stride]);
         if(isnan_(curr_elem) || (!isnan_(out) && op(curr_elem, out))) {
-            out = self_data[i*self_stride];
+            out = curr_elem;
             idx = i;
         }
         values_data[i*values_stride] = out;
@@ -1191,18 +1191,6 @@ Tensor nansum(const Tensor& self, IntArrayRef dim, bool keepdim, c10::optional<S
   return at::native::nansum_out(self, dim, keepdim, dtype, result);
 }
 
-static Tensor& prod_out_impl(Tensor& result, const Tensor& self, IntArrayRef dim,
-                        bool keepdim, c10::optional<ScalarType> opt_dtype) {
-  ScalarType dtype = get_dtype_from_result(result, opt_dtype);
-  auto iter = make_reduction("prod", result, self, dim, keepdim, dtype);
-  if (iter.numel() == 0) {
-    result.fill_(1);
-  } else {
-    prod_stub(iter.device_type(), iter);
-  }
-  return result;
-}
-
 // NOTE: this could be implemented via diag and sum, but this has perf problems,
 // see https://github.com/pytorch/pytorch/pull/47305,
 Tensor trace_cpu(const Tensor& self) {
@@ -1353,7 +1341,7 @@ Tensor nanmean(
       self.scalar_type());
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
-  return at::nansum(self, dim, keepdim, opt_dtype).div_(factor);
+  return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
 }
 
 static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {
@@ -2079,7 +2067,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
       char* other_data = data[1];
       for (const auto i : c10::irange(dim_size)) {
         (void)i; //Suppress unused variable warning
-        if (*((scalar_t*)self_data) != *((scalar_t*)other_data)) {
+        if (c10::load<scalar_t>(self_data) != c10::load<scalar_t>(other_data)) {
           result = false;
           return;
         }

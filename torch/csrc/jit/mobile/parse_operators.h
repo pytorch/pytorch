@@ -9,7 +9,7 @@ enum MobileModuleLoadOptions {
   OPERATOR_CHECK = 1,
 };
 
-const uint64_t _default_mobile_module_load_options =
+const uint64_t kDefaultMobileLoadOptions =
     MobileModuleLoadOptions::OPERATOR_CHECK;
 
 namespace mobile {

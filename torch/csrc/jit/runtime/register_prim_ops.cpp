@@ -419,6 +419,10 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
         size,
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("aten::sym_size(Tensor self) -> SymInt[]"),
+        sym_size,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::EnumName(AnyEnumType enum) -> str"),
         [](Stack& stack) {
           IValue e = pop(stack);
@@ -1078,6 +1082,14 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_cuda(Tensor a) -> bool"),
         isCuda,
+        aliasAnalysisFromSchema()),
+    OperatorGeneratorArgs(
+        TORCH_SELECTIVE_SCHEMA("prim::is_cpu(Tensor a) -> bool"),
+        [](Stack& stack) {
+          at::Tensor a;
+          pop(stack, a);
+          push(stack, a.is_cpu());
+        },
         aliasAnalysisFromSchema()),
     OperatorGeneratorArgs(
         TORCH_SELECTIVE_SCHEMA("prim::is_xpu(Tensor a) -> bool"),

@@ -10,7 +10,7 @@ set -ex -o pipefail
 # shellcheck disable=SC2034
 echo "Build lite interpreter with lightweight dispatch."
 
-CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-${PWD}/../}
+CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
 mkdir -pv "${CUSTOM_TEST_ARTIFACT_BUILD_DIR}"
 
 BUILD_LIBTORCH_PY="$PWD/tools/build_libtorch.py"
