@@ -289,7 +289,8 @@ def _inject_new_class(module: Module) -> None:
     def default_deepcopy(self, memo=None):
         # Just emulate a standard deepcopy procedure when __deepcopy__ doesn't exist in the current class.
         memo = {} if memo is None else memo
-        memo[id(self)] = replica = self.__new__(self.__class__)
+        replica = self.__new__(self.__class__)
+        memo[id(self)] = replica
         for key, value in self.__dict__.items():
             replica.__dict__[key] = deepcopy(value, memo)
         return replica
