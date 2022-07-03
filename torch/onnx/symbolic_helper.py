@@ -3,15 +3,13 @@ import functools
 import inspect
 import sys
 import warnings
-from typing import Set
+from typing import Optional, Set
 
 import torch
 import torch._C._onnx as _C_onnx
-import torch.onnx
 from torch import _C
 
-# This import monkey-patches graph manipulation methods on Graph, used for the
-# ONNX symbolics
+# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx._globals import GLOBALS
 
@@ -57,6 +55,23 @@ from torch.onnx._globals import GLOBALS
 # type annotation of torch.onnx.SymbolicContext will be called with that additional context.
 # During export, it is populated from `utils._run_symbolic_function`
 # to contain the context for each node being converted.
+
+__all__ = [
+    "args_have_same_dtype",
+    "cast_pytorch_to_onnx",
+    "check_training_mode",
+    "dequantize_helper",
+    "is_caffe2_aten_fallback",
+    "parse_args",
+    "pytorch_name_to_type",
+    "quantize_helper",
+    "quantized_args",
+    "requantize_bias_helper",
+    "scalar_name_to_pytorch",
+    "scalar_type_to_onnx",
+    "scalar_type_to_pytorch_type",
+    "ScalarType",
+]
 
 # ---------------------------------------------------------------------------------
 # Helper functions
@@ -235,15 +250,19 @@ def parse_args(*arg_descriptors):
     return decorator
 
 
-def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
+def quantized_args(
+    *arg_q_descriptors: bool,
+    scale: Optional[float] = None,
+    zero_point: Optional[int] = None,
+):
     """A decorator which extends support for quantized version of the base operator.
     Quantization is detected by examining the arguments that are annotated by
     `arg_q_descriptors`.
 
     If quantization is detected, the base operator symbolic function will be wrapped with
-    argument dequantization and output quantization.
+    argument de-quantization and output quantization.
 
-    Otherwise, only base symbolic function will be invoked.
+    Otherwise, only the base symbolic function will be invoked.
 
     For example:
 
@@ -266,11 +285,12 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
     ```
 
     Args:
-        arg_q_descriptors: list of bool, where each element represents if the
-          argument is QTensor for quantized version of this operator.
-        scale: float default None, quantized output scale. If None, derive from
+        arg_q_descriptors: A sequence of bool, where each element represents if the
+          argument is QTensor for quantized version of this operator. It defaults
+          to False for unspecified (variable length) arguments.
+        scale: Quantized output scale. If None, derive from
           the first quantized input scale.
-        zero_point: int default None, quantized output zero point. If None,
+        zero_point: Quantized output zero point. If None,
           derive from the first quantized input zero point.
     """
 
@@ -287,19 +307,21 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
             if _zero_point is not None:
                 _zero_point = g.op("Constant", value_t=torch.tensor(_zero_point))
 
-            # some args may be optional, so the length may be smaller
-            assert len(arg_q_descriptors) >= len(args)
-            desc_args = tuple(zip(arg_q_descriptors[: len(args)], args))
+            # Support variable length arguments by marking unspecified ones as non-quantized
+            arg_q_descriptors_extended = arg_q_descriptors + (False,) * (
+                len(args) - len(arg_q_descriptors)
+            )
+            descriptor_args = tuple(zip(arg_q_descriptors_extended, args))
             # Run regular symbolic function if none of the argument is QTensor.
             if not any(
-                (desc and arg.node().kind() == "prim::TupleConstruct")
-                for desc, arg in desc_args
+                (descriptor and arg.node().kind() == "prim::TupleConstruct")
+                for descriptor, arg in descriptor_args
             ):
                 return fn(g, *args, **kwargs)
 
             dequantized_args = []
-            for desc, arg in desc_args:
-                if desc:
+            for descriptor, arg in descriptor_args:
+                if descriptor:
                     dequantized_arg, scale, zero_point, _ = dequantize_helper(g, arg)
                     dequantized_args.append(dequantized_arg)
                     if _scale is None:
@@ -308,7 +330,8 @@ def quantized_args(*arg_q_descriptors, scale=None, zero_point=None):
                         _zero_point = zero_point
                 else:
                     dequantized_args.append(arg)
-            # TODO: only support single output
+            # TODO(justinchuby): Only single output is supported for now. We may want to
+            # support multiple outputs in the future.
             output = fn(g, *dequantized_args, **kwargs)
 
             return quantize_helper(g, output, _scale, _zero_point)
@@ -778,6 +801,7 @@ def _interpolate_get_scales_and_mode(g, input, size, scale_factor, mode, align_c
 
 
 def _interpolate_helper(name, dim, interpolate_mode):
+    @quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = _get_interpolate_attributes(g, interpolate_mode, args)
         align_corners = _maybe_get_scalar(align_corners)
@@ -786,7 +810,7 @@ def _interpolate_helper(name, dim, interpolate_mode):
             if interpolate_mode == "nearest"
             else "align_corners"
             if align_corners
-            else "pytorch_half_pixel"
+            else "half_pixel"
         )
 
         if scales is None:
@@ -856,7 +880,7 @@ def __interpolate_helper(
         if mode == "nearest"
         else "align_corners"
         if align_corners
-        else "pytorch_half_pixel"
+        else "half_pixel"
     )
 
     if not _is_none(size):
@@ -1305,10 +1329,6 @@ def _set_opset_version(opset_version: int):
 
 def _set_operator_export_type(operator_export_type):
     GLOBALS.operator_export_type = operator_export_type
-
-
-def _set_training_mode(training_mode):
-    GLOBALS.training_mode = training_mode
 
 
 # This function is for debug use only.
