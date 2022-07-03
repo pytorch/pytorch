@@ -145,8 +145,6 @@ try:
         Returns:  tuple and the current counter
 
         """
-        # print(dimension)
-
         if dimension == Dyn:
             counter += 1
             return D(0, z3.Int(counter)), counter
