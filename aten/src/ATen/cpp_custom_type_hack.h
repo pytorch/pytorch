@@ -48,8 +48,8 @@
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 // STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP STOP
 
-#include <ATen/core/Tensor.h>
 #include <ATen/TracerMode.h>
+#include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
