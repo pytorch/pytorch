@@ -2,6 +2,8 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 
+#include <c10/util/CallOnce.h>
+
 #include <thread>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -48,10 +50,10 @@ namespace at {
 namespace native {
 
 static bool init_nnpack() {
-  static std::once_flag once_;
+  static c10::once_flag once_;
   static bool nnpack_successfully_initialized_ = false;
 
-  std::call_once(once_, []() {
+  c10::call_once(once_, []() {
     const nnp_status nnpack_status = nnp_initialize();
     nnpack_successfully_initialized_ = (nnp_status_success == nnpack_status);
 

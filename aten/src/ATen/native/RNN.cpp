@@ -5,7 +5,9 @@
 #include <ATen/core/List.h>
 #include <ATen/Context.h>
 #include <ATen/TensorOperators.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/fbgemm_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
 #include <c10/util/irange.h>
 #include <torch/custom_class.h>
 #include <torch/library.h>

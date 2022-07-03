@@ -5,7 +5,7 @@
 #include <ATen/core/custom_class.h>
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <c10/core/ScalarType.h>
 #include <torch/library.h>
