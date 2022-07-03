@@ -3,7 +3,7 @@
 #include <ATen/Context.h>
 #include <ATen/Dispatch.h>
 #include <torch/library.h>
-#include <ATen/native/quantized/affine_quantizer_base.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
 #include <ATen/native/quantized/cpu/QuantizedOps.h>
 #include <ATen/native/quantized/cpu/init_qnnpack.h>
 #include <ATen/native/quantized/cpu/QnnpackUtils.h>
