@@ -13,14 +13,17 @@
 #include <ATen/ops/_nested_from_padded.h>
 #include <ATen/ops/_nested_from_padded_and_nested_example_native.h>
 #include <ATen/ops/_nested_from_padded_native.h>
+#include <ATen/ops/_nested_tensor_from_mask_left_aligned_native.h>
 #include <ATen/ops/_nested_tensor_from_mask_native.h>
 #include <ATen/ops/_nested_tensor_layer_norm_native.h>
+#include <ATen/ops/_nested_tensor_size_native.h>
 #include <ATen/ops/_softmax.h>
 #include <ATen/ops/_softmax_native.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/cat.h>
+#include <ATen/ops/clone_native.h>
 #include <ATen/ops/constant_pad_nd.h>
 #include <ATen/ops/dropout.h>
 #include <ATen/ops/dropout_native.h>
@@ -39,6 +42,7 @@
 #include <ATen/ops/ones_native.h>
 #include <ATen/ops/relu.h>
 #include <ATen/ops/relu_native.h>
+#include <ATen/ops/select_native.h>
 #include <ATen/ops/split_with_sizes.h>
 #include <ATen/ops/stack.h>
 #include <ATen/ops/stack_native.h>
