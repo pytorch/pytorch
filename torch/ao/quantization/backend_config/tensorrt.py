@@ -1,10 +1,11 @@
 import torch
 from .observation_type import ObservationType
-# TODO: maybe refactor this to a separate util function
-from .native import _get_binary_op_configs
-from .native import _get_linear_configs
-from .native import _get_conv_configs
-from .native import _get_share_qparams_op_configs
+from ._common_operator_config_utils import (
+    _get_binary_op_configs,
+    _get_linear_configs,
+    _get_conv_configs,
+    _get_share_qparams_op_configs,
+)
 
 def get_tensorrt_backend_config_dict():
     """ Get the backend config dictionary for tensorrt backend

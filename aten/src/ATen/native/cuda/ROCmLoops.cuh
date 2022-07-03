@@ -37,7 +37,7 @@
 #include <ATen/native/TensorIterator.h>
 #include <c10/macros/Macros.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/TypeCast.h>
+#include <c10/core/DynamicCast.h>
 
 
 #ifdef __NVCC__
@@ -134,7 +134,7 @@ template <typename traits, typename func_t, typename index_t, size_t... INDEX>
 C10_HOST_DEVICE typename traits::result_type
 invoke_impl(const func_t &f, char *const C10_RESTRICT data[], const index_t strides[], int i,
             std::index_sequence<INDEX...>) {
-  return f(*(typename traits::template arg<INDEX>::type*)(data[INDEX] + i * strides[INDEX])...);
+  return f(c10::load<typename traits::template arg<INDEX>::type>(data[INDEX] + i * strides[INDEX])...);
 }
 
 template <typename func_t, typename index_t, typename traits = function_traits<func_t>>
@@ -257,7 +257,7 @@ __global__ void elementwise_kernel(int N, func_t f, array_t data) {
     if (idx + num_threads() * i < N) {
       #pragma unroll
       for (int j = 0; j < arity; j++) {
-        args[i][j] = *(args_base[j] + i * num_threads());
+        args[i][j] = c10::load(args_base[j] + i * num_threads());
       }
     }
   }

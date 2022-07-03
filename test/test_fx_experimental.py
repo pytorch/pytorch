@@ -29,7 +29,6 @@ from torch.fx.experimental.partitioner_utils import (
 from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.schema_type_annotation import AnnotateTypesWithSchema
 import torch.fx.experimental.meta_tracer
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 from torch.fx.operator_schemas import (
@@ -701,46 +700,6 @@ class TestFXExperimental(JitTestCase):
 
                 torch.testing.assert_close(loaded(x), mttm(x))
 
-    def test_proxy_tensor(self):
-        def f_grad(x):
-            val = x.cos().cos().sum()
-            return torch.autograd.grad(val, x)
-
-        def f_backward(x):
-            val = x.cos().cos().sum()
-            val.backward()
-            return x.grad
-
-        for f in [f_grad, f_backward]:
-            traced_graph = make_fx(f)(torch.randn(3, requires_grad=True))
-            inp = torch.randn(3, requires_grad=True)
-            traced_graph_out = traced_graph(inp)
-            assert inp.grad is None
-            torch.testing.assert_close(traced_graph_out, f(inp))
-
-    def test_mode_tracing_factory_function(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-
-        traced = make_fx(f, trace_factory_functions=True)(torch.randn(3))
-        self.assertTrue(
-            any(
-                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
-                for node in traced.graph.nodes
-            )
-        )
-
-    def test_mode_tracing_factory_function_default_behavior(self):
-        def f(x):
-            return x + torch.randn(x.shape)
-
-        traced = make_fx(f)(torch.randn(3))  # default behavior should not trace factory functions
-        self.assertFalse(
-            any(
-                isinstance(node.target, torch._ops.OpOverloadPacket) and node.target._qualified_op_name == 'aten::randn'
-                for node in traced.graph.nodes
-            )
-        )
 
     def test_call_to_assert_with_msg(self):
         class M(torch.nn.Module):
