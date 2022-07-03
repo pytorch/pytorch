@@ -170,46 +170,7 @@ PythonTracerBase& PythonTracerBase::get() {
 }
 } // namespace python_tracer
 
-#define OUT_T(method_name) decltype(std::declval<Result>().method_name())
-#define DEFINE_VISITOR(                                                 \
-    method_name,                                                        \
-    torch_op_field,                                                     \
-    backend_field,                                                      \
-    allocation_field,                                                   \
-    py_field,                                                           \
-    py_c_field,                                                         \
-    kineto_field)                                                       \
-  OUT_T(method_name) Result::method_name() const {                      \
-    using out_t = OUT_T(method_name);                                   \
-    return c10::visit(                                                  \
-        c10::overloaded(                                                \
-            [&](const ExtraFields<EventType::TorchOp>& e) -> out_t {    \
-              (void)e;                                                  \
-              return torch_op_field;                                    \
-            },                                                          \
-            [&](const ExtraFields<EventType::Backend>& e) -> out_t {    \
-              (void)e;                                                  \
-              return backend_field;                                     \
-            },                                                          \
-            [&](const ExtraFields<EventType::Allocation>& e) -> out_t { \
-              (void)e;                                                  \
-              return allocation_field;                                  \
-            },                                                          \
-            [&](const ExtraFields<EventType::PyCall>& e) -> out_t {     \
-              (void)e;                                                  \
-              return py_field;                                          \
-            },                                                          \
-            [&](const ExtraFields<EventType::PyCCall>& e) -> out_t {    \
-              (void)e;                                                  \
-              return py_c_field;                                        \
-            },                                                          \
-            [&](const ExtraFields<EventType::Kineto>& e) -> out_t {     \
-              (void)e;                                                  \
-              return kineto_field;                                      \
-            }),                                                         \
-        extra_fields_);                                                 \
-  }
-
+namespace {
 std::string toString(const ExtraFields<EventType::PyCall>& e) {
   if (e.module_.has_value()) {
     return fmt::format(
@@ -222,7 +183,6 @@ std::string toString(const ExtraFields<EventType::PyCall>& e) {
       e.callsite_.funcname_.str());
 }
 
-namespace {
 auto scopeToType(at::RecordScope scope) {
   return scope == at::RecordScope::USER_SCOPE
       ? libkineto::ActivityType::USER_ANNOTATION
@@ -243,49 +203,60 @@ auto torchOpEndNS(
 }
 } // namespace
 
-DEFINE_VISITOR(
-    name,
-    e.name_,
-    e.name_,
-    "[memory]",
-    toString(e),
-    e.function_name_.str(),
-    e.name_);
-DEFINE_VISITOR(
-    kinetoType,
-    scopeToType(e.scope_),
-    scopeToType(e.scope_),
-    libkineto::ActivityType::CPU_INSTANT_EVENT,
-    libkineto::ActivityType::PYTHON_FUNCTION,
-    libkineto::ActivityType::PYTHON_FUNCTION,
-    e.activity_type_);
-DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0, e.correlation_id_);
-DEFINE_VISITOR(
-    endTimeNS,
-    torchOpEndNS(e, finished_, parent_),
-    e.end_time_us_ * 1000,
-    start_time_ns_,
-    e.end_time_ns_,
-    e.end_time_ns_,
-    start_time_ns_ + e.duration_us_ * 1000);
-DEFINE_VISITOR(
-    endTID,
-    e.end_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_,
-    start_tid_);
-DEFINE_VISITOR(
-    deviceType,
-    c10::DeviceType::CPU,
-    c10::DeviceType::CPU,
-    e.device_type_,
-    c10::DeviceType::CPU,
-    c10::DeviceType::CPU,
-    torch::autograd::profiler::deviceTypeFromActivity(e.activity_type_));
-#undef DEFINE_VISITOR
-#undef OUT_T
+#define ATTRIBUTE(event_type, expr)                  \
+  [&](const ExtraFields<EventType::event_type>& e) { \
+    (void)e;                                         \
+    return expr;                                     \
+  }
+
+std::string Result::name() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(Allocation, std::string("[memory]")),
+      ATTRIBUTE(PyCall, toString(e)),
+      ATTRIBUTE(PyCCall, std::string(e.function_name_.str())),
+      [](const auto& e) { return e.name_; }));
+}
+
+libkineto::ActivityType Result::kinetoType() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, scopeToType(e.scope_)),
+      ATTRIBUTE(Backend, scopeToType(e.scope_)),
+      ATTRIBUTE(Allocation, libkineto::ActivityType::CPU_INSTANT_EVENT),
+      ATTRIBUTE(PyCall, libkineto::ActivityType::PYTHON_FUNCTION),
+      ATTRIBUTE(PyCCall, libkineto::ActivityType::PYTHON_FUNCTION),
+      ATTRIBUTE(Kineto, e.activity_type_)));
+}
+
+uint64_t Result::correlationID() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, e.correlation_id_),
+      ATTRIBUTE(Kineto, e.correlation_id_),
+      [&](const auto&) -> uint64_t { return 0; }));
+}
+
+int64_t Result::endTimeNS() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, torchOpEndNS(e, finished_, parent_)),
+      ATTRIBUTE(Backend, e.end_time_us_ * 1000),
+      ATTRIBUTE(Allocation, start_time_ns_),
+      ATTRIBUTE(Kineto, start_time_ns_ + e.duration_us_ * 1000),
+      [&](const auto& e) { return e.end_time_ns_; }));
+}
+
+uint64_t Result::endTID() const {
+  return visit(c10::overloaded(
+      ATTRIBUTE(TorchOp, e.end_tid_),
+      [&](const auto&) { return start_tid_; }));
+}
+
+c10::DeviceType Result::deviceType() const {
+  using torch::autograd::profiler::deviceTypeFromActivity;
+  return visit(c10::overloaded(
+      ATTRIBUTE(Allocation, e.device_type_),
+      ATTRIBUTE(Kineto, deviceTypeFromActivity(e.activity_type_)),
+      [&](const auto&) { return c10::DeviceType::CPU; }));
+}
+#undef ATTRIBUTE
 
 template <typename T, size_t ChunkSize>
 ThreadLocalSubqueue::EventBlock<T, ChunkSize>::EventBlock() {
