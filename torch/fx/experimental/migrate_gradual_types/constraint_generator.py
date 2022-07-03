@@ -1,6 +1,6 @@
 import torch
 import operator
-from typing import Callable, Dict
+from typing import Callable, Dict, Iterable
 
 from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
@@ -279,11 +279,15 @@ def lt_inference_rule(n: Node, symbols, constraints, counter):
 def full_inference_rule(n: Node, symbols, constraints, counter):
     full, counter = gen_tvar(counter)
     symbols[n] = full
-    c = BinConstraintT(full, TensorType(list(n.args[0])), op_eq)  # type: ignore[arg-type]
+    res = []
+    assert isinstance(n.args[0], Iterable)
+    for arg in n.args[0]:
+        res.append(symbols[arg])
+    c = BinConstraintT(full, TensorType(list(res)), op_eq)  # type: ignore[arg-type]
     return [c], counter
 
 
-# TODO normalize index?
+# TODO normalize index
 @register_inference_rule(torch.arange)
 def arange_inference_rule(n: Node, symbols, constraints, counter):
     start = 0
@@ -303,7 +307,7 @@ def arange_inference_rule(n: Node, symbols, constraints, counter):
     # either the a parameter is a number or it is Dyn
     c1 = Disj([BinConstraintD(end, Dyn, op_eq),
                BinConstraintD(start, Dyn, op_eq),
-               BinConstraintD(end, Dyn, op_eq)])
+               BinConstraintD(step, Dyn, op_eq)])
     c2 = BinConstraintD(d1, Dyn, op_eq)
     both_dyn = Conj([c1, c2])
 
