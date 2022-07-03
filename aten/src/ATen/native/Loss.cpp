@@ -15,10 +15,8 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/abs.h>
 #include <ATen/ops/binary_cross_entropy_backward_native.h>
 #include <ATen/ops/binary_cross_entropy_native.h>
-#include <ATen/ops/binary_cross_entropy_with_logits_backward_native.h>
 #include <ATen/ops/binary_cross_entropy_with_logits_native.h>
 #include <ATen/ops/clamp_min.h>
 #include <ATen/ops/cosine_embedding_loss_native.h>
@@ -31,9 +29,6 @@
 #include <ATen/ops/huber_loss_native.h>
 #include <ATen/ops/kl_div_backward_native.h>
 #include <ATen/ops/kl_div_native.h>
-#include <ATen/ops/l1_loss.h>
-#include <ATen/ops/l1_loss_backward.h>
-#include <ATen/ops/l1_loss_backward_native.h>
 #include <ATen/ops/l1_loss_native.h>
 #include <ATen/ops/log.h>
 #include <ATen/ops/margin_ranking_loss_native.h>
@@ -54,7 +49,6 @@
 #include <ATen/ops/soft_margin_loss_backward_native.h>
 #include <ATen/ops/soft_margin_loss_native.h>
 #include <ATen/ops/squeeze.h>
-#include <ATen/ops/sub.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/triplet_margin_loss_native.h>
 #include <ATen/ops/where.h>
