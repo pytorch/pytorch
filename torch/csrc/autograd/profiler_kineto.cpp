@@ -70,7 +70,6 @@ struct EventFieldsVisitor {
       : kineto_activity_{result->kineto_activity_},
         kineto_event_{kineto_event},
         post_process_{post_process} {
-
     c10::guts::if_constexpr<torch::profiler::kKinetoAvailable>([&](auto _) {
       kineto_event.deviceIndex(_(result->kineto_info_).device);
       kineto_event.deviceResourceId(_(result->kineto_info_).resource);
@@ -347,7 +346,7 @@ struct KinetoThreadLocalState : public ProfilerThreadLocalStateBase {
             .correlationId(e->correlationID())
             .deviceType(e->deviceType())
             .startThreadId(e->start_tid_)
-            .activityType((uint8_t)e->kinetoType());;
+            .activityType((uint8_t)e->kinetoType());
 
         EventFieldsVisitor set_fields_and_metadata(
             e, kineto_events_.back(), getEventPostProcessingCallback());

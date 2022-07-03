@@ -638,7 +638,8 @@ class TestProfilerTree(TestCase):
               aten::add_
                 cudaLaunchKernel
                   void at::native::vectorized_elementwise_kernel<...>(int, at::native::CUDAFunctor_add<float>, at::detail::Array<char*, 3>)
-            [memory]""")
+            [memory]"""  # noqa: B950
+        )
 
 if __name__ == '__main__':
     run_tests()
