@@ -3,10 +3,10 @@
 #include <ATen/Context.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/packed_params.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/PackedParams.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
 
@@ -241,7 +241,12 @@ at::Tensor PackedLinearWeight::apply_dynamic_relu(
 #ifdef USE_PYTORCH_QNNPACK
 template <bool ReluFused>
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
-    at::Tensor input) {
+    at::Tensor input,
+    bool reduce_range) {
+  if (reduce_range) {
+    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
+  }
+
   using at::Tensor;
   TORCH_CHECK(
       input.dim() >= 2,
@@ -383,14 +388,14 @@ at::Tensor PackedLinearWeightsQnnp::apply_dynamic_impl(
 
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic(
     at::Tensor input,
-    bool /* reduce_range */) {
-  return apply_dynamic_impl</*ReluFused=*/false>(std::move(input));
+    bool reduce_range) {
+  return apply_dynamic_impl</*ReluFused=*/false>(std::move(input), reduce_range);
 }
 
 at::Tensor PackedLinearWeightsQnnp::apply_dynamic_relu(
     at::Tensor input,
-    bool /* reduce_range */) {
-  return apply_dynamic_impl</*ReluFused=*/true>(std::move(input));
+    bool reduce_range ) {
+  return apply_dynamic_impl</*ReluFused=*/true>(std::move(input), reduce_range);
 }
 
 #endif // USE_PYTORCH_QNNPACK

@@ -23,17 +23,21 @@ namespace at {
 //    If input is a Tensor subclass, then the above ends up either erroring out
 //    or returning a regular non-Tensor-subclass Tensor!
 
-constexpr auto kFunctorchWrappedTensors = DispatchKeySet({
-    DispatchKey::FuncTorchGradWrapper,
-    DispatchKey::FuncTorchBatched});
+constexpr auto kFunctorchWrappedTensors = DispatchKeySet(
+    {DispatchKey::FuncTorchGradWrapper, DispatchKey::FuncTorchBatched});
 
-constexpr auto kTensorSubclassLike = kFunctorchWrappedTensors | DispatchKeySet({
-    DispatchKey::Batched,
-    DispatchKey::Sparse,
-    DispatchKey::SparseCsrCPU,
-    DispatchKey::SparseCsrCUDA,
-    DispatchKey::Meta,
-    DispatchKey::Python});
+constexpr auto kTensorSubclassLike =
+    kFunctorchWrappedTensors |
+    DispatchKeySet(
+        {// WARNING: DO NOT put combined backend component + functionality keys
+         // here, you will incorrectly always match on the functionality key
+         // no matter the backend component
+         DispatchKey::Batched,
+         DispatchKey::Sparse,
+         DispatchKey::SparseCsrCPU,
+         DispatchKey::SparseCsrCUDA,
+         DispatchKey::Python}) |
+    DispatchKeySet(BackendComponent::MetaBit);
 
 inline bool isTensorSubclassLike(const Tensor& tensor) {
   auto key_set = tensor.unsafeGetTensorImpl()->key_set();
@@ -44,10 +48,13 @@ inline bool areAnyTensorSubclassLike(TensorList tensors) {
   return std::any_of(tensors.begin(), tensors.end(), isTensorSubclassLike);
 }
 
-inline bool areAnyOptionalTensorSubclassLike(const c10::List<c10::optional<Tensor>>& tensors) {
-  return std::any_of(tensors.begin(), tensors.end(), [](const optional<Tensor>& opt_tensor) {
-    return (opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
-    });
+inline bool areAnyOptionalTensorSubclassLike(
+    const c10::List<c10::optional<Tensor>>& tensors) {
+  return std::any_of(
+      tensors.begin(), tensors.end(), [](const optional<Tensor>& opt_tensor) {
+        return (
+            opt_tensor.has_value() && isTensorSubclassLike(opt_tensor.value()));
+      });
 }
 
-}
+} // namespace at
