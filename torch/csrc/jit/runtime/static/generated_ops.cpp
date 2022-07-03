@@ -3363,26 +3363,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::mse_loss, aten_mse_loss, [](Node* n) -> SROperat
   return nullptr;
 });
 
-REGISTER_OPERATOR_FUNCTOR(aten::l1_loss, aten_l1_loss, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::l1_loss(Tensor self, Tensor target, int reduction=Mean) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto& target = p_node->Input(1).toTensor();
-      const auto reduction = p_node->Input(2).toInt();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::l1_loss(self, target, reduction);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::l1_loss_out(self, target, reduction, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
 REGISTER_OPERATOR_FUNCTOR(
     aten::multi_margin_loss,
     aten_multi_margin_loss,
@@ -4858,8 +4838,8 @@ REGISTER_OPERATOR_FUNCTOR(
     aten::linalg_svdvals,
     aten_linalg_svdvals,
     [](Node* n) -> SROperator {
-      if (n->matches(
-              torch::schema("aten::linalg_svdvals(Tensor A) -> Tensor"))) {
+      if (n->matches(torch::schema(
+              "aten::linalg_svdvals(Tensor A, *, str? driver=None) -> Tensor"))) {
         return [](ProcessedNode* p_node) {
           const auto& A = p_node->Input(0).toTensor();
           if (p_node->Output(0).isNone()) {
@@ -4868,7 +4848,7 @@ REGISTER_OPERATOR_FUNCTOR(
           }
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
-          at::native::linalg_svdvals_out(A, out);
+          at::native::linalg_svdvals_out(A, c10::nullopt, out);
         };
       }
       LogAndDumpSchema(n);
@@ -4902,17 +4882,18 @@ REGISTER_OPERATOR_FUNCTOR(
     aten_linalg_solve,
     [](Node* n) -> SROperator {
       if (n->matches(torch::schema(
-              "aten::linalg_solve(Tensor input, Tensor other) -> Tensor"))) {
+              "aten::linalg_solve(Tensor input, Tensor other, bool left) -> Tensor"))) {
         return [](ProcessedNode* p_node) {
           const auto& input = p_node->Input(0).toTensor();
           const auto& other = p_node->Input(1).toTensor();
+          auto left = p_node->Input(2).toBool();
           if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::native::linalg_solve(input, other);
+            p_node->Output(0) = at::native::linalg_solve(input, other, left);
             return;
           }
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
-          at::native::linalg_solve_out(input, other, out);
+          at::native::linalg_solve_out(input, other, left, out);
         };
       }
       LogAndDumpSchema(n);

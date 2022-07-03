@@ -79,8 +79,7 @@ FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
-# Environment variable `IN_CI` is set in `.jenkins/common.sh`.
-IS_IN_CI = os.getenv('IN_CI') == '1'
+IS_CI = bool(os.getenv('CI'))
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
@@ -191,6 +190,14 @@ def instantiate_parametrized_tests(generic_cls):
     decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
     parametrized tests with specialized names.
 
+    You can also use it as a class decorator. E.g.
+
+    ```
+    @instantiate_parametrized_tests
+    class TestFoo(TestCase):
+        ...
+    ```
+
     Args:
         generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
     """
@@ -215,6 +222,7 @@ def instantiate_parametrized_tests(generic_cls):
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = '{}_{}'.format(test.__name__, test_suffix)
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
+    return generic_cls
 
 
 class subtest(object):
@@ -289,7 +297,7 @@ class parametrize(_TestParametrizer):
         name_fn (callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names = arg_str.split(',')
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -454,7 +462,7 @@ parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if IS_IN_CI else None)
+                    default=_get_test_report_path() if IS_CI else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
@@ -692,6 +700,7 @@ IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
+IS_X86 = platform.machine() in ('x86_64', 'i386')
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -758,6 +767,7 @@ def _check_module_exists(name: str) -> bool:
         return False
 
 TEST_NUMPY = _check_module_exists('numpy')
+TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_CUDA = torch.cuda.is_available()
@@ -820,9 +830,6 @@ class CrossRefMode(torch.overrides.TorchFunctionMode):
 #   then CUDA memory leak checks are performed.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
 TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
-
-# Disables tests for when on Github Actions
-ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
 
 # True if CI is running TBB-enabled Pytorch
 IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
@@ -1078,6 +1085,7 @@ def skipIfNotRegistered(op_name, message):
 
 def _decide_skip_caffe2(expect_caffe2, reason):
     def skip_dec(func):
+        @wraps(func)
         def wrapper(self):
             if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
                 raise unittest.SkipTest(reason)
@@ -1093,16 +1101,6 @@ def skipIfNoSciPy(fn):
     def wrapper(*args, **kwargs):
         if not TEST_SCIPY:
             raise unittest.SkipTest("test require SciPy, but SciPy not found")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
-def skipIfOnGHA(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if ON_GHA:
-            raise unittest.SkipTest("Test disabled for GHA")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -1441,7 +1439,7 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_IN_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
+        "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
@@ -1495,7 +1493,7 @@ def check_if_enable(test: unittest.TestCase):
                         skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
                             f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
                             "If you're seeing this on your local machine and would like to enable this test, " \
-                            "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests."
+                            "please make sure CI is not set and you are not using the flag --import-disabled-tests."
                         raise unittest.SkipTest(skip_msg)
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
@@ -2198,6 +2196,17 @@ class TestCase(expecttest.TestCase):
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
+    def assertEqualBroadcasting(self, x, y, *args, **kwargs) -> None:
+        r"""Tests if tensor x equals to y, if y to be broadcast to x.shape.
+        """
+        if not isinstance(y, Iterable):
+            # int, float, etc. or different shape tensors
+            y = torch.ones_like(x) * y
+        if not isinstance(y, torch.Tensor):
+            # iterable, but not a tensor
+            y = torch.ones_like(x) * torch.tensor(y)
+        return self.assertEqual(x, y, *args, **kwargs)
+
     def assertEqual(
             self,
             x,
@@ -2520,10 +2529,10 @@ class TestCase(expecttest.TestCase):
     def runWithPytorchAPIUsageStderr(code):
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
-        # remove IN_CI flag since this is a wrapped test process.
-        # IN_CI flag should be set in the parent process only.
-        if "IN_CI" in env.keys():
-            del env["IN_CI"]
+        # remove CI flag since this is a wrapped test process.
+        # CI flag should be set in the parent process only.
+        if "CI" in env.keys():
+            del env["CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 

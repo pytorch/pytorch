@@ -1,6 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <torch/library.h>
@@ -12,6 +12,8 @@
 #include <ATen/Parallel.h>
 #include <ATen/Utils.h>
 #include <c10/util/irange.h>
+
+#include <array>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -238,14 +240,23 @@ at::Tensor& embedding_bag_nbit_impl(
     offsets_include_last_val[M] = indices.numel();
     offsets_data = offsets_include_last_val.data();
   }
-  std::vector<int64_t> shape;
-  if(indices.dim() == 2 && is_embedding_op) {
-    const auto indices_sizes = indices.sizes();
-    shape = {indices_sizes[0], indices_sizes[1], D};
-  } else {
-    shape = {output_size, D};
+  {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<int64_t, 3> shape_arr;
+    c10::IntArrayRef shape;
+    if(indices.dim() == 2 && is_embedding_op) {
+      const auto indices_sizes = indices.sizes();
+      shape_arr[0] = indices_sizes[0];
+      shape_arr[1] = indices_sizes[1];
+      shape_arr[2] = D;
+      shape = shape_arr;
+    } else {
+      shape_arr[0] = output_size;
+      shape_arr[1] = D;
+      shape = c10::IntArrayRef(&shape_arr[0], 2);
+    }
+    at::native::resize_(output, shape, c10::nullopt);
   }
-  at::native::resize_(output, shape, c10::nullopt);
 #ifdef USE_FBGEMM
   const auto indices_data = indices.data_ptr<IndexType>();
   const auto weight_data = weight.data_ptr<uint8_t>();
@@ -399,14 +410,23 @@ at::Tensor& embedding_bag_byte_impl(
     offsets_include_last_val[M] = indices.numel();
     offsets_data = offsets_include_last_val.data();
   }
-  std::vector<int64_t> shape;
-  if (indices.dim() == 2 && is_embedding_op) {
-    const auto indices_sizes = indices.sizes();
-    shape = {indices_sizes[0], indices_sizes[1], D};
-  } else {
-    shape = {output_size, D};
+  {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<int64_t, 3> shape_arr;
+    c10::IntArrayRef shape;
+    if (indices.dim() == 2 && is_embedding_op) {
+      const auto indices_sizes = indices.sizes();
+      shape_arr[0] = indices_sizes[0];
+      shape_arr[1] = indices_sizes[1];
+      shape_arr[2] = D;
+      shape = shape_arr;
+    } else {
+      shape_arr[0] = output_size;
+      shape_arr[1] = D;
+      shape = c10::IntArrayRef(&shape_arr[0], 2);
+    }
+    at::native::resize_(output, shape, c10::nullopt);
   }
-  at::native::resize_(output, shape, c10::nullopt);
 #ifdef USE_FBGEMM
   const int64_t N = weight_sizes[0];
   const auto weight_data = weight.data_ptr<uint8_t>();
