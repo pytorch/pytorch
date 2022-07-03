@@ -1,10 +1,10 @@
 #pragma once
 
+#include <torch/csrc/Export.h>
 #include <torch/csrc/utils/variadic.h>
 #include <torch/nn/cloneable.h>
 #include <torch/nn/pimpl.h>
 #include <torch/types.h>
-#include <torch/csrc/Export.h>
 
 #include <functional>
 #include <utility>
@@ -41,11 +41,11 @@ namespace nn {
 ///   Functional(torch::leaky_relu, /*slope=*/0.5)
 /// \endrst
 ///
-/// The value of `0.5` is then stored within the `Functional` object and supplied
-/// to the function call at invocation time. Note that such bound values are
-/// evaluated eagerly and stored a single time. See the documentation of
-/// [std::bind](https://en.cppreference.com/w/cpp/utility/functional/bind) for
-/// more information on the semantics of argument binding.
+/// The value of `0.5` is then stored within the `Functional` object and
+/// supplied to the function call at invocation time. Note that such bound
+/// values are evaluated eagerly and stored a single time. See the documentation
+/// of [std::bind](https://en.cppreference.com/w/cpp/utility/functional/bind)
+/// for more information on the semantics of argument binding.
 ///
 /// \rst
 /// .. attention::

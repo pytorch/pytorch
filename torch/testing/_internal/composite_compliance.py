@@ -2,23 +2,14 @@ import torch
 from torch import Tensor
 import contextlib
 import itertools
-from typing import Iterator
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from functools import partial
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import enable_torch_dispatch_mode
 import torch.autograd.forward_ad as fwAD
 from torch.overrides import enable_reentrant_dispatch
 import re
 
-
-# TODO: move this into library proper
-@contextlib.contextmanager
-def no_dispatch() -> Iterator[None]:
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    try:
-        yield
-    finally:
-        del guard
 
 def check_attr_consistency(wrapper_tensor, metadata_name, metadata_accessor):
     elem = wrapper_tensor.elem
@@ -229,10 +220,9 @@ def generate_cct(enable_recursive_torch_dispatch=False,
             # Some operations are allowed to in-place modify the metadata of the
             # inputs. The only ones are the "inplace view functions"; when we
             # run into these, we manually modify the metadata of the input.
-            with enable_reentrant_dispatch():
-                with no_dispatch():
-                    if is_inplace_view_fn(func):
-                        func(*args, **kwargs)
+            with no_dispatch():
+                if is_inplace_view_fn(func):
+                    func(*args, **kwargs)
 
             # For each CompositeCompliantTensor t, we check that t and t.elem
             # have consistent metadata. If they don't have consistent metadata,
@@ -402,7 +392,7 @@ def gather_leaf_tensors(args, kwargs):
 # Checks if the backward formula is composite compliant by testing
 # all possible permutations of {inputs, grad_outputs} being
 # CompositeCompliantTensor or regular Tensors.
-def check_backward_formula(op, args, kwargs):
+def check_backward_formula(op, args, kwargs, output_process_fn_grad=None):
     assert op.supports_autograd
     CCT = generate_cct()
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT):
@@ -411,7 +401,9 @@ def check_backward_formula(op, args, kwargs):
         assert len(leaf_tensors) > 0
 
         try:
-            results = op(*new_args, **new_kwargs)
+            results = op.gradcheck_wrapper(op.get_op(), *new_args, **new_kwargs)
+            if output_process_fn_grad is not None:
+                results = output_process_fn_grad(results)
         # see NOTE: [What errors are Composite Compiance trying to catch?]
         except RuntimeError as err:
             raise_composite_compliance_error(
