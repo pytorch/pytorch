@@ -3297,6 +3297,50 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             parametrize.type_before_parametrizations(model) == original_type
         )
 
+    def test_deepcopy_after_parametrization(self):
+        r"""Test that we are able to create a deepcopy of the module when it's parametrized."""
+
+        class AddOne(nn.Module):
+            def forward(self, x):
+                return x + 1.0
+
+        class ModelWithoutDeepcopy(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.tensor([1., 1., 1., 1.]), requires_grad=True)
+                self.bias = nn.Parameter(torch.tensor([0., 0., 0., 0.]), requires_grad=True)
+                self.attr = [1.0, 2.0, 3.0, 4.0]
+
+        class ActualModel(ModelWithoutDeepcopy):
+            # Emulate custom implementation of the deepcopying.
+            def __deepcopy__(self, memo):
+                memo[id(self)] = result = self.__new__(ActualModel)
+                for key, value in self.__dict__.items():
+                    result.__dict__[key] = deepcopy(value, memo)
+                return result
+
+        def check_deepcopy(m1: nn.Module, m2: nn.Module):
+            self.assertEqual(m1.__dict__.keys(), m2.__dict__.keys())
+            self.assertNotEqual(id(m1), id(m2))
+            # Weights, biases and attributes should be equal but they must be a different objects.
+            self.assertEqual(m1.parametrizations.weight.original, m2.parametrizations.weight.original)
+            self.assertNotEqual(id(m1.parametrizations.weight.original), id(m2.parametrizations.weight.original))
+            self.assertEqual(m1.bias, m2.bias)
+            self.assertNotEqual(id(m1.bias), id(m2.bias))
+            self.assertEqual(m1.attr, m2.attr)
+            self.assertNotEqual(id(m1.attr), id(m2.attr))
+
+        model1 = ModelWithoutDeepcopy()
+        model2 = ActualModel()
+        parametrize.register_parametrization(model1, "weight", AddOne())
+        parametrize.register_parametrization(model2, "weight", AddOne())
+        # We should be able to create deepcopies for both models.
+        model1_copy = deepcopy(model1)
+        model2_copy = deepcopy(model2)
+
+        check_deepcopy(model1, model1_copy)
+        check_deepcopy(model2, model2_copy)
+
     def test_transfer_parametrizations_and_params(self):
         r"""Test that all parametrizations and their associated parameters are transferred."""
 
