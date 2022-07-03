@@ -2,7 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/ivalue.h>
 #include <torch/library.h>
-#include <ATen/native/quantized/cpu/quantized_ops.h>
+#include <ATen/native/quantized/cpu/QuantizedOps.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
