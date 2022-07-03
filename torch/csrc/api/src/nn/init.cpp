@@ -58,11 +58,11 @@ double calculate_kaiming_std(
 
 double calculate_gain(NonlinearityType nonlinearity, double param) {
   if (c10::get_if<enumtype::kTanh>(&nonlinearity)) {
-    return 5.0 / 3.0;  // NOLINT
+    return 5.0 / 3.0; // NOLINT
   } else if (c10::get_if<enumtype::kReLU>(&nonlinearity)) {
-    return std::sqrt(2.0);  // NOLINT
+    return std::sqrt(2.0); // NOLINT
   } else if (c10::get_if<enumtype::kLeakyReLU>(&nonlinearity)) {
-    return std::sqrt(2.0 / (1 + pow(param, 2)));  // NOLINT
+    return std::sqrt(2.0 / (1 + pow(param, 2))); // NOLINT
   }
 
   return 1.0;
@@ -225,11 +225,13 @@ Tensor zeros_(Tensor tensor) {
   return tensor.zero_();
 }
 
-std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(const Tensor& tensor) {
+std::tuple<int64_t, int64_t> _calculate_fan_in_and_fan_out(
+    const Tensor& tensor) {
   const auto dimensions = tensor.dim();
-  TORCH_CHECK(dimensions >= 2,
-    "Fan in and fan out can not be computed "
-    "for tensor with fewer than 2 dimensions")
+  TORCH_CHECK(
+      dimensions >= 2,
+      "Fan in and fan out can not be computed "
+      "for tensor with fewer than 2 dimensions")
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   int64_t fan_in, fan_out;

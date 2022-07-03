@@ -768,7 +768,7 @@ Example::
 
 add_docstr(torch.as_strided,
            r"""
-as_strided(input, size, stride, storage_offset=0) -> Tensor
+as_strided(input, size, stride, storage_offset=None) -> Tensor
 
 Create a view of an existing `torch.Tensor` :attr:`input` with specified
 :attr:`size`, :attr:`stride` and :attr:`storage_offset`.
@@ -786,7 +786,8 @@ Args:
     {input}
     size (tuple or ints): the shape of the output tensor
     stride (tuple or ints): the stride of the output tensor
-    storage_offset (int, optional): the offset in the underlying storage of the output tensor
+    storage_offset (int, optional): the offset in the underlying storage of the output tensor.
+    If ``None``, the storage_offset of the output tensor will match the input tensor.
 
 Example::
 
@@ -1730,7 +1731,7 @@ This function is based on NumPy's :func:`numpy.hsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(4,4)
@@ -1777,7 +1778,7 @@ This function is based on NumPy's :func:`numpy.vsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(4,4)
@@ -1816,7 +1817,7 @@ This function is based on NumPy's :func:`numpy.dsplit`.
 
 Args:
     input (Tensor): tensor to split.
-    indices_or_sections (Tensor, int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
+    indices_or_sections (int or list or tuple of ints): See argument in :func:`torch.tensor_split`.
 
 Example::
     >>> t = torch.arange(16.0).reshape(2, 2, 4)
@@ -2064,9 +2065,6 @@ real(input) -> Tensor
 
 Returns a new tensor containing real values of the :attr:`self` tensor.
 The returned tensor and :attr:`self` share the same underlying storage.
-
-.. warning::
-    :func:`real` is only supported for tensors with complex dtypes.
 
 Args:
     {input}
@@ -2667,8 +2665,8 @@ Create a new floating-point tensor with the magnitude of :attr:`input` and the s
 
 .. math::
     \text{out}_{i} = \begin{cases}
-        -|\text{input}_{i}| & \text{if} \text{other}_{i} \leq -0.0 \\
-        |\text{input}_{i}| & \text{if} \text{other}_{i} \geq 0.0 \\
+        -|\text{input}_{i}| & \text{if } \text{other}_{i} \leq -0.0 \\
+         |\text{input}_{i}| & \text{if } \text{other}_{i} \geq 0.0 \\
     \end{cases}
 """ + r"""
 
@@ -5290,11 +5288,11 @@ Keyword args:
 
 Example::
 
-    >>> a = torch.randn(5)
+    >>> a = torch.rand(5) * 5
     >>> a
-    tensor([-0.7168, -0.5471, -0.8933, -1.4428, -0.1190])
+    tensor([4.7767, 4.3234, 1.2156, 0.2411, 4.5739])
     >>> torch.log(a)
-    tensor([ nan,  nan,  nan,  nan,  nan])
+    tensor([ 1.5637,  1.4640,  0.1952, -1.4226,  1.5204])
 """.format(**common_args))
 
 add_docstr(torch.log10,
@@ -5750,63 +5748,48 @@ Example::
 add_docstr(torch.lu_unpack, r"""
 lu_unpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True, *, out=None) -> (Tensor, Tensor, Tensor)
 
-Unpacks the data and pivots from a LU factorization of a tensor into tensors ``L`` and ``U`` and a permutation tensor ``P``
-such that ``LU_data, LU_pivots = (P @ L @ U).lu()``.
+Unpacks the LU decomposition returned by :func:`~linalg.lu_factor` into the `P, L, U` matrices.
 
-Returns a tuple of tensors as ``(the P tensor (permutation matrix), the L tensor, the U tensor)``.
+.. seealso::
 
-.. note:: ``P.dtype == LU_data.dtype`` and ``P.dtype`` is not an integer type so that matrix products with ``P``
-          are possible without casting it to a floating type.
+    :func:`~linalg.lu` returns the matrices from the LU decomposition. Its gradient formula is more efficient
+    than that of doing :func:`~linalg.lu_factor` followed by :func:`~linalg.lu_unpack`.
 
 Args:
     LU_data (Tensor): the packed LU factorization data
     LU_pivots (Tensor): the packed LU factorization pivots
     unpack_data (bool): flag indicating if the data should be unpacked.
-                        If ``False``, then the returned ``L`` and ``U`` are ``None``.
+                        If ``False``, then the returned ``L`` and ``U`` are empty tensors.
                         Default: ``True``
     unpack_pivots (bool): flag indicating if the pivots should be unpacked into a permutation matrix ``P``.
-                          If ``False``, then the returned ``P`` is  ``None``.
+                          If ``False``, then the returned ``P`` is  an empty tensor.
                           Default: ``True``
-    out (tuple, optional): a tuple of three tensors to use for the outputs ``(P, L, U)``.
+
+Keyword args:
+    out (tuple, optional): output tuple of three tensors. Ignored if `None`.
+
+Returns:
+    A namedtuple ``(P, L, U)``
 
 Examples::
 
     >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots = A.lu()
-    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-    >>>
-    >>> # can recover A from factorization
-    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> P, L, U = torch.lu_unpack(LU, pivots)
+    >>> # We can recover A from the factorization
+    >>> A_ = P @ L @ U
+    >>> torch.allclose(A, A_)
+    True
 
     >>> # LU factorization of a rectangular matrix:
     >>> A = torch.randn(2, 3, 2)
-    >>> A_LU, pivots = A.lu()
-    >>> P, A_L, A_U = torch.lu_unpack(A_LU, pivots)
-    >>> P
-    tensor([[[1., 0., 0.],
-             [0., 1., 0.],
-             [0., 0., 1.]],
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> P, L, U = torch.lu_unpack(LU, pivots)
+    >>> # P, L, U are the same as returned by linalg.lu
+    >>> P_, L_, U_ = torch.linalg.lu(A)
+    >>> torch.allclose(P, P_) and torch.allclose(L, L_) and torch.allclose(U, U_)
+    True
 
-            [[0., 0., 1.],
-             [0., 1., 0.],
-             [1., 0., 0.]]])
-    >>> A_L
-    tensor([[[ 1.0000,  0.0000],
-             [ 0.4763,  1.0000],
-             [ 0.3683,  0.1135]],
-
-            [[ 1.0000,  0.0000],
-             [ 0.2957,  1.0000],
-             [-0.9668, -0.3335]]])
-    >>> A_U
-    tensor([[[ 2.1962,  1.0881],
-             [ 0.0000, -0.8681]],
-
-            [[-1.0947,  0.3736],
-             [ 0.0000,  0.5718]]])
-    >>> A_ = torch.bmm(P, torch.bmm(A_L, A_U))
-    >>> torch.norm(A_ - A)
-    tensor(2.9802e-08)
 """.format(**common_args))
 
 add_docstr(torch.less, r"""
@@ -5820,16 +5803,26 @@ add_docstr(torch.lu_solve,
 lu_solve(b, LU_data, LU_pivots, *, out=None) -> Tensor
 
 Returns the LU solve of the linear system :math:`Ax = b` using the partially pivoted
-LU factorization of A from :meth:`torch.lu`.
+LU factorization of A from :func:`~linalg.lu_factor`.
 
 This function supports ``float``, ``double``, ``cfloat`` and ``cdouble`` dtypes for :attr:`input`.
+
+.. warning::
+
+    :func:`torch.lu_solve` is deprecated in favor of :func:`torch.linalg.lu_solve`.
+    :func:`torch.lu_solve` will be removed in a future PyTorch release.
+    ``X = torch.lu_solve(B, LU, pivots)`` should be replaced with
+
+    .. code:: python
+
+        X = linalg.lu_solve(LU, pivots, B)
 
 Arguments:
     b (Tensor): the RHS tensor of size :math:`(*, m, k)`, where :math:`*`
                 is zero or more batch dimensions.
-    LU_data (Tensor): the pivoted LU factorization of A from :meth:`torch.lu` of size :math:`(*, m, m)`,
+    LU_data (Tensor): the pivoted LU factorization of A from :meth:`~linalg.lu_factor` of size :math:`(*, m, m)`,
                        where :math:`*` is zero or more batch dimensions.
-    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`torch.lu` of size :math:`(*, m)`,
+    LU_pivots (IntTensor): the pivots of the LU factorization from :meth:`~linalg.lu_factor` of size :math:`(*, m)`,
                            where :math:`*` is zero or more batch dimensions.
                            The batch dimensions of :attr:`LU_pivots` must be equal to the batch dimensions of
                            :attr:`LU_data`.
@@ -5841,9 +5834,9 @@ Example::
 
     >>> A = torch.randn(2, 3, 3)
     >>> b = torch.randn(2, 3, 1)
-    >>> A_LU = torch.lu(A)
-    >>> x = torch.lu_solve(b, *A_LU)
-    >>> torch.norm(torch.bmm(A, x) - b)
+    >>> LU, pivots = torch.linalg.lu_factor(A)
+    >>> x = torch.lu_solve(b, LU, pivots)
+    >>> torch.dist(A @ x, b)
     tensor(1.00000e-07 *
            2.8312)
 """.format(**common_args))
@@ -6733,7 +6726,7 @@ documentation for the exact semantics of this method.
 Args:
     {input}
     {dim} If ``None``, the argmin of the flattened input is returned.
-    {keepdim} Ignored if ``dim=None``.
+    {keepdim}.
 
 Example::
 
@@ -8821,7 +8814,7 @@ add_docstr(torch.signbit,
            r"""
 signbit(input, *, out=None) -> Tensor
 
-Tests if each element of :attr:`input` has its sign bit set (is less than zero) or not.
+Tests if each element of :attr:`input` has its sign bit set or not.
 
 Args:
   {input}
@@ -8999,7 +8992,7 @@ Example::
 
 add_docstr(torch.argsort,
            r"""
-argsort(input, dim=-1, descending=False) -> LongTensor
+argsort(input, dim=-1, descending=False, stable=False) -> Tensor
 
 Returns the indices that sort a tensor along a given dimension in ascending
 order by value.
@@ -9007,10 +9000,15 @@ order by value.
 This is the second value returned by :meth:`torch.sort`.  See its documentation
 for the exact semantics of this method.
 
+If :attr:`stable` is ``True`` then the sorting routine becomes stable, preserving
+the order of equivalent elements. If ``False``, the relative order of values
+which compare equal is not guaranteed. ``True`` is slower.
+
 Args:
     {input}
     dim (int, optional): the dimension to sort along
     descending (bool, optional): controls the sorting order (ascending or descending)
+    stable (bool, optional): controls the relative order of equivalent elements
 
 Example::
 
@@ -11149,15 +11147,19 @@ logdet(input) -> Tensor
 
 Calculates log determinant of a square matrix or batches of square matrices.
 
-.. note::
-    Result is ``-inf`` if :attr:`input` has zero log determinant, and is ``nan`` if
-    :attr:`input` has negative determinant.
+It returns ``-inf`` if the input has a determinant of zero, and ``NaN`` if it has
+a negative determinant.
 
 .. note::
     Backward through :meth:`logdet` internally uses SVD results when :attr:`input`
     is not invertible. In this case, double backward through :meth:`logdet` will
     be unstable in when :attr:`input` doesn't have distinct singular values. See
     :func:`torch.linalg.svd` for details.
+
+.. seealso::
+
+        :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
+        absolute value of the determinant of real-valued (resp. complex) square matrices.
 
 Arguments:
     input (Tensor): the input tensor of size ``(*, n, n)`` where ``*`` is zero or more

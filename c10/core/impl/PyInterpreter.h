@@ -1,7 +1,9 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/ArrayRef.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/python_stub.h>
 #include <string>
@@ -129,6 +131,11 @@ struct C10_API PyInterpreter {
       const std::shared_ptr<SafePyObject>& type);
   using is_contiguous_sig = bool(const PyInterpreter*, const TensorImpl*);
   using device_sig = c10::Device(const PyInterpreter*, const TensorImpl*);
+  using dim_sig = int64_t(const PyInterpreter*, const TensorImpl*);
+  using strides_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
+  using sizes_sig = c10::IntArrayRef(const PyInterpreter*, const TensorImpl*);
+  using sym_sizes_sig =
+      c10::SymIntArrayRef(const PyInterpreter*, const TensorImpl*);
 
   PyInterpreter(
       name_sig* name_fn,
@@ -136,13 +143,21 @@ struct C10_API PyInterpreter {
       detach_sig* detach,
       dispatch_sig* dispatch,
       is_contiguous_sig* is_contiguous,
-      device_sig* device_fn)
+      device_sig* device_fn,
+      dim_sig* dim_fn,
+      strides_sig* strides,
+      sizes_sig* sizes,
+      sym_sizes_sig* sym_sizes)
       : name_fn_(name_fn),
         decref_fn_(decref_fn),
         detach_fn_(detach),
         dispatch_fn_(dispatch),
         is_contiguous_fn_(is_contiguous),
-        device_fn_(device_fn) {}
+        device_fn_(device_fn),
+        dim_fn_(dim_fn),
+        strides_fn_(strides),
+        sizes_fn_(sizes),
+        sym_sizes_fn_(sym_sizes) {}
 
   name_sig* name_fn_;
   decref_sig* decref_fn_;
@@ -150,6 +165,10 @@ struct C10_API PyInterpreter {
   dispatch_sig* dispatch_fn_;
   is_contiguous_sig* is_contiguous_fn_;
   device_sig* device_fn_;
+  dim_sig* dim_fn_;
+  strides_sig* strides_fn_;
+  sizes_sig* sizes_fn_;
+  sym_sizes_sig* sym_sizes_fn_;
 
   // UBSAN suppression fixes: "call to function
   // (anonymous namespace)::concrete_decref_fn(c10::impl::PyInterpreter const*,
@@ -190,6 +209,25 @@ struct C10_API PyInterpreter {
 
   __ubsan_ignore_function__ c10::Device device(const TensorImpl* self) const {
     return (*device_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ int64_t dim(const TensorImpl* self) const {
+    return (*dim_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ c10::IntArrayRef strides(
+      const TensorImpl* self) const {
+    return (*strides_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ c10::IntArrayRef sizes(
+      const TensorImpl* self) const {
+    return (*sizes_fn_)(this, self);
+  }
+
+  __ubsan_ignore_function__ c10::SymIntArrayRef sym_sizes(
+      const TensorImpl* self) const {
+    return (*sym_sizes_fn_)(this, self);
   }
 
   // Disarm this PyInterpreter, making all of its methods noops.
