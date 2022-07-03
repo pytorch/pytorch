@@ -6,7 +6,7 @@ from torch.fx._symbolic_trace import _assert_is_none
 from torch.fx.experimental.migrate_gradual_types.constraint import ApplyBroadcasting, CalcProduct, \
     Disj, TGreatestUpperBound, CalcMaxPool, CalcConv, Conj, BinConstraintT, CanReshape, BinConstraintD, GetItem
 from torch.fx.experimental.migrate_gradual_types.operation import \
-    op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq
+    op_eq, op_matching, op_consistency, op_leq, op_precision, op_gt, op_div, op_sub, op_neq, op_lt
 from torch.fx.node import Target, Node
 from torch.fx.experimental.migrate_gradual_types.util import gen_tensor_dims, gen_nat_constraints, gen_dvar, gen_tvar
 
@@ -141,8 +141,8 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
     symbols[n] = my_view
 
     src_var = symbols[n.args[0]]
-    t2 = n.args[1:]  # target shape
-    t2_type = TensorType([Dyn if elem == -1 else symbols[elem] for elem in t2])  # type: ignore[union-attr]
+    t2 = [symbols[elem] if isinstance(elem, Node) else elem for elem in n.args[1:]]  # target shape
+    t2_type = TensorType([Dyn if elem == -1 else elem for elem in t2])  # type: ignore[union-attr]
     c1 = BinConstraintT(my_view, t2_type, op_eq)
     c2 = CanReshape(src_var, t2_type)
 
@@ -269,10 +269,20 @@ def gt_inference_rule(n: Node, symbols, constraints, counter):
     e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
     return [BinConstraintD(e1, e2, op_gt)], counter
 
-# TODO
+
 @register_inference_rule(operator.lt)
 def lt_inference_rule(n: Node, symbols, constraints, counter):
-    raise NotImplementedError('Not yet implemented')
+    assert isinstance(n.args[0], Node) or isinstance(n.args[0], int)
+    assert isinstance(n.args[1], Node) or isinstance(n.args[1], int)
+
+    # We make sure this node will not be used again. We do not
+    # generate a constraint about that node. Only about the operands.
+    # assert len(n.users) == 0
+    # print(len(n.users))
+
+    e1 = symbols[n.args[0]] if isinstance(n.args[0], Node) else n.args[0]
+    e2 = symbols[n.args[1]] if isinstance(n.args[1], Node) else n.args[1]
+    return [BinConstraintD(e1, e2, op_lt)], counter
 
 
 @register_inference_rule(torch.full)
@@ -280,6 +290,7 @@ def full_inference_rule(n: Node, symbols, constraints, counter):
     full, counter = gen_tvar(counter)
     symbols[n] = full
     res = []
+
     assert isinstance(n.args[0], Iterable)
     for arg in n.args[0]:
         res.append(symbols[arg])
@@ -323,11 +334,11 @@ def arange_inference_rule(n: Node, symbols, constraints, counter):
 @register_inference_rule(operator.add)
 def add_inference_rule(n: Node, symbols, constraints, counter):
 
-    if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
-        # create and store the new variable
-        my_add, counter = gen_tvar(counter)
-        symbols[n] = my_add
+    # create and store the new variable
+    my_add, counter = gen_tvar(counter)
+    symbols[n] = my_add
 
+    if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
         # retrive arg variables
         e1 = symbols[n.args[0]]
         e2 = symbols[n.args[1]]
@@ -341,6 +352,12 @@ def add_inference_rule(n: Node, symbols, constraints, counter):
         c2 = ApplyBroadcasting(e11, e22, e1, e2)
         c3 = BinConstraintT(e11, e22, op_consistency)
         return [c1, c2, c3], counter
+
+    elif isinstance(n.args[0], Node) and isinstance(n.args[1], int):
+        e1 = symbols[n.args[0]]
+        # scalar addition
+        return [BinConstraintT(my_add, e1, op_eq)], counter
+
     else:
         # TODO generate add constraints for scalar addition
         raise NotImplementedError('Addition not yet implemented')
@@ -571,6 +588,7 @@ class ConstraintGenerator:
         for n in graph.nodes:
             (constraints, counter) = self.generate_constraints_node(n, counter)
             all_constraints += constraints
+
         return Conj(all_constraints), counter
 
     def generate_constraints_node(self, n: Node, counter):

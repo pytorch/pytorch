@@ -73,7 +73,27 @@ class HFOperations(unittest.TestCase):
         s.add(transformed)
         self.assertEqual(s.check(), z3.sat)
 
+    def test_scalar_add(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
 
+            def forward(self, x: TensorType([2, 4])):
+                size = x.size()
+                getitem = size[-1]
+                arange = torch.arange(getitem)
+                add = arange + 1
+                return add
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        arange_result = z3.Const(5, tensor_type)
+        add_result = z3.Const(6, tensor_type)
+        self.assertEqual(s.model()[arange_result], s.model()[add_result])
 
     def test_embedding(self):
         class BasicBlock(torch.nn.Module):
@@ -255,6 +275,23 @@ class HFOperations(unittest.TestCase):
         assert s.model()[mul_result] == s.model()[embedding_result]
 
 
+    def test_view(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([2, 4])):
+                view = x.view(-1, 8)
+                return view
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+        traced = GraphModule(ast_rewriter.root, graph, "gm")
+
+        transformed = transform_all_constraints(traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEquals(s.check(), z3.sat)
 
     def test_conditional(self):
         """
@@ -313,6 +350,43 @@ class HFOperations(unittest.TestCase):
         positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
 
         self.assertEqual(positive, z3.sat)
+        self.assertEqual(negative, z3.sat)
+
+
+    def test_conditional_2(self):
+        """
+        This test case is for the HFmodels interface.
+        A function takes a node and a graph and considers
+        the conditional the node represents and its negation
+        and solves each formula with the remaining sets of constraints
+        Returns the opposite result of the above testcase
+
+        """
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+                self.embed_tokens = torch.nn.Embedding(256008, 1024, padding_idx=1)
+
+            def forward(self, x: TensorType([Dyn, 4])):
+                size = x.size()
+                getitem = size[-1]
+                view = x.view(-1, getitem)
+                embed_tokens = self.embed_tokens(view)
+                mul = embed_tokens * 32.0
+                getitem_1 = size[-1]
+                lt = getitem_1 < 1
+                return lt
+
+        ast_rewriter = RewritingTracer()
+        graph = ast_rewriter.trace(BasicBlock())
+
+        # The node we are considering is the gt node
+        for n in graph.nodes:
+            if n.target == operator.lt:
+                node = n
+
+        positive, negative = evaluate_conditional_with_constraints(ast_rewriter.root, graph, node)
+        self.assertEqual(positive, z3.unsat)
         self.assertEqual(negative, z3.sat)
 
 
