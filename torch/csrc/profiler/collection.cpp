@@ -1,7 +1,9 @@
 #include <torch/csrc/profiler/collection.h>
 
 #include <algorithm>
+#include <limits>
 #include <queue>
+#include "c10/util/Exception.h"
 
 #include <fmt/format.h>
 
@@ -11,6 +13,7 @@
 
 #include <ATen/record_function.h>
 #include <c10/core/ScalarTypeToTypeMeta.h>
+#include <c10/util/Exception.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
@@ -225,6 +228,19 @@ auto scopeToType(at::RecordScope scope) {
       ? libkineto::ActivityType::USER_ANNOTATION
       : libkineto::ActivityType::CPU_OP;
 }
+
+auto torchOpEndNS(
+    const ExtraFields<EventType::TorchOp>& e,
+    const bool finished,
+    const std::weak_ptr<Result>& parent) {
+  if (finished && e.end_time_ns_ == std::numeric_limits<time_t>::min()) {
+    auto p = parent.lock();
+    if (p) {
+      return p->endTimeNS();
+    }
+  }
+  return e.end_time_ns_;
+}
 } // namespace
 
 DEFINE_VISITOR(
@@ -246,7 +262,7 @@ DEFINE_VISITOR(
 DEFINE_VISITOR(correlationID, e.correlation_id_, 0, 0, 0, 0, e.correlation_id_);
 DEFINE_VISITOR(
     endTimeNS,
-    e.end_time_ns_,
+    torchOpEndNS(e, finished_, parent_),
     e.end_time_us_ * 1000,
     start_time_ns_,
     e.end_time_ns_,
@@ -404,6 +420,12 @@ auto steal_or_default(T& it) {
   }
 }
 
+void mark_finished(std::shared_ptr<Result>& r) {
+  TORCH_INTERNAL_ASSERT(!r->finished_, r->name());
+  r->finished_ = true;
+  TORCH_INTERNAL_ASSERT(r->endTimeNS() >= r->start_time_ns_, r->name());
+}
+
 template <typename T0, typename T1>
 void checkedInsert(ska::flat_hash_map<T0, T1>& map, const T0& k, const T1& v) {
   auto inserted = map.insert({k, v});
@@ -434,7 +456,7 @@ std::shared_ptr<Result> resultFromActivity(
   if (parent) {
     event->parent_ = parent;
     parent->children_.push_back(event);
-    event->finished_ = true;
+    mark_finished(event);
   }
 
   return event;
@@ -671,11 +693,11 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
       // encounter such a case we don't push to `end_events_`.
       stacks[event->start_tid_] = event;
     } else {
-      event->finished_ = true;
+      mark_finished(event);
     }
   };
 
-  auto pop_event = [&stacks](const std::shared_ptr<Result>& event) {
+  auto pop_event = [&stacks](std::shared_ptr<Result> event) {
     if (event->finished_) {
       // This event was marked finished by a previous `pop_event` call.
       return;
@@ -686,12 +708,12 @@ void build_tree(std::vector<std::shared_ptr<Result>>& events) {
 
     while (frame.get() != event.get()) {
       TORCH_INTERNAL_ASSERT(frame != nullptr);
-      frame->finished_ = true;
+      mark_finished(frame);
       TORCH_INTERNAL_ASSERT(!frame->parent_.expired());
       frame = frame->parent_.lock();
     }
 
-    event->finished_ = true;
+    mark_finished(event);
     stacks.erase(start_tid);
     auto new_frame = event->parent_.lock();
     if (new_frame != nullptr) {
