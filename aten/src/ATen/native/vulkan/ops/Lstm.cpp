@@ -1,7 +1,18 @@
 #include <ATen/native/vulkan/ops/Common.h>
 #include <ATen/native/vulkan/ops/Mm.h>
 #include <ATen/native/vulkan/ops/VulkanOpContext.h>
+#include <ATen/TensorOperators.h>
 #include <torch/library.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/addmm.h>
+#include <ATen/ops/sigmoid.h>
+#include <ATen/ops/tanh.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/slice.h>
+#endif
 
 namespace at {
 namespace native {
