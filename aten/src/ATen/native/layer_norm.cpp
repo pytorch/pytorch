@@ -40,10 +40,6 @@ void layer_norm_with_mean_rstd_out(
     double eps,
     int64_t M,
     int64_t N) {
-  if (M <= 0) {
-    return;
-  }
-
   LayerNormKernel(kCPU, input, gamma, beta, M, N, eps, &out, &mean, &rstd);
   const auto input_shape = input.sizes();
   const size_t axis = input.dim() - normalized_shape.size();

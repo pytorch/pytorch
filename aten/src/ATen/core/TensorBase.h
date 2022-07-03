@@ -156,11 +156,16 @@ class TORCH_API TensorBase {
     return at::isSignedType(this->scalar_type());
   }
 
-  int64_t size(int64_t dim) const {
-    const auto sizes = this->sizes();
+  c10::SymInt sym_size(int64_t dim) const {
+    const auto sizes = this->sym_sizes();
     const auto ndim = static_cast<int64_t>(sizes.size());
     // false is passed to maybe_wrap_dim so behavior is identical to array access (but with wrapping)
     return sizes[c10::maybe_wrap_dim(dim, ndim, /*wrap_scalar=*/false)];
+
+  }
+
+  int64_t size(int64_t dim) const {
+    return impl_->size(dim);
   }
 
   int64_t stride(int64_t dim) const {
@@ -925,7 +930,6 @@ struct ExclusivelyOwnedTraits<at::TensorBase> {
       toDestroy->refcount_ = 0;
       toDestroy->weakcount_ = 0;
 #endif
-      toDestroy->release_resources();
       delete toDestroy;
     }
   }

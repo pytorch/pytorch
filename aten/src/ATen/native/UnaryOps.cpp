@@ -50,6 +50,7 @@
 #include <ATen/ops/bitwise_not_native.h>
 #include <ATen/ops/can_cast.h>
 #include <ATen/ops/ceil_native.h>
+#include <ATen/ops/conj_native.h>
 #include <ATen/ops/conj_physical.h>
 #include <ATen/ops/conj_physical_native.h>
 #include <ATen/ops/cos_native.h>
@@ -122,6 +123,11 @@
 #include <ATen/ops/sinc.h>
 #include <ATen/ops/sinc_native.h>
 #include <ATen/ops/sinh_native.h>
+#include <ATen/ops/special_airy_ai_native.h>
+#include <ATen/ops/special_bessel_j0_native.h>
+#include <ATen/ops/special_bessel_j1_native.h>
+#include <ATen/ops/special_bessel_y0_native.h>
+#include <ATen/ops/special_bessel_y1_native.h>
 #include <ATen/ops/special_digamma_native.h>
 #include <ATen/ops/special_entr_native.h>
 #include <ATen/ops/special_erf_native.h>
@@ -139,13 +145,20 @@
 #include <ATen/ops/special_log1p_native.h>
 #include <ATen/ops/special_log_ndtr_native.h>
 #include <ATen/ops/special_logit_native.h>
+#include <ATen/ops/special_modified_bessel_i0_native.h>
+#include <ATen/ops/special_modified_bessel_i1_native.h>
+#include <ATen/ops/special_modified_bessel_k0_native.h>
+#include <ATen/ops/special_modified_bessel_k1_native.h>
 #include <ATen/ops/special_multigammaln_native.h>
 #include <ATen/ops/special_ndtr_native.h>
 #include <ATen/ops/special_ndtri_native.h>
 #include <ATen/ops/special_polygamma_native.h>
 #include <ATen/ops/special_psi_native.h>
 #include <ATen/ops/special_round_native.h>
+#include <ATen/ops/special_scaled_modified_bessel_k0_native.h>
+#include <ATen/ops/special_scaled_modified_bessel_k1_native.h>
 #include <ATen/ops/special_sinc_native.h>
+#include <ATen/ops/special_spherical_bessel_j0_native.h>
 #include <ATen/ops/sqrt_native.h>
 #include <ATen/ops/square_native.h>
 #include <ATen/ops/tan_native.h>
@@ -206,6 +219,18 @@ CREATE_UNARY_FLOAT_META_FUNC(special_log_ndtr)
 CREATE_UNARY_FLOAT_META_FUNC(sqrt)
 CREATE_UNARY_FLOAT_META_FUNC(tan)
 CREATE_UNARY_FLOAT_META_FUNC(tanh)
+CREATE_UNARY_FLOAT_META_FUNC(special_airy_ai)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_j0)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_j1)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_y0)
+CREATE_UNARY_FLOAT_META_FUNC(special_bessel_y1)
+CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_i0)
+CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_i1)
+CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_k0)
+CREATE_UNARY_FLOAT_META_FUNC(special_modified_bessel_k1)
+CREATE_UNARY_FLOAT_META_FUNC(special_scaled_modified_bessel_k0)
+CREATE_UNARY_FLOAT_META_FUNC(special_scaled_modified_bessel_k1)
+CREATE_UNARY_FLOAT_META_FUNC(special_spherical_bessel_j0)
 
 TORCH_META_FUNC(polygamma)(int64_t n, const Tensor& self) {
   TORCH_CHECK(n >= 0, "polygamma(n, x) does not support negative n.");
@@ -325,6 +350,18 @@ CREATE_UNARY_TORCH_IMPL_FUNC(sqrt_out, sqrt_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tan_out, tan_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(tanh_out, tanh_stub)
 CREATE_UNARY_TORCH_IMPL_FUNC(trunc_out, trunc_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_airy_ai_out, special_airy_ai_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_j0_out, special_bessel_j0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_j1_out, special_bessel_j1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_y0_out, special_bessel_y0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_bessel_y1_out, special_bessel_y1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_i0_out, special_modified_bessel_i0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_i1_out, special_modified_bessel_i1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_k0_out, special_modified_bessel_k0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_modified_bessel_k1_out, special_modified_bessel_k1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k0_out, special_scaled_modified_bessel_k0_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_scaled_modified_bessel_k1_out, special_scaled_modified_bessel_k1_stub)
+CREATE_UNARY_TORCH_IMPL_FUNC(special_spherical_bessel_j0_out, special_spherical_bessel_j0_stub)
 
 TORCH_IMPL_FUNC(round_decimals_out)
 (const Tensor& self, int64_t decimals, const Tensor& result) {
@@ -998,6 +1035,18 @@ DEFINE_DISPATCH(tanh_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-v
 DEFINE_DISPATCH(trigamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(trunc_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(lgamma_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_airy_ai_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_j0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_j1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_y0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_bessel_y1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_modified_bessel_i0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_modified_bessel_i1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_modified_bessel_k0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_scaled_modified_bessel_k0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_scaled_modified_bessel_k1_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+DEFINE_DISPATCH(special_spherical_bessel_j0_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
 } // namespace native
 } // namespace at
