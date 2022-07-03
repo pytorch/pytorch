@@ -1,10 +1,8 @@
 #pragma once
 
-#include <c10/util/Optional.h>
-#include <c10/util/irange.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
