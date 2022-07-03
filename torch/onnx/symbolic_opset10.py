@@ -2,11 +2,11 @@ import sys
 import warnings
 
 import torch
+from torch import _C
 import torch._C._onnx as _C_onnx
 import torch.onnx
 
-# This import monkey-patches graph manipulation methods on Graph, used for the
-# ONNX symbolics
+# Monkey-patch graph manipulation methods on Graph, used for the ONNX symbolics
 from torch.onnx import _patch_torch  # noqa: F401
 from torch.onnx import symbolic_helper
 from torch.onnx import symbolic_opset9 as opset9
@@ -141,6 +141,7 @@ max_pool3d_with_indices = _max_pool(
 
 
 def _avg_pool(name, tuple_fn):
+    @symbolic_helper.quantized_args(True, False, False, False, False, False, False)
     @symbolic_helper.parse_args("v", "is", "is", "is", "i", "i", "none")
     def symbolic_fn(
         g,
@@ -187,6 +188,7 @@ avg_pool3d = _avg_pool("avg_pool3d", torch.nn.modules.utils._triple)
 
 
 def _interpolate(name, dim, interpolate_mode):
+    @symbolic_helper.quantized_args(True, False, False)
     def symbolic_fn(g, input, output_size, *args):
         scales, align_corners = symbolic_helper._get_interpolate_attributes(
             g, interpolate_mode, args
@@ -258,11 +260,11 @@ def slice(g, self, *args):
         dim = 0
     else:
         raise NotImplementedError("Unknown aten::slice signature")
-    is_start_none = (
-        start.node().kind() == "prim::Constant" and start.type().kind() == "NoneType"
+    is_start_none = start.node().kind() == "prim::Constant" and isinstance(
+        start.type(), _C.NoneType
     )
-    is_end_none = (
-        end.node().kind() == "prim::Constant" and end.type().kind() == "NoneType"
+    is_end_none = end.node().kind() == "prim::Constant" and isinstance(
+        end.type(), _C.NoneType
     )
     is_start_onnx_const = start.node().kind() == "onnx::Constant"
     is_end_onnx_const = end.node().kind() == "onnx::Constant"
@@ -324,7 +326,7 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.training_mode:
+    if scale_grad_by_freq and GLOBALS.export_training:
         return symbolic_helper._onnx_unsupported(
             "embedding_bag with scale_grad_by_freq for training mode"
         )
@@ -540,6 +542,16 @@ class Quantized:
         y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
 
         output = opset9.add(g, x, y)
+
+        return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
+
+    @staticmethod
+    def add_relu(g, x, y, op_scale, op_zero_point):
+        x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
+        y, _, _, _ = symbolic_helper.dequantize_helper(g, y)
+
+        output = opset9.add(g, x, y)
+        output = opset9.relu(g, output)
 
         return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 

@@ -18,11 +18,10 @@ class TensorFiller {
   void Fill(Tensor* tensor, Context* context) const {
     CAFFE_ENFORCE(context, "context is null");
     CAFFE_ENFORCE(tensor, "tensor is null");
-    auto min = (min_ < std::numeric_limits<Type>::min())
+    auto min = (min_ < (double)std::numeric_limits<Type>::min())
         ? std::numeric_limits<Type>::min()
         : static_cast<Type>(min_);
-    // NOLINTNEXTLINE(clang-diagnostic-implicit-const-int-float-conversion)
-    auto max = (max_ > std::numeric_limits<Type>::max())
+    auto max = (max_ > (double)std::numeric_limits<Type>::max())
         ? std::numeric_limits<Type>::max()
         : static_cast<Type>(max_);
     CAFFE_ENFORCE_LE(min, max);
