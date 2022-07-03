@@ -4,7 +4,7 @@ from functools import partial
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCUDA,
@@ -83,6 +83,86 @@ class TestPrims(TestCase):
             a.unsqueeze_(0)
             self.assertEqual(a.expand_as(result), result)
             """
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_broadcast_in_dim_sum(self, device, dtype):
+        def _wrapper(a):
+            a_sum = prims.sum(a, [0, 1])
+            a_bc = prims.broadcast_in_dim(a_sum, [], [])
+            return a_bc
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten', 'nvfuser'):
+            fn = partial(traced, executor=executor)
+            shape = (5, 5)
+            a = make_arg(shape)
+            result = fn(a)
+
+            self.assertEqual(result.shape, ())
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(_wrapper(a), result)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    def test_nvfuser_impl_is_used(self, device):
+        # This test is to ensure that when the nvfuser implementation exists it is used
+        # Assuming one-to-one mapping between prims and nvfuser implementations
+        # This test is not intended to test the correctness of the nvfuser implementation
+        from torch._C._nvfuser import FusionDefinition as fd
+
+        prim_nvfuser_ops = set(torch._prims.__all__).intersection(dir(fd.Ops))
+        ops_without_nvfuser_impl = {
+            name
+            for name in prim_nvfuser_ops
+            if getattr(torch.ops.prims, name).default.impl_nvfuser is None
+        }
+        assert (
+            len(ops_without_nvfuser_impl) == 0
+        ), (f"The following prims do not have 'impl_nvfuser' defined: {ops_without_nvfuser_impl} ",
+            "while there exists nvfuser implementations for them.")
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    @parametrize("correction", [0, 1])
+    def test_var(self, device, dtype, correction):
+        def _wrapper(a):
+            return prims.var(a, [0, 1], correction=correction)
+
+        traced = make_traced(_wrapper)
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for executor in ('aten', 'nvfuser'):
+            fn = partial(traced, executor=executor)
+            shape = (5, 5)
+            a = make_arg(shape)
+            result = fn(a)
+
+            self.assertEqual(result.shape, ())
+            self.assertTrue(result.is_contiguous)
+            self.assertEqual(_wrapper(a), result)
+
+    @onlyCUDA
+    @skipCUDAIfRocm
+    @dtypes(torch.float32)
+    def test_pytree_output(self, device, dtype):
+        @make_traced
+        def fn(a, b):
+            d = {}
+            d["c"] = torch.add(a, b)
+            return (d, torch.add(a, d["c"]))
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        a = make_arg((5, 5))
+        b = make_arg((1, 5))
+
+        result_aten = fn(a, b, executor="aten")
+        result_nvfuser = fn(a, b, executor="nvfuser")
+        self.assertEqual(result_aten, result_nvfuser)
 
 
 class TestPrimsBasic(TestCase):

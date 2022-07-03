@@ -5,10 +5,12 @@ import json
 import os
 import re
 import time
+import urllib.parse
+from datetime import datetime
 from dataclasses import dataclass
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
-from typing import cast, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Iterable, cast, Any, Callable, Dict, List, Optional, Tuple, Union
 from gitutils import get_git_remote_name, get_git_repo_dir, patterns_to_regex, GitRepo
 from functools import lru_cache
 from warnings import warn
@@ -121,6 +123,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
             checkSuites(first: 10) {
               ...PRCheckSuites
             }
+            pushedDate
             oid
           }
         }
@@ -299,7 +302,7 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 """
 
 RE_GHSTACK_HEAD_REF = re.compile(r"^(gh/[^/]+/[0-9]+/)head$")
-RE_GHSTACK_SOURCE_ID = re.compile(r'^ghstack-source-id: (.+)\n?', re.MULTILINE)
+RE_GHSTACK_DESC = re.compile(r'Stack.*:\r?\n(\* [^\r\n]+\r?\n)+', re.MULTILINE)
 RE_PULL_REQUEST_RESOLVED = re.compile(
     r'Pull Request resolved: '
     r'https://github.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>[0-9]+)',
@@ -308,7 +311,6 @@ RE_PULL_REQUEST_RESOLVED = re.compile(
 RE_REVERT_CMD = re.compile(r"@pytorch(merge|)bot\s+revert\s+this")
 RE_REVERT_CMD_CLI = re.compile(r"@pytorch(merge|)bot\s+revert\s+(-m.*-c.*|-c.*-m.*)")
 RE_DIFF_REV = re.compile(r'^Differential Revision:.+?(D[0-9]+)', re.MULTILINE)
-
 
 def _fetch_url(url: str, *,
                headers: Optional[Dict[str, str]] = None,
@@ -329,22 +331,35 @@ def _fetch_url(url: str, *,
             print(f"Rate limit exceeded: {err.headers['X-RateLimit-Used']}/{err.headers['X-RateLimit-Limit']}")
         raise
 
-
 def fetch_json(url: str,
                params: Optional[Dict[str, Any]] = None,
                data: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     headers = {'Accept': 'application/vnd.github.v3+json'}
     if params is not None and len(params) > 0:
-        url += '?' + '&'.join(f"{name}={val}" for name, val in params.items())
+        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
     return cast(List[Dict[str, Any]], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
+def fetch_json_dict(url: str,
+                    params: Optional[Dict[str, Any]] = None,
+                    data: Optional[Dict[str, Any]] = None) -> Dict[str, Any] :
+    headers = {'Accept': 'application/vnd.github.v3+json'}
+    if params is not None and len(params) > 0:
+        url += '?' + '&'.join(f"{name}={urllib.parse.quote(str(val))}" for name, val in params.items())
+    return cast(Dict[str, Any], _fetch_url(url, headers=headers, data=data, reader=json.load))
 
-def gh_post_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+def _gh_post_comment(url: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
     if dry_run:
         print(comment)
         return []
-    return fetch_json(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/comments',
-                      data={"body": comment})
+    return fetch_json(url, data={"body": comment})
+
+
+def gh_post_pr_comment(org: str, project: str, pr_num: int, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/issues/{pr_num}/comments', comment, dry_run)
+
+
+def gh_post_commit_comment(org: str, project: str, sha: str, comment: str, dry_run: bool = False) -> List[Dict[str, Any]]:
+    return _gh_post_comment(f'https://api.github.com/repos/{org}/{project}/commits/{sha}/comments', comment, dry_run)
 
 
 def gh_add_labels(org: str, project: str, pr_num: int, labels: Union[str, List[str]]) -> None:
@@ -384,6 +399,8 @@ def parse_args() -> Any:
     parser = ArgumentParser("Merge PR into default branch")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--on-green", action="store_true")
+    parser.add_argument("--on-mandatory", action="store_true")
+    parser.add_argument("--land-checks", action="store_true")
     parser.add_argument("--revert", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--comment-id", type=int)
@@ -445,6 +462,12 @@ class GitHubPR:
 
     def get_changed_files_count(self) -> int:
         return int(self.info["changedFiles"])
+
+    def last_pushed_at(self) -> datetime:
+        return datetime.fromisoformat(self.last_commit()['pushedDate'][:-1])
+
+    def last_commit(self) -> Any:
+        return self.info["commits"]["nodes"][-1]["commit"]
 
     def get_changed_files(self) -> List[str]:
         if self.changed_files is None:
@@ -547,8 +570,11 @@ class GitHubPR:
                 checkruns = node["checkRuns"]
                 if workflow_run is not None:
                     conclusions[workflow_run["workflow"]["name"]] = (node["conclusion"], node["url"])
+                has_failing_check = False
                 while checkruns is not None:
                     for checkrun_node in checkruns["nodes"]:
+                        if checkrun_node["conclusion"] == 'FAILURE':
+                            has_failing_check = True
                         conclusions[checkrun_node["name"]] = (checkrun_node["conclusion"], checkrun_node["detailsUrl"])
                     if bool(checkruns["pageInfo"]["hasNextPage"]):
                         rc = gh_graphql(GH_GET_PR_NEXT_CHECK_RUNS,
@@ -561,6 +587,9 @@ class GitHubPR:
                         checkruns = last_commit["checkSuites"]["nodes"][-1]["checkRuns"]
                     else:
                         checkruns = None
+                # Github doesn't set conclusion to failure if a job is still pending
+                if workflow_run is not None and has_failing_check:
+                    conclusions[workflow_run["workflow"]["name"]] = ("FAILURE", node["url"])
 
         add_conclusions(checksuites["edges"])
         while bool(checksuites["pageInfo"]["hasNextPage"]):
@@ -580,7 +609,12 @@ class GitHubPR:
 
     def get_authors(self) -> Dict[str, str]:
         rc = {}
-        for idx in range(self.get_commit_count()):
+        # TODO: replace with  `self.get_commit_count()` when GraphQL pagination can be used
+        # to fetch all commits, see https://gist.github.com/malfet/4f35321b0c9315bcd7116c7b54d83372
+        # and https://support.github.com/ticket/enterprise/1642/1659119
+        if self.get_commit_count() <= 250:
+            assert len(self._fetch_authors()) == self.get_commit_count()
+        for idx in range(len(self._fetch_authors())):
             rc[self.get_committer_login(idx)] = self.get_committer_author(idx)
 
         return rc
@@ -680,33 +714,53 @@ class GitHubPR:
             if self.org != m.group('owner') or self.project != m.group('repo'):
                 raise RuntimeError(f"PR {m.group('number')} resolved to wrong owner/repo pair")
             pr_num = int(m.group('number'))
+            commit_msg = self.gen_commit_message(filter_ghstack=True)
             if pr_num != self.pr_num:
                 pr = GitHubPR(self.org, self.project, pr_num)
                 if pr.is_closed():
                     print(f"Skipping {idx+1} of {len(rev_list)} PR (#{pr_num}) as its already been merged")
                     continue
-                approved_by = pr.get_approved_by()
+                commit_msg = pr.gen_commit_message(filter_ghstack=True)
                 # Raises exception if matching rule is not found
                 find_matching_merge_rule(pr, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
 
-            # Adding the url here makes it clickable within the Github UI
-            approved_by_urls = ', '.join(prefix_with_github_url(login) for login in approved_by)
             repo.cherry_pick(rev)
-            msg = re.sub(RE_GHSTACK_SOURCE_ID, "", msg)
-            msg += f"\nApproved by: {approved_by_urls}\n"
-            repo.amend_commit_message(msg)
+            repo.amend_commit_message(commit_msg)
 
-    def merge_into(self, repo: GitRepo, *, force: bool = False, dry_run: bool = False, comment_id: Optional[int] = None) -> None:
+    def gen_commit_message(self, filter_ghstack: bool = False) -> str:
+        """ Fetches title and body from PR description
+            adds reviewed by, pull request resolved and optionally
+            filters out ghstack info """
+        # Adding the url here makes it clickable within the Github UI
+        approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
+        msg = self.get_title() + f" (#{self.pr_num})\n\n"
+        msg += self.get_body() if not filter_ghstack else re.sub(RE_GHSTACK_DESC, "", self.get_body())
+        msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
+        msg += f"Approved by: {approved_by_urls}\n"
+        return msg
+
+    def merge_into(self, repo: GitRepo, *,
+                   force: bool = False,
+                   dry_run: bool = False,
+                   comment_id: Optional[int] = None) -> None:
         # Raises exception if matching rule is not found
         find_matching_merge_rule(self, repo, force=force, skip_internal_checks=can_skip_internal_checks(self, comment_id))
-        if repo.current_branch() != self.default_branch():
-            repo.checkout(self.default_branch())
+        self.merge_changes(repo, force, comment_id)
+
+        repo.push(self.default_branch(), dry_run)
+        if not dry_run:
+            gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
+
+    def merge_changes(self,
+                      repo: GitRepo,
+                      force: bool = False,
+                      comment_id: Optional[int] = None,
+                      branch: Optional[str] = None) -> None:
+        branch_to_merge_into = self.default_branch() if branch is None else branch
+        if repo.current_branch() != branch_to_merge_into:
+            repo.checkout(branch_to_merge_into)
         if not self.is_ghstack_pr():
-            # Adding the url here makes it clickable within the Github UI
-            approved_by_urls = ', '.join(prefix_with_github_url(login) for login in self.get_approved_by())
-            msg = self.get_title() + f" (#{self.pr_num})\n\n" + self.get_body()
-            msg += f"\nPull Request resolved: {self.get_pr_url()}\n"
-            msg += f"Approved by: {approved_by_urls}\n"
+            msg = self.gen_commit_message()
             pr_branch_name = f"__pull-request-{self.pr_num}__init__"
             repo.fetch(f"pull/{self.pr_num}/head", pr_branch_name)
             repo._run_git("merge", "--squash", pr_branch_name)
@@ -714,9 +768,24 @@ class GitHubPR:
         else:
             self.merge_ghstack_into(repo, force, comment_id=comment_id)
 
-        repo.push(self.default_branch(), dry_run)
-        if not dry_run:
-            gh_add_labels(self.org, self.project, self.pr_num, ["merged"])
+    def create_land_time_check_branch(self,
+                                      repo: GitRepo,
+                                      branch: str,
+                                      force: bool = False,
+                                      comment_id: Optional[int] = None,) -> str:
+        self.merge_changes(repo, branch=branch, force=force, comment_id=comment_id)
+        land_check_branch = f'landchecks/{self.pr_num}'
+        try:
+            repo._run_git('branch', "-D", land_check_branch)
+        except Exception:
+            pass
+        repo._run_git('checkout', "-b", land_check_branch)
+        repo._run_git('push', '-u', 'origin', land_check_branch, '--force')
+        commit = repo.get_commit('HEAD').commit_hash
+        gh_post_pr_comment(self.org, self.project, self.pr_num,
+                           'Successfully started land time checks.' +
+                           f' See progress here: https://hud.pytorch.org/{self.org}/{self.project}/commit/{commit}')
+        return commit
 
 
 class MandatoryChecksMissingError(Exception):
@@ -805,21 +874,10 @@ def find_matching_merge_rule(pr: GitHubPR,
                 reject_reason = (f"Matched rule {rule_name}, but PR #{pr.pr_num} was not reviewed yet by any of: " +
                                  f"{', '.join(list(rule_approvers_set)[:5])}{', ...' if len(rule_approvers_set) > 5 else ''}")
             continue
-        if rule.mandatory_checks_name is not None:
-            pending_checks: List[Tuple[str, Optional[str]]] = []
-            failed_checks: List[Tuple[str, Optional[str]]] = []
-            checks = pr.get_checkrun_conclusions()
-            # HACK: We don't want to skip CLA check, even when forced
-            for checkname in filter(lambda x: force is False or "CLA Check" in x, rule.mandatory_checks_name):
-                if checkname not in checks:
-                    pending_checks.append((checkname, None))
-                elif checks[checkname][0] is None:
-                    pending_checks.append((checkname, checks[checkname][1]))
-                elif checks[checkname][0] != 'SUCCESS':
-                    failed_checks.append((checkname, checks[checkname][1]))
-
-        def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
-            return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
+        mandatory_checks = rule.mandatory_checks_name if rule.mandatory_checks_name is not None else []
+        checks = pr.get_checkrun_conclusions()
+        required_checks = filter(lambda x: force is False or "CLA Check" in x, mandatory_checks)
+        [pending_checks, failed_checks] = categorize_checks(checks, required_checks)
 
         if len(failed_checks) > 0:
             if reject_reason_score < 30000:
@@ -841,12 +899,28 @@ def find_matching_merge_rule(pr: GitHubPR,
     raise RuntimeError(reject_reason)
 
 
+def checks_to_str(checks: List[Tuple[str, Optional[str]]]) -> str:
+    return ", ".join(f"[{c[0]}]({c[1]})" if c[1] is not None else c[0] for c in checks)
+
+def pr_get_checks_with_lambda(pr: GitHubPR, status_check: Callable[[Optional[str]], bool]) -> List[Tuple[str, str]]:
+    checks = pr.get_checkrun_conclusions()
+    return [(name, status[1]) for name, status in checks.items() if status_check(status[0])]
+
+
+def pr_get_pending_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
+    return pr_get_checks_with_lambda(pr, lambda x: x is None)
+
+
+def pr_get_failed_checks(pr: GitHubPR) -> List[Tuple[str, str]]:
+    return pr_get_checks_with_lambda(pr, lambda x: x == "FAILURE")
+
+
 def try_revert(repo: GitRepo, pr: GitHubPR, *,
                dry_run: bool = False,
                comment_id: Optional[int] = None,
                reason: Optional[str] = None) -> None:
     def post_comment(msg: str) -> None:
-        gh_post_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
+        gh_post_pr_comment(pr.org, pr.project, pr.pr_num, msg, dry_run=dry_run)
     if not pr.is_closed():
         return post_comment(f"Can't revert open PR #{pr.pr_num}")
     comment = pr.get_last_comment() if comment_id is None else pr.get_comment_by_id(comment_id)
@@ -874,40 +948,130 @@ def try_revert(repo: GitRepo, pr: GitHubPR, *,
     rc = RE_DIFF_REV.search(msg)
     if rc is not None and not can_skip_internal_checks:
         raise RuntimeError(f"Can't revert PR that was landed via phabricator as {rc.group(1)}")
+    revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
+    revert_msg += f" due to {reason}\n" if reason is not None else "\n"
     repo.checkout(pr.default_branch())
     repo.revert(commit_sha)
     msg = repo.commit_message("HEAD")
     msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
-    msg += f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
-    msg += f" due to {reason}\n" if reason is not None else "\n"
+    msg += revert_msg
     repo.amend_commit_message(msg)
     repo.push(pr.default_branch(), dry_run)
+    post_comment(f"@{pr.get_pr_creator_login()} your PR has been successfully reverted.")
     if not dry_run:
         gh_add_labels(pr.org, pr.project, pr.pr_num, ["reverted"])
+        gh_post_commit_comment(pr.org, pr.project, commit_sha, revert_msg)
 
 
 def prefix_with_github_url(suffix_str: str) -> str:
     return f"https://github.com/{suffix_str}"
 
+def check_for_sev(org: str, project: str, force: bool) -> None:
+    if force:
+        return
+    response = cast(
+        Dict[str, Any],
+        fetch_json(
+            "https://api.github.com/search/issues",
+            params={"q": f'repo:{org}/{project} is:open is:issue label:"ci: sev"'},
+        ),
+    )
+    if response["total_count"] != 0:
+        for item in response["items"]:
+            if "merge blocking" in item["body"].lower():
+                raise RuntimeError(
+                    "Not merging any PRs at the moment because there is a "
+                    + "merge blocking https://github.com/pytorch/pytorch/labels/ci:%20sev issue open at: \n"
+                    + f"{item['html_url']}"
+                )
+    return
 
-def merge_on_green(pr_num: int, repo: GitRepo, dry_run: bool = False, timeout_minutes: int = 400) -> None:
+def fetch_check_run_conclusions(repo: GitRepo, commit: str) -> Dict[str, Tuple[str, str]]:
+    [owner, name] = repo.gh_owner_and_name()
+    checks = fetch_json_dict(f'https://api.github.com/repos/{owner}/{name}/commits/{commit}/check-runs')
+    check_run_conclusions = {}
+    if len(checks) == 0:
+        raise MandatoryChecksMissingError("Refusing to merge as land check(s) are not yet run")
+    for check_run in checks['check_runs']:
+        check_run_conclusions[check_run['name']] = (check_run['conclusion'],
+                                                    check_run['html_url'])
+    return check_run_conclusions
+
+def validate_land_time_checks(repo: GitRepo, commit: str) -> None:
+    checks = fetch_check_run_conclusions(repo, commit)
+    [pending_checks, failed_checks] = categorize_checks(checks, checks)
+
+    if len(failed_checks) > 0:
+        raise RuntimeError(f"Failed to merge; some land checks failed: {checks_to_str(failed_checks)}")
+    if len(pending_checks) > 0:
+        raise MandatoryChecksMissingError(f"Refusing to merge as land check(s) {checks_to_str(pending_checks)} are not yet run")
+
+def categorize_checks(check_runs: Dict[str, Tuple[str, str]],
+                      required_checks: Iterable[str]) -> Tuple[List[Tuple[str, Optional[str]]], List[Tuple[str, Optional[str]]]]:
+    pending_checks: List[Tuple[str, Optional[str]]] = []
+    failed_checks: List[Tuple[str, Optional[str]]] = []
+    for checkname in required_checks:
+        if checkname not in check_runs:
+            pending_checks.append((checkname, None))
+        elif check_runs[checkname][0] is None:
+            pending_checks.append((checkname, check_runs[checkname][1]))
+        elif check_runs[checkname][0].upper() != 'SUCCESS' and check_runs[checkname][0].upper() != 'SKIPPED':
+            failed_checks.append((checkname, check_runs[checkname][1]))
+    return (pending_checks, failed_checks)
+
+def merge(pr_num: int, repo: GitRepo,
+          dry_run: bool = False,
+          force: bool = False,
+          comment_id: Optional[int] = None,
+          mandatory_only: bool = False,
+          on_green: bool = False,
+          land_checks: bool = False,
+          timeout_minutes: int = 400,
+          stale_pr_days: int = 3) -> None:
     repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
     org, project = repo.gh_owner_and_name()
+    pr = GitHubPR(org, project, pr_num)
+    initial_commit_sha = pr.last_commit()['oid']
+    check_for_sev(org, project, force)
+    if force or can_skip_internal_checks(pr, comment_id):
+        # do not wait for any pending signals if PR is closed as part of co-development process
+        return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
+    if (datetime.utcnow() - pr.last_pushed_at()).days > stale_pr_days:
+        raise RuntimeError("This PR is too stale; the last push date was more than 3 days ago. Please rebase and try again.")
+
+    if land_checks:
+        commit = pr.create_land_time_check_branch(repo, 'viable/strict', force=force, comment_id=comment_id)
+
     start_time = time.time()
     last_exception = ''
     elapsed_time = 0.0
     while elapsed_time < timeout_minutes * 60:
+        check_for_sev(org, project, force)
         current_time = time.time()
         elapsed_time = current_time - start_time
-
-
+        print(f"Attempting merge of https://github.com/{org}/{project}/pull/{pr_num} ({elapsed_time / 60} minutes elapsed)")
         pr = GitHubPR(org, project, pr_num)
+        if initial_commit_sha != pr.last_commit()['oid']:
+            raise RuntimeError("New commits were pushed while merging. Please rerun the merge command.")
         try:
-            return pr.merge_into(repo, dry_run=dry_run)
+            find_matching_merge_rule(pr, repo)
+            pending = pr_get_pending_checks(pr)
+            failing = pr_get_failed_checks(pr)
+
+            if (not mandatory_only and on_green) and len(failing) > 0:
+                raise RuntimeError(f"{len(failing)} additional jobs have failed, first few of them are: " +
+                                   ' ,'.join(f"[{x[0]}]({x[1]})" for x in failing[:5]))
+            if (not mandatory_only and on_green) and len(pending) > 0:
+                raise MandatoryChecksMissingError(f"Still waiting for {len(pending)} additional jobs to finish, " +
+                                                  f"first few of them are: {' ,'.join(x[0] for x in pending[:5])}")
+            if land_checks:
+                validate_land_time_checks(repo, commit)
+
+            return pr.merge_into(repo, dry_run=dry_run, force=force, comment_id=comment_id)
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
-            print(f"Merged failed due to: {ex}. Retrying in 60 seconds.")
-            time.sleep(60)
+            print(f"Merge of https://github.com/{org}/{project}/pull/{pr_num} failed due to: {ex}. Retrying in 5 min")
+            time.sleep(5 * 60)
     # Finally report timeout back
     msg = f"Merged timed out after {timeout_minutes} minutes. Please contact the pytorch_dev_infra team."
     msg += f"The last exception was: {last_exception}"
@@ -926,9 +1090,13 @@ def main() -> None:
         run_url = os.getenv("GH_RUN_URL")
         if run_url is not None:
             msg += f"\nRaised by {run_url}"
-        gh_post_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
+        gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
         import traceback
         traceback.print_exc()
+
+    msg = f"@pytorchbot successfully started a {'revert' if args.revert else 'merge'} job."
+    msg += f" Check the current status [here]({os.getenv('GH_RUN_URL')})"
+    gh_post_pr_comment(org, project, args.pr_num, msg, dry_run=args.dry_run)
 
     if args.revert:
         try:
@@ -938,23 +1106,23 @@ def main() -> None:
         return
 
     if pr.is_closed():
-        gh_post_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
+        gh_post_pr_comment(org, project, args.pr_num, f"Can't merge closed PR #{args.pr_num}", dry_run=args.dry_run)
         return
 
     if pr.is_cross_repo() and pr.is_ghstack_pr():
-        gh_post_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
+        gh_post_pr_comment(org, project, args.pr_num, "Cross-repo ghstack merges are not supported", dry_run=args.dry_run)
         return
 
-    if args.on_green:
-        try:
-            merge_on_green(args.pr_num, repo, dry_run=args.dry_run)
-        except Exception as e:
-            handle_exception(e)
-    else:
-        try:
-            pr.merge_into(repo, dry_run=args.dry_run, force=args.force, comment_id=args.comment_id)
-        except Exception as e:
-            handle_exception(e)
+    try:
+        merge(args.pr_num, repo,
+              dry_run=args.dry_run,
+              force=args.force,
+              comment_id=args.comment_id,
+              on_green=args.on_green,
+              mandatory_only=args.on_mandatory,
+              land_checks=args.land_checks)
+    except Exception as e:
+        handle_exception(e)
 
 
 if __name__ == "__main__":
