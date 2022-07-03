@@ -48,7 +48,6 @@ __all__ = [
     "asinh",
     "atan",
     "atanh",
-    "copysign",
     "cos",
     "cosh",
     "bessel_i0",
@@ -549,13 +548,6 @@ atanh = _make_elementwise_unary_prim(
     "atanh",
     impl_aten=torch.atanh,
     impl_nvfuser=_atanh_nvfuser,  # type: ignore[name-defined]
-    doc="",
-    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
-)
-
-copysign = _make_elementwise_unary_prim(
-    "copysign",
-    impl_aten=torch.copysign,
     doc="",
     type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
 )
