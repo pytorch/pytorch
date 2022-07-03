@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 #include <ATen/Context.h>
 #include <ATen/NamedTensorUtils.h>
+#include <ATen/NestedTensorImpl.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorProperties.h>
 
@@ -13,6 +14,7 @@
 #include <ATen/ops/contiguous_native.h>
 #include <ATen/ops/cudnn_is_acceptable_native.h>
 #include <ATen/ops/detach_native.h>
+#include <ATen/ops/equal.h>
 #include <ATen/ops/is_same_size_native.h>
 #include <ATen/ops/is_set_to_native.h>
 #include <ATen/ops/size_native.h>
@@ -28,6 +30,18 @@ bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sizes().equals(other.sizes());
 }
 
+bool nested_is_same_size(const Tensor& self, const Tensor& other) {
+  TORCH_CHECK(
+      self.is_nested() && other.is_nested(),
+      "Expected both self and other to be nested tensors. ",
+      "Self ", self.is_nested()? "is " : "is not ",
+      "nested. While Other ",
+      other.is_nested()? "is " : "is not ",
+      "nested.")
+  const auto self_nt_size = get_nested_size_tensor(self);
+  const auto other_nt_size = get_nested_size_tensor(other);
+  return at::equal(self_nt_size, other_nt_size);
+}
 int64_t size(const Tensor& self, int64_t dim) {
   return self.size(dim);
 }
