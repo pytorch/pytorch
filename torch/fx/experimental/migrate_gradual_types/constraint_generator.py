@@ -177,15 +177,20 @@ def size_inference_rule(n: Node, symbols, constraints, counter):
             input = symbols[n.args[0]]
             c2 = [GetItem(i + 1, n.args[1], size_index, input) for i in range(MAX_TENSOR_RANK)]
             c3 = BinConstraintD(0, size_index, op_leq)
-            return [Conj([Disj(c2), c3])], counter
+
+            input_dyn = BinConstraintT(input, Dyn, op_eq)
+            output_dyn = BinConstraintD(size_index, Dyn, op_eq)
+            c1 = Conj([input_dyn, output_dyn])
+
+            # print(c1)
+
+            return [Disj([c1, Conj([Disj(c2), c3])])], counter
+
         else:
             raise NotImplementedError
 
     else:
         raise NotImplementedError
-
-
-
 
 
 # TODO
