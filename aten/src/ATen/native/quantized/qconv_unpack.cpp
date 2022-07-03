@@ -4,7 +4,7 @@ The correct unpack backend function is determined using runtime polymorphism thr
 which is of type intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> and points to either a PackedConvWeightsQnnp,
 PackedConvWeights (Fbgemm), or PackedConvWeightsCudnn at runtime, which all inherit from ConvPackedParamsBase.
 The implementations for the unpack functions can be found in /cpu/qconv_unpack_impl.cpp, for fbgemm&qnnpack
-and /cudnn/conv_unpack_impl.cpp, for cudnn.
+and /cudnn/ConvUnpackImpl.cpp, for cudnn.
 */
 
 #include <tuple>
@@ -12,10 +12,10 @@ and /cudnn/conv_unpack_impl.cpp, for cudnn.
 #include <ATen/ATen.h>
 #include <torch/library.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/onednn_utils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
-#include <ATen/native/quantized/packed_params.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
+#include <ATen/native/quantized/PackedParams.h>
 
 namespace at {
 namespace native {
