@@ -20,7 +20,7 @@
 #ifdef USE_KINETO
 // Forward declarations so we don't have to include `libkineto.h` in a header.
 namespace libkineto {
-struct GenericTraceActivity;
+class GenericTraceActivity;
 struct CpuTraceBuffer;
 class ActivityTraceInterface;
 } // namespace libkineto
