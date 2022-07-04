@@ -463,11 +463,11 @@ class CachingAllocatorConfig {
             double val2 = stod(kv[1]);
             TORCH_CHECK(
                 val2 > 0,
-                "garbage_collect_threshold too small, set it 0.0~1.0",
+                "garbage_collection_threshold too small, set it 0.0~1.0",
                 "");
             TORCH_CHECK(
                 val2 < 1.0,
-                "garbage_collect_threshold too big, set it 0.0~1.0",
+                "garbage_collection_threshold too big, set it 0.0~1.0",
                 "");
             m_garbage_collection_threshold = val2;
           } else {
