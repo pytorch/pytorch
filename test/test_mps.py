@@ -368,6 +368,12 @@ class TestMPS(TestCase):
                 self.assertEqual(cpu_linear.bias.grad.size(), mps_linear.bias.grad.size())
                 self.assertEqual(cpu_linear.bias.grad, mps_linear.bias.grad.to("cpu"), atol=8e-04, rtol=10.4e-05)
 
+    def test_linear1D(self):
+        self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=False)
+
+    def test_linear1D_backward(self):
+        self._linear_helper(in_features=2, out_features=3, shape=([2]), bias=True, backward_pass=True)
+
     def test_linear2D(self):
         self._linear_helper(in_features=2, out_features=3, shape=((4, 2)), bias=True, backward_pass=False)
 
