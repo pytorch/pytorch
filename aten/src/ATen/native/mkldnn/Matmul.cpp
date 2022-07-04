@@ -60,7 +60,8 @@ bool mkldnn_bf16_gemm(
     float beta,
     c10::BFloat16 *c_data, int64_t ldc) {
   if (!use_mkldnn_bf16_matmul() ||
-      (m * n * k <= 16 * 16 * 16)) {
+      (m * n * k <= 16 * 16 * 16) ||
+      (alpha == 0.0f)) {
     return false;
   }
 
