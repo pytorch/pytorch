@@ -66,6 +66,7 @@ jobs:
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
+          skip_push: false
           force_push: true
           push-ghcr-image: true
 

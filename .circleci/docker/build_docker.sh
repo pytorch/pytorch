@@ -49,7 +49,12 @@ fi
 
 # Only push if `DOCKER_SKIP_PUSH` = false
 if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
-  docker push "${image}:${tag}"
+  # Only push if docker image doesn't exist already.
+  # ECR image tags are immutable so this will avoid pushing if only just testing if the docker jobs work
+  # NOTE: The only workflow that should push these images should be the docker-builds.yml workflow
+  if ! docker manifest inspect "${image}:${tag}" >/dev/null 2>/dev/null; then
+    docker push "${image}:${tag}"
+  fi
 
   if [ "${PUSH_GHCR_IMAGE:-}" ]; then
     # Push docker image to the ghcr.io
@@ -57,6 +62,7 @@ if [ "${DOCKER_SKIP_PUSH:-true}" = "false" ]; then
     docker tag "${image}:${tag}" "${ghcr_image}:${tag}"
     docker push "${ghcr_image}:${tag}"
   fi
+
 fi
 
 if [ -z "${DOCKER_SKIP_S3_UPLOAD:-}" ]; then
