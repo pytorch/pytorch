@@ -13,6 +13,10 @@ import torch.nn.intrinsic.qat as nniqat
 import torch.nn.intrinsic as nni
 import torch.nn.qat as nnqat
 import torch.nn.qat.dynamic as nnqatd
+from torch.ao.quantization.backend_config import get_native_backend_config_dict
+import torch.ao.quantization.fx._lower_to_native_backend as \
+    _lower_to_native_backend
+import torch.ao.quantization.quantization_mappings as quantization_mappings
 
 from .ns_types import NSNodeTargetType
 
@@ -20,73 +24,35 @@ from typing import Set, Dict, List, Optional
 
 
 def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
+    # note: this set is modified below by items from backend_config_dict
     sets_of_related_ops: List[Set[NSNodeTargetType]] = [
         # conv modules
         set([
             nn.Conv1d,
-            nnq.Conv1d,
-            nnqd.Conv1d,
-            nniqat.ConvBn1d,
-            nniqat.ConvBnReLU1d,
-            nniq.ConvReLU1d,
-            nni.ConvReLU1d,
         ]),
         set([
             nn.Conv2d,
-            nnq.Conv2d,
-            nnqd.Conv2d,
-            nnqat.Conv2d,
-            nniqat.ConvBn2d,
-            nniqat.ConvBnReLU2d,
-            nniqat.ConvReLU2d,
-            nniq.ConvReLU2d,
-            nni.ConvReLU2d,
         ]),
         set([
             nn.Conv3d,
-            nnq.Conv3d,
-            nnqd.Conv3d,
-            nnqat.Conv3d,
-            nniqat.ConvBn3d,
-            nniqat.ConvBnReLU3d,
-            nniqat.ConvReLU3d,
-            nniq.ConvReLU3d,
-            nni.ConvReLU3d,
         ]),
         # conv functionals
         set([
             F.conv1d,
-            toq.conv1d,
-            toq.conv1d_relu,
         ]),
         set([
             F.conv2d,
-            toq.conv2d,
-            toq.conv2d_relu,
         ]),
         set([
             F.conv3d,
-            toq.conv3d,
-            toq.conv3d_relu,
         ]),
         # linear modules
         set([
             nn.Linear,
-            nnq.Linear,
-            nni.LinearReLU,
-            nniq.LinearReLU,
-            nniqd.LinearReLU,
-            nnqat.Linear,
-            nnqatd.Linear,
-            nnqd.Linear,
-            nniqat.LinearReLU,
-            nn.modules.linear.NonDynamicallyQuantizableLinear,
         ]),
         # linear functionals
         set([
             F.linear,
-            toq.linear,
-            toq.linear_relu,
         ]),
         # average pool
         set([
@@ -117,26 +83,20 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # LSTM
         set([
             nn.LSTM,
-            nnqd.LSTM,
         ]),
         # add
         set([
             torch.add,
-            toq.add,
             operator.add,  # x + y
-            toq.add_relu,
         ]),
         # cat
         set([
             torch.cat,
-            toq.cat,
         ]),
         # mul
         set([
             torch.mul,
-            toq.mul,
             operator.mul,
-            toq.mul_relu,
         ]),
         # relu
         set([
@@ -170,121 +130,82 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # BatchNorm
         set([
             nn.BatchNorm2d,
-            nnq.BatchNorm2d,
         ]),
         set([
             nn.BatchNorm3d,
-            nnq.BatchNorm3d,
         ]),
         # ConvTranspose
         set([
             nn.ConvTranspose1d,
-            nnq.ConvTranspose1d,
-            nnqd.ConvTranspose1d,
         ]),
         set([
             nn.ConvTranspose2d,
-            nnq.ConvTranspose2d,
-            nnqd.ConvTranspose2d,
         ]),
         set([
             nn.ConvTranspose3d,
-            nnq.ConvTranspose3d,
-            nnqd.ConvTranspose3d,
-        ]),
-        set([
-            nn.ConvTranspose3d,
-            nnq.ConvTranspose3d,
         ]),
         # ELU
         set([
             nn.ELU,
-            nnq.ELU,
         ]),
         # Embedding
         set([
             nn.Embedding,
-            nnq.Embedding,
-            nnqat.Embedding,
         ]),
         # EmbeddingBag
         set([
             nn.EmbeddingBag,
-            nnq.EmbeddingBag,
-            nnqat.EmbeddingBag,
         ]),
         # GroupNorm
         set([
             nn.GroupNorm,
-            nnq.GroupNorm,
         ]),
         # Hardswish
         set([
             nn.Hardswish,
-            nnq.Hardswish,
         ]),
         # InstanceNorm
         set([
             nn.InstanceNorm1d,
-            nnq.InstanceNorm1d,
         ]),
         set([
             nn.InstanceNorm2d,
-            nnq.InstanceNorm2d,
         ]),
         set([
             nn.InstanceNorm3d,
-            nnq.InstanceNorm3d,
         ]),
         # LayerNorm
         set([
             nn.LayerNorm,
-            nnq.LayerNorm,
         ]),
         # LeakyReLU
         set([
             nn.LeakyReLU,
-            nnq.LeakyReLU,
         ]),
         # ReLU6
         set([
             nn.ReLU6,
             F.relu6,
-            nnq.ReLU6,
-        ]),
-        # BNReLU2d
-        set([
-            nni.BNReLU2d,
-            nniq.BNReLU2d,
-        ]),
-        set([
-            nni.BNReLU3d,
-            nniq.BNReLU3d,
         ]),
         # F.elu
         set([
             F.elu,
-            toq.elu,
         ]),
         # F.hardswish
         set([
             F.hardswish,
-            toq.hardswish,
         ]),
         # F.instance_norm
         set([
             F.instance_norm,
-            toq.instance_norm,
         ]),
         # F.layer_norm
         set([
             F.layer_norm,
-            toq.layer_norm,
         ]),
         # F.leaky_relu
         set([
             F.leaky_relu,
-            toq.leaky_relu,
         ]),
         # F.silu
         set([
@@ -376,14 +297,115 @@ def get_base_name_to_sets_of_related_ops() -> Dict[str, Set[NSNodeTargetType]]:
         # dropout
         set([
             nn.Dropout,
-            nnq.Dropout,
         ]),
         # F.dropout
         set([
             F.dropout,
-            toq.dropout,
+        ]),
+        # matmul
+        set([
+            torch.matmul,
+        ]),
+        # Softmax
+        set([
+            nn.Softmax,
         ]),
     ]
+
+    # for each floating point op, add versions of the op added by
+    # backend_config_dict
+    backend_config_dict = get_native_backend_config_dict()
+
+    new_connections = [
+        # technical debt edge case
+        (nn.Linear, nn.modules.linear.NonDynamicallyQuantizableLinear),
+    ]
+
+    for config in backend_config_dict['configs']:
+
+        if 'pattern' not in config:
+            continue
+
+        # format: (c, (b, a))
+        pattern = config['pattern']
+        first_element = pattern
+        # look from the end, because pattern is in reverse order
+        while isinstance(first_element, (list, tuple)):
+            first_element = first_element[-1]
+
+        if 'fused_module' in config:
+            # case 1: pattern fuses a pattern of ops into an op
+            # example: nn.Conv1d, nn.ReLU fused into nni.ConvReLU1d
+            new_connections.append((first_element, config['fused_module']))
+
+        if 'qat_module' in config:
+            # case 2: pattern swaps a module into a QAT module
+            # example: nni.ConvReLU1d swapped into nniqat.ConvReLU1d
+            new_connections.append((first_element, config['qat_module']))
+
+        if 'reference_quantized_module_for_root' in config:
+            # case 3: reference version of floating point module, such as
+            # nn.Conv2d and nnqr.Conv2d
+            new_connections.append(
+                (first_element, config['reference_quantized_module_for_root'])
+            )
+
+    #
+    # Add reference module swaps from default lowering path
+    #
+
+    for source_to_target in (
+        _lower_to_native_backend.STATIC_LOWER_MODULE_MAP,
+        _lower_to_native_backend.DYNAMIC_LOWER_MODULE_MAP,
+        _lower_to_native_backend.WEIGHT_ONLY_LOWER_MODULE_MAP,
+        _lower_to_native_backend.SPECIAL_PATTERN_LOWER_MODULE_MAP,
+    ):
+        for source, target in source_to_target.items():  # type: ignore[attr-defined]
+            new_connections.append((source, target))
+
+    for source_to_double_target in (
+        _lower_to_native_backend.STATIC_LOWER_FUSED_MODULE_MAP,
+        _lower_to_native_backend.DYNAMIC_LOWER_FUSED_MODULE_MAP,
+    ):
+        for source, (target1, target2) in source_to_double_target.items():  # type: ignore[attr-defined]
+            new_connections.append((source, target1))
+            new_connections.append((source, target2))
+
+    #
+    # Add function swaps from default lowering path
+    #
+
+    for source, (target1, target2) in \
+            _lower_to_native_backend.STATIC_LOWER_FUNCTIONAL_MAP.items():
+        new_connections.append((source, target1))
+        new_connections.append((source, target2))
+
+    for source_to_target in (
+        _lower_to_native_backend.QBIN_OP_MAPPING,
+        _lower_to_native_backend.QBIN_RELU_OP_MAPPING,
+        quantization_mappings.DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS,
+    ):
+        for source, target in source_to_target.items():
+            new_connections.append((source, target))
+
+    #
+    # Add other swaps, ideally in the future this could be removed
+    # after the lowering code stops using these.
+    #
+    for source_to_target in (
+        quantization_mappings.DEFAULT_DYNAMIC_QUANT_MODULE_MAPPINGS,
+    ):
+        for source, target in source_to_target.items():
+            new_connections.append((source, target))
+
+
+    # add the new connections from backend_config_dict
+    for item1, item2 in new_connections:
+        for set_of_related_ops in sets_of_related_ops:
+            if item1 in set_of_related_ops or item2 in set_of_related_ops:
+                set_of_related_ops.add(item1)
+                set_of_related_ops.add(item2)
+                break
 
     base_name_to_sets_of_related_ops: Dict[str, Set[NSNodeTargetType]] = {}
 
@@ -441,10 +463,10 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         F.dropout,
         F.silu,
         F.mish,
-        # TODO(future PR): implement shadowing for binary ops and
-        # uncomment below
-        # operator.add,
-        # operator.mul,
+        operator.add,
+        torch.add,
+        operator.mul,
+        torch.mul,
         torch.sum,
     ])
 
@@ -507,6 +529,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         torch.squeeze,
         torch.stack,
         torch.unsqueeze,
+        operator.add,
     ])
 
     MODS_IO_TYPE_FP32: Set[NSNodeTargetType] = set([
@@ -518,9 +541,7 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.Conv1d,
         nn.Conv2d,
         nn.Conv3d,
-        nnqd.Conv1d,
-        nnqd.Conv2d,
-        nnqd.Conv3d,
+        nnqat.Conv1d,
         nnqat.Conv2d,
         nnqat.Conv3d,
         nnqat.Embedding,
@@ -535,9 +556,6 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.ConvTranspose1d,
         nn.ConvTranspose2d,
         nn.ConvTranspose3d,
-        nnqd.ConvTranspose1d,
-        nnqd.ConvTranspose2d,
-        nnqd.ConvTranspose3d,
         nn.ELU,
         nn.GroupNorm,
         nn.InstanceNorm1d,
@@ -549,12 +567,14 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nn.ReLU6,
         nn.SiLU,
         nn.Mish,
+        nn.Softmax,
         nni.BNReLU2d,
         nni.BNReLU3d,
         nni.ConvReLU1d,
         nni.ConvReLU2d,
         nni.ConvReLU3d,
         nni.LinearReLU,
+        nni.LinearBn1d,
         nni.ConvBn1d,
         nni.ConvBn2d,
         nni.ConvBn3d,
@@ -564,9 +584,11 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nniqat.ConvBnReLU1d,
         nniqat.ConvBnReLU2d,
         nniqat.ConvBnReLU3d,
+        nniqat.ConvReLU1d,
         nniqat.ConvReLU2d,
         nniqat.ConvReLU3d,
         nniqat.LinearReLU,
+        nniqat.LinearBn1d,
         nniqd.LinearReLU,
     ])
 
@@ -574,26 +596,23 @@ def get_node_type_to_io_type_map() -> Dict[str, Set[NSNodeTargetType]]:
         nnq.Linear,
         nnq.Conv1d,
         nnq.Conv2d,
-        nniq.ConvReLU2d,
         nnq.Conv3d,
         nnq.BatchNorm2d,
         nnq.BatchNorm3d,
         nnq.Dropout,
         nnq.ConvTranspose1d,
         nnq.ConvTranspose2d,
-        nnq.ConvTranspose3d,
         nnq.ELU,
-        nnq.GroupNorm,
         nnq.InstanceNorm1d,
         nnq.InstanceNorm2d,
         nnq.InstanceNorm3d,
         nnq.LayerNorm,
         nnq.Hardswish,
         nnq.LeakyReLU,
-        nnq.ReLU6,
         nnq.Embedding,
         nnq.EmbeddingBag,
         nnq.Dropout,
+        nnq.Softmax,
         nniq.BNReLU2d,
         nniq.BNReLU3d,
         nniq.ConvReLU1d,

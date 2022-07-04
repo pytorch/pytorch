@@ -71,10 +71,11 @@ class ExperimentalFeatureConfigNode(TreeConfigNode):
         next_nodes = {
             "asan": AsanConfigNode,
             "xla": XlaConfigNode,
-            "mlc": MLCConfigNode,
+            "mps": MPSConfigNode,
             "vulkan": VulkanConfigNode,
             "parallel_tbb": ParallelTBBConfigNode,
-            "noarch": NoarchConfigNode,
+            "crossref": CrossRefConfigNode,
+            "dynamo": DynamoConfigNode,
             "parallel_native": ParallelNativeConfigNode,
             "onnx": ONNXConfigNode,
             "libtorch": LibTorchConfigNode,
@@ -116,12 +117,12 @@ class XlaConfigNode(TreeConfigNode):
     def child_constructor(self):
         return ImportantConfigNode
 
-class MLCConfigNode(TreeConfigNode):
+class MPSConfigNode(TreeConfigNode):
     def modify_label(self, label):
-        return "MLC=" + str(label)
+        return "MPS=" + str(label)
 
     def init2(self, node_name):
-        self.props["is_mlc"] = node_name
+        self.props["is_mps"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode
@@ -171,9 +172,17 @@ class ParallelTBBConfigNode(TreeConfigNode):
         return ImportantConfigNode
 
 
-class NoarchConfigNode(TreeConfigNode):
+class CrossRefConfigNode(TreeConfigNode):
     def init2(self, node_name):
-        self.props["is_noarch"] = node_name
+        self.props["is_crossref"] = node_name
+
+    def child_constructor(self):
+        return ImportantConfigNode
+
+
+class DynamoConfigNode(TreeConfigNode):
+    def init2(self, node_name):
+        self.props["is_dynamo"] = node_name
 
     def child_constructor(self):
         return ImportantConfigNode

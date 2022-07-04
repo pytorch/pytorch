@@ -5,10 +5,11 @@
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <ATen/SmallVector.h>
-#include <ATen/native/quantized/cpu/conv_packed_params.h>
+#include <ATen/native/quantized/PackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
-#include <ATen/native/quantized/cpu/qnnpack_utils.h>
-#include <ATen/native/quantized/cpu/quant_utils.h>
+#include <ATen/native/quantized/cpu/QnnpackUtils.h>
+#include <ATen/native/quantized/cpu/OnednnUtils.h>
+#include <ATen/native/quantized/cpu/QuantUtils.h>
 #include <c10/util/irange.h>
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <torch/library.h>
@@ -70,7 +71,11 @@ template at::Tensor PackedConvWeight<3>::apply_dynamic(
 template <int kSpatialDim>
 at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_dynamic(
     const at::Tensor& input,
-    bool /*reduce_range*/) {
+    bool reduce_range) {
+  if (reduce_range) {
+    TORCH_WARN("Currently, qnnpack incorrectly ignores reduce_range when it is set to true; this may change in a future release.");
+  }
+
   // On empty input, no output data will be generated,
   // so use arbitrary qparams.
   float x_min = 0;
@@ -117,6 +122,57 @@ template at::Tensor PackedConvWeightsQnnp<3>::apply_dynamic(
     bool reduce_range);
 
 #endif // USE_PYTORCH_QNNPACK
+
+#if AT_MKLDNN_ENABLED()
+
+template <int kSpatialDim>
+at::Tensor PackedConvWeightsOnednn<kSpatialDim>::apply_dynamic(
+    const at::Tensor& input,
+    bool reduce_range) {
+
+  // Find min/max of input
+  float x_max = 0, x_min = 0;
+  if (input.numel() > 0) {
+    x_min = input.min().item<float>();
+    x_max = input.max().item<float>();
+  }
+
+  // Input tensor is quantized as 8-bit unsigned values
+  static constexpr int precision = 8;
+  static constexpr bool is_signed = false;
+
+  // Calculate scale and zero point for quantization of input tensor
+  auto q_params = quant_utils::ChooseQuantizationParams(
+      /*min=*/x_min,
+      /*max=*/x_max,
+      /*qmin=*/is_signed ? -(1 << (precision - 1)) : 0,
+      /*qmax=*/
+      is_signed ? ((1 << (precision - 1)) - 1) : (1 << precision) - 1,
+      /*preserve_sparsity=*/false,
+      /*force_scale_power_of_two=*/false,
+      /*reduce_range=*/reduce_range);
+
+  // Quantize input
+  at::Tensor q_input = at::quantize_per_tensor(
+      input, q_params.scale, q_params.zero_point, c10::kQUInt8);
+
+  at::Tensor out =
+      apply_impl<false>(q_input, q_params.scale, q_params.zero_point);
+
+  // TODO: Modify ideep to allow fp32 input & output
+  // to avoid explicit `quantize - dequantize`
+  return at::dequantize(out);
+}
+
+template at::Tensor PackedConvWeightsOnednn<2>::apply_dynamic(
+    const at::Tensor& input,
+    bool reduce_range);
+
+template at::Tensor PackedConvWeightsOnednn<3>::apply_dynamic(
+    const at::Tensor& input,
+    bool reduce_range);
+
+#endif // AT_MKLDNN_ENABLED()
 
 namespace at {
 namespace native {

@@ -13,11 +13,15 @@ def _initialize_orthogonal(conv):
 
 class ResidualBlock(nn.Module):
     def __init__(self, n_filters):
-        super(ResidualBlock, self).__init__()
-        self.conv1 = nn.Conv2d(n_filters, n_filters, kernel_size=3, padding=1, bias=False)
+        super().__init__()
+        self.conv1 = nn.Conv2d(
+            n_filters, n_filters, kernel_size=3, padding=1, bias=False
+        )
         self.bn1 = nn.BatchNorm2d(n_filters)
         self.prelu = nn.PReLU(n_filters)
-        self.conv2 = nn.Conv2d(n_filters, n_filters, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(
+            n_filters, n_filters, kernel_size=3, padding=1, bias=False
+        )
         self.bn2 = nn.BatchNorm2d(n_filters)
 
         # Orthogonal initialisation
@@ -32,8 +36,10 @@ class ResidualBlock(nn.Module):
 
 class UpscaleBlock(nn.Module):
     def __init__(self, n_filters):
-        super(UpscaleBlock, self).__init__()
-        self.upscaling_conv = nn.Conv2d(n_filters, 4 * n_filters, kernel_size=3, padding=1)
+        super().__init__()
+        self.upscaling_conv = nn.Conv2d(
+            n_filters, 4 * n_filters, kernel_size=3, padding=1
+        )
         self.upscaling_shuffler = nn.PixelShuffle(2)
         self.upscaling = nn.PReLU(n_filters)
         _initialize_orthogonal(self.upscaling_conv)
@@ -44,7 +50,7 @@ class UpscaleBlock(nn.Module):
 
 class SRResNet(nn.Module):
     def __init__(self, rescale_factor, n_filters, n_blocks):
-        super(SRResNet, self).__init__()
+        super().__init__()
         self.rescale_levels = int(math.log(rescale_factor, 2))
         self.n_filters = n_filters
         self.n_blocks = n_blocks
@@ -54,14 +60,21 @@ class SRResNet(nn.Module):
 
         for residual_block_num in range(1, n_blocks + 1):
             residual_block = ResidualBlock(self.n_filters)
-            self.add_module('residual_block' + str(residual_block_num), nn.Sequential(residual_block))
+            self.add_module(
+                "residual_block" + str(residual_block_num),
+                nn.Sequential(residual_block),
+            )
 
-        self.skip_conv = nn.Conv2d(n_filters, n_filters, kernel_size=3, padding=1, bias=False)
+        self.skip_conv = nn.Conv2d(
+            n_filters, n_filters, kernel_size=3, padding=1, bias=False
+        )
         self.skip_bn = nn.BatchNorm2d(n_filters)
 
         for upscale_block_num in range(1, self.rescale_levels + 1):
             upscale_block = UpscaleBlock(self.n_filters)
-            self.add_module('upscale_block' + str(upscale_block_num), nn.Sequential(upscale_block))
+            self.add_module(
+                "upscale_block" + str(upscale_block_num), nn.Sequential(upscale_block)
+            )
 
         self.output_conv = nn.Conv2d(n_filters, 3, kernel_size=9, padding=4)
 
@@ -74,8 +87,8 @@ class SRResNet(nn.Module):
         x_init = self.prelu1(self.conv1(x))
         x = self.residual_block1(x_init)
         for residual_block_num in range(2, self.n_blocks + 1):
-            x = getattr(self, 'residual_block' + str(residual_block_num))(x)
+            x = getattr(self, "residual_block" + str(residual_block_num))(x)
         x = self.skip_bn(self.skip_conv(x)) + x_init
         for upscale_block_num in range(1, self.rescale_levels + 1):
-            x = getattr(self, 'upscale_block' + str(upscale_block_num))(x)
+            x = getattr(self, "upscale_block" + str(upscale_block_num))(x)
         return self.output_conv(x)

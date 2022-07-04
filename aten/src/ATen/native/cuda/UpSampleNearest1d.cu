@@ -1,11 +1,22 @@
-#include <ATen/ATen.h>
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
-#include <ATen/NativeFunctions.h>
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/cuda/UpSample.cuh>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/upsample_nearest1d_native.h>
+#include <ATen/ops/upsample_nearest1d_backward_native.h>
+#include <ATen/ops/_upsample_nearest_exact1d_native.h>
+#include <ATen/ops/_upsample_nearest_exact1d_backward_native.h>
+#endif
 
 namespace at {
 namespace native {

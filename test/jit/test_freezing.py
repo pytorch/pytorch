@@ -12,7 +12,7 @@ from torch.jit._recursive import wrap_cpp_module
 from torch.testing import FileCheck
 from torch.testing._internal.common_quantization import skipIfNoFBGEMM
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import set_default_dtype, skipCUDAMemoryLeakCheckIf
 from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils import mkldnn as mkldnn_utils
 
@@ -1678,6 +1678,38 @@ class TestFrozenOptimizations(JitTestCase):
         scripted_mod = torch.jit.freeze(scripted_mod, preserved_attrs=["make_prediction", "amt"])
         FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.make_prediction.graph)
 
+    # During freezing this creates tensors constants that are attached to the frozen graph,
+    # which is then kept alive by the compilation unit (which causes a leak)
+    @skipCUDAMemoryLeakCheckIf(True)
+    @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
+    def test_conv_bn_folding_autocast_scenario_cuda(self):
+        # CUDA conv takes input tensors which must all be the same dtype,
+        # which can cause issues if folding produces inputs of different dtypes.
+
+        class ConvBN(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(ConvBN, self).__init__()
+                self.conv = torch.nn.Conv2d(in_channels, out_channels, bias=False, dtype=torch.half, **kwargs)
+                self.bn = torch.nn.BatchNorm2d(out_channels, eps=0.001, dtype=torch.float)
+
+            def forward(self, x):
+                return self.bn(self.conv(x))
+
+        mod_eager = ConvBN(3, 32, kernel_size=3, stride=2).cuda().eval()
+        scripted_mod = torch.jit.script(mod_eager)
+        scripted_mod = torch.jit.freeze(scripted_mod)
+        FileCheck().check("conv").check_not("aten::batch_norm").run(scripted_mod.graph)
+        conv_node = scripted_mod.graph.findNode("aten::conv2d", True)
+        self.assertTrue(conv_node is not None)
+        bias_input = conv_node.namedInput("bias")
+        self.assertTrue(bias_input is not None)
+        self.assertTrue(bias_input.type().dtype() == torch.half)
+
+        x = torch.rand((3, 3, 32, 32), dtype=torch.half).cuda()
+
+        self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
+        self.assertEqual(mod_eager(x), scripted_mod(x), atol=1e-2, rtol=1e-2)
+
     def test_conv_add_folding(self):
 
         @torch.no_grad()
@@ -1760,7 +1792,32 @@ class TestFrozenOptimizations(JitTestCase):
 
             # add with different dtype
             test_conv_fusion(use_bias, nn.Conv2d, False, pytorch_op, False,
-                             add_tensor=torch.rand(1).to(torch.int), expect_success=False)
+                             add_tensor=torch.tensor([2]).to(torch.int), expect_success=True)
+
+    def test_conv_mul_add_bn(self):
+        class Conv_Mul_Add_Bn(nn.Module):
+
+            def __init__(self, in_channels, out_channels, **kwargs):
+                super(Conv_Mul_Add_Bn, self).__init__()
+                self.conv = nn.Conv2d(in_channels, out_channels, **kwargs)
+                self.bn = nn.BatchNorm2d(out_channels, eps=0.001)
+                self.tensor1 = torch.tensor(2.2)
+                self.tensor2 = torch.tensor(2)
+
+            def forward(self, x):
+                return self.bn(torch.add(torch.mul(self.conv(x), self.tensor1), self.tensor2))
+
+        input = torch.randn(8, 3, 64, 64)
+        model = Conv_Mul_Add_Bn(3, 32, kernel_size=3, stride=1).eval()
+
+        with torch.no_grad():
+            result = model(input)
+            traced_model = torch.jit.trace(model, input).eval()
+            traced_model = torch.jit.freeze(traced_model)
+            tresult = traced_model(input)
+            self.assertEqual(result, tresult)
+            FileCheck().check("conv").check_not("aten::batch_norm").run(traced_model.graph)
+            FileCheck().check("conv").check_not("aten::add").run(traced_model.graph)
 
     @unittest.skipIf(not TEST_CUDA, "Optimization currently only run for GPU")
     def test_linear_concat(self):
@@ -1944,7 +2001,7 @@ class TestFrozenOptimizations(JitTestCase):
         frozen_mod = torch.jit.freeze(mod)
         FileCheck().check_not("aten::feature_dropout").run(frozen_mod.graph)
 
-        input = torch.randn(2, 2)
+        input = torch.randn(2, 2, 1, 1)
         output_s = mod.forward(input)
         output_f = frozen_mod.forward(input)
         self.assertEqual(output_s, output_f)

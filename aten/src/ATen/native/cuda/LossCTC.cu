@@ -7,14 +7,31 @@
 // Graves et al call the probabilities y, we use log_probs (also calling them inputs)
 // A few optimizations (similar to those here, but also some I didn't take) are described in
 // 2. Minmin Sun: http://on-demand.gputechconf.com/gtc/2016/presentation/s6383-minmin-sun-speech-recognition.pdf
-
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorUtils.h>
 #include <c10/util/Exception.h>
 #include <c10/macros/Macros.h>
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/TensorOperators.h>
 #include <ATen/cuda/Atomic.cuh>
 #include <ATen/cuda/CUDAContext.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_ctc_loss_backward_native.h>
+#include <ATen/ops/_ctc_loss_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/exp.h>
+#include <ATen/ops/full_like.h>
+#include <ATen/ops/imag.h>
+#include <ATen/ops/logsumexp.h>
+#include <ATen/ops/tensor.h>
+#include <ATen/ops/where.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 #include <type_traits>
 #include <numeric>
@@ -417,14 +434,14 @@ ctc_loss_backward_collect_nonblank_gpu_kernel(scalar_t* __restrict__ gradient_da
                                                      const scalar_t* __restrict__ grad_out_data, int64_t grad_out_batch_stride,
                                                      const scalar_t* __restrict__ log_alpha_data, const scalar_t* __restrict__ log_beta_data,
                                                      const scalar_t*log_probs_data, const int64_t* __restrict__ input_lengths,
-                                                     const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths, int64_t max_target_length,
+                                                     const target_t* __restrict__ targets_data, const int64_t* __restrict__ target_lengths,
                                                      const scalar_t* __restrict__ neg_log_likelihood_data,
                                                      int64_t gr_input_stride, int64_t gr_batch_stride, int64_t gr_char_stride,
                                                      int64_t lp_input_stride, int64_t lp_batch_stride, int64_t lp_char_stride,
                                                      int64_t la_batch_stride, int64_t la_input_stride, int64_t la_target_stride,
                                                      int64_t lb_batch_stride, int64_t lb_input_stride, int64_t lb_target_stride,
                                                      const int64_t* __restrict__ tg_batch_offsets, int64_t tg_target_stride,
-                                              int64_t batch_size, int64_t num_labels, int64_t BLANK, bool zero_infinity) {
+                                              int64_t batch_size, bool zero_infinity) {
   int64_t b = threadIdx.y + blockIdx.y * blockDim.y;
   int64_t s = threadIdx.x + blockIdx.x * blockDim.x; // note, this directly indexes into targets, not targets prime!
 
@@ -676,14 +693,14 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        grad_out.data_ptr<scalar_t>(), grad_out.stride(0),
        log_alpha.data_ptr<scalar_t>(), log_beta.data_ptr<scalar_t>(),
        log_probs.data_ptr<scalar_t>(), input_lengths_t.data_ptr<int64_t>(),
-       targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(), max_target_length,
+       targets.data_ptr<target_t>(), target_lengths_t.data_ptr<int64_t>(),
        neg_log_likelihood.data_ptr<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data_ptr<int64_t>(), tg_target_stride,
-       batch_size, num_labels, BLANK, zero_infinity);
+       batch_size, zero_infinity);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   } else { // small problem, use naive algorithm
     // Still no block/grid configuration guru...

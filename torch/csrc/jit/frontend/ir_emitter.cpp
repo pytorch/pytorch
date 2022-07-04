@@ -24,6 +24,7 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 #include <torch/csrc/jit/passes/normalize_ops.h>
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
+#include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
@@ -34,6 +35,9 @@
 #include <c10/util/Optional.h>
 #include <c10/util/hash.h>
 
+#include <ATen/core/interned_strings.h>
+#include <ATen/core/jit_type.h>
+#include <torch/csrc/jit/frontend/error_report.h>
 #include <atomic>
 #include <climits>
 #include <set>
@@ -2478,12 +2482,14 @@ struct to_ir {
   void emitRaise(const Raise& raise) {
     auto sv = emitSugaredExpr(raise.expr(), 1);
     Value* error_message = nullptr;
+    Value* qualified_class_name = nullptr;
 
     if (auto exception_instance =
             std::dynamic_pointer_cast<ExceptionMessageValue>(sv)) {
       // The typical case, an instance of the exception class was thrown:
       //    raise RuntimeError("error")
       error_message = exception_instance->getValue();
+      qualified_class_name = exception_instance->getQualifiedClassName();
     } else if (
         auto exception_class = std::dynamic_pointer_cast<ExceptionValue>(sv)) {
       // A bare exception was thrown so add an empty message. e.g.
@@ -2500,7 +2506,11 @@ struct to_ir {
       error_message = graph->insert(aten::str, {error_message});
     }
 
-    graph->insert(prim::RaiseException, {error_message}, {}, raise.range());
+    graph->insert(
+        prim::RaiseException,
+        {error_message, qualified_class_name},
+        {},
+        raise.range());
     exit_blocks.insert(environment_stack->block());
   }
 
@@ -3310,7 +3320,7 @@ struct to_ir {
     auto sv = emitSugaredExpr(apply.callee(), 1);
     auto loc = apply.callee().range();
     if (auto special_form = dynamic_cast<SpecialFormValue*>(sv.get())) {
-      return emitApplySpecialForm(special_form->form(), apply, type_hint);
+      return emitApplySpecialForm(special_form->form(), apply, sv, type_hint);
     }
     auto args = getNamedValues(apply.inputs(), true);
     auto kwargs = emitAttributes(apply.attributes());
@@ -3325,6 +3335,7 @@ struct to_ir {
   std::shared_ptr<SugaredValue> emitApplySpecialForm(
       Symbol form,
       Apply& apply,
+      std::shared_ptr<SugaredValue> sv,
       const TypePtr& type_hint = nullptr) {
     switch (form) {
       case prim::fork: {
@@ -3429,6 +3440,71 @@ struct to_ir {
         return std::make_shared<SimpleValue>(
             graph->insertNode(graph->createTuple(inp_values))->output());
       }
+      case prim::LegacyTypedConstructor: {
+        // see legacy_tensor_generic_ctor_new
+        // These legacy constructors do not follow schemas that can be
+        // typed in native_functions.yaml / JIT type signature and are handled
+        // here. Only the two common cases are handled initially:
+        // "new(IntArrayRef size, *, Device? device=None)",
+        // "new(PyObject* data, *, Device? device=None)",
+        // Note: device argument is unused in the kernel
+        auto args = getValues(apply.inputs(), true);
+        auto kwargs = emitAttributes(apply.attributes());
+        auto get_base_error_msg = [&]() {
+          std::stringstream base_error_msg;
+          base_error_msg
+              << "Legacy Tensor Constructor only supports two schemas in TorchScript: \n";
+          base_error_msg
+              << "'new(IntArrayRef size, *, Device? device=None)',\n";
+          base_error_msg << "'new(PyObject* data, *, Device? device=None)\n'";
+          return base_error_msg;
+        };
+        if (kwargs.size() == 1 && kwargs[0].name() != "device") {
+          throw ErrorReport(apply)
+              << get_base_error_msg().str() << "Got kwarg " << kwargs[0].name();
+        }
+        if (kwargs.size() > 1) {
+          throw ErrorReport(apply)
+              << get_base_error_msg().str() << "Got multiple kwargs\n";
+        }
+        auto dtype = dynamic_cast<LegacyTensorConstructor*>(sv.get())->dtype();
+        auto dtype_ivalue = graph->insertConstant(dtype);
+
+        // supporting "new(IntArrayRef size, *, Device? device=None)", through
+        // empty.memory_format(int[] size, *, ScalarType? dtype=None, Layout?
+        // layout=None, Device? device=None, bool? pin_memory=None,
+        // MemoryFormat? memory_format=None) -> Tensor
+        bool all_ints = std::all_of(args.begin(), args.end(), [](Value* v) {
+          return v->type()->cast<IntType>();
+        });
+        if (args.size() == 0) {
+          // empty inputs == torch.tensor([], dtype=....)
+          auto inp_list =
+              graph->insertNode(graph->createList(IntType::get(), {}))
+                  ->output();
+          return std::make_shared<SimpleValue>(graph->insert(
+              aten::tensor,
+              {inp_list},
+              {NamedValue(apply.range(), "dtype", dtype_ivalue)}));
+        } else if (all_ints) {
+          auto inp_list =
+              graph->insertNode(graph->createList(IntType::get(), args))
+                  ->output();
+          return std::make_shared<SimpleValue>(graph->insert(
+              aten::empty,
+              {inp_list},
+              {NamedValue(apply.range(), "dtype", dtype_ivalue)}));
+        } else if (args.size() == 1) {
+          return std::make_shared<SimpleValue>(graph->insert(
+              aten::tensor,
+              {args[0]},
+              {NamedValue(apply.range(), "dtype", dtype_ivalue)}));
+        } else {
+          throw ErrorReport(apply)
+              << get_base_error_msg().str()
+              << "Got multiple positional arguments that were not all integers";
+        }
+      }
       case prim::isinstance: {
         checkApplyNumInputs(apply, 2);
         auto result = emitIsInstance(apply.inputs()[0], apply.inputs()[1]);
@@ -3471,6 +3547,7 @@ struct to_ir {
         }
         auto createNode =
             graph->insertNode(graph->createObject(class_arg->type_));
+        createNode->setSourceRange(apply.range());
         return std::make_shared<SimpleValue>(createNode->output());
       }
       // We construct the iterable tree here using the IterableTree
@@ -3488,7 +3565,9 @@ struct to_ir {
       case prim::enumerate: {
         const SourceRange& loc = apply.range();
         auto inputs = apply.inputs();
-        auto input_size = apply.inputs().size();
+        auto input_size = inputs.size();
+        auto attributes = apply.attributes();
+        auto attribute_size = attributes.size();
         // enumerate(x) can be rewrite as subtrees:
         // IterableTree(RangeValue(0, math.inf), SimpleValue(x))
         Value* start_index = nullptr;
@@ -3500,11 +3579,22 @@ struct to_ir {
         if (input_size == 2) {
           start_index = emitSugaredExpr(inputs[1], 1)->asValue(loc, method);
         }
-
-        if (input_size > 2) {
+        auto arg_size = input_size + attribute_size;
+        if (arg_size > 2) {
           throw ErrorReport(loc)
-              << "enumerate expected at most 2 arguments, got " << input_size;
+              << "enumerate expected at most 2 arguments, got " << arg_size;
         }
+
+        if (attribute_size == 1) {
+          if (attributes[0].name().name() != "start") {
+            throw ErrorReport(loc)
+                << "enumerate expected kwarg name 'start', got '"
+                << attributes[0].name().name() << "'";
+          }
+          start_index =
+              emitSugaredExpr(attributes[0].value(), 1)->asValue(loc, method);
+        }
+
         std::vector<Value*> range_inputs;
         if (start_index != nullptr) {
           range_inputs.emplace_back(start_index);
@@ -3548,6 +3638,25 @@ struct to_ir {
       }
       case prim::dict: {
         return emitApplySpecialFormForDict(apply, type_hint);
+      }
+      case aten::index: {
+        const SourceRange& loc = apply.range();
+        auto select = Select(apply.callee());
+        auto self = emitSugaredExpr(select.value(), 1)->asValue(loc, method);
+
+        auto inputs = apply.inputs();
+        if (inputs.size() != 1) {
+          throw ErrorReport(apply)
+              << "__getitem__ expected exactly 1 arguments, got "
+              << inputs.size();
+        }
+        auto input =
+            emitSugaredExpr(apply.inputs()[0], 1)->asValue(loc, method);
+        if (input->type()->kind() == TypeKind::TupleType) {
+          return std::make_shared<SimpleValue>(
+              emitIndex(loc, self, createTupleUnpack(input)));
+        }
+        return std::make_shared<SimpleValue>(emitIndex(loc, self, {input}));
       }
       default:
         TORCH_INTERNAL_ASSERT(false, "unknown special form: ", form);
@@ -4176,6 +4285,27 @@ struct to_ir {
 
   Value* emitListLiteral(ListLiteral ll, const TypePtr& type_hint) {
     auto values = getValues(ll.inputs(), /*maybe_unpack=*/true);
+
+    // Empty List Literals that are not assigned to variables
+    // may match to any list type in schema matching,
+    // but still default to List[Tensor] if assigned to a variable
+    // or returned from a function
+    // Restricting empty list matching to temporary values
+    // avoids difficult to handle cases such as
+    // a = []
+    // b = a
+    // if cond:
+    //    b.append(2)
+    // else:
+    //    a.append("hi")
+    // This is also the same behavior that C++ allows with {}
+    // (cannot assign to a variable typed as auto)
+    // These nodes will be removed in a later pass after initial compilation
+    if (values.size() == 0 && type_hint == nullptr) {
+      auto node = graph->insertNode(graph->create(prim::EmptyListLiteral));
+      node->output()->setType(ListType::ofTensors());
+      return node->output();
+    }
 
     // Determine the element type of the list. If we have a type hint
     // of `List[T]`, use `T`. If the list is non-empty, find the
@@ -5428,12 +5558,37 @@ std::vector<Function*> CompilationUnit::define(
       self);
 }
 
+void eraseListLiterals(std::shared_ptr<Graph>& graph) {
+  DepthFirstGraphNodeIterator it(graph);
+
+  for (auto next_node = it.next(); next_node != nullptr;) {
+    Node* node = next_node;
+    next_node = it.next();
+
+    if (node->kind() == prim::EmptyListLiteral) {
+      if (node->hasUses()) {
+        TORCH_INTERNAL_ASSERT(
+            node->output()->type()->isSubtypeOf(ListType::ofTensors()));
+
+        auto li = graph->createList(TensorType::get(), {});
+        li->insertBefore(node);
+        node->replaceAllUsesWith(li);
+      }
+      node->destroy();
+    }
+  }
+}
+
 void runCleanupPasses(std::shared_ptr<Graph>& to_clean) {
   liftClosures(to_clean);
   inlineForkedClosures(to_clean);
+
   if (getInlineEverythingMode()) {
     Inline(*to_clean);
   }
+
+  // these exist temporarily in initial compilation
+  eraseListLiterals(to_clean);
 
   // remove any uses of tuples that we inserted that are not needed
   LowerSimpleTuples(to_clean);

@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/codegen/cuda/arith.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/instrumentation.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_internal_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/ir_iostream.h>
 #include <torch/csrc/jit/codegen/cuda/iter_visitor.h>
@@ -37,18 +38,36 @@ struct ViewIndexState {
 };
 
 //! Base class for all tranformations
-class Transform {
+class Transform : public PolymorphicBase {
  public:
-  virtual void toString(std::stringstream& output) const = 0;
+  virtual void toString(std::ostream& output) const = 0;
 
   size_t index() const {
     return index_;
   }
-  virtual ~Transform() = default;
+
+  size_t originalIndex() const {
+    return original_index_;
+  }
+
+  size_t newIndex() const {
+    return new_index_;
+  }
 
  protected:
-  Transform(size_t index) : index_(index) {}
+  Transform(const ViewIndexState& state, size_t index)
+      : index_(index),
+        original_index_(state.original_view_index),
+        new_index_(Transform::computeNewIndex(state)) {}
+
   const size_t index_ = 0;
+  const size_t original_index_ = 0;
+  const size_t new_index_ = 0;
+
+  static size_t computeNewIndex(const ViewIndexState& state) {
+    return state.original_view_index - state.trivial_reduction_offset +
+        state.split_offset - state.merge_offset + state.broadcast_offset;
+  }
 };
 
 //! Base class for all view tranformations - Merge, Split, Keep
@@ -59,11 +78,12 @@ class ViewTransform : public Transform {
   virtual void createRfactorDomain(
       const std::vector<IterDomain*>& new_root_domain,
       std::vector<IterDomain*>& rfactor_domain) = 0;
-  ~ViewTransform() override = default;
+
+  virtual bool isOriginalAxisDynamic() const = 0;
 
  protected:
   ViewTransform(const ViewIndexState& state)
-      : Transform(ViewTransform::computeIndex(state)) {}
+      : Transform(state, ViewTransform::computeIndex(state)) {}
 
   static size_t computeIndex(const ViewIndexState& state) {
     return state.original_view_index - state.trivial_reduction_offset;
@@ -71,6 +91,7 @@ class ViewTransform : public Transform {
 };
 
 namespace {
+typedef std::vector<size_t> Sizes;
 const size_t kEmptyAxis = 0;
 const size_t kSingletonAxis = 1;
 
@@ -81,16 +102,20 @@ class MergeTransform final : public ViewTransform {
   MergeTransform(const ViewIndexState& state, bool is_last_axis_rfactor)
       : ViewTransform(state), is_last_axis_rfactor_(is_last_axis_rfactor) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "Merge Index: " << index_ << " RF: " << is_last_axis_rfactor_
            << std::endl;
+  }
+
+  bool isOriginalAxisDynamic() const override {
+    return false;
   }
 
   void createRfactorDomain(
       const std::vector<IterDomain*>& new_root_domain,
       std::vector<IterDomain*>& rfactor_domain) override {
     TORCH_INTERNAL_ASSERT(
-        index_ >= 0 && (index_ + 1) < new_root_domain.size(),
+        (index_ + 1) < new_root_domain.size(),
         "Index: \t",
         index_,
         "\t Domain Size:\t",
@@ -108,14 +133,13 @@ class MergeTransform final : public ViewTransform {
     auto merged_extent =
         mul(merged_id->extent(), new_root_domain[index_ + 1]->extent());
 
-    auto new_merged_id = new IterDomain(
-        new Int(0),
-        merged_extent,
-        ParallelType::Serial,
-        IterType::Iteration,
-        true);
+    auto new_merged_id =
+        IterDomainBuilder(FusionGuard::getCurFusion()->zeroVal(), merged_extent)
+            .is_rfactor_domain(true)
+            .build();
 
-    new Merge(new_merged_id, merged_id, new_root_domain[index_ + 1]);
+    IrBuilder::create<Merge>(
+        new_merged_id, merged_id, new_root_domain[index_ + 1]);
 
     rfactor_domain.push_back(new_merged_id);
   }
@@ -135,22 +159,26 @@ class SplitTransform final : public ViewTransform {
         is_last_axis_rfactor_(is_last_axis_rfactor),
         split_factor_(split_factor) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "Split Index: " << index_ << " RF: " << is_last_axis_rfactor_
            << " ARG: " << split_factor_ << std::endl;
+  }
+
+  bool isOriginalAxisDynamic() const override {
+    return false;
   }
 
   void createRfactorDomain(
       const std::vector<IterDomain*>& new_root_domain,
       std::vector<IterDomain*>& rfactor_domain) override {
     TORCH_INTERNAL_ASSERT(
-        index_ >= 0 && index_ < new_root_domain.size(),
+        index_ < new_root_domain.size(),
         "Index: \t",
         index_,
         "\t Domain Size:\t",
         new_root_domain.size());
 
-    auto factor = new Int(split_factor_);
+    auto factor = IrBuilder::create<Int>(split_factor_);
 
     IterDomain* id = nullptr;
     if (is_last_axis_rfactor_) {
@@ -164,18 +192,21 @@ class SplitTransform final : public ViewTransform {
     Val* remainder = ceilDiv(id->extent(), factor);
 
     // outer loop IterDomain
-    IterDomain* factor_id = new IterDomain(
-        new Int(0), factor, id->getParallelType(), id->getIterType(), true);
+    IterDomain* factor_id =
+        IterDomainBuilder(FusionGuard::getCurFusion()->zeroVal(), factor)
+            .parallel_type(id->getParallelType())
+            .iter_type(id->getIterType())
+            .is_rfactor_domain(true)
+            .build();
 
     // inner loop IterDomain
-    IterDomain* remainder_id = new IterDomain(
-        new Int(0),
-        remainder->as<Int>(),
-        ParallelType::Serial,
-        IterType::Iteration,
-        true);
+    IterDomain* remainder_id =
+        IterDomainBuilder(
+            FusionGuard::getCurFusion()->zeroVal(), remainder->as<Int>())
+            .is_rfactor_domain(true)
+            .build();
 
-    new Split(factor_id, remainder_id, id, factor, false);
+    IrBuilder::create<Split>(factor_id, remainder_id, id, factor, false);
 
     rfactor_domain.push_back(factor_id);
     rfactor_domain.push_back(remainder_id);
@@ -191,15 +222,19 @@ class KeepTransform final : public ViewTransform {
  public:
   KeepTransform(const ViewIndexState& state) : ViewTransform(state) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "Keep Index: " << index_ << std::endl;
+  }
+
+  bool isOriginalAxisDynamic() const override {
+    return true;
   }
 
   void createRfactorDomain(
       const std::vector<IterDomain*>& new_root_domain,
       std::vector<IterDomain*>& rfactor_domain) override {
     TORCH_INTERNAL_ASSERT(
-        index_ >= 0 && index_ < new_root_domain.size(),
+        index_ < new_root_domain.size(),
         "Index: \t",
         index_,
         "\t Domain Size:\t",
@@ -214,16 +249,10 @@ class KeepTransform final : public ViewTransform {
 class BroadcastTransform final : public Transform {
  public:
   BroadcastTransform(const ViewIndexState& state)
-      : Transform(BroadcastTransform::computeIndex(state)) {}
+      : Transform(state, Transform::computeNewIndex(state)) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "Bcast Index: " << index_ << std::endl;
-  }
-
- private:
-  static size_t computeIndex(const ViewIndexState& state) {
-    return state.original_view_index - state.trivial_reduction_offset +
-        state.split_offset - state.merge_offset + state.broadcast_offset;
   }
 };
 
@@ -232,9 +261,9 @@ class BroadcastTransform final : public Transform {
 class TrivialReductionTransform final : public Transform {
  public:
   TrivialReductionTransform(const ViewIndexState& state)
-      : Transform(TrivialReductionTransform::computeIndex(state)) {}
+      : Transform(state, TrivialReductionTransform::computeIndex(state)) {}
 
-  void toString(std::stringstream& output) const override {
+  void toString(std::ostream& output) const override {
     output << "1-Red Index: " << index_ << std::endl;
   }
 
@@ -249,10 +278,11 @@ class TrivialReductionTransform final : public Transform {
 class AnalyzeViewTransformation {
  public:
   AnalyzeViewTransformation(
-      const std::vector<IterDomain*> root_domain,
-      const std::vector<size_t>& original_view,
-      const std::vector<size_t>& new_view)
-      : root_domain_(root_domain),
+      const Sizes& original_view,
+      const Sizes& new_view,
+      std::vector<IterDomain*> root_domain = {})
+      : default_implicit_broadcast_(root_domain.empty()),
+        root_domain_(root_domain),
         original_view_(original_view),
         new_view_(new_view),
         transform_view_(original_view) {
@@ -264,12 +294,43 @@ class AnalyzeViewTransformation {
     TORCH_INTERNAL_ASSERT(kOriginalNumElements == kNewNumElements);
   }
 
-  AnalyzeViewResult run() {
+  AnalyzeViewConstraint constraint() {
     findTransformation();
     TORCH_INTERNAL_ASSERT(
         validate(),
         "Analyze View Transformation failed to find valid transformation.\n",
         toString());
+    std::vector<int64_t> original_constraint(
+        original_view_.begin(), original_view_.end());
+    std::vector<int64_t> new_constraint(new_view_.begin(), new_view_.end());
+    for (auto& vt : view_transforms_) {
+      if (vt->isOriginalAxisDynamic()) {
+        original_constraint[vt->originalIndex()] = -1;
+        new_constraint[vt->newIndex()] = -1;
+      }
+    }
+    return {original_constraint, new_constraint};
+  }
+
+  AnalyzeViewResult run() {
+    findTransformation();
+
+    TORCH_INTERNAL_ASSERT(
+        validate(),
+        "Analyze View Transformation failed to find valid transformation.\n",
+        toString());
+
+    // Skip view operations if all iterDomains are kept as-is
+    bool all_keep_transforms = std::all_of(
+        view_transforms_.begin(),
+        view_transforms_.end(),
+        [](std::shared_ptr<ViewTransform> vt) {
+          return vt->isA<KeepTransform>();
+        });
+    if (all_keep_transforms) {
+      view_transforms_.clear();
+    }
+
     return {
         !broadcast_transforms_.empty(),
         generateBroadcastAxes(),
@@ -382,6 +443,15 @@ class AnalyzeViewTransformation {
     return true;
   }
 
+  bool isImplicitBroadcast(size_t original_view_index) const {
+    if (default_implicit_broadcast_) {
+      return original_view_[original_view_index] == 1;
+    } else {
+      TORCH_INTERNAL_ASSERT(!root_domain_.empty());
+      return root_domain_[original_view_index]->isImplicitBroadcast();
+    }
+  }
+
   //! This utility class merges a fixed set of axes together
   //! according to some invariant. Implicit broadcast axes cannot be
   //! merged with standard iterDomains, so they are handled separately
@@ -400,8 +470,7 @@ class AnalyzeViewTransformation {
 
       bool any_merge = false;
       for (size_t idx = 0; idx < num_merge_axes_; ++idx) {
-        if (avt_->root_domain_[state_.original_view_index]
-                ->isImplicitBroadcast()) {
+        if (avt_->isImplicitBroadcast(state_.original_view_index)) {
           avt_->addTrivialReductionTransform();
         } else {
           avt_->addMergeTransform(
@@ -603,9 +672,10 @@ class AnalyzeViewTransformation {
   std::vector<std::shared_ptr<TrivialReductionTransform>>
       trivial_reduction_transforms_;
 
+  bool default_implicit_broadcast_ = true;
   const std::vector<IterDomain*> root_domain_;
-  const std::vector<size_t>& original_view_;
-  const std::vector<size_t>& new_view_;
+  const Sizes& original_view_;
+  const Sizes& new_view_;
 
   // transform_view is a mutable view and is initialized with the original_view.
   // It is used to track the current state of the original tensor domain.
@@ -622,7 +692,7 @@ class AnalyzeViewTransformation {
   // If transform size != original size for an axis, then the transformation
   // uses the last rfactor domain. Otherwise, it is a root domain
   // transformation.
-  std::vector<size_t> transform_view_;
+  Sizes transform_view_;
 };
 
 //! Create new TensorDomain with a modified rfactor domain using the specified
@@ -635,8 +705,9 @@ TensorDomain* createViewDomain(
   TORCH_INTERNAL_ASSERT(!view_transforms.empty());
 
   std::vector<IterDomain*> new_root_domain;
-  for (auto id : TensorDomain::noReductions(original_domain->getRootDomain())) {
-    new_root_domain.push_back(id->clone());
+  for (auto id :
+       TensorDomain::noReductions(original_domain->getMaybeRFactorDomain())) {
+    new_root_domain.push_back(id->cloneWithoutRFactor());
   }
 
   std::vector<IterDomain*> rfactor_domain;
@@ -644,7 +715,7 @@ TensorDomain* createViewDomain(
     t->createRfactorDomain(new_root_domain, rfactor_domain);
   }
 
-  return new TensorDomain(
+  return IrBuilder::create<TensorDomain>(
       new_root_domain,
       rfactor_domain,
       rfactor_domain,
@@ -652,11 +723,19 @@ TensorDomain* createViewDomain(
 }
 
 //! Infer -1 value in new view sizes from original view sizes
-std::vector<size_t> inferNewViewShape(
-    const std::vector<size_t>& original_view,
+std::pair<Sizes, Sizes> inferNewViewShape(
+    const std::vector<int64_t>& original_sizes,
     const std::vector<int64_t>& new_sizes) {
-  std::vector<size_t> new_view(new_sizes.size());
+  bool valid_original_sizes = std::all_of(
+      original_sizes.begin(), original_sizes.end(), [](int64_t dim) {
+        return dim > 0;
+      });
+  TORCH_INTERNAL_ASSERT(valid_original_sizes);
 
+  Sizes original_view(original_sizes.begin(), original_sizes.end());
+  Sizes new_view(new_sizes.size());
+
+  // TODO: refactor
   int64_t dynamic_index = -1;
   size_t new_size_num_elements = 1;
   for (size_t idx = 0; idx < new_sizes.size(); ++idx) {
@@ -665,6 +744,7 @@ std::vector<size_t> inferNewViewShape(
           dynamic_index == -1, "Only one dimension can by inferred.")
       dynamic_index = idx;
     } else {
+      TORCH_INTERNAL_ASSERT(new_sizes[idx] > 0);
       new_size_num_elements *= new_sizes[idx];
       new_view[idx] = new_sizes[idx];
     }
@@ -676,7 +756,7 @@ std::vector<size_t> inferNewViewShape(
     new_view[dynamic_index] = kNumElements / new_size_num_elements;
   }
 
-  return new_view;
+  return {original_view, new_view};
 }
 
 } // namespace
@@ -689,21 +769,24 @@ AnalyzeViewResult analyzeView(
     const std::vector<int64_t>& new_sizes) {
   FUSER_PERF_SCOPE("analyzeView");
   TORCH_INTERNAL_ASSERT(
-      tv->getMaybeRFactorDomain().size() == original_sizes.size());
-
-  bool valid_original_sizes = std::all_of(
-      original_sizes.begin(), original_sizes.end(), [](int64_t dim) {
-        return dim > 0;
-      });
-
-  TORCH_INTERNAL_ASSERT(valid_original_sizes);
-
-  std::vector<size_t> original_view(
-      original_sizes.begin(), original_sizes.end());
-  auto new_view = inferNewViewShape(original_view, new_sizes);
+      TensorDomain::noReductions(tv->getMaybeRFactorDomain()).size() ==
+      original_sizes.size());
+  auto sizes = inferNewViewShape(original_sizes, new_sizes);
   AnalyzeViewTransformation analyzer(
-      tv->getRootDomain(), original_view, new_view);
+      sizes.first /* original_view */,
+      sizes.second /* new_view */,
+      TensorDomain::noReductions(tv->getMaybeRFactorDomain()));
   return analyzer.run();
+}
+
+AnalyzeViewConstraint analyzeViewConstraint(
+    const std::vector<int64_t>& original_sizes,
+    const std::vector<int64_t>& new_sizes) {
+  FUSER_PERF_SCOPE("analyzeViewConstraint");
+  auto sizes = inferNewViewShape(original_sizes, new_sizes);
+  AnalyzeViewTransformation analyzer(
+      sizes.first /* original_view */, sizes.second /* new_view */);
+  return analyzer.constraint();
 }
 
 //! Create new TensorDomain with a modified rfactor domain using the specified

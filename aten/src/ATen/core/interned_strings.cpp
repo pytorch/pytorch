@@ -1,3 +1,6 @@
+// aten_interned_strings.h includes the names of all operators
+#undef TORCH_ASSERT_ONLY_METHOD_OPERATORS
+
 #include <ATen/core/interned_strings.h>
 #include <cstdint>
 #include <cstring>
@@ -137,6 +140,7 @@ bool Symbol::is_attr() const { return ns() == namespaces::attr; }
 bool Symbol::is_aten() const { return ns() == namespaces::aten; }
 bool Symbol::is_cuda() const { return ns() == namespaces::cuda; }
 bool Symbol::is_prim() const { return ns() == namespaces::prim; }
+bool Symbol::is_prims() const { return ns() == namespaces::prims; }
 bool Symbol::is_onnx() const { return ns() == namespaces::onnx; }
 bool Symbol::is_user() const { return ns() == namespaces::user; }
 bool Symbol::is_caffe2() const { return ns() == namespaces::_caffe2; }

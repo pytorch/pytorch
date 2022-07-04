@@ -2,6 +2,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/ScalarType.h>
+#include <c10/core/SymInt.h>
 
 #include <c10/util/intrusive_ptr.h>
 
@@ -35,8 +36,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   struct use_byte_size_t {};
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
+      use_byte_size_t /*use_byte_size*/,
+      SymInt size_bytes,
       at::DataPtr data_ptr,
       at::Allocator* allocator,
       bool resizable)
@@ -52,14 +53,16 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   }
 
   StorageImpl(
-      use_byte_size_t use_byte_size,
-      size_t size_bytes,
+      use_byte_size_t /*use_byte_size*/,
+      SymInt size_bytes,
       at::Allocator* allocator,
       bool resizable)
       : StorageImpl(
             use_byte_size_t(),
             size_bytes,
-            allocator->allocate(size_bytes),
+            size_bytes.is_symbolic()
+                ? allocator->allocate(0)
+                : allocator->allocate(size_bytes.as_int_unchecked()),
             allocator,
             resizable) {}
 
@@ -85,11 +88,17 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     return static_cast<T*>(this->data_ptr_.get());
   }
 
+  // Destructor doesn't call release_resources because it's
+  // unnecessary; don't forget to change that if needed!
   void release_resources() override {
     data_ptr_.clear();
   }
 
   size_t nbytes() const {
+    return size_bytes_.expect_int();
+  }
+
+  SymInt sym_nbytes() const {
     return size_bytes_;
   }
 
@@ -197,7 +206,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  private:
   DataPtr data_ptr_;
-  size_t size_bytes_;
+  SymInt size_bytes_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
   // local to process cuda memory allocation

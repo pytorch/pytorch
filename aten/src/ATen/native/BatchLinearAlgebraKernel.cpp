@@ -149,7 +149,7 @@ void apply_eig(const Tensor& self, bool eigenvectors, Tensor& vals_, Tensor& vec
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (self.is_complex()) {
-    ScalarType real_dtype = toValueType(typeMetaToScalarType(self.dtype()));
+    ScalarType real_dtype = toRealValueType(typeMetaToScalarType(self.dtype()));
     rwork = at::empty({n*2}, self.options().dtype(real_dtype));
     rwork_data = rwork.data_ptr<value_t>();
   }
@@ -242,7 +242,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   Tensor rwork;
   value_t* rwork_data = nullptr;
   if (input.is_complex()) {
-    ScalarType real_dtype = toValueType(input.scalar_type());
+    ScalarType real_dtype = toRealValueType(input.scalar_type());
     rwork = at::empty({lda * 2}, input.options().dtype(real_dtype));
     rwork_data = rwork.data_ptr<value_t>();
   }
@@ -256,7 +256,7 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   Tensor work = at::empty({lwork}, input.dtype());
   auto work_data = work.data_ptr<scalar_t>();
 
-  for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
+  for (const auto i : c10::irange(batch_size)) {
     scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* values_working_ptr = &values_data[i * values_stride];
     scalar_t* rvectors_working_ptr = compute_eigenvectors ? &rvectors_data[i * input_matrix_stride] : nullptr;
@@ -647,7 +647,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
       default:
         rwork_len = std::max<int64_t>(1, rwork_opt);
     }
-    rwork = at::empty({rwork_len}, A.options().dtype(c10::toValueType(A.scalar_type())));
+    rwork = at::empty({rwork_len}, A.options().dtype(c10::toRealValueType(A.scalar_type())));
     rwork_data = rwork.data_ptr<value_t>();
   }
 
@@ -833,6 +833,137 @@ void triangular_solve_kernel(const Tensor& A, const Tensor& B, bool left, bool u
   });
 }
 
+template <typename scalar_t>
+void apply_ldl_factor(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+#if !AT_BUILD_WITH_LAPACK()
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_factor on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
+  auto batch_size = batchCount(A);
+  auto n = A.size(-2);
+  auto leading_dim = A.stride(-1);
+  auto uplo = upper ? 'U' : 'L';
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  auto pivots_data = pivots.data_ptr<int>();
+  auto info_data = info.data_ptr<int>();
+
+  auto ldl_func =
+      hermitian ? lapackLdlHermitian<scalar_t> : lapackLdlSymmetric<scalar_t>;
+
+  scalar_t wkopt;
+  ldl_func(uplo, n, a_data, leading_dim, pivots_data, &wkopt, -1, info_data);
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  int lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
+  Tensor work = at::empty({lwork}, A.dtype());
+  auto work_data = work.data_ptr<scalar_t>();
+
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* a_working_ptr = &a_data[i * a_stride];
+    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    auto* info_working_ptr = &info_data[i];
+    ldl_func(
+        uplo,
+        n,
+        a_working_ptr,
+        leading_dim,
+        pivots_working_ptr,
+        work_data,
+        lwork,
+        info_working_ptr);
+  }
+#endif
+}
+
+void ldl_factor_kernel(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& info,
+    bool upper,
+    bool hermitian) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_factor_kernel_cpu", [&] {
+        apply_ldl_factor<scalar_t>(LD, pivots, info, upper, hermitian);
+      });
+}
+
+template <typename scalar_t>
+void apply_ldl_solve(
+    const Tensor& A,
+    const Tensor& pivots,
+    const Tensor& B,
+    bool upper,
+    bool hermitian) {
+#if !AT_BUILD_WITH_LAPACK()
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_factor on a CPU tensor requires compiling ",
+      "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
+#else
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(A) > 0);
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(batchCount(pivots.unsqueeze(-1)) > 0);
+  auto batch_size = batchCount(B);
+  auto n = A.size(-2);
+  auto nrhs = B.size(-1);
+  auto lda = A.stride(-1);
+  auto ldb = B.stride(-1);
+  auto uplo = upper ? 'U' : 'L';
+
+  auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
+  auto b_stride = B.dim() > 2 ? B.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+
+  auto a_data = A.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+  auto pivots_ = pivots.to(kInt);
+  auto pivots_data = pivots_.data_ptr<int>();
+
+  auto ldl_solve_func = hermitian ? lapackLdlSolveHermitian<scalar_t>
+                                  : lapackLdlSolveSymmetric<scalar_t>;
+
+  int info = 0;
+  for (const auto i : c10::irange(batch_size)) {
+    scalar_t* a_working_ptr = &a_data[i * a_stride];
+    scalar_t* b_working_ptr = &b_data[i * b_stride];
+    auto* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    ldl_solve_func(
+        uplo,
+        n,
+        nrhs,
+        a_working_ptr,
+        lda,
+        pivots_working_ptr,
+        b_working_ptr,
+        ldb,
+        &info);
+  }
+  TORCH_INTERNAL_ASSERT(info == 0);
+#endif
+}
+
+void ldl_solve_kernel(
+    const Tensor& LD,
+    const Tensor& pivots,
+    const Tensor& result,
+    bool upper,
+    bool hermitian) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
+      LD.scalar_type(), "ldl_solve_kernel_cpu", [&] {
+        apply_ldl_solve<scalar_t>(LD, pivots, result, upper, hermitian);
+      });
+}
+
 /*
   Computes the LU decomposition of a m×n matrix or batch of matrices in 'input' tensor.
   This is an in-place routine, content of 'input', 'pivots', and 'infos' is overwritten.
@@ -851,7 +982,7 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
-      "Calling torch.lu on a CPU tensor requires compiling ",
+      "Calling torch.linalg.lu_factor on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
@@ -896,31 +1027,40 @@ void lu_factor_kernel(const Tensor& input, const Tensor& pivots, const Tensor& i
   For further details, please see the LAPACK documentation for GETRS.
 */
 template <typename scalar_t>
-void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType transpose) {
+void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType transpose) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
-      "Calling torch.lu_solve on a CPU tensor requires compiling ",
+      "Calling linalg.lu_solve on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  auto b_data = b.data_ptr<scalar_t>();
-  auto lu_data = lu.data_ptr<scalar_t>();
+  auto b_data = B.data_ptr<scalar_t>();
+  auto lu_data = LU.data_ptr<scalar_t>();
   const auto trans = to_blas(transpose);
   auto pivots_data = pivots.data_ptr<int>();
-  auto b_stride = matrixStride(b);
-  auto lu_stride = matrixStride(lu);
-  auto pivots_stride = pivots.size(-1);
-  auto batch_size = batchCount(b);
+  auto b_stride = matrixStride(B);
+  auto lu_stride = LU.dim() > 2 ? LU.stride(-3) : 0;
+  auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
+  auto batch_size = batchCount(B);
 
-  auto n = lu.size(-2);
-  auto nrhs = b.size(-1);
+  auto n = LU.size(-2);
+  auto nrhs = B.size(-1);
   auto leading_dimension = std::max<int64_t>(1, n);
 
   int info = 0;
+
+  // lu and pivots tensors can be broadcast to B
+  // here we construct a helper indexing tensor to linearly index into LU and pivots
+  IntArrayRef lu_batch_shape(LU.sizes().data(), LU.dim() - 2);
+  IntArrayRef b_batch_shape(B.sizes().data(), B.dim() - 2);
+  BroadcastLinearIndices lu_index(
+      batchCount(LU), lu_batch_shape, b_batch_shape);
+
   for (const auto i : c10::irange(batch_size)) {
+    int64_t lu_index_i = lu_index(i);
     scalar_t* b_working_ptr = &b_data[i * b_stride];
-    scalar_t* lu_working_ptr = &lu_data[i * lu_stride];
-    int* pivots_working_ptr = &pivots_data[i * pivots_stride];
+    scalar_t* lu_working_ptr = &lu_data[lu_index_i * lu_stride];
+    int* pivots_working_ptr = &pivots_data[lu_index_i * pivots_stride];
 
     lapackLuSolve<scalar_t>(trans, n, nrhs, lu_working_ptr, leading_dimension, pivots_working_ptr,
                             b_working_ptr, leading_dimension, &info);
@@ -933,16 +1073,121 @@ void apply_lu_solve(const Tensor& b, const Tensor& lu, const Tensor& pivots, Tra
 }
 
 // This is a type dispatching helper function for 'apply_lu_solve'
-void lu_solve_trans_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots, TransposeType trans) {
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(b.scalar_type(), "lu_solve_cpu", [&]{
-    apply_lu_solve<scalar_t>(b, lu, pivots, trans);
+void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(LU.scalar_type(), "linalg.lu_solve_cpu", [&]{
+    apply_lu_solve<scalar_t>(LU, pivots, B, trans);
   });
 }
 
-void lu_solve_kernel(const Tensor& b, const Tensor& lu, const Tensor& pivots) {
-  lu_solve_trans_kernel(b, lu, pivots, TransposeType::NoTranspose);
+template <typename scalar_t>
+static void apply_svd(const Tensor& A,
+                      const bool full_matrices,
+                      const bool compute_uv,
+                      const Tensor& U,
+                      const Tensor& S,
+                      const Tensor& Vh,
+                      const Tensor& info) {
+#if !AT_BUILD_WITH_LAPACK()
+  TORCH_CHECK(false, "svd: LAPACK library not found in compilation");
+#else
+  using value_t = typename c10::scalar_value_type<scalar_t>::type;
+  const auto A_data = A.data_ptr<scalar_t>();
+  const auto U_data = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
+  const auto S_data = S.data_ptr<value_t>();
+  const auto info_data = info.data_ptr<int>();
+  const auto Vh_data = compute_uv ? Vh.data_ptr<scalar_t>() : nullptr;
+  const auto A_stride = matrixStride(A);
+  const auto S_stride = S.size(-1);
+  const auto U_stride = compute_uv ? matrixStride(U) : 1;
+  const auto Vh_stride = compute_uv ? matrixStride(Vh) : 1;
+  const auto batchsize = batchCount(A);
+  const char jobz = compute_uv ? (full_matrices ? 'A' : 'S') : 'N';
+
+  const auto m = A.size(-2);
+  const auto n = A.size(-1);
+  const auto lda = A.stride(-1);
+  const auto ldu= compute_uv ? U.stride(-1) : 1;
+  const auto ldvh = compute_uv ? Vh.stride(-1) : 1;
+
+  auto iwork = std::vector<int>(8 * std::min(m, n));
+  auto* const iwork_data = iwork.data();
+
+  // rwork is just used for the complex decomposition
+  auto rwork = std::vector<value_t>{};
+  if (A.is_complex()) {
+    rwork.resize(std::max(computeLRWorkDim(jobz, m, n), int64_t{1}));
+  }
+  auto* const rwork_data = rwork.data();
+
+  // Query svd for the optimal lwork size
+  int lwork = -1;
+  {
+    scalar_t wkopt;
+    lapackSvd<scalar_t, value_t>(jobz, m, n, A_data, lda, S_data, U_data, ldu, Vh_data, ldvh, &wkopt, lwork, rwork_data, iwork_data, info_data);
+    lwork = std::max<int>(1, real_impl<scalar_t, value_t>(wkopt));
+  }
+  auto work = std::vector<scalar_t>(lwork);
+  auto* const work_data = work.data();
+
+  for (const auto i : c10::irange(batchsize)) {
+    auto* const A_working_ptr = &A_data[i * A_stride];
+    auto* const S_working_ptr = &S_data[i * S_stride];
+    auto* const U_working_ptr = compute_uv ? &U_data[i * U_stride] : nullptr;
+    auto* const Vh_working_ptr = compute_uv ? &Vh_data[i * Vh_stride] : nullptr;
+
+    // Compute S, U (optionally) and Vh (optionally)
+    lapackSvd<scalar_t, value_t>(jobz, m, n, A_working_ptr, lda,
+                        S_working_ptr, U_working_ptr, ldu, Vh_working_ptr, ldvh, work_data, lwork, rwork_data, iwork_data, info_data + i);
+  }
+#endif
 }
 
+void svd_kernel(const Tensor& A,
+                const bool full_matrices,
+                const bool compute_uv,
+                const c10::optional<c10::string_view>& driver,
+                const Tensor& U,
+                const Tensor& S,
+                const Tensor& Vh,
+                const Tensor& infos) {
+  TORCH_INTERNAL_ASSERT(!driver.has_value(), "svd_kernel: driver shouldn't have a value here. ");
+  // Need to copy A as column major, as its contents will be destroyed in the LAPACK call.
+  // FIXME It'd be more efficient, rather than cloning A, to copy it into `U` or `Vh` (depending on m > n
+  // or m < n) and call jobz='O'
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(A.scalar_type(), "linalg_svd_cpu", [&]{
+    apply_svd<scalar_t>(cloneBatchedColumnMajor(A), full_matrices, compute_uv, U, S, Vh, infos);
+  });
+}
+
+void unpack_pivots_cpu_kernel(TensorIterator& iter, const int64_t dim_size) {
+  if (iter.numel() == 0) {
+    return;
+  }
+  auto loop = [&](char* const* const  data, const int64_t* const strides, const int64_t nelems) {
+    auto* perm_ptr = data[0];
+    const auto* pivots_ptr = data[1];
+
+    for (const auto elem : c10::irange(nelems)) {
+      (void)elem; //Suppress unused variable warning
+      // WARNING: linalg.lu_factor returns int32 pivots,
+      // this behavior could change in the future.
+      const auto perm_data = reinterpret_cast<int64_t*>(perm_ptr);
+      const auto pivots_data = reinterpret_cast<const int32_t*>(pivots_ptr);
+
+      for (const auto i : c10::irange(dim_size)) {
+        std::swap(
+          perm_data[i],
+          perm_data[pivots_data[i] - 1]
+        );
+      }
+
+      perm_ptr += strides[0];
+      pivots_ptr += strides[1];
+    }
+  };
+
+  iter.for_each(loop);
+}
 } // anonymous namespace
 
 REGISTER_ARCH_DISPATCH(cholesky_stub, DEFAULT, &cholesky_kernel);
@@ -1011,16 +1256,32 @@ REGISTER_AVX2_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 REGISTER_VSX_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 REGISTER_ZVECTOR_DISPATCH(lu_factor_stub, &lu_factor_kernel);
 
-REGISTER_ARCH_DISPATCH(lu_solve_trans_stub, DEFAULT, &lu_solve_trans_kernel);
-REGISTER_AVX512_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_AVX2_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_VSX_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
-REGISTER_ZVECTOR_DISPATCH(lu_solve_trans_stub, &lu_solve_trans_kernel);
+REGISTER_ARCH_DISPATCH(ldl_factor_stub, DEFAULT, &ldl_factor_kernel);
+REGISTER_AVX512_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
+REGISTER_AVX2_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
+REGISTER_VSX_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
+REGISTER_ZVECTOR_DISPATCH(ldl_factor_stub, &ldl_factor_kernel);
 
+REGISTER_ARCH_DISPATCH(ldl_solve_stub, DEFAULT, &ldl_solve_kernel);
+REGISTER_AVX512_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
+REGISTER_AVX2_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
+REGISTER_VSX_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
+REGISTER_ZVECTOR_DISPATCH(ldl_solve_stub, &ldl_solve_kernel);
 REGISTER_ARCH_DISPATCH(lu_solve_stub, DEFAULT, &lu_solve_kernel);
 REGISTER_AVX512_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_AVX2_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_VSX_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 REGISTER_ZVECTOR_DISPATCH(lu_solve_stub, &lu_solve_kernel);
 
+REGISTER_ARCH_DISPATCH(svd_stub, DEFAULT, &svd_kernel);
+REGISTER_AVX512_DISPATCH(svd_stub, &svd_kernel);
+REGISTER_AVX2_DISPATCH(svd_stub, &svd_kernel);
+REGISTER_VSX_DISPATCH(svd_stub, &svd_kernel);
+REGISTER_ZVECTOR_DISPATCH(svd_stub, &svd_kernel);
+
+REGISTER_ARCH_DISPATCH(unpack_pivots_stub, DEFAULT, &unpack_pivots_cpu_kernel);
+REGISTER_AVX512_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
+REGISTER_AVX2_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
+REGISTER_VSX_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
+REGISTER_ZVECTOR_DISPATCH(unpack_pivots_stub, &unpack_pivots_cpu_kernel);
 }} // namespace at::native

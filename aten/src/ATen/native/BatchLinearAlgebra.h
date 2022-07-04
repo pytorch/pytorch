@@ -1,11 +1,19 @@
 #pragma once
 
-#include <ATen/ATen.h>
+#include <c10/util/Optional.h>
 #include <ATen/Config.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/LinearAlgebraUtils.h>
-#include <ATen/native/cpu/zmath.h>
 
+// Forward declare TI
+namespace at {
+class Tensor;
+struct TensorIterator;
+
+namespace native {
+enum class TransposeType;
+}
+
+}
 
 namespace at { namespace native {
 
@@ -161,6 +169,54 @@ void lapackLuSolve(char trans, int n, int nrhs, scalar_t *a, int lda, int *ipiv,
 template <class scalar_t>
 void lapackLu(int m, int n, scalar_t *a, int lda, int *ipiv, int *info);
 
+template <class scalar_t>
+void lapackLdlHermitian(
+    char uplo,
+    int n,
+    scalar_t* a,
+    int lda,
+    int* ipiv,
+    scalar_t* work,
+    int lwork,
+    int* info);
+
+template <class scalar_t>
+void lapackLdlSymmetric(
+    char uplo,
+    int n,
+    scalar_t* a,
+    int lda,
+    int* ipiv,
+    scalar_t* work,
+    int lwork,
+    int* info);
+
+template <class scalar_t>
+void lapackLdlSolveHermitian(
+    char uplo,
+    int n,
+    int nrhs,
+    scalar_t* a,
+    int lda,
+    int* ipiv,
+    scalar_t* b,
+    int ldb,
+    int* info);
+
+template <class scalar_t>
+void lapackLdlSolveSymmetric(
+    char uplo,
+    int n,
+    int nrhs,
+    scalar_t* a,
+    int lda,
+    int* ipiv,
+    scalar_t* b,
+    int ldb,
+    int* info);
+
+template<class scalar_t, class value_t=scalar_t>
+void lapackSvd(char jobz, int m, int n, scalar_t *a, int lda, value_t *s, scalar_t *u, int ldu, scalar_t *vt, int ldvt, scalar_t *work, int lwork, value_t *rwork, int *iwork, int *info);
 #endif
 
 #if AT_BUILD_WITH_BLAS()
@@ -226,18 +282,42 @@ using lu_factor_fn = void (*)(
     bool /*compute_pivots*/);
 DECLARE_DISPATCH(lu_factor_fn, lu_factor_stub);
 
+using unpack_pivots_fn = void(*)(
+  TensorIterator& iter,
+  const int64_t dim_size);
+DECLARE_DISPATCH(unpack_pivots_fn, unpack_pivots_stub);
+
 using lu_solve_fn = void (*)(
-    const Tensor& /*b*/,
-    const Tensor& /*lu*/,
-    const Tensor& /*pivots*/);
+    const Tensor& /*LU*/,
+    const Tensor& /*pivots*/,
+    const Tensor& /*B*/,
+    TransposeType /*trans*/);
 DECLARE_DISPATCH(lu_solve_fn, lu_solve_stub);
 
-using lu_solve_trans_fn = void (*)(
-    const Tensor& /*b*/,
-    const Tensor& /*lu*/,
+using ldl_factor_fn = void (*)(
+    const Tensor& /*LD*/,
     const Tensor& /*pivots*/,
-    TransposeType /*trans*/);
-DECLARE_DISPATCH(lu_solve_trans_fn, lu_solve_trans_stub);
+    const Tensor& /*info*/,
+    bool /*upper*/,
+    bool /*hermitian*/);
+DECLARE_DISPATCH(ldl_factor_fn, ldl_factor_stub);
 
+using svd_fn = void (*)(
+    const Tensor& /*A*/,
+    const bool /*full_matrices*/,
+    const bool /*compute_uv*/,
+    const c10::optional<c10::string_view>& /*driver*/,
+    const Tensor& /*U*/,
+    const Tensor& /*S*/,
+    const Tensor& /*Vh*/,
+    const Tensor& /*info*/);
+DECLARE_DISPATCH(svd_fn, svd_stub);
 
+using ldl_solve_fn = void (*)(
+    const Tensor& /*LD*/,
+    const Tensor& /*pivots*/,
+    const Tensor& /*result*/,
+    bool /*upper*/,
+    bool /*hermitian*/);
+DECLARE_DISPATCH(ldl_solve_fn, ldl_solve_stub);
 }} // namespace at::native

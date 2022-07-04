@@ -2,7 +2,7 @@
 
 #include <ATen/OpMathType.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/TransposeType.h>
 #include <c10/util/complex.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>

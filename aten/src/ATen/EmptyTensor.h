@@ -4,9 +4,26 @@
 namespace at {
 namespace detail {
 
-TORCH_API void check_size_nonnegative(IntArrayRef size);
+inline void check_size_nonnegative(IntArrayRef size) {
+  for (auto x : size) {
+    TORCH_CHECK(
+        x >= 0,
+        "Trying to create tensor with negative dimension ",
+        x,
+        ": ",
+        size);
+  }
+}
+
+TORCH_API size_t computeStorageNbytesContiguous(
+    IntArrayRef sizes,
+    size_t itemsize,
+    size_t storage_offset = 0);
 TORCH_API size_t computeStorageNbytes(
-    IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
+    IntArrayRef sizes,
+    IntArrayRef strides,
+    size_t itemsize,
+    size_t storage_offset = 0);
 
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,
@@ -25,8 +42,8 @@ TORCH_API TensorBase empty_strided_generic(
 TORCH_API TensorBase empty_cpu(
     IntArrayRef size,
     ScalarType dtype,
-    bool pin_memory=false,
-    c10::optional<c10::MemoryFormat> memory_format_opt=c10::nullopt);
+    bool pin_memory = false,
+    c10::optional<c10::MemoryFormat> memory_format_opt = c10::nullopt);
 
 TORCH_API TensorBase empty_cpu(
     IntArrayRef size,
@@ -36,15 +53,13 @@ TORCH_API TensorBase empty_cpu(
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt);
 
-TORCH_API TensorBase empty_cpu(
-    IntArrayRef size,
-    const TensorOptions &options);
+TORCH_API TensorBase empty_cpu(IntArrayRef size, const TensorOptions& options);
 
 TORCH_API TensorBase empty_strided_cpu(
     IntArrayRef size,
     IntArrayRef stride,
     ScalarType dtype,
-    bool pin_memory=false);
+    bool pin_memory = false);
 
 TORCH_API TensorBase empty_strided_cpu(
     IntArrayRef size,
@@ -57,12 +72,12 @@ TORCH_API TensorBase empty_strided_cpu(
 TORCH_API TensorBase empty_strided_cpu(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options);
+    const TensorOptions& options);
 
 TORCH_API TensorBase empty_meta(
     IntArrayRef size,
     ScalarType dtype,
-    c10::optional<c10::MemoryFormat> memory_format_opt=c10::nullopt);
+    c10::optional<c10::MemoryFormat> memory_format_opt = c10::nullopt);
 
 TORCH_API TensorBase empty_meta(
     IntArrayRef size,
@@ -72,12 +87,10 @@ TORCH_API TensorBase empty_meta(
     c10::optional<bool> pin_memory_opt,
     c10::optional<c10::MemoryFormat> memory_format_opt);
 
-TORCH_API TensorBase empty_meta(
-    IntArrayRef size,
-    const TensorOptions &options);
+TORCH_API TensorBase empty_meta(IntArrayRef size, const TensorOptions& options);
 
-TORCH_API TensorBase empty_strided_meta(
-    IntArrayRef size, IntArrayRef stride, ScalarType dtype);
+TORCH_API TensorBase
+empty_strided_meta(IntArrayRef size, IntArrayRef stride, ScalarType dtype);
 
 TORCH_API TensorBase empty_strided_meta(
     IntArrayRef size,
@@ -90,6 +103,7 @@ TORCH_API TensorBase empty_strided_meta(
 TORCH_API TensorBase empty_strided_meta(
     IntArrayRef size,
     IntArrayRef stride,
-    const TensorOptions &options);
+    const TensorOptions& options);
 
-}}  // namespace at::detail
+} // namespace detail
+} // namespace at

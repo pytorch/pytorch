@@ -28,26 +28,32 @@ from pathlib import Path
 import socket
 import subprocess
 import time
-from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Sequence, Mapping
 from contextlib import contextmanager, closing
 from functools import wraps
 from itertools import product
 from copy import deepcopy
-from numbers import Number
 import tempfile
 import json
 import __main__  # type: ignore[import]
 import errno
 import ctypes
-from typing import cast, Any, Dict, Iterable, Iterator, Optional, Union, List, TypeVar
+from typing import Any, Dict, Iterable, Iterator, Optional, Union, List, Tuple, Type, TypeVar, Callable
 from unittest.mock import MagicMock
 
 import numpy as np
 
 import expecttest
-from .._core import \
-    (_compare_tensors_internal, _compare_scalars_internal, _compare_return_type)
+from torch.testing._comparison import (
+    assert_equal as assert_equal,
+    Pair,
+    TensorLikePair,
+    BooleanPair,
+    NumberPair,
+    UnsupportedInputs,
+    NonePair,
+    ErrorMeta,
+)
 
 import torch
 import torch.cuda
@@ -57,19 +63,23 @@ from torch._six import string_classes
 from torch import Tensor
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.backends.xnnpack
 from enum import Enum
 from statistics import mean
 import functools
 from .composite_compliance import no_dispatch
-
+from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.nn import ModuleList, ModuleDict, Sequential, ParameterList, ParameterDict
+from torch._C import ScriptList, ScriptDict  # type: ignore[attr-defined]
+from torch.onnx import (register_custom_op_symbolic,
+                        unregister_custom_op_symbolic)
 torch.backends.disable_global_flags()
 
 FILE_SCHEMA = "file://"
 if sys.platform == 'win32':
     FILE_SCHEMA = "file:///"
 
-# Environment variable `IN_CI` is set in `.jenkins/common.sh`.
-IS_IN_CI = os.getenv('IN_CI') == '1'
+IS_CI = bool(os.getenv('CI'))
 IS_SANDCASTLE = os.getenv('SANDCASTLE') == '1' or os.getenv('TW_JOB_USER') == 'sandcastle'
 IS_FBCODE = os.getenv('PYTORCH_TEST_FBCODE') == '1'
 IS_REMOTE_GPU = os.getenv('PYTORCH_TEST_REMOTE_GPU') == '1'
@@ -180,6 +190,14 @@ def instantiate_parametrized_tests(generic_cls):
     decorator subclass of _TestParametrizer. The generic test will be replaced on the test class by
     parametrized tests with specialized names.
 
+    You can also use it as a class decorator. E.g.
+
+    ```
+    @instantiate_parametrized_tests
+    class TestFoo(TestCase):
+        ...
+    ```
+
     Args:
         generic_cls (class): Generic test class object containing tests (e.g. TestFoo)
     """
@@ -204,6 +222,7 @@ def instantiate_parametrized_tests(generic_cls):
                 class_attr, generic_cls=generic_cls, device_cls=None):
             full_name = '{}_{}'.format(test.__name__, test_suffix)
             instantiate_test_helper(cls=generic_cls, name=full_name, test=test, param_kwargs=param_kwargs)
+    return generic_cls
 
 
 class subtest(object):
@@ -278,7 +297,7 @@ class parametrize(_TestParametrizer):
         name_fn (callable): Optional function that takes in parameters and returns subtest name.
     """
     def __init__(self, arg_str, arg_values, name_fn=None):
-        self.arg_names = arg_str.split(',')
+        self.arg_names: List[str] = [s.strip() for s in arg_str.split(',')]
         self.arg_values = arg_values
         self.name_fn = name_fn
 
@@ -359,9 +378,9 @@ class ProfilingMode(Enum):
 
 def cppProfilingFlagsToProfilingMode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     torch._C._jit_set_profiling_executor(old_prof_exec_state)
-    torch._C._jit_set_profiling_mode(old_prof_mode_state)
+    torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
     if old_prof_exec_state:
         if old_prof_mode_state:
@@ -375,23 +394,23 @@ def cppProfilingFlagsToProfilingMode():
 def enable_profiling_mode_for_profiling_tests():
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-        old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+        old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     try:
         yield
     finally:
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             torch._C._jit_set_profiling_executor(old_prof_exec_state)
-            torch._C._jit_set_profiling_mode(old_prof_mode_state)
+            torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
 @contextmanager
 def enable_profiling_mode():
     old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
-    old_prof_mode_state = torch._C._jit_set_profiling_mode(True)
+    old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
     try:
         yield
     finally:
         torch._C._jit_set_profiling_executor(old_prof_exec_state)
-        torch._C._jit_set_profiling_mode(old_prof_mode_state)
+        torch._C._get_graph_executor_optimize(old_prof_mode_state)
 
 @contextmanager
 def num_profiled_runs(num_runs):
@@ -432,8 +451,8 @@ def _get_test_report_path():
     test_source = override if override is not None else 'python-unittest'
     return os.path.join('test-reports', test_source)
 
-
-parser = argparse.ArgumentParser()
+is_running_via_run_test = "run_test.py" in getattr(__main__, "__file__", "")
+parser = argparse.ArgumentParser(add_help=not is_running_via_run_test)
 parser.add_argument('--subprocess', action='store_true',
                     help='whether to run each test in a subprocess')
 parser.add_argument('--seed', type=int, default=1234)
@@ -443,7 +462,7 @@ parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--test_bailouts', action='store_true')
 parser.add_argument('--save-xml', nargs='?', type=str,
                     const=_get_test_report_path(),
-                    default=_get_test_report_path() if IS_IN_CI else None)
+                    default=_get_test_report_path() if IS_CI else None)
 parser.add_argument('--discover-tests', action='store_true')
 parser.add_argument('--log-suffix', type=str, default="")
 parser.add_argument('--run-parallel', type=int, default=1)
@@ -636,6 +655,29 @@ def run_tests(argv=UNITTEST_ARGS):
     elif TEST_SAVE_XML is not None:
         # import here so that non-CI doesn't need xmlrunner installed
         import xmlrunner  # type: ignore[import]
+        from xmlrunner.result import _XMLTestResult  # type: ignore[import]
+
+        class XMLTestResultVerbose(_XMLTestResult):
+            """
+            Adding verbosity to test outputs:
+            by default test summary prints 'skip',
+            but we want to also print the skip reason.
+            GH issue: https://github.com/pytorch/pytorch/issues/69014
+
+            This works with unittest_xml_reporting<=3.2.0,>=2.0.0
+            (3.2.0 is latest at the moment)
+            """
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+
+            def addSkip(self, test, reason):
+                super().addSkip(test, reason)
+                for c in self.callback.__closure__:
+                    if isinstance(c.cell_contents, str) and c.cell_contents == 'skip':
+                        # this message is printed in test summary;
+                        # it stands for `verbose_str` captured in the closure
+                        c.cell_contents = f"skip: {reason}"
+
         test_filename = sanitize_test_filename(inspect.getfile(sys._getframe(1)))
         test_report_path = TEST_SAVE_XML + LOG_SUFFIX
         test_report_path = os.path.join(test_report_path, test_filename)
@@ -643,7 +685,10 @@ def run_tests(argv=UNITTEST_ARGS):
         verbose = '--verbose' in argv or '-v' in argv
         if verbose:
             print('Test results will be stored in {}'.format(test_report_path))
-        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(output=test_report_path, verbosity=2 if verbose else 1))
+        unittest.main(argv=argv, testRunner=xmlrunner.XMLTestRunner(
+            output=test_report_path,
+            verbosity=2 if verbose else 1,
+            resultclass=XMLTestResultVerbose))
     elif REPEAT_COUNT > 1:
         for _ in range(REPEAT_COUNT):
             if not unittest.main(exit=False, argv=argv).result.wasSuccessful():
@@ -655,6 +700,7 @@ IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
+IS_X86 = platform.machine() in ('x86_64', 'i386')
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -721,6 +767,7 @@ def _check_module_exists(name: str) -> bool:
         return False
 
 TEST_NUMPY = _check_module_exists('numpy')
+TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_CUDA = torch.cuda.is_available()
@@ -730,7 +777,7 @@ TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa')
 
-BUILD_WITH_CAFFE2 = _check_module_exists("caffe2.python.caffe2_pybind11_state")
+BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
 
 # Python 2.7 doesn't have spawn
 NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
@@ -743,7 +790,6 @@ TEST_WITH_ROCM = os.getenv('PYTORCH_TEST_WITH_ROCM', '0') == '1'
 # TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
 # See #64427
 TEST_WITH_MIOPEN_SUGGEST_NHWC = os.getenv('PYTORCH_MIOPEN_SUGGEST_NHWC', '0') == '1'
-
 # Enables tests that are slow to run (disabled by default)
 TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 
@@ -753,10 +799,29 @@ TEST_WITH_SLOW = os.getenv('PYTORCH_TEST_WITH_SLOW', '0') == '1'
 # it felt a little awkward.
 TEST_SKIP_FAST = os.getenv('PYTORCH_TEST_SKIP_FAST', '0') == '1'
 
-# Disables noarch tests; all but one CI configuration disables these.  We don't
-# disable them for local runs because you still want to run them
-# (unlike slow tests!)
-TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
+# Enables crossref tests, in addition to standard tests which
+# are being run.  crossref tests work by installing a torch
+# function mode that runs extra compute alongside the regular
+# computation that happens with the test.  After both computations
+# are done, we cross-reference them (thus the name) to check for
+# correction, before throwing out the extra compute and proceeding
+# as we had before.  By default, we don't run these tests.
+TEST_WITH_CROSSREF = os.getenv('PYTORCH_TEST_WITH_CROSSREF', '0') == '1'
+
+def skipIfCrossRef(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_WITH_CROSSREF:
+            raise unittest.SkipTest("test doesn't currently with crossref")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+class CrossRefMode(torch.overrides.TorchFunctionMode):
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        r = func(*args, **kwargs)
+        return r
 
 # Determine whether to enable cuda memory leak check.
 # CUDA mem leak check is expensive and thus we don't want to execute it on every
@@ -765,9 +830,6 @@ TEST_SKIP_NOARCH = os.getenv('PYTORCH_TEST_SKIP_NOARCH', '0') == '1'
 #   then CUDA memory leak checks are performed.
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
 TEST_SKIP_CUDA_MEM_LEAK_CHECK = os.getenv('PYTORCH_TEST_SKIP_CUDA_MEM_LEAK_CHECK', '0') == '1'
-
-# Disables tests for when on Github Actions
-ON_GHA = os.getenv('GITHUB_ACTIONS', '0') == '1'
 
 # True if CI is running TBB-enabled Pytorch
 IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
@@ -787,6 +849,25 @@ numpy_to_torch_dtype_dict = {
     np.complex128 : torch.complex128
 }
 
+
+# numpy dtypes like np.float64 are not instances, but rather classes. This leads to rather absurd cases like
+# np.float64 != np.dtype("float64") but np.float64 == np.dtype("float64").type.
+# Especially when checking against a reference we can't be sure which variant we get, so we simply try both.
+def numpy_to_torch_dtype(np_dtype):
+    try:
+        return numpy_to_torch_dtype_dict[np_dtype]
+    except KeyError:
+        return numpy_to_torch_dtype_dict[np_dtype.type]
+
+
+def has_corresponding_torch_dtype(np_dtype):
+    try:
+        numpy_to_torch_dtype(np_dtype)
+        return True
+    except KeyError:
+        return False
+
+
 if IS_WINDOWS:
     # Size of `np.intc` is platform defined.
     # It is returned by functions like `bitwise_not`.
@@ -796,27 +877,25 @@ if IS_WINDOWS:
 
 # Dict of torch dtype -> NumPy dtype
 torch_to_numpy_dtype_dict = {value : key for (key, value) in numpy_to_torch_dtype_dict.items()}
-
-ALL_TENSORTYPES = [torch.float,
-                   torch.double,
-                   torch.half]
-
-# bfloat16 bringup is currently only available on ROCm
-# ALL_TENSORTYPES2 will eventually be unified with ALL_TENSORTYPES
-# when bfloat16 bringup is complete on all platforms
-if TEST_WITH_ROCM:
-    ALL_TENSORTYPES2 = [torch.float,
-                        torch.double,
-                        torch.half,
-                        torch.bfloat16]
-else:
-    ALL_TENSORTYPES2 = ALL_TENSORTYPES
+torch_to_numpy_dtype_dict.update({
+    torch.bfloat16: np.float32,
+    torch.complex32: np.complex64
+})
 
 def skipIfRocm(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if TEST_WITH_ROCM:
             raise unittest.SkipTest("test doesn't currently work on the ROCm stack")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfMps(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if torch.backends.mps.is_available():
+            raise unittest.SkipTest("test doesn't currently work with MPS")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -965,6 +1044,14 @@ def _test_function(fn, device):
         return fn(self, device)
     return run_test_function
 
+def skipIfNoXNNPACK(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torch.backends.xnnpack.enabled:
+            raise unittest.SkipTest('XNNPACK must be enabled for these tests. Please build with USE_XNNPACK=1.')
+        else:
+            fn(*args, **kwargs)
+    return wrapper
 
 def skipIfNoLapack(fn):
     @wraps(fn)
@@ -974,7 +1061,6 @@ def skipIfNoLapack(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
-
 
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
@@ -997,22 +1083,24 @@ def skipIfNotRegistered(op_name, message):
         skipper = unittest.skip("Cannot import `caffe2.python.core`")
     return skipper
 
+def _decide_skip_caffe2(expect_caffe2, reason):
+    def skip_dec(func):
+        @wraps(func)
+        def wrapper(self):
+            if torch.onnx._CAFFE2_ATEN_FALLBACK != expect_caffe2:
+                raise unittest.SkipTest(reason)
+            return func(self)
+        return wrapper
+    return skip_dec
+
+skipIfCaffe2 = _decide_skip_caffe2(False, "Not compatible with Caffe2")
+skipIfNoCaffe2 = _decide_skip_caffe2(True, "Caffe2 is not available")
 
 def skipIfNoSciPy(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if not TEST_SCIPY:
             raise unittest.SkipTest("test require SciPy, but SciPy not found")
-        else:
-            fn(*args, **kwargs)
-    return wrapper
-
-
-def skipIfOnGHA(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if ON_GHA:
-            raise unittest.SkipTest("Test disabled for GHA")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -1038,20 +1126,6 @@ def slowTest(fn):
         else:
             fn(*args, **kwargs)
     wrapper.__dict__['slow_test'] = True
-    return wrapper
-
-
-# noarch tests are tests that should be only run on one CI configuration,
-# because they don't exercise any interesting platform specific code
-# and so if run once, indicate the test should pass everywhere.
-# See https://github.com/pytorch/pytorch/issues/53743
-def noarchTest(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if TEST_SKIP_NOARCH:
-            raise unittest.SkipTest("test is noarch: we are skipping noarch tests due to TEST_SKIP_NOARCH")
-        else:
-            fn(*args, **kwargs)
     return wrapper
 
 
@@ -1365,64 +1439,242 @@ try:
             verbosity=hypothesis.Verbosity.verbose))
 
     hypothesis.settings.load_profile(
-        "pytorch_ci" if IS_IN_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
+        "pytorch_ci" if IS_CI else os.getenv('PYTORCH_HYPOTHESIS_PROFILE', 'dev')
     )
 except ImportError:
     print('Fail to import hypothesis in common_utils, tests are not derandomized')
 
+# Used in check_if_enable to see if a test method should be disabled by an issue,
+# sanitizes a test method name from appended suffixes by @dtypes parametrization.
+# e.g., an issue with title "DISABLED test_bitwise_ops (__main__.TestBinaryUfuncs)" should
+# disabled ALL parametrized test_bitwise_ops tests, such test_bitwise_ops_cuda_int32
+def remove_device_and_dtype_suffixes(test_name: str) -> str:
+    # import statement is localized to avoid circular dependency issues with common_device_type.py
+    from torch.testing._internal.common_device_type import get_device_type_test_bases
+    device_suffixes = [x.device_type for x in get_device_type_test_bases()]
+    dtype_suffixes = [str(dt)[len("torch."):] for dt in get_all_dtypes()]
+
+    test_name_chunks = test_name.split("_")
+    if len(test_name_chunks) > 0 and test_name_chunks[-1] in dtype_suffixes:
+        if len(test_name_chunks) > 1 and test_name_chunks[-2] in device_suffixes:
+            return "_".join(test_name_chunks[0:-2])
+        return "_".join(test_name_chunks[0:-1])
+    return test_name
+
+
 def check_if_enable(test: unittest.TestCase):
     test_suite = str(test.__class__).split('\'')[1]
-    test_name = f'{test._testMethodName} ({test_suite})'
-    if slow_tests_dict is not None and test_name in slow_tests_dict:
+    raw_test_name = f'{test._testMethodName} ({test_suite})'
+    if slow_tests_dict is not None and raw_test_name in slow_tests_dict:
         getattr(test, test._testMethodName).__dict__['slow_test'] = True
         if not TEST_WITH_SLOW:
             raise unittest.SkipTest("test is slow; run with PYTORCH_TEST_WITH_SLOW to enable test")
+    sanitized_test_method_name = remove_device_and_dtype_suffixes(test._testMethodName)
     if not IS_SANDCASTLE and disabled_tests_dict is not None:
-        if test_name in disabled_tests_dict:
-            issue_url, platforms = disabled_tests_dict[test_name]
-            platform_to_conditional: Dict = {
-                "mac": IS_MACOS,
-                "macos": IS_MACOS,
-                "win": IS_WINDOWS,
-                "windows": IS_WINDOWS,
-                "linux": IS_LINUX,
-                "rocm": TEST_WITH_ROCM,
-                "asan": TEST_WITH_ASAN
-            }
-            if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
-                raise unittest.SkipTest(
-                    f"Test is disabled because an issue exists disabling it: {issue_url}" +
-                    f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " +
-                    "If you're seeing this on your local machine and would like to enable this test, " +
-                    "please make sure IN_CI is not set and you are not using the flag --import-disabled-tests.")
+        for disabled_test, (issue_url, platforms) in disabled_tests_dict.items():
+            disable_test_parts = disabled_test.split()
+            if len(disable_test_parts) > 1:
+                disabled_test_name = disable_test_parts[0]
+                disabled_test_suite = disable_test_parts[1][1:-1]
+                # if test method name or its sanitized version exactly matches the disabled test method name
+                # AND allow non-parametrized suite names to disable parametrized ones (TestSuite disables TestSuiteCPU)
+                if (test._testMethodName == disabled_test_name or sanitized_test_method_name == disabled_test_name) \
+                   and disabled_test_suite in test_suite:
+                    platform_to_conditional: Dict = {
+                        "mac": IS_MACOS,
+                        "macos": IS_MACOS,
+                        "win": IS_WINDOWS,
+                        "windows": IS_WINDOWS,
+                        "linux": IS_LINUX,
+                        "rocm": TEST_WITH_ROCM,
+                        "asan": TEST_WITH_ASAN
+                    }
+                    if platforms == [] or any([platform_to_conditional[platform] for platform in platforms]):
+                        skip_msg = f"Test is disabled because an issue exists disabling it: {issue_url}" \
+                            f" for {'all' if platforms == [] else ''}platform(s) {', '.join(platforms)}. " \
+                            "If you're seeing this on your local machine and would like to enable this test, " \
+                            "please make sure CI is not set and you are not using the flag --import-disabled-tests."
+                        raise unittest.SkipTest(skip_msg)
     if TEST_SKIP_FAST:
         if not getattr(test, test._testMethodName).__dict__.get('slow_test', False):
             raise unittest.SkipTest("test is fast; we disabled it with PYTORCH_TEST_SKIP_FAST")
 
-# Acquires the comparison dtype, required since isclose
-# requires both inputs have the same dtype, and isclose is not supported
-# for some device x dtype combinations.
-# NOTE: Remaps bfloat16 to float32 since neither the CPU or CUDA device types
-#  support needed bfloat16 comparison methods.
-# NOTE: Remaps float16 to float32 on CPU since the CPU device type doesn't
-#   support needed float16 comparison methods.
-# TODO: Update this once bfloat16 and float16 are better supported.
-def get_comparison_dtype(a, b):
-    # TODO: update this when promote_types supports bfloat16 and/or
-    # isclose supports bfloat16.
-    a_dtype = torch.float32 if a.dtype is torch.bfloat16 else a.dtype
-    b_dtype = torch.float32 if b.dtype is torch.bfloat16 else b.dtype
 
-    compare_dtype = torch.promote_types(a_dtype, b_dtype)
+# `TestCase.assertEqual` is very permissive and coerced the inputs into a format that could be compared. This is very
+# convenient when writing tests, but not so much while reviewing them. By default, the comparison `Pair` framework of
+# `torch.testing._comparison.assert_equal`, used for example by the public testing function
+# `torch.testing.assert_close`, is more strict. In order to use the same framework and thus reduce the divergence
+# between internal and external comparison logic as much as possible, we define some "relaxed" pairs here. They only
+# change the supported inputs, but the comparison logic is the same.
+# TODO: Revisit the relaxed pairs and check how much work it is to fix the tests that would fail without the relaxation.
 
-    # non-CUDA (CPU, for example) float16 -> float32
-    # TODO: update this when isclose is implemented for CPU float16
-    if (compare_dtype is torch.float16 and
-        (a.device != b.device or a.device.type != 'cuda' or
-            b.device.type != 'cuda')):
-        compare_dtype = torch.float32
+class RelaxedBooleanPair(BooleanPair):
+    """Pair for boolean-like inputs.
 
-    return compare_dtype
+    In contrast to the builtin :class:`BooleanPair`, this class also supports one input being a number or a single
+    element tensor-like.
+    """
+    _supported_number_types = NumberPair(0, 0)._supported_types
+
+    def _process_inputs(self, actual, expected, *, id):
+        # We require only one of the inputs of the inputs to be a boolean and the other can also be a boolean, a
+        # number, or a single element tensor or array, whereas in default BooleanPair both inputs have to be booleans.
+        tensor_or_array_types: Tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        other_supported_types = (*self._supported_types, *self._supported_number_types, *tensor_or_array_types)
+        if not (
+            (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
+            or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
+        ):
+            raise UnsupportedInputs()
+
+        return [self._to_bool(input, id=id) for input in (actual, expected)]
+
+    def _to_bool(self, bool_like, *, id):
+        if isinstance(bool_like, np.number):
+            return bool(bool_like.item())
+        elif type(bool_like) in self._supported_number_types:
+            return bool(bool_like)
+        elif isinstance(bool_like, (torch.Tensor, np.ndarray)):
+            numel = bool_like.numel() if isinstance(bool_like, torch.Tensor) else bool_like.size
+            if numel > 1:
+                raise ErrorMeta(
+                    ValueError,
+                    f"Only single element tensor-likes can be compared against a boolean. "
+                    f"Got {numel} elements instead.",
+                    id=id,
+                )
+
+            return bool(bool_like.item())
+        else:
+            return super()._to_bool(bool_like, id=id)
+
+
+class RelaxedNumberPair(NumberPair):
+    """Pair for number-like inputs.
+
+    In contrast to the builtin :class:`NumberPair`, this class also supports one input being a single element
+    tensor-like or a :class:`enum.Enum`. (D)Type checks are disabled, meaning comparing 1 to 1.0 succeeds even when
+    ``check_dtype=True`` is passed.
+
+    In addition, this class uses looser default tolerances for :class:`float` and :class:`complex` inputs. Also
+    supports overriding the absolute and relative tolerance through the ``@precisionOverride`` and
+    ``@toleranceOverride`` decorators.
+    """
+    _TYPE_TO_DTYPE = {
+        int: torch.int64,
+        float: torch.float32,
+        complex: torch.complex64,
+    }
+
+    def __init__(
+            self, actual, expected, *, rtol_override=0.0, atol_override=0.0, check_dtype=None, **other_parameters
+    ) -> None:
+        super().__init__(actual, expected, check_dtype=False, **other_parameters)
+        self.rtol = max(self.rtol, rtol_override)
+        self.atol = max(self.atol, atol_override)
+
+    def _process_inputs(self, actual, expected, *, id):
+        # We require only one of the inputs of the inputs to be a number and the other can also be a number or a single
+        # element tensor or array, whereas in default NumberPair both inputs have to be numbers.
+        tensor_or_array_types: Tuple[Type, ...] = (torch.Tensor, np.ndarray)
+        other_supported_types = (*self._supported_types, *tensor_or_array_types)
+        if not (
+                (isinstance(actual, self._supported_types) and isinstance(expected, other_supported_types))
+                or (isinstance(expected, self._supported_types) and isinstance(actual, other_supported_types))
+        ):
+            raise UnsupportedInputs()
+
+        return [self._to_number(input, id=id) for input in (actual, expected)]
+
+    def _to_number(self, number_like, *, id):
+        if isinstance(number_like, (torch.Tensor, np.ndarray)):
+            numel = number_like.numel() if isinstance(number_like, torch.Tensor) else number_like.size
+            if numel > 1:
+                raise ErrorMeta(
+                    ValueError,
+                    f"Only single element tensor-likes can be compared against a number. "
+                    f"Got {numel} elements instead.",
+                    id=id,
+                )
+            number = number_like.item()
+            if isinstance(number, bool):
+                number = int(number)
+
+            return number
+        elif isinstance(number_like, Enum):
+            return int(number_like)  # type: ignore[call-overload]
+        else:
+            return super()._to_number(number_like, id=id)
+
+
+class TensorOrArrayPair(TensorLikePair):
+    """Pair for tensor-like inputs.
+
+    On the one hand this class is stricter than the builtin :class:`TensorLikePair` since it only allows instances of
+    :class:`torch.Tensor` and :class:`numpy.ndarray` rather than allowing any tensor-like than can be converted into a
+    tensor. On the other hand this class is looser since it converts all inputs into tensors with no regard of their
+    relationship, e.g. comparing a :class:`torch.Tensor` to :class:`numpy.ndarray` is fine.
+
+    In addition, this class supports overriding the absolute and relative tolerance through the ``@precisionOverride``
+    and ``@toleranceOverride`` decorators.
+    """
+    def __init__(self, actual, expected, *, rtol_override=0.0, atol_override=0.0, **other_parameters):
+        super().__init__(actual, expected, **other_parameters)
+        self.rtol = max(self.rtol, rtol_override)
+        self.atol = max(self.atol, atol_override)
+
+    def _process_inputs(self, actual, expected, *, id, allow_subclasses):
+        self._check_inputs_isinstance(actual, expected, cls=(torch.Tensor, np.ndarray))
+
+        actual, expected = [self._to_tensor(input) for input in (actual, expected)]
+        for tensor in (actual, expected):
+            self._check_supported(tensor, id=id)
+        return actual, expected
+
+
+class UnittestPair(Pair):
+    """Fallback ABC pair that handles non-numeric inputs.
+
+    To avoid recreating the mismatch messages of :meth:`unittest.TestCase.assertEqual`, this pair simply wraps it in
+    order to use it with the :class:`Pair` "framework" from :func:`assert_equal`.
+
+    Define the :attr:`UnittestPair.CLS` in a subclass to indicate which class(es) of the inputs the pair should support.
+    """
+    CLS: Union[Type, Tuple[Type, ...]]
+    TYPE_NAME: Optional[str] = None
+
+    def __init__(self, actual, expected, **other_parameters):
+        self._check_inputs_isinstance(actual, expected, cls=self.CLS)
+        super().__init__(actual, expected, **other_parameters)
+
+    def compare(self):
+        test_case = unittest.TestCase()
+
+        try:
+            return test_case.assertEqual(self.actual, self.expected)
+        except test_case.failureException as error:
+            msg = str(error)
+
+        type_name = self.TYPE_NAME or (self.CLS if isinstance(self.CLS, type) else self.CLS[0]).__name__
+        raise self._make_error_meta(AssertionError, f"{type_name.title()} comparison failed: {msg}")
+
+
+class StringPair(UnittestPair):
+    CLS = string_classes
+    TYPE_NAME = "string"
+
+
+class SetPair(UnittestPair):
+    CLS = set
+
+
+class TypePair(UnittestPair):
+    CLS = type
+
+
+class ObjectPair(UnittestPair):
+    CLS = object
+
 
 # This implements a variant of assertRaises/assertRaisesRegex where we first test
 # if the exception is NotImplementedError, and if so just skip the test instead
@@ -1466,6 +1718,7 @@ class TestCase(expecttest.TestCase):
             try:
                 torch.cuda.synchronize()
             except RuntimeError as rte:
+                print("TEST SUITE EARLY TERMINATION due to torch.cuda.synchronize() failure", file=sys.stderr)
                 return True
             return False
         else:
@@ -1561,11 +1814,13 @@ class TestCase(expecttest.TestCase):
     # When report_only is True, flaky tests are only reported, but the signal remains the same (the test will still
     # show up red).
     # Otherwise, the flaky test will show up green while its stats are captured by test reports.
-    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True):
-        if num_runs_left == 0:
-            return
-
+    def _run_with_retry(self, result=None, num_runs_left=0, report_only=True, num_red=0, num_green=0):
         using_unittest = isinstance(result, unittest.TestResult)
+        if num_runs_left == 0:
+            if num_green > 0 and num_red > 0 and using_unittest:
+                result.addSkip(self, f'{{"flaky": {True}, "num_red": {num_red}, "num_green": {num_green},' +
+                                     f'"max_num_retries": {MAX_NUM_RETRIES}}}')
+            return
 
         if using_unittest:
             failures_before = 0 if result is None else len(result.failures)  # num tests marked as failed before starting
@@ -1574,6 +1829,20 @@ class TestCase(expecttest.TestCase):
         super().run(result=result)
         # Early terminate test if necessary.
         if self._should_stop_test_suite():
+            if result.wasSuccessful():
+                case = TestCase()
+                if TEST_SAVE_XML is not None:
+                    # This is a big hacky, XMLRunner modifies expected type from TestCase to TestInfo
+                    # Create dummy TestInfo to record results correctly
+                    from xmlrunner.result import _TestInfo  # type: ignore[import]
+                    case = _TestInfo(result, case)
+                    case.output = _TestInfo.ERROR
+                    case.elapsed_time = 0.0
+                    case.test_description = "TestSuiteEarlyFailure"
+                # This shouldn't really happen, but if does add fake failure
+                # For more details see https://github.com/pytorch/pytorch/issues/71973
+                result.failures.append((case, "TestSuite execution was aborted early"))
+                assert result.wasSuccessful() is False
             result.stop()
 
         if not RETRY_TEST_CASES or not using_unittest:
@@ -1584,24 +1853,42 @@ class TestCase(expecttest.TestCase):
         if failures_before < len(result.failures):
             print(f"    {self._testMethodName} failed - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                result.failures.pop(-1)
+                _, traceback_str = result.failures.pop(-1)
+                print(traceback_str)
                 result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red + 1, num_green=num_green)
         elif errors_before < len(result.errors):
             print(f"    {self._testMethodName} errored - num_retries_left: {num_retries_left}")
             if (report_only and num_retries_left < MAX_NUM_RETRIES) or (not report_only and num_retries_left > 0):
-                result.errors.pop(-1)
+                _, traceback_str = result.errors.pop(-1)
+                print(traceback_str)
                 result.addExpectedFailure(self, err)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red + 1, num_green=num_green)
         elif report_only and num_retries_left < MAX_NUM_RETRIES:
             print(f"    {self._testMethodName} succeeded - num_retries_left: {num_retries_left}")
             result.addUnexpectedSuccess(self)
-            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only)
+            self._run_with_retry(result=result, num_runs_left=num_retries_left, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
+        elif not report_only and num_retries_left < MAX_NUM_RETRIES:
+            # in this case, our test was rerun (as a retry has been used) and it just passed.
+            # we incur one more recursive call with num_runs_left = 0 to allow for accurate flaky reporting
+            self._run_with_retry(result=result, num_runs_left=0, report_only=report_only,
+                                 num_red=num_red, num_green=num_green + 1)
 
 
     def run(self, result=None):
-        num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
-        self._run_with_retry(result=result, num_runs_left=num_runs, report_only=not OVERRIDE_FLAKY_SIGNAL)
+        with contextlib.ExitStack() as stack:
+            if TEST_WITH_CROSSREF:
+                stack.enter_context(torch.overrides.push_torch_function_mode(CrossRefMode))
+            num_runs = MAX_NUM_RETRIES + 1 if RETRY_TEST_CASES else 1
+            self._run_with_retry(
+                result=result,
+                num_runs_left=num_runs,
+                report_only=not OVERRIDE_FLAKY_SIGNAL,
+                num_red=0,
+                num_green=0)
 
     def setUp(self):
         check_if_enable(self)
@@ -1661,7 +1948,7 @@ class TestCase(expecttest.TestCase):
         final correction, while the external part of the window is
         filled with counts to meet the nnz contraint exactly.
         """
-        assert 0 <= nnz <= n_rows * n_cols
+        assert 0 <= nnz <= n_rows * n_cols, (nnz, n_rows, n_cols)
 
         def sawteeth(n, m):
             # return the total number of counts in the sequence of
@@ -1757,27 +2044,67 @@ class TestCase(expecttest.TestCase):
         crow_indices.cumsum_(dim=0)
         return crow_indices.to(device=device)
 
-    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+    def genSparseCompressedTensor(self, size, nnz, *, layout, device, dtype, index_dtype, blocksize=()):
+        from operator import mul
+        from functools import reduce
         sparse_dim = 2
-        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
-        assert len(size) == sparse_dim
+        assert all(size[d] > 0 for d in range(len(size))) or nnz == 0, 'invalid arguments'
+        assert len(size) >= sparse_dim
+        if blocksize:
+            assert len(blocksize) == 2, (size, blocksize)
+            assert size[-2] % blocksize[0] == 0, (size, blocksize)
+            assert size[-1] % blocksize[1] == 0, (size, blocksize)
+            blocksize0, blocksize1 = blocksize
+        else:
+            blocksize0 = blocksize1 = 1
 
-        def random_sparse_csr(n_rows, n_cols, nnz):
-            crow_indices = self._make_crow_indices(n_rows, n_cols, nnz, device=device, dtype=index_dtype)
-            col_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
-            for i in range(n_rows):
-                count = crow_indices[i + 1] - crow_indices[i]
-                col_indices[crow_indices[i]:crow_indices[i + 1]], _ = torch.sort(
-                    torch.randperm(n_cols, dtype=index_dtype, device=device)[:count])
+        def random_sparse_compressed(n_compressed_dims, n_plain_dims, nnz):
+            compressed_indices = self._make_crow_indices(n_compressed_dims, n_plain_dims, nnz, device=device, dtype=index_dtype)
+            plain_indices = torch.zeros(nnz, dtype=index_dtype, device=device)
+            for i in range(n_compressed_dims):
+                count = compressed_indices[i + 1] - compressed_indices[i]
+                plain_indices[compressed_indices[i]:compressed_indices[i + 1]], _ = torch.sort(
+                    torch.randperm(n_plain_dims, dtype=index_dtype, device=device)[:count])
             low = -1 if dtype != torch.uint8 else 0
             high = 1 if dtype != torch.uint8 else 2
-            values = make_tensor([nnz], device=device, dtype=dtype, low=low, high=high)
-            return values, crow_indices, col_indices
+            values = make_tensor((nnz,) + blocksize, device=device, dtype=dtype, low=low, high=high)
+            return values, compressed_indices, plain_indices
 
-        values, crow_indices, col_indices = random_sparse_csr(size[0], size[1], nnz)
-        return torch.sparse_csr_tensor(crow_indices,
-                                       col_indices,
-                                       values, size=size, dtype=dtype, device=device)
+        batch_shape = size[:-2]
+        n_batch = reduce(mul, batch_shape, 1)
+
+        if layout in {torch.sparse_csr, torch.sparse_bsr}:
+            n_compressed_dims, n_plain_dims = size[-2] // blocksize0, size[-1] // blocksize1
+        else:
+            n_compressed_dims, n_plain_dims = size[-1] // blocksize1, size[-2] // blocksize0
+        blocknnz = nnz // (blocksize0 * blocksize1)
+        sparse_tensors = [random_sparse_compressed(n_compressed_dims, n_plain_dims, blocknnz) for _ in range(n_batch)]
+        sparse_tensors_it = map(list, zip(*sparse_tensors))
+
+        values = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, blocknnz, *blocksize)
+        compressed_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+        plain_indices = torch.stack(next(sparse_tensors_it)).reshape(*batch_shape, -1)
+
+        return torch.sparse_compressed_tensor(compressed_indices, plain_indices,
+                                              values, size=size, dtype=dtype, layout=layout, device=device)
+
+    def genSparseCSRTensor(self, size, nnz, *, device, dtype, index_dtype):
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csr, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+
+    def genSparseCSCTensor(self, size, nnz, *, device, dtype, index_dtype):
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_csc, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=())
+
+    def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+        assert len(blocksize) == 2
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsr, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
+
+    def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype):
+        assert len(blocksize) == 2
+        return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsc, device=device,
+                                              dtype=dtype, index_dtype=index_dtype, blocksize=blocksize)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
@@ -1790,8 +2117,9 @@ class TestCase(expecttest.TestCase):
         i.mul_(torch.tensor(size[:sparse_dim]).unsqueeze(1).to(i))
         i = i.to(torch.long)
         if is_uncoalesced:
-            v = torch.cat([v, torch.randn_like(v)], 0)
-            i = torch.cat([i, i], 1)
+            i1 = i[:, :(nnz // 2), ...]
+            i2 = i[:, :((nnz + 1) // 2), ...]
+            i = torch.cat([i1, i2], 1)
         x = torch.sparse_coo_tensor(i, v, torch.Size(size), dtype=dtype, device=device)
 
         if not is_uncoalesced:
@@ -1807,18 +2135,22 @@ class TestCase(expecttest.TestCase):
         return x, x._indices().clone(), x._values().clone()
 
     def safeToDense(self, t):
-        return t.coalesce().to_dense()
+        # coalesce is only implemented for COO
+        if t.layout == torch.sparse_coo:
+            t = t.coalesce()
+        return t.to_dense()
 
     # Compares a torch function with a reference function for a given sample input (object of SampleInput)
     # Note: only values are compared, type comparison is not done here
     def compare_with_reference(self, torch_fn, ref_fn, sample_input, **kwargs):
-        n_inp, n_args, n_kwargs = sample_input.numpy()
+        numpy_sample = sample_input.numpy()
+        n_inp, n_args, n_kwargs = numpy_sample.input, numpy_sample.args, numpy_sample.kwargs
         t_inp, t_args, t_kwargs = sample_input.input, sample_input.args, sample_input.kwargs
 
         actual = torch_fn(t_inp, *t_args, **t_kwargs)
         expected = ref_fn(n_inp, *n_args, **n_kwargs)
 
-        self.assertEqual(actual, expected, exact_device=False)
+        self.assertEqual(actual, expected, exact_device=False, **kwargs)
 
     # Compares the given Torch and NumPy functions on the given tensor-like object.
     # NOTE: both torch_fn and np_fn should be functions that take a single
@@ -1859,305 +2191,99 @@ class TestCase(expecttest.TestCase):
 
         self.assertEqual(np_result, torch_result, **kwargs)
 
-    # Some analysis of tolerance by logging tests from test_torch.py can be found
-    # in https://github.com/pytorch/pytorch/pull/32538.
-    # dtype name : (rtol, atol)
-    dtype_precisions = {
-        torch.float16    : (0.001, 1e-5),
-        torch.bfloat16   : (0.016, 1e-5),
-        torch.float32    : (1.3e-6, 1e-5),
-        torch.float64    : (1e-7, 1e-7),
-        torch.complex32  : (0.001, 1e-5),
-        torch.complex64  : (1.3e-6, 1e-5),
-        torch.complex128 : (1e-7, 1e-7),
-    }
-
-    # Returns the "default" rtol and atol for comparing scalars or
-    # tensors of the given dtypes.
-    def _getDefaultRtolAndAtol(self, dtype0, dtype1):
-        rtol = max(self.dtype_precisions.get(dtype0, (0, 0))[0],
-                   self.dtype_precisions.get(dtype1, (0, 0))[0])
-        atol = max(self.dtype_precisions.get(dtype0, (0, 0))[1],
-                   self.dtype_precisions.get(dtype1, (0, 0))[1])
-
-        return rtol, atol
-
-    # Checks if two dense tensors are equal(-ish), returning (True, None)
-    #   when they are and (False, debug_msg) when they are not.
-    # If exact_dtype is true both tensors must have the same dtype.
-    # If exact_device is true both tensors must be on the same device.
-    # See the "Test Framework Tensor 'Equality'" note for more details.
-    # NOTE: tensors on different devices are moved to the CPU to be compared when
-    #   exact_device is False.
-    # NOTE: this function checks the tensors' devices, sizes, and dtypes
-    #  and acquires the appropriate device, dtype, rtol and atol to compare
-    #  them with. It then calls _compare_tensors_internal.
-    def _compareTensors(self, a, b, *, rtol: Optional[float] = None, atol=None, equal_nan=True,
-                        exact_dtype=True, exact_device=False) -> _compare_return_type:
-        assert (atol is None) == (rtol is None)
-        if not isinstance(a, torch.Tensor):
-            return (False, "argument a, {0}, to _compareTensors is not a tensor!".format(a))
-        if not isinstance(b, torch.Tensor):
-            return (False, "argument b, {0}, to _compareTensors is not a tensor!".format(b))
-
-        # Validates tensors are on the same device
-        if exact_device and a.device != b.device:
-            return (False, ("Attempted to compare equality of tensors on "
-                            "different devices! Got devices {0} and "
-                            "{1}.".format(a.device, b.device)))
-
-        # Compares tensors of different devices on the CPU
-        if a.device != b.device:
-            a = a.cpu()
-            b = b.cpu()
-
-        # Checks size matches
-        if a.size() != b.size():
-            return (False, ("Attempted to compare equality of tensors with "
-                            "different sizes. Got sizes {0} and {1}.").format(a.size(), b.size()))
-
-        # Checks dtype (if exact_dtype)
-        if exact_dtype and a.dtype is not b.dtype:
-            return (False, ("Attempted to compare equality of tensors with "
-                            "different dtypes. Got dtypes {0} and {1}.").format(a.dtype, b.dtype))
-
-        # Acquires rtol and atol
-        if rtol is None:
-            rtol, atol = self._getDefaultRtolAndAtol(a.dtype, b.dtype)
-
-        atol = max(atol, self.precision)
-        rtol = max(rtol, self.rel_tol)
-
-        # Converts to comparison dtype
-        dtype = get_comparison_dtype(a, b)
-        a = a.to(dtype)
-        b = b.to(dtype)
-
-        return _compare_tensors_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
-
-    # Checks if two scalars are equal(-ish), returning (True, None)
-    #   when they are and (False, debug_msg) when they are not.
-    # NOTE: this function just acquires rtol and atol
-    #   before calling _compare_scalars_internal.
-    def _compareScalars(self, a, b, *,
-                        rtol: Optional[float] = None, atol: Optional[float] = None, equal_nan=True) -> _compare_return_type:
-        # Acquires rtol and atol
-        assert (atol is None) == (rtol is None)
-        if rtol is None:
-            if isinstance(a, complex) or isinstance(b, complex):
-                rtol, atol = self._getDefaultRtolAndAtol(torch.complex64, torch.complex64)
-            elif isinstance(a, float) or isinstance(b, float):
-                rtol, atol = self._getDefaultRtolAndAtol(torch.float32, torch.float32)
-            else:
-                rtol, atol = 0, 0
-        rtol = cast(float, rtol)
-        atol = cast(float, atol)
-        assert atol is not None
-        atol = max(atol, self.precision)
-        rtol = max(rtol, self.rel_tol)
-
-        return _compare_scalars_internal(a, b, rtol=rtol, atol=atol, equal_nan=equal_nan)
-
-    # Construct assert messages basd on internal debug message and user provided message.
-    def _get_assert_msg(self, msg, debug_msg=None):
-        if msg is None:
-            return debug_msg
-        else:
-            return f"\n{msg}" if debug_msg is None else f"{debug_msg}\n{msg}"
-
     def assertEqualIgnoreType(self, *args, **kwargs) -> None:
         # If you are seeing this function used, that means test is written wrongly
         # and deserves detailed investigation
         return self.assertEqual(*args, exact_dtype=False, **kwargs)
 
-    def _is_dict(self, obj):
-        return isinstance(obj, (dict, torch._C.ScriptDict))  # type: ignore[attr-defined]
+    def assertEqualBroadcasting(self, x, y, *args, **kwargs) -> None:
+        r"""Tests if tensor x equals to y, if y to be broadcast to x.shape.
+        """
+        if not isinstance(y, Iterable):
+            # int, float, etc. or different shape tensors
+            y = torch.ones_like(x) * y
+        if not isinstance(y, torch.Tensor):
+            # iterable, but not a tensor
+            y = torch.ones_like(x) * torch.tensor(y)
+        return self.assertEqual(x, y, *args, **kwargs)
 
-    # Compares x and y
-    # TODO: default exact_device to True
-    def assertEqual(self, x, y, msg: Optional[str] = None, *,
-                    atol: Optional[float] = None, rtol: Optional[float] = None,
-                    equal_nan=True, exact_dtype=True, exact_device=False) -> None:
-        assert (atol is None) == (rtol is None), "If one of atol or rtol is specified, then the other must be too"
-        debug_msg: Optional[str] = None
+    def assertEqual(
+            self,
+            x,
+            y,
+            msg: Optional[Union[str, Callable[[str], str]]] = None,
+            *,
+            atol: Optional[float] = None,
+            rtol: Optional[float] = None,
+            equal_nan=True,
+            exact_dtype=True,
+            # TODO: default this to True
+            exact_device=False,
+            exact_layout=False,
+            exact_stride=False,
+            exact_is_coalesced=False
+    ):
+        # Hide this function from `pytest`'s traceback
+        __tracebackhide__ = True
 
-        if x is None or y is None:
-            self.assertTrue(x is None, "left arg is not None while right arg is None")
-            self.assertTrue(y is None, "left arg is None while right arg not is None")
-        # Tensor x Number and Number x Tensor comparisons
-        elif isinstance(x, torch.Tensor) and isinstance(y, Number):
-            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        elif isinstance(y, torch.Tensor) and isinstance(x, Number):
-            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        # Tensor x np.bool
-        elif isinstance(x, torch.Tensor) and isinstance(y, np.bool_):
-            self.assertEqual(x.item(), y, atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
-        elif isinstance(y, torch.Tensor) and isinstance(x, np.bool_):
-            self.assertEqual(x, y.item(), atol=atol, rtol=rtol, msg=msg,
-                             exact_dtype=exact_dtype, exact_device=exact_device)
+        # numpy's dtypes are a superset of what PyTorch supports. In case we encounter an unsupported dtype, we fall
+        # back to an elementwise comparison. Note that this has to happen here and not for example in
+        # `TensorOrArrayPair`, since at that stage we can no longer split the array into its elements and perform
+        # multiple comparisons.
+        if any(
+            isinstance(input, np.ndarray) and not has_corresponding_torch_dtype(input.dtype) for input in (x, y)
+        ):
+            def to_list(input):
+                return input.tolist() if isinstance(input, (torch.Tensor, np.ndarray)) else list(input)
 
-        # Tensor x Tensor
-        elif isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-            debug_msg = ("Attempted to compare with different is_sparse settings: "
-                         f"Expected: {x.is_sparse}; Actual: {y.is_sparse}.")
-            super().assertEqual(x.is_sparse, y.is_sparse, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg))
-            debug_msg = ("Attempted to compare with different is_quantized settings: "
-                         f"Expected: {x.is_quantized}; Actual: {y.is_quantized}.")
-            super().assertEqual(x.is_quantized, y.is_quantized, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg))
-            if x.is_sparse:
-                if x.size() != y.size():
-                    debug_msg_sparse = ("Attempted to compare equality of tensors with different sizes: "
-                                        f"Expected: {x.size()}; Actual: {y.size()}.")
-                    super().assertTrue(False, msg=self._get_assert_msg(msg=msg, debug_msg=debug_msg_sparse))
+            x = to_list(x)
+            y = to_list(y)
+        # When comparing a sequence of numbers to a tensor, we need to convert the sequence to a tensor here.
+        # Otherwise, the pair origination of `assert_equal` will fail, because the sequence is recognized as container
+        # that should be checked elementwise while the tensor is not.
+        elif isinstance(x, torch.Tensor) and isinstance(y, Sequence):
+            y = torch.as_tensor(y, dtype=x.dtype, device=x.device)
+        elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
+            x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
 
-                x = x.coalesce()
-                y = y.coalesce()
-                indices_result, debug_msg_indices = self._compareTensors(x._indices(), y._indices(),
-                                                                         rtol=rtol, atol=atol,
-                                                                         equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                         exact_device=exact_device)
-
-                if not indices_result:
-                    assert debug_msg_indices is not None
-                    debug_msg = "Sparse tensor indices failed to compare as equal! " + debug_msg_indices
-                super().assertTrue(indices_result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-
-                values_result, debug_msg_values = self._compareTensors(x._values(), y._values(),
-                                                                       rtol=rtol, atol=atol,
-                                                                       equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                       exact_device=exact_device)
-
-                if not values_result:
-                    assert debug_msg_values is not None
-                    debug_msg = "Sparse tensor values failed to compare as equal! " + debug_msg_values
-                super().assertTrue(values_result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-            elif x.is_quantized and y.is_quantized:
-                self.assertEqual(x.qscheme(), y.qscheme(), atol=atol, rtol=rtol,
-                                 msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device)
-
-                if x.qscheme() == torch.per_tensor_affine:
-                    self.assertEqual(x.q_scale(), y.q_scale(), atol=atol, rtol=rtol,
-                                     msg=msg, exact_dtype=exact_dtype,
-                                     exact_device=exact_device)
-                    self.assertEqual(x.q_zero_point(), y.q_zero_point(),
-                                     atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device)
-                elif x.qscheme() == torch.per_channel_affine:
-                    self.assertEqual(x.q_per_channel_scales(), y.q_per_channel_scales(), atol=atol, rtol=rtol,
-                                     msg=msg, exact_dtype=exact_dtype,
-                                     exact_device=exact_device)
-                    self.assertEqual(x.q_per_channel_zero_points(), y.q_per_channel_zero_points(),
-                                     atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device)
-                    self.assertEqual(x.q_per_channel_axis(), y.q_per_channel_axis(),
-                                     atol=atol, rtol=rtol, msg=msg,
-                                     exact_dtype=exact_dtype, exact_device=exact_device)
-
-                result, debug_msg_compare = self._compareTensors(x.int_repr().to(torch.int32),
-                                                                 y.int_repr().to(torch.int32),
-                                                                 atol=atol, rtol=rtol,
-                                                                 exact_dtype=exact_dtype,
-                                                                 exact_device=exact_device)
-
-                if not result:
-                    assert debug_msg_compare is not None
-                    debug_msg = "Quantized representations failed to compare as equal! " + debug_msg_compare
-                super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-            else:
-                result, debug_msg_generic = self._compareTensors(x, y, rtol=rtol, atol=atol,
-                                                                 equal_nan=equal_nan, exact_dtype=exact_dtype,
-                                                                 exact_device=exact_device)
-
-                if not result:
-                    assert debug_msg_generic is not None
-                    debug_msg = "Tensors failed to compare as equal!" + debug_msg_generic
-                super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        elif isinstance(x, (np.ndarray, torch.Tensor)) or isinstance(y, (np.ndarray, torch.Tensor)):
-            def maybe_to_tensor(a: Union[np.ndarray, torch.Tensor]) -> Union[np.ndarray, torch.Tensor]:
-                if not isinstance(a, np.ndarray):
-                    return a
-
-                try:
-                    return torch.from_numpy(a)
-                except TypeError:
-                    # This happens if the dtype is non-numeric or not supported by torch
-                    return a
-
-            def maybe_to_list(a: Any) -> Any:
-                if not isinstance(a, (np.ndarray, torch.Tensor)):
-                    return a
-
-                return a.tolist()
-
-            x = maybe_to_tensor(x)
-            y = maybe_to_tensor(y)
-
-            if isinstance(x, torch.Tensor) and isinstance(y, torch.Tensor):
-                self.assertEqual(
-                    x, y, atol=atol, rtol=rtol, msg=msg, exact_dtype=exact_dtype, exact_device=exact_device
-                )
-            else:
-                # In case we can't convert the array to a tensor, we fall back to comparing x and y as iterables
-                self.assertEqual(
-                    maybe_to_list(x),
-                    maybe_to_list(y),
-                    atol=atol,
-                    rtol=rtol,
-                    msg=msg,
-                    exact_dtype=exact_dtype,
-                    exact_device=exact_device
-                )
-        elif isinstance(x, string_classes) and isinstance(y, string_classes):
-            debug_msg = ("Attempted to compare [string] types: "
-                         f"Expected: {repr(x)}; Actual: {repr(y)}.")
-            super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        elif type(x) == set and type(y) == set:
-            debug_msg = ("Attempted to compare [set] types: "
-                         f"Expected: {x}; Actual: {y}.")
-            super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        elif self._is_dict(x) and self._is_dict(y):
-            if isinstance(x, OrderedDict) and isinstance(y, OrderedDict):
-                self.assertEqual(x.items(), y.items(), atol=atol, rtol=rtol,
-                                 msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device)
-            else:
-                self.assertEqual(set(x.keys()), set(y.keys()), atol=atol, rtol=rtol,
-                                 msg=msg, exact_dtype=exact_dtype,
-                                 exact_device=exact_device)
-                key_list = list(x.keys())
-                self.assertEqual([x[k] for k in key_list],
-                                 [y[k] for k in key_list],
-                                 atol=atol, rtol=rtol, msg=msg,
-                                 exact_dtype=exact_dtype, exact_device=exact_device)
-        elif isinstance(x, type) and isinstance(y, type):
-            # See TestTorch.test_assert_equal_generic_meta
-            debug_msg = ("Attempted to compare [type] types: "
-                         f"Expected: {x}; Actual: {y}.")
-            super().assertEqual(x, y, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        elif is_iterable(x) and is_iterable(y):
-            debug_msg = ("Attempted to compare the lengths of [iterable] types: "
-                         f"Expected: {len(x)}; Actual: {len(y)}.")
-            super().assertEqual(len(x), len(y), msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-            for x_, y_ in zip(x, y):
-                self.assertEqual(x_, y_, atol=atol, rtol=rtol, msg=msg,
-                                 exact_dtype=exact_dtype, exact_device=exact_device)
-        elif isinstance(x, bool) and isinstance(y, bool):
-            super().assertTrue(x == y, msg=msg)
-
-        # Scalar x Scalar
-        elif isinstance(x, Number) and isinstance(y, Number):
-            result, debug_msg_scalars = self._compareScalars(x, y, rtol=rtol, atol=atol,
-                                                             equal_nan=equal_nan)
-            if not result:
-                assert debug_msg_scalars is not None
-                debug_msg = "Scalars failed to compare as equal! " + debug_msg_scalars
-            super().assertTrue(result, msg=self._get_assert_msg(msg, debug_msg=debug_msg))
-        else:
-            super().assertEqual(x, y, msg=msg)
+        assert_equal(
+            x,
+            y,
+            pair_types=(
+                NonePair,
+                RelaxedBooleanPair,
+                RelaxedNumberPair,
+                TensorOrArrayPair,
+                StringPair,
+                SetPair,
+                TypePair,
+                ObjectPair,
+            ),
+            sequence_types=(
+                Sequence,
+                torch.storage._TypedStorage,
+                Sequential,
+                ModuleList,
+                ParameterList,
+                ScriptList,
+                torch.utils.data.dataset.Subset,
+            ),
+            mapping_types=(Mapping, ModuleDict, ParameterDict, ScriptDict),
+            rtol=rtol,
+            rtol_override=self.rel_tol,
+            atol=atol,
+            atol_override=self.precision,
+            equal_nan=equal_nan,
+            check_device=exact_device,
+            check_dtype=exact_dtype,
+            check_layout=exact_layout,
+            check_stride=exact_stride,
+            check_is_coalesced=exact_is_coalesced,
+            # This emulates unittest.TestCase's behavior if a custom message passed and
+            # TestCase.longMessage (https://docs.python.org/3/library/unittest.html#unittest.TestCase.longMessage)
+            # is True (default)
+            msg=(lambda generated_msg: f"{generated_msg} : {msg}") if isinstance(msg, str) and self.longMessage else msg,
+        )
 
     def assertNotEqual(self, x, y, msg: Optional[str] = None, *,                                       # type: ignore[override]
                        atol: Optional[float] = None, rtol: Optional[float] = None, **kwargs) -> None:
@@ -2372,6 +2498,19 @@ class TestCase(expecttest.TestCase):
         msg = self._formatMessage(msg, standardMsg)
         raise self.failureException(msg)
 
+    def assertAtenOp(self, onnx_model, operator, overload_name=""):
+        all_aten_nodes = [p for p in onnx_model.graph.node
+                          if p.op_type == "ATen" and p.domain == "org.pytorch.aten"]
+        self.assertTrue(all_aten_nodes)
+
+        for op in all_aten_nodes:
+            attrs = {attr.name: attr.s.decode() for attr in op.attribute}
+            if attrs.get("operator") == operator:
+                break
+
+        self.assertEqual(attrs["operator"], operator)
+        self.assertEqual(attrs.get("overload_name", ""), overload_name)
+
     # run code in subprocess and capture exceptions.
     @staticmethod
     def run_process_no_exception(code, env=None):
@@ -2390,10 +2529,10 @@ class TestCase(expecttest.TestCase):
     def runWithPytorchAPIUsageStderr(code):
         env = os.environ.copy()
         env["PYTORCH_API_USAGE_STDERR"] = "1"
-        # remove IN_CI flag since this is a wrapped test process.
-        # IN_CI flag should be set in the parent process only.
-        if "IN_CI" in env.keys():
-            del env["IN_CI"]
+        # remove CI flag since this is a wrapped test process.
+        # CI flag should be set in the parent process only.
+        if "CI" in env.keys():
+            del env["CI"]
         (stdout, stderr) = TestCase.run_process_no_exception(code, env=env)
         return stderr.decode('ascii')
 
@@ -2531,26 +2670,28 @@ def noncontiguous_like(t):
         return t
 
     # Special-cases 0-dim tensors
-    if t.ndim == 0:
-        result = t.detach().unsqueeze(0).repeat_interleave(2, dim=-1)
-        if t.dtype.is_floating_point or t.dtype.is_complex:
-            result[0] = math.nan
-        else:
-            result[0] = 0
-        result.set_(result.storage(), 1, t.size(), ())
-        result.requires_grad_(t.requires_grad)
-        return result
+    zero_dim = t.ndim == 0
+    if zero_dim:
+        t = t.unsqueeze(0)
 
-    # 1+ dim tensor case
     result = torch.repeat_interleave(t.detach(), 2, dim=-1)
-    if t.dtype.is_floating_point or t.dtype.is_complex:
-        result[..., 1::2] = math.nan
-    else:
-        result[..., 1::2] = 0
 
-    strides = list(result.stride())
-    strides[-1] = strides[-1] * 2
-    result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
+    # Choose a "weird" value that won't be accessed
+    if t.dtype.is_floating_point or t.dtype.is_complex:
+        value = math.nan
+    elif t.dtype == torch.bool:
+        value = True
+    else:
+        value = 12
+
+    if zero_dim:
+        result[0] = value
+        result.set_(result.storage(), 1, (), ())
+    else:
+        result[..., 1::2] = value
+        strides = list(result.stride())
+        strides[-1] *= 2
+        result.set_(result.storage(), result.storage_offset(), t.size(), stride=tuple(strides))
     result.requires_grad_(t.requires_grad)
     return result
 
@@ -2631,13 +2772,12 @@ def random_hermitian_pd_matrix(matrix_size, *batch_dims, dtype, device):
                     dtype=dtype, device=device)
     return A @ A.mH + torch.eye(matrix_size, dtype=dtype, device=device)
 
-# Creates a full rank matrix with distinct signular values or
+# Creates a full rank matrix with distinct singular values or
 #   a batch of such matrices
 def make_fullrank_matrices_with_distinct_singular_values(*shape, device, dtype, requires_grad=False):
     with torch.no_grad():
         t = make_tensor(shape, device=device, dtype=dtype)
         u, _, vh = torch.linalg.svd(t, full_matrices=False)
-        # TODO: improve the handling of complex tensors here
         real_dtype = t.real.dtype if t.dtype.is_complex else t.dtype
         k = min(shape[-1], shape[-2])
         # We choose the singular values to be "around one"
@@ -2898,7 +3038,7 @@ def gradcheck(fn, inputs, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -2918,7 +3058,7 @@ def gradgradcheck(fn, inputs, grad_outputs=None, **kwargs):
         "fast_mode": True,
     }
 
-    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0FF") == "ON":
+    if os.environ.get('PYTORCH_TEST_WITH_SLOW_GRADCHECK', "0") == "1":
         default_values["fast_mode"] = False
 
     for key, value in default_values.items():
@@ -3065,21 +3205,6 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
     return torch.tensor(res, device=device, dtype=dtype)
 
 
-def has_breakpad():
-    # We always build with breakpad in CI
-    if IS_IN_CI:
-        return True
-
-    # If not on a special build, check that the library was actually linked in
-    try:
-        torch._C._get_minidump_directory()  # type: ignore[attr-defined]
-        return True
-    except RuntimeError as e:
-        if "Minidump handler is uninintialized" in str(e):
-            return True
-        return False
-
-
 def sandcastle_skip_if(condition, reason):
     """
     Similar to unittest.skipIf, however in the sandcastle environment it just
@@ -3087,20 +3212,17 @@ def sandcastle_skip_if(condition, reason):
     skipping continuously.
     """
     def decorator(func):
-
-        if not IS_SANDCASTLE and condition:
-            func.__unittest_skip__ = True
-            func.__unittest_skip_why__ = reason
-            return func
-
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if condition and IS_SANDCASTLE:
-                print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
-                return
+        if condition:
+            if IS_SANDCASTLE:
+                @wraps(func)
+                def wrapper(*args, **kwargs):
+                    print(f'Skipping {func.__name__} on sandcastle for following reason: {reason}', file=sys.stderr)
+                return wrapper
             else:
-                return func(*args, **kwargs)
-        return wrapper
+                func.__unittest_skip__ = True
+                func.__unittest_skip_why__ = reason
+
+        return func
 
     return decorator
 
@@ -3182,3 +3304,12 @@ def clone_input_helper(input):
         return tuple(map(clone_input_helper, input))
 
     return input
+
+@contextmanager
+def custom_op(opname, symbolic_fn, opset_version):
+    """Context manager/decorator to test ONNX export with custom oeprator"""
+    try:
+        register_custom_op_symbolic(opname, symbolic_fn, opset_version)
+        yield
+    finally:
+        unregister_custom_op_symbolic(opname, opset_version)

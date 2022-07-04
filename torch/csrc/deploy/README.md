@@ -20,3 +20,8 @@ Because CPython builds successfully when optional dependencies are missing, the 
 To be safe, install the [complete list of dependencies for CPython](https://devguide.python.org/setup/#install-dependencies) for your platform, before trying to build torch with USE_DEPLOY=1.
 
 If you already built CPython without all the dependencies and want to fix it, just blow away the CPython folder under torch/csrc/deploy/third_party, install the missing system dependencies, and re-attempt the pytorch build command.
+
+# Example
+
+Read the [getting started guide](https://github.com/pytorch/pytorch/blob/master/docs/source/deploy.rst) for an
+example on how to use `torch::deploy`.
