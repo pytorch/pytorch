@@ -43,7 +43,6 @@ jobs:
           - docker-image-name: pytorch-linux-focal-py3-clang10-onnx
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
-      GHCR_PAT: ${{ secrets.GHCR_PAT }}
     steps:
       - name: Clean workspace
         shell: bash
@@ -63,6 +62,8 @@ jobs:
       - name: Build docker image
         id: build-docker-image
         uses: ./.github/actions/calculate-docker-image
+        env:
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
         with:
           docker-image-name: ${{ matrix.docker-image-name }}
           always-rebuild: true
