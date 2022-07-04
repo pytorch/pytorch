@@ -121,10 +121,14 @@ __all__ = [
     #
     # View prims
     #
+    "atleast_1d",
+    "atleast_2d",
+    "atleast_3d",
     "as_strided",
     "broadcast_in_dim",
     "collapse_view",
     "expand_dims",
+    "ravel",
     "slice",
     "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
@@ -1130,6 +1134,30 @@ zeta = _make_elementwise_binary_prim(
 #
 # View operations
 #
+atleast_1d = _make_elementwise_unary_prim(
+    "atleast_1d",
+    impl_aten=torch.atleast_1d,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+atleast_2d = _make_elementwise_unary_prim(
+    "atleast_2d",
+    impl_aten=torch.atleast_2d,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
+atleast_3d = _make_elementwise_unary_prim(
+    "atleast_3d",
+    impl_aten=torch.atleast_3d,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
+
+
 # TODO: model view relationships
 # TODO: model storage
 def _as_strided_meta(
@@ -1388,6 +1416,14 @@ def expand_dims(a: TensorLikeType, dimensions: DimsSequenceType) -> TensorLikeTy
         idx for idx in range(len(new_shape)) if idx not in dimensions
     ]
     return broadcast_in_dim(a, new_shape, broadcast_dimensions)
+
+
+ravel = _make_elementwise_unary_prim(
+    "ravel",
+    impl_aten=torch.ravel,
+    doc="",
+    type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT,
+)
 
 
 # Note: saves the Python slice object because we're about to clobber its name with the slice prim
