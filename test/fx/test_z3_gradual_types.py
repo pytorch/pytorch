@@ -32,6 +32,59 @@ skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 class HFOperations(unittest.TestCase):
 
+    def test_cumsum(self):
+        class BasicBlock(torch.nn.Module):
+            def __init__(self):
+                super(BasicBlock, self).__init__()
+
+            def forward(self, x: TensorType([Dyn, 4, 3])):
+                t = torch.cumsum(x, 3)
+                return t
+
+        symbolic_traced: torch.fx.GraphModule = meta_symbolic_trace(BasicBlock(), meta_args={})
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+
+        # should be unsat since the index is not valid for this annotation
+        self.assertEqual(s.check(), z3.unsat)
+
+        # modify the annotation to Dyn which should give sat
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = Dyn
+
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        # # modify the annotation to the right tensor size
+        for n in symbolic_traced.graph.nodes:
+            if n.op == 'placeholder':
+                n.type = TensorType([1, 2, 3, 4])
+
+        # verify that the input is equal to the output
+        B = BasicBlock().forward(torch.rand(1, 2, 3, 4))
+        res_shape = B.shape
+        transformed = transform_all_constraints(symbolic_traced, counter=0)
+        s = z3.Solver()
+        s.add(transformed)
+        self.assertEqual(s.check(), z3.sat)
+
+        # confirm the output matches the expected tensor
+        result = z3.Const(2, tensor_type)
+        self.assertEqual(s.model()[result].arg(0).arg(1), res_shape[0])
+        self.assertEqual(s.model()[result].arg(1).arg(1), res_shape[1])
+        self.assertEqual(s.model()[result].arg(2).arg(1), res_shape[2])
+        self.assertEqual(s.model()[result].arg(3).arg(1), res_shape[3])
+
+        # confirm the output is not dyn
+        self.assertNotEqual(s.model()[result].arg(0).arg(0).as_long(), 0)
+        self.assertNotEqual(s.model()[result].arg(1).arg(0).as_long(), 0)
+        self.assertNotEqual(s.model()[result].arg(2).arg(0).as_long(), 0)
+        self.assertNotEqual(s.model()[result].arg(3).arg(0).as_long(), 0)
+
     def test_arange(self):
         class BasicBlock(torch.nn.Module):
             def __init__(self):
