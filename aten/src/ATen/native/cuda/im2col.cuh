@@ -1,9 +1,5 @@
 #pragma once
 
-#include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/Utils.h>
-
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
@@ -171,8 +167,8 @@ void col2im(
     const int64_t channels,
     const int64_t height,
     const int64_t width,
-    const int64_t output_height,
-    const int64_t output_width,
+    const int64_t height_col,
+    const int64_t width_col,
     const int64_t patch_height,
     const int64_t patch_width,
     const int64_t pad_height,
@@ -201,8 +197,8 @@ void col2im(
           stride_width,
           dilation_height,
           dilation_width,
-          output_height,
-          output_width,
+          height_col,
+          width_col,
           data_im);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }

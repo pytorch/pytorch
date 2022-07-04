@@ -2,6 +2,7 @@
 #include <torch/csrc/jit/codegen/cuda/executor.h>
 #include <torch/csrc/jit/codegen/cuda/fusion.h>
 #include <torch/csrc/jit/codegen/cuda/ir_all_nodes.h>
+#include <torch/csrc/jit/codegen/cuda/ir_builder.h>
 #include <torch/csrc/jit/codegen/cuda/ir_utils.h>
 #include <torch/csrc/jit/codegen/cuda/lower2device.h>
 #include <torch/csrc/jit/codegen/cuda/ops/all_ops.h>
@@ -14,7 +15,7 @@
 
 #include <sstream>
 
-#include "utils.h"
+#include <benchmarks/cpp/nvfuser/utils.h>
 
 using namespace torch::jit::fuser::cuda;
 
@@ -36,7 +37,7 @@ static void setupDivMaxSoftmaxDropoutForward(Fusion* fusion, DataType dtype) {
   fusion->addInput(tv1);
 
   // TODO: should be input
-  auto d16 = new Double(1.0);
+  auto d16 = IrBuilder::create<Double>(1.0);
 
   if (is_fp16) {
     tv0 = castOp(DataType::Float, tv0);
@@ -47,7 +48,7 @@ static void setupDivMaxSoftmaxDropoutForward(Fusion* fusion, DataType dtype) {
   auto tv3 = add(tv2, tv0);
 
   auto tv10 = softmax(tv3, 3);
-  auto dropout_tvs = dropout(tv10, new Double(0.9));
+  auto dropout_tvs = dropout(tv10, IrBuilder::create<Double>(0.9));
   auto tv12 = dropout_tvs.mask;
   auto tv14 = dropout_tvs.output;
 
@@ -83,9 +84,9 @@ static void setupDivMaxSoftmaxDropoutBackward(Fusion* fusion, DataType dtype) {
   }
 
   // TODO: should be inputs
-  auto d32 = new Double(1.0);
+  auto d32 = IrBuilder::create<Double>(1.0);
   // fusion->addInput(d32);
-  auto d33 = new Double(2.0);
+  auto d33 = IrBuilder::create<Double>(2.0);
   // fusion->addInput(d33);
 
   auto tv4 = mul(tv2, tv3);
@@ -252,14 +253,15 @@ static void setupBiasDropoutAddLayernormFwd(Fusion* fusion, DataType dtype) {
 
   auto tv5 = broadcast(tv4, {true, true, false});
   auto tv6 = add(tv3, tv5);
-  auto dropout_outs = dropout(tv6, new Double(0.9));
+  auto dropout_outs = dropout(tv6, IrBuilder::create<Double>(0.9));
 
   auto tv8 = dropout_outs.output;
   auto tv10 = dropout_outs.mask;
 
   auto tv11 = add(tv10, tv2);
 
-  auto layer_norm_outs = layer_norm(tv11, 1, tv0, tv1, new Double(1e-5));
+  auto layer_norm_outs =
+      layer_norm(tv11, 1, tv0, tv1, IrBuilder::create<Double>(1e-5));
   auto tv14 = layer_norm_outs.output;
   auto tv21 = layer_norm_outs.mean;
   auto tv26 = layer_norm_outs.invstd;
@@ -481,7 +483,7 @@ static void setupBiasDropoutAddLayernormBwd2(Fusion* fusion, DataType dtype) {
     tv1 = castOp(DataType::Float, tv1);
     tv8 = castOp(DataType::Float, tv8);
   }
-  auto d36 = mul(new Double(1.0), tv1->axis(2)->extent());
+  auto d36 = mul(IrBuilder::create<Double>(1.0), tv1->axis(2)->extent());
   auto d47 = unaryOp(UnaryOpType::Reciprocal, d36);
 
   auto tv9 = broadcast(tv5, {true, true, false});
@@ -583,7 +585,7 @@ static void setupBiasDropoutAddLayernormBwd3(Fusion* fusion, DataType dtype) {
   }
 
   // Uncertain this is the right value, but going for it anyways
-  auto d34 = div(new Double(1.0), tv0->axis(2)->extent());
+  auto d34 = div(IrBuilder::create<Double>(1.0), tv0->axis(2)->extent());
 
   auto tv25 = mul(tv21, tv0);
   auto tv26 = mul(tv25, d34);

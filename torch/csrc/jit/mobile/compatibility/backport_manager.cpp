@@ -27,6 +27,8 @@ constexpr int64_t kBytecodeVersionV4 = 0x4L;
 constexpr int64_t kBytecodeVersionV5 = 0x5L;
 constexpr int64_t kBytecodeVersionV6 = 0x6L;
 constexpr int64_t kBytecodeVersionV7 = 0x7L;
+constexpr int64_t kBytecodeVersionV8 = 0x8L;
+constexpr int64_t kBytecodeVersionV9 = 0x9L;
 } // namespace
 
 /********************** Utility Functions **********************/
@@ -73,21 +75,6 @@ void selective_copy(
       writer.writeRecord(record, data, size);
     }
   }
-}
-
-// Copy all content from reader to stringstream
-void get_model_stream(PyTorchStreamReader& reader, std::stringstream& out) {
-  auto writer_func = [&](const void* buf, size_t nbytes) -> size_t {
-    out.write(static_cast<const char*>(buf), nbytes);
-    return !out ? 0 : nbytes;
-  };
-  PyTorchStreamWriter writer(writer_func);
-
-  selective_copy(
-      reader,
-      writer,
-      std::unordered_set<std::string>(),
-      std::unordered_set<std::string>());
 }
 
 // The write_archive_current function is used for bytecode from version v5 to
@@ -434,7 +421,8 @@ std::stringstream backport_v6_to_v5(std::stringstream& input_model_stream) {
   {
     BytecodeEmitModeGuard argNumGuard(
         true /*emit_default_input_instructions*/,
-        false /*enable_defaults_args_with_out_args*/);
+        false /*enable_defaults_args_with_out_args*/,
+        false /*enable_emit_promoted_ops*/);
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
@@ -501,7 +489,8 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   {
     BytecodeEmitModeGuard argNumGuard(
         false /*emit_default_input_instructions*/,
-        false /*enable_defaults_args_with_out_args*/);
+        false /*enable_defaults_args_with_out_args*/,
+        false /*enable_emit_promoted_ops*/);
     torch_script._save_for_mobile(
         intermediate_model_stream, extra_files, hasBytecodeDebug);
   }
@@ -509,6 +498,65 @@ std::stringstream backport_v7_to_v6(std::stringstream& input_model_stream) {
   // Update the bytecode version (from 7 to 6)
   std::stringstream output_model_stream =
       update_bytecode_version(intermediate_model_stream, kBytecodeVersionV6);
+  return output_model_stream;
+}
+
+std::stringstream backport_v9_to_v8(std::stringstream& input_model_stream) {
+  ExtraFilesMap extra_files;
+  Module torch_script =
+      torch::jit::load(input_model_stream, c10::nullopt, extra_files);
+  std::stringstream intermediate_model_stream;
+  // TODO(@pavithran) : Check if debug info is available and use load/save while
+  // backporting hardcode debaug info to be false untill supported.
+  bool hasBytecodeDebug = false;
+  {
+    BytecodeEmitModeGuard argNumGuard(
+        false /*emit_default_input_instructions*/,
+        true /*enable_defaults_args_with_out_args*/,
+        true /*enable_emit_promoted_ops*/);
+    torch_script._save_for_mobile(
+        intermediate_model_stream,
+        extra_files,
+        hasBytecodeDebug,
+        /*use_flatbuffer=*/false);
+  }
+  // Update the bytecode version (from 9 to 8)
+  std::stringstream output_model_stream =
+      update_bytecode_version(intermediate_model_stream, kBytecodeVersionV8);
+
+  return output_model_stream;
+}
+
+std::stringstream backport_v8_to_v7(std::stringstream& input_model_stream) {
+  std::shared_ptr<IStreamAdapter> rai =
+      std::make_shared<IStreamAdapter>(&input_model_stream);
+  auto reader = std::make_shared<PyTorchStreamReader>(rai);
+  // extra_files are kept
+  auto records = reader->getAllRecords();
+  bool hasBytecodeDebug = reader->hasRecord("mobile_debug_handles.pkl");
+  ExtraFilesMap extra_files;
+  for (const auto& record : records) {
+    std::size_t found = record.find_last_of("/\\");
+    auto path = record.substr(0, found);
+    if ("extra" == path) {
+      extra_files.emplace(record.substr(found + 1), "");
+    }
+  }
+  Module torch_script = torch::jit::load(rai, c10::nullopt, extra_files);
+  std::stringstream intermediate_model_stream;
+  {
+    BytecodeEmitModeGuard argNumGuard(
+        false /*emit_default_input_instructions*/,
+        true /*enable_defaults_args_with_out_args*/,
+        false /*enable_emit_promoted_ops*/);
+    torch_script._save_for_mobile(
+        intermediate_model_stream, extra_files, hasBytecodeDebug);
+  }
+
+  // Update the bytecode version (from 8 to 7)
+  std::stringstream output_model_stream =
+      update_bytecode_version(intermediate_model_stream, kBytecodeVersionV7);
+
   return output_model_stream;
 }
 
@@ -528,6 +576,8 @@ BackportManager::BackportManager() {
   registerBytecodeBackportFunction(kBytecodeVersionV5, backport_v5_to_v4);
   registerBytecodeBackportFunction(kBytecodeVersionV6, backport_v6_to_v5);
   registerBytecodeBackportFunction(kBytecodeVersionV7, backport_v7_to_v6);
+  registerBytecodeBackportFunction(kBytecodeVersionV8, backport_v8_to_v7);
+  registerBytecodeBackportFunction(kBytecodeVersionV9, backport_v9_to_v8);
 }
 
 std::unordered_map<
@@ -562,12 +612,10 @@ void BackportManager::registerBytecodeBackportFunction(
 // istream_adapter has access to it. During the backport process,
 // the intermediate result will be stored with stream.
 bool BackportManager::backport(
-    std::shared_ptr<IStreamAdapter> istream_adapter,
+    std::istream& oss,
     PyTorchStreamWriter& final_writer,
     int64_t from_version,
     int64_t to_version) const {
-  PyTorchStreamReader start_reader(istream_adapter);
-
   if (from_version <= to_version) {
     TORCH_WARN(
         "backport donesn't support backporting model to new version. It's trying to backport from version ",
@@ -582,9 +630,9 @@ bool BackportManager::backport(
   // 1) Given an istream_adapter (an adapter with access to the input model, the
   // model can be from istream, file and etc), copy all model content to
   // stringstream
-  std::stringstream oss;
-  get_model_stream(start_reader, oss);
-  std::stringstream input_model_stream(oss.str());
+  oss.seekg(0, std::ios::beg);
+  std::stringstream input_model_stream;
+  input_model_stream << oss.rdbuf();
   std::stringstream output_model_stream;
 
   // 2) backport model, backport_v{i}_to_v{i-1} function's argurment is
@@ -602,6 +650,7 @@ bool BackportManager::backport(
       return false;
     }
 
+    input_model_stream.seekg(0, input_model_stream.beg);
     auto input_model_stream_version =
         _get_model_bytecode_version(input_model_stream);
 
@@ -619,6 +668,7 @@ bool BackportManager::backport(
         bytecodeBackportFunctions()[bytecode_version--](input_model_stream);
 
     output_model_stream.swap(backport_model_stream);
+    output_model_stream.seekg(0, output_model_stream.beg);
     auto output_model_stream_version =
         _get_model_bytecode_version(output_model_stream);
 

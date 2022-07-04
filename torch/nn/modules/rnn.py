@@ -11,15 +11,20 @@ from ..utils.rnn import PackedSequence
 from .. import init
 from ... import _VF
 
+__all__ = ['RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCellBase', 'RNNCell', 'LSTMCell', 'GRUCell']
+
 _rnn_impls = {
     'RNN_TANH': _VF.rnn_tanh,
     'RNN_RELU': _VF.rnn_relu,
 }
 
 
-def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
+def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
     return tensor.index_select(dim, permutation)
 
+def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
+    warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
+    return _apply_permutation(tensor, permutation, dim)
 
 class RNNBase(Module):
     __constants__ = ['mode', 'input_size', 'hidden_size', 'num_layers', 'bias',
@@ -234,7 +239,7 @@ class RNNBase(Module):
     def permute_hidden(self, hx: Tensor, permutation: Optional[Tensor]):
         if permutation is None:
             return hx
-        return apply_permutation(hx, permutation)
+        return _apply_permutation(hx, permutation)
 
 
     def extra_repr(self) -> str:
@@ -313,7 +318,7 @@ class RNN(RNNBase):
     function:
 
     .. math::
-        h_t = \tanh(W_{ih} x_t + b_{ih} + W_{hh} h_{(t-1)} + b_{hh})
+        h_t = \tanh(x_t W_{ih}^T + b_{ih} + h_{t-1}W_{hh}^T + b_{hh})
 
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
     the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
@@ -601,13 +606,16 @@ class LSTM(RNNBase):
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the LSTM, for each `t`. If a
           :class:`torch.nn.utils.rnn.PackedSequence` has been given as the input, the output
-          will also be a packed sequence.
+          will also be a packed sequence. When ``bidirectional=True``, `output` will contain
+          a concatenation of the forward and reverse hidden states at each time step in the sequence.
         * **h_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{out})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{out})` containing the
-          final hidden state for each element in the sequence.
+          final hidden state for each element in the sequence. When ``bidirectional=True``,
+          `h_n` will contain a concatenation of the final forward and reverse hidden states, respectively.
         * **c_n**: tensor of shape :math:`(D * \text{num\_layers}, H_{cell})` for unbatched input or
           :math:`(D * \text{num\_layers}, N, H_{cell})` containing the
-          final cell state for each element in the sequence.
+          final cell state for each element in the sequence. When ``bidirectional=True``,
+          `c_n` will contain a concatenation of the final forward and reverse cell states, respectively.
 
     Attributes:
         weight_ih_l[k] : the learnable input-hidden weights of the :math:`\text{k}^{th}` layer
@@ -644,6 +652,11 @@ class LSTM(RNNBase):
         For bidirectional LSTMs, forward and backward are directions 0 and 1 respectively.
         Example of splitting the output layers when ``batch_first=False``:
         ``output.view(seq_len, batch, num_directions, hidden_size)``.
+
+    .. note::
+        For bidirectional LSTMs, `h_n` is not equivalent to the last element of `output`; the
+        former contains the final forward and reverse hidden states, while the latter contains the
+        final forward hidden state and the initial reverse hidden state.
 
     .. note::
         ``batch_first`` argument is ignored for unbatched inputs.
@@ -694,7 +707,7 @@ class LSTM(RNNBase):
                        ) -> Tuple[Tensor, Tensor]:
         if permutation is None:
             return hx
-        return apply_permutation(hx[0], permutation), apply_permutation(hx[1], permutation)
+        return _apply_permutation(hx[0], permutation), _apply_permutation(hx[1], permutation)
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     @overload  # type: ignore[override]
@@ -843,7 +856,7 @@ class GRU(RNNBase):
             \end{aligned}
 
     Outputs: output, h_n
-        * **output**: tensor of shape :math:`(L, H_{in})` for unbatched input,
+        * **output**: tensor of shape :math:`(L, D * H_{out})` for unbatched input,
           :math:`(L, N, D * H_{out})` when ``batch_first=False`` or
           :math:`(N, L, D * H_{out})` when ``batch_first=True`` containing the output features
           `(h_t)` from the last layer of the GRU, for each `t`. If a
@@ -1145,6 +1158,8 @@ class LSTMCell(RNNCellBase):
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
 
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
+
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20) # (input_size, hidden_size)
@@ -1235,6 +1250,8 @@ class GRUCell(RNNCellBase):
     .. note::
         All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
         where :math:`k = \frac{1}{\text{hidden\_size}}`
+
+    On certain ROCm devices, when using float16 inputs this module will use :ref:`different precision<fp16_on_mi200>` for backward.
 
     Examples::
 

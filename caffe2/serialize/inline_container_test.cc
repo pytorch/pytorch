@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include "caffe2/serialize/inline_container.h"
+#include "c10/util/irange.h"
 
 namespace caffe2 {
 namespace serialize {
@@ -22,14 +23,14 @@ TEST(PyTorchStreamWriterAndReader, SaveAndLoad) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
-  for (int i = 0; i < data1.size(); ++i) {
+  for (auto i: c10::irange( data1.size())) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
-  for (int i = 0; i < data2.size(); ++i) {
+  for (auto i: c10::irange(data2.size())) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());
@@ -83,14 +84,14 @@ TEST(PytorchStreamWriterAndReader, GetNonexistentRecordThrows) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 127> data1;
 
-  for (int i = 0; i < data1.size(); ++i) {
+  for (auto i: c10::irange(data1.size())) {
     data1[i] = data1.size() - i;
   }
   writer.writeRecord("key1", data1.data(), data1.size());
 
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init,cppcoreguidelines-avoid-magic-numbers)
   std::array<char, 64> data2;
-  for (int i = 0; i < data2.size(); ++i) {
+  for (auto i: c10::irange(data2.size())) {
     data2[i] = data2.size() - i;
   }
   writer.writeRecord("key2", data2.data(), data2.size());

@@ -23,6 +23,7 @@ if torch.distributed.rpc.is_available():
     from .._jit_internal import RRef, is_rref
     from torch._C import RRefType
 
+from torch._ops import OpOverloadPacket
 
 class Module(object):
     def __init__(self, name, members):
@@ -62,7 +63,10 @@ class EvalEnv(object):
         return getattr(builtins, name, None)
 
 def get_signature(fn, rcb, loc, is_method):
-    signature = try_real_annotations(fn, loc)
+    if isinstance(fn, OpOverloadPacket):
+        signature = try_real_annotations(fn.op, loc)
+    else:
+        signature = try_real_annotations(fn, loc)
     if signature is not None and is_method:
         # If this is a method, then the signature will include a type for
         # `self`, but type comments do not contain a `self`. So strip it
@@ -106,6 +110,9 @@ def is_vararg(the_callable):
 
 
 def get_param_names(fn, n_args):
+    if isinstance(fn, OpOverloadPacket):
+        fn = fn.op
+
     if not is_function_or_method(fn) and hasattr(fn, '__call__') and is_function_or_method(fn.__call__):  # noqa: B004
         # De-sugar calls to classes
         fn = fn.__call__
@@ -277,7 +284,10 @@ def get_enum_value_type(e: Type[enum.Enum], loc):
     # Even though Python supports this case, we chose to not implement it to
     # avoid overcomplicate logic here for a rare use case. Please report a
     # feature request if you find it necessary.
-    return torch._C.unify_type_list(ir_types)
+    res = torch._C.unify_type_list(ir_types)
+    if not res:
+        return AnyType.get()
+    return res
 
 def is_tensor(ann):
     if issubclass(ann, torch.Tensor):

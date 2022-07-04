@@ -1,6 +1,8 @@
+import copy
 import re
 import torch
 import torch.nn as nn
+from torch.ao.quantization import QuantType
 from torch.ao.quantization.utils import is_per_tensor, is_per_channel
 from torch.ao.quantization.quantize import is_activation_post_process
 
@@ -10,9 +12,46 @@ from torch.fx.graph import (
     Graph,
     Node,
 )
+from .custom_config import PrepareCustomConfig
 
 from typing import Callable, Optional, List, Dict, Any, Set, Tuple, Union, Type
+from collections import namedtuple
 import operator
+import warnings
+
+# TODO: revisit this list. Many helper methods shouldn't be public
+__all__ = [
+    "all_node_args_except_first",
+    "all_node_args_have_no_tensors",
+    "assert_and_get_unique_device",
+    "BIAS_INDEX_DICT",
+    "collect_producer_nodes",
+    "create_getattr_from_value",
+    "create_node_from_old_node_preserve_meta",
+    "create_qparam_nodes",
+    "EMPTY_ARG_DICT",
+    "get_custom_module_class_keys",
+    "get_linear_prepack_op_for_dtype",
+    "get_new_attr_name_with_prefix",
+    "get_non_observable_arg_indexes_and_types",
+    "get_per_tensor_qparams",
+    "get_qconv_op",
+    "get_qconv_prepack_op",
+    "get_quantize_node_info",
+    "graph_module_from_producer_nodes",
+    "graph_pretty_str",
+    "is_get_tensor_info_node",
+    "maybe_get_next_module",
+    "NodeInfo",
+    "node_return_type_is_int",
+    "NON_OBSERVABLE_ARG_DICT",
+    "NON_QUANTIZABLE_WEIGHT_OPS",
+    "quantize_node",
+    "return_arg_list",
+    "WEIGHT_INDEX_DICT",
+    "get_skipped_module_name_and_classes",
+]
+
 
 # A dictionary for querying the weight index for a given op
 WEIGHT_INDEX_DICT = {
@@ -111,12 +150,15 @@ def get_per_tensor_qparams(activation_post_process):
     dtype = activation_post_process.dtype
     return scale, zero_point, dtype
 
-def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Union[Callable, str], Dict[str, Any]]:
+def get_quantize_node_info(activation_post_process: Callable) -> Optional[Tuple[str, Union[Callable, str], Dict[str, Any]]]:
     ''' Given an activation_post_process module,
     return node_type(e.g. call_function), quantize op(e.g. quantize_per_tensor) and a dictionary
     of extracted qparams from the module
     '''
     dtype = activation_post_process.dtype  # type: ignore[attr-defined]
+    compute_dtype = None
+    if hasattr(activation_post_process, "compute_dtype"):
+        compute_dtype = activation_post_process.compute_dtype  # type: ignore[attr-defined]
     quantize_op : Optional[Union[Callable, str]] = None
     if dtype in [torch.quint8, torch.qint8]:
         node_type = "call_function"
@@ -134,9 +176,17 @@ def get_quantize_node_info(activation_post_process: Callable) -> Tuple[str, Unio
         node_type = "call_method"
         quantize_op = "to"
         qparams = {"_dtype_": dtype}
+    elif dtype == torch.float32 and compute_dtype in [torch.quint8, torch.qint8, torch.float16]:
+        # dynamic quantization
+        node_type = "call_function"
+        quantize_op = torch.quantize_per_tensor_dynamic
+        # TODO: get reduce range from observer
+        # reduce_range = activation_post_process.reduce_range
+        reduce_range = torch.backends.quantized.engine == "fbgemm"
+        qparams = {"_dtype_": compute_dtype, "_reduce_range_": reduce_range}
     else:
-        raise Exception("Unsupported dtype in get_quantize_node_info:" + str(dtype))
-    assert quantize_op is not None
+        warnings.warn(f"Unsupported activation_post_process in get_quantize_node_info: {activation_post_process}")
+        return None
     return node_type, quantize_op, qparams
 
 def quantize_node(
@@ -146,7 +196,8 @@ def quantize_node(
         modules: Dict[str, torch.nn.Module],
         quantized_graph: Graph,
         node_name_to_scope: Dict[str, Tuple[str, type]],
-        is_input: bool) -> Node:
+        is_input: bool,
+        output_prefix: str = "_output") -> Node:
     ''' Add quantization nodes (eg. quantize_per_tensor/per_channel) for given node to graph
     with the qparams calculated from activation_post_process (obs_module).
     The observer node (obs_node) is used to find the FQN of the user of act_post_process.
@@ -173,7 +224,7 @@ def quantize_node(
     else:
         # if the quantize function is at the output of the op, we use the observer input node to get the path
         first_linear_use_or_first_use = in_node
-        prefix = "_output"
+        prefix = output_prefix
 
     if first_linear_use_or_first_use and first_linear_use_or_first_use.name in node_name_to_scope:
         module_path, _ = node_name_to_scope[first_linear_use_or_first_use.name]
@@ -184,7 +235,10 @@ def quantize_node(
         module_path = ""
     root_module = modules['']
     graph = quantized_graph
-    node_type, quantize_op, qparams = get_quantize_node_info(obs_module)
+    maybe_quantize_node_info = get_quantize_node_info(obs_module)
+    assert maybe_quantize_node_info is not None, \
+        f"Expecting quantize node info not to be None, observer: {obs_module}"
+    node_type, quantize_op, qparams = maybe_quantize_node_info
     inputs = [in_node]
 
     for key, value in qparams.items():
@@ -197,32 +251,29 @@ def quantize_node(
             inputs.append(value)
     return graph.create_node(node_type, quantize_op, tuple(inputs), {})
 
-def get_custom_module_class_keys(custom_config_dict, custom_config_dict_key) -> List[Any]:
+def get_custom_module_class_keys(custom_module_mapping: Dict[QuantType, Dict[Type, Type]]) -> List[Any]:
     r""" Get all the unique custom module keys in the custom config dict
     e.g.
     Input:
-    custom_config_dict = {
-        "float_to_observed_custom_module_class": {
-           "static": {
-               CustomModule1: ObservedCustomModule
-           },
-           "dynamic": {
-               CustomModule2: DynamicObservedCustomModule
-           },
-           "weight_only": {
-               CustomModule3: WeightOnlyObservedCustomModule
-           },
+    {
+        QuantType.STATIC: {
+            CustomModule1: ObservedCustomModule
+        },
+        QuantType.DYNAMIC: {
+            CustomModule2: DynamicObservedCustomModule
+        },
+        QuantType.WEIGHT_ONLY: {
+            CustomModule3: WeightOnlyObservedCustomModule
         },
     }
 
     Output:
-    # extract all the keys in "static", "dynamic" and "weight_only" dict
+    # extract the keys across all inner STATIC, DYNAMIC, and WEIGHT_ONLY dicts
     [CustomModule1, CustomModule2, CustomModule3]
     """
     # using set to dedup
     float_custom_module_classes : Set[Any] = set()
-    custom_module_mapping = custom_config_dict.get(custom_config_dict_key, {})
-    for quant_mode in ["static", "dynamic", "weight_only"]:
+    for quant_mode in [QuantType.STATIC, QuantType.DYNAMIC, QuantType.WEIGHT_ONLY]:
         quant_mode_custom_module_config = custom_module_mapping.get(quant_mode, {})
         quant_mode_custom_module_classes = set(quant_mode_custom_module_config.keys())
         float_custom_module_classes |= quant_mode_custom_module_classes
@@ -455,6 +506,74 @@ def all_node_args_have_no_tensors(node: Node, modules: Dict[str, torch.nn.Module
         cache[node] = result
     return result
 
+def all_node_args_except_first(node: Node) -> List[int]:
+    """
+    Returns all node arg indices after first
+    """
+    return list(range(1, len(node.args)))
+
+def return_arg_list(arg_indices: List[int]) -> Callable[[Node], List[int]]:
+    """
+    Constructs a function that takes a node as arg and returns the arg_indices
+    that are valid for node.args
+    """
+    def arg_indices_func(node: Node) -> List[int]:
+        return [i for i in arg_indices if i < len(node.args)]
+    return arg_indices_func
+
+NodeInfo = namedtuple("NodeInfo", "op target")
+
+# this dict identifies which indices of a node are non tensors
+# so that they can be propagated correctly since inserting observers
+# for them would cause errors
+
+NON_OBSERVABLE_ARG_DICT: Dict[NodeInfo, Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]] = {
+    NodeInfo("call_method", "masked_fill") : {
+        torch.bool: return_arg_list([1]),
+        float: return_arg_list([2])
+    },
+    NodeInfo("call_method", "permute") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "repeat") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "reshape") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "size") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "transpose") : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", torch.transpose) : {
+        int: all_node_args_except_first
+    },
+    NodeInfo("call_method", "unsqueeze") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "unsqueeze_") : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", torch.unsqueeze) : {
+        int: return_arg_list([1])
+    },
+    NodeInfo("call_method", "view") : {
+        int: all_node_args_except_first
+    },
+}
+
+EMPTY_ARG_DICT: Dict[Union[type, torch.dtype], Callable[[Node], List[int]]] = {}
+
+def get_non_observable_arg_indexes_and_types(node: Node) -> Dict[Union[type, torch.dtype], Callable[[Node], List[int]]]:
+    """
+    Returns a dict with of non float tensor types as keys and values which correspond to a
+    function to retrieve the list (which takes the node as an argument)
+    """
+    info = NodeInfo(node.op, node.target)
+
+    return NON_OBSERVABLE_ARG_DICT.get(info, EMPTY_ARG_DICT)
 
 def node_return_type_is_int(node: Node) -> bool:
     """
@@ -463,13 +582,6 @@ def node_return_type_is_int(node: Node) -> bool:
     """
     return node.op == 'call_method' and node.target == 'size'
 
-def node_bool_tensor_arg_indexes(node: Node) -> List[int]:
-    """
-    Returns indexes of boolean Tensor args
-    """
-    if node.op == "call_method" and node.target == "masked_fill":
-        return [1]
-    return []
 
 def is_get_tensor_info_node(node: Node) -> bool:
     """ Returns True if this node is a node that takes a Tensor as input and output some
@@ -515,3 +627,16 @@ def create_node_from_old_node_preserve_meta(
     new_node = quantized_graph.create_node(*create_node_args)
     new_node.stack_trace = old_node.stack_trace
     return new_node
+
+def get_skipped_module_name_and_classes(
+        prepare_custom_config: PrepareCustomConfig,
+        is_standalone_module: bool) -> Tuple[List[str], List[Type[Any]]]:
+    skipped_module_names = copy.copy(prepare_custom_config.non_traceable_module_names)
+    skipped_module_classes = copy.copy(prepare_custom_config.non_traceable_module_classes)
+    if not is_standalone_module:
+        # standalone module and custom module config are applied in top level module
+        skipped_module_names += list(prepare_custom_config.standalone_module_names.keys())
+        skipped_module_classes += list(prepare_custom_config.standalone_module_classes.keys())
+        skipped_module_classes += get_custom_module_class_keys(prepare_custom_config.float_to_observed_mapping)
+
+    return skipped_module_names, skipped_module_classes

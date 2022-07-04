@@ -616,7 +616,7 @@ RegisterOperators reg_guard({
             // each invocation or would that mess up with multithreaded
             // inference since we are writing to it?
             // TODO - smallvector here ?
-
+            bool grad_mode_enabled = at::GradMode::is_enabled();
             std::vector<int64_t> flattened_symbolic_dims(num_symbolic_dims, -1);
             size_t flattened_dim_offset = 0;
             size_t flattened_stride_offset = 0;
@@ -624,8 +624,11 @@ RegisterOperators reg_guard({
               at::Tensor tensor = inputs[i].toTensor();
               if (C10_UNLIKELY(
                       tensor.device() != device ||
-                      tensor.dtype() != expected_scalar_types[i]) ||
-                  tensor.requires_grad()) {
+                      tensor.dtype() != expected_scalar_types[i])) {
+                push(stack, false);
+                return;
+              }
+              if (C10_UNLIKELY(grad_mode_enabled && tensor.requires_grad())) {
                 push(stack, false);
                 return;
               }

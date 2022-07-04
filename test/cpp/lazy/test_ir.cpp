@@ -1,18 +1,30 @@
 #include <gtest/gtest.h>
 
+#include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/lazy/core/config.h>
+#include <torch/csrc/lazy/core/debug_util.h>
+#include <torch/csrc/lazy/core/dynamic_ir.h>
 #include <torch/csrc/lazy/core/ir.h>
+#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/ir_metadata.h>
+#include <torch/csrc/lazy/generated/LazyIr.h>
+#include <torch/csrc/lazy/ts_backend/dynamic_ir.h>
 #include <torch/csrc/lazy/ts_backend/ts_node.h>
+#include <memory>
 
 namespace torch {
 namespace lazy {
 
 class TestLeafNode : public Node {
  public:
+  static OpKind ClassOpKind() {
+    return OpKind();
+  }
+
   explicit TestLeafNode(size_t param)
-      : Node(OpKind(), /* num_outputs */ 1, /* hash_seed */ Hash(param)),
+      : Node(ClassOpKind(), /* num_outputs */ 1),
+        hash_(Hash(param)),
         param_(param) {}
   ~TestLeafNode() override = default;
 
@@ -24,7 +36,15 @@ class TestLeafNode : public Node {
     TORCH_INTERNAL_ASSERT(false, "Can't access operand[i] of leaf node");
   }
 
+  hash_t hash() const override {
+    return hash_;
+  }
+  hash_t shapeHash() const override {
+    return hash_;
+  }
+
  private:
+  hash_t hash_;
   size_t param_;
 };
 
@@ -35,7 +55,7 @@ TEST(IrTest, BasicTest) {
 
   EXPECT_EQ(node1->num_outputs(), 1);
 
-  const TestLeafNode* leafptr = NodeCast<TestLeafNode>(node1.get(), OpKind());
+  const TestLeafNode* leafptr = NodeCast<TestLeafNode>(node1.get());
   EXPECT_TRUE(leafptr != nullptr);
 }
 
@@ -51,22 +71,23 @@ TEST(IrTest, MetaDataTest) {
   node = MakeNode<TestLeafNode>(1);
   auto metaWithEmptyDebug = node->metadata();
   EXPECT_EQ(metaWithEmptyDebug.scope.size(), 0);
-  EXPECT_EQ(metaWithEmptyDebug.frame_info.size(), 0);
+  EXPECT_EQ(metaWithEmptyDebug.frame_info.size(), 1);
 
   {
     ScopePusher scope("TestScope");
     node = MakeNode<TestLeafNode>(1);
     auto metaWithScope = node->metadata();
     EXPECT_EQ(metaWithScope.scope, "TestScope.1");
-    EXPECT_EQ(metaWithScope.frame_info.size(), 0);
+    EXPECT_EQ(metaWithScope.frame_info.size(), 1);
   }
 
   SourceLocation dummySourceLocation;
   dummySourceLocation.file = "file";
   dummySourceLocation.function = "function";
   dummySourceLocation.line = 10;
-  RegisterGetFrameInfo(
-      [&]() -> std::vector<SourceLocation> { return {dummySourceLocation}; });
+  GetPythonFramesFunction() = [&]() -> std::vector<SourceLocation> {
+    return {dummySourceLocation};
+  };
   node = MakeNode<TestLeafNode>(1);
   auto metaWithSourceLoc = node->metadata();
   EXPECT_EQ(metaWithSourceLoc.scope.size(), 0);
@@ -77,7 +98,7 @@ TEST(IrTest, MetaDataTest) {
   FLAGS_torch_lazy_ir_debug = restore_FLAGS_torch_lazy_ir_debug;
 }
 
-TEST(IrTest, TsNode) {
+TEST(IrTest, TsNodeTest) {
   NodePtr node1 = MakeNode<TsNode>(
       OpKind(at::aten::view),
       Shape(),
@@ -92,8 +113,69 @@ TEST(IrTest, TsNode) {
 
   EXPECT_EQ(node1->num_outputs(), 1);
 
-  const TsNode* leafptr = NodeCast<TsNode>(node1.get(), OpKind(at::aten::view));
+  const TsNode* leafptr = dynamic_cast<const TsNode*>(node1.get());
   EXPECT_TRUE(leafptr != nullptr);
+}
+
+TEST(IrTest, DimensionNodeTest) {
+  const size_t DIM0 = 5;
+  const size_t DIM1 = 8;
+  NodePtr node1 = MakeNode<TsNode>(
+      OpKind(at::aten::view),
+      Shape(c10::kFloat, {DIM0, DIM1}),
+      /*num_outputs*/ 1,
+      /*hash_seed*/ kHashSeed);
+
+  auto size0 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 0));
+  auto size1 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
+
+  ASSERT_EQ(DIM0, size0->getStaticValue());
+  ASSERT_EQ(DIM1, size1->getStaticValue());
+
+  NodePtr size0_np = size0;
+  auto size0_dn = std::dynamic_pointer_cast<DimensionNode>(size0_np);
+  ASSERT_EQ(DIM0, size0_dn->getStaticValue());
+
+  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(
+      MakeNode<SizeAdd>(Value{size0}, Value{size1}));
+  ASSERT_EQ(DIM0 + DIM1, add_dim->getStaticValue());
+
+  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(
+      MakeNode<SizeMul>(Value{size0}, Value{size1}));
+  ASSERT_EQ(DIM0 * DIM1, mul_dim->getStaticValue());
+}
+
+TEST(IrTest, DimensionIsDynamicTest) {
+  const size_t DIM0 = 5;
+  const size_t DIM1 = 8;
+  const auto shape = Shape(c10::kFloat, {DIM0, DIM1});
+  NodePtr node1 = MakeNode<TsNode>(
+      OpKind(at::aten::view),
+      shape.with_symbolic_dims(std::vector<bool>{true, false}),
+      /*num_outputs*/ 1,
+      /*hash_seed*/ kHashSeed);
+
+  auto size0 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 0));
+  auto size1 =
+      std::dynamic_pointer_cast<SizeNode>(MakeNode<SizeNode>(Value{node1}, 1));
+
+  ASSERT_EQ(true, size0->isDynamic());
+  ASSERT_EQ(false, size1->isDynamic());
+
+  auto add_dim = std::dynamic_pointer_cast<SizeAdd>(
+      MakeNode<SizeAdd>(Value{size0}, Value{size1}));
+  ASSERT_EQ(true, add_dim->isDynamic());
+
+  add_dim = std::dynamic_pointer_cast<SizeAdd>(
+      MakeNode<SizeAdd>(Value{size1}, Value{size1}));
+  ASSERT_EQ(false, add_dim->isDynamic());
+
+  auto mul_dim = std::dynamic_pointer_cast<SizeMul>(
+      MakeNode<SizeMul>(Value{size0}, Value{size0}));
+  ASSERT_EQ(true, mul_dim->isDynamic());
 }
 
 } // namespace lazy

@@ -82,6 +82,53 @@ torch::jit::Stack boxArgs(Args... args) {
   return stack;
 }
 
+template <class T>
+static inline constexpr size_t boxed_size_one() {
+  static_assert(!std::is_same<std::decay_t<T>, c10::TensorOptions>::value, "need to patch this path to support TensorOptions passed by reference");
+  return 1;
+}
+
+// torch::jit::push pushes 4 values for a TensorOptions; this needs to
+// be kept in sync.
+template <>
+inline constexpr size_t boxed_size_one<c10::TensorOptions>() {
+  return 4;
+}
+
+// NOTE: this could probably be simplified with C++17 fold expressions.
+template <typename...>
+struct BoxedSize : std::integral_constant<size_t, 0> {};
+template <class T, class... Args>
+struct BoxedSize<T, Args...> : std::integral_constant<size_t, boxed_size_one<T>() + BoxedSize<Args...>::value> {};
+
+template <class... Args>
+static inline constexpr size_t boxed_size() {
+  return BoxedSize<Args...>::value;
+}
+
+using IValueAlignedStorage = std::aligned_storage_t<sizeof(IValue), alignof(IValue)>;
+
+template <typename T>
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValueAlignedStorage* dest, T& arg, int& lastIdx) {
+  new (&dest[lastIdx]) IValue(arg);
+  lastIdx++;
+}
+
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxToStack(IValueAlignedStorage* dest, c10::TensorOptions options, int& lastIdx) {
+  new (&dest[lastIdx++]) IValue(c10::typeMetaToScalarType(options.dtype()));
+  new (&dest[lastIdx++]) IValue(options.layout());
+  new (&dest[lastIdx++]) IValue(options.device());
+  new (&dest[lastIdx++]) IValue(options.pinned_memory());
+}
+
+inline void boxArgsToStack(IValueAlignedStorage*, int&) {}
+
+template<typename T, typename... Args>
+C10_ALWAYS_INLINE_UNLESS_MOBILE void boxArgsToStack(IValueAlignedStorage* dest, int& lastIdx, T& arg, Args &... args) {
+  boxToStack(dest, arg, lastIdx);
+  boxArgsToStack(dest, lastIdx, args...);
+}
+
 //
 // PopResult is a helper class whose specializations handle popping single and
 // multiple return values, respectively.
@@ -200,7 +247,7 @@ struct BoxedKernelWrapper<
 // 3. in-place ops take a single non-const Tensor reference
 // as their first argument, and return it.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // Because of this, the generated BoxedKernelWrapper specializations simply
 // return the in-place argument.
 //
@@ -260,7 +307,7 @@ struct BoxedKernelWrapper<
 // 4. out of place ops that take a single non-const Tensor reference as their
 // final argument, and also return it.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
 // return out arguments.
 //
@@ -300,7 +347,7 @@ struct BoxedKernelWrapper<
 // 5. out of place ops that take multiple non-const Tensor references as their
 // final arguments, and return them in a std::tuple.
 //
-// Note: all signatures matching this pattern are are assumed to be for such ops.
+// Note: all signatures matching this pattern are assumed to be for such ops.
 // This assumption permits the generated BoxedKernelWrapper specializations to simply
 // return the out arguments.
 //

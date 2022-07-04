@@ -18,7 +18,8 @@ import threading
 from typing import List, Optional, Tuple, Union, Any
 from ._utils import _get_device_index, _dummy_type
 from .._utils import classproperty
-from .graphs import CUDAGraph, graph_pool_handle, graph, make_graphed_callables
+from .graphs import CUDAGraph, graph_pool_handle, graph, \
+    make_graphed_callables, is_current_stream_capturing
 from .streams import ExternalStream, Stream, Event
 from .. import device as _device
 import torch._C
@@ -634,25 +635,6 @@ from .random import *  # noqa: F403
 # Define Storage and Tensor classes
 ################################################################################
 
-
-from ..storage import _StorageBase
-
-
-if not hasattr(torch._C, 'CudaByteStorageBase'):
-    # Define dummy base classes
-    for t in ['Double', 'Float', 'Long', 'Int', 'Short', 'Char', 'Byte', 'Half', 'Bool', 'BFloat16',
-              'ComplexDouble', 'ComplexFloat']:
-        tensor_name = 'Cuda{0}TensorBase'.format(t)
-
-        torch._C.__dict__[tensor_name] = _dummy_type(tensor_name)
-
-    storage_name = 'CudaByteStorageBase'
-    torch._C.__dict__[storage_name] = _dummy_type(storage_name)
-
-    torch._C.__dict__['_CudaStreamBase'] = _dummy_type('CudaStreamBase')
-    torch._C.__dict__['_CudaEventBase'] = _dummy_type('CudaEventBase')
-
-
 @staticmethod  # type: ignore[misc]
 def _lazy_new(cls, *args, **kwargs):
     _lazy_init()
@@ -674,72 +656,84 @@ class _CudaBase(object):
 
     __new__ = _lazy_new
 
-from torch.storage import TypedStorage
+from torch.storage import _LegacyStorage
 
-class UntypedStorage(_CudaBase, torch._C.CudaByteStorageBase, _StorageBase):
-    pass
+class _CudaLegacyStorage(_LegacyStorage):
+    @classmethod
+    def from_buffer(cls, *args, **kwargs):
+        raise RuntimeError('from_buffer: Not available for CUDA storage')
 
-class ByteStorage(TypedStorage):
+    @classmethod
+    def _new_with_weak_ptr(cls, *args, **kwargs):
+        raise RuntimeError('_new_with_weak_ptr: Not available for CUDA storage')
+
+    @classmethod
+    def _new_shared_filename(cls, manager, obj, size, *, device=None, dtype=None):
+        raise RuntimeError('_new_shared_filename: Not available for CUDA storage')
+
+class ByteStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.uint8
 
-class DoubleStorage(TypedStorage):
+class DoubleStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.double
 
-class FloatStorage(TypedStorage):
+class FloatStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.float
 
-class HalfStorage(TypedStorage):
+class HalfStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.half
 
-class LongStorage(TypedStorage):
+class LongStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.long
 
-class IntStorage(TypedStorage):
+class IntStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.int
 
-class ShortStorage(TypedStorage):
+class ShortStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.short
 
-class CharStorage(TypedStorage):
+class CharStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.int8
 
-class BoolStorage(TypedStorage):
+class BoolStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.bool
 
-class BFloat16Storage(TypedStorage):
+class BFloat16Storage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.bfloat16
 
-class ComplexDoubleStorage(TypedStorage):
+class ComplexDoubleStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.cdouble
 
-class ComplexFloatStorage(TypedStorage):
+class ComplexFloatStorage(_CudaLegacyStorage):
     @classproperty
     def dtype(self):
         return torch.cfloat
 
-torch._storage_classes.add(UntypedStorage)
+del _LegacyStorage
+del _CudaLegacyStorage
+
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -757,3 +751,4 @@ from . import sparse
 from . import profiler
 from . import nvtx
 from . import amp
+from . import jiterator

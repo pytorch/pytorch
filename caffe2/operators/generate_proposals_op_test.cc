@@ -493,7 +493,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotatedAngle0) {
       1.53593004e-01f,  -8.75087008e-02f, -4.92327996e-02f, -3.32239009e-02f};
 
   // Add angle in bbox deltas
-  int num_boxes = scores.size();
+  auto num_boxes = scores.size();
   CHECK_EQ(bbx.size() / 4, num_boxes);
   vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta
@@ -666,7 +666,7 @@ TEST(GenerateProposalsTest, TestRealDownSampledRotated) {
       1.53593004e-01f,  -8.75087008e-02f, -4.92327996e-02f, -3.32239009e-02f};
 
   // Add angle in bbox deltas
-  int num_boxes = scores.size();
+  auto num_boxes = scores.size();
   CHECK_EQ(bbx.size() / 4, num_boxes);
   vector<float> bbx_with_angle(num_boxes * box_dim);
   // bbx (deltas) is in shape (A * 4, H, W). Insert angle delta

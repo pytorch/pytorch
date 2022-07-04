@@ -25,7 +25,7 @@ void optimizePointwise(tensorexpr::LoopNest* ln, tensorexpr::Tensor target) {
   ln->vectorize(inner);
   ln->splitWithTail(outer, 8, &inner, &tail);
   StmtPtr unrolled;
-  LoopNest::unroll(inner, &unrolled);
+  LoopNest::fullUnroll(inner, &unrolled);
 }
 
 static void relu_nnc(benchmark::State& state) {
@@ -352,6 +352,7 @@ static void tanh_aten(benchmark::State& state) {
 }
 
 static void tanh_caffe2(benchmark::State& state) {
+#ifdef FBCODE_CAFFE2
   at::Tensor A_t = torch::abs(torch::randn({state.range(0)}));
   at::Tensor B_t = torch::randn({state.range(0)});
   at::Tensor B_ref = torch::randn({state.range(0)});
@@ -371,6 +372,7 @@ static void tanh_caffe2(benchmark::State& state) {
   state.counters["tanh/s"] = benchmark::Counter(
       uint64_t(state.range(0) * state.iterations()),
       benchmark::Counter::kIsRate);
+#endif
 }
 
 BENCHMARK(relu_nnc)->Args({2 << 5})->Args({2 << 8})->Args({2 << 12})->Args(

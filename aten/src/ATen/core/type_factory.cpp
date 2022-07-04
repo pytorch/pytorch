@@ -1,5 +1,7 @@
 #include <ATen/core/type_factory.h>
 
+#include <ATen/core/jit_type.h>
+
 namespace c10 {
 
 // Dtype constraints are not constrained in compilation. Therefore, we map
@@ -54,6 +56,13 @@ const std::unordered_map<std::string, c10::TypePtr>& DefaultTypeFactory::
 #undef MAP_ITEM
   };
   return map;
+}
+
+c10::TypePtr DefaultTypeFactory::createNamedTuple(
+    const std::string& name,
+    const std::vector<c10::string_view>& fields,
+    const std::vector<c10::TypePtr>& types) {
+  return c10::TupleType::createNamed(name, fields, types);
 }
 
 } // namespace c10

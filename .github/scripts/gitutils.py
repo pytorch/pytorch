@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
+import os
+import re
+import tempfile
 from collections import defaultdict
 from datetime import datetime
 from typing import cast, Any, Dict, Iterator, List, Optional, Tuple, Union
-import os
-import re
 
 
 RE_GITHUB_URL_MATCH = re.compile("^https://.*@?github.com/(.+)/(.+)$")
@@ -30,8 +31,18 @@ def fuzzy_list_to_dict(items: List[Tuple[str, str]]) -> Dict[str, List[str]]:
 
 
 def _check_output(items: List[str], encoding: str = "utf-8") -> str:
-    from subprocess import check_output
-    return check_output(items).decode(encoding)
+    from subprocess import check_output, CalledProcessError, STDOUT
+    try:
+        return check_output(items, stderr=STDOUT).decode(encoding)
+    except CalledProcessError as e:
+        msg = f"Command `{' '.join(e.cmd)}` returned non-zero exit code {e.returncode}"
+        stdout = e.stdout.decode(encoding) if e.stdout is not None else ""
+        stderr = e.stderr.decode(encoding) if e.stderr is not None else ""
+        if len(stderr) == 0:
+            msg += f"\n```\n{stdout}```"
+        else:
+            msg += f"\nstdout:\n```\n{stdout}```\nstderr:\n```\n{stderr}```"
+        raise RuntimeError(msg) from e
 
 
 class GitCommit:
@@ -117,7 +128,15 @@ class GitRepo:
         return self._run_git("symbolic-ref", "--short", "HEAD").strip()
 
     def checkout(self, branch: str) -> None:
-        self._run_git('checkout', branch)
+        self._run_git("checkout", branch)
+
+    def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
+        if branch is None and ref is None:
+            self._run_git("fetch", self.remote)
+        elif branch is None:
+            self._run_git("fetch", self.remote, ref)
+        else:
+            self._run_git("fetch", self.remote, f"{ref}:{branch}")
 
     def show_ref(self, name: str) -> str:
         refs = self._run_git('show-ref', '-s', name).strip().split('\n')
@@ -140,11 +159,20 @@ class GitRepo:
         rc = _check_output(['sh', '-c', f'git -C {self.repo_dir} show {ref}|git patch-id --stable']).strip()
         return [cast(Tuple[str, str], x.split(" ", 1)) for x in rc.split("\n")]
 
+    def commits_resolving_gh_pr(self, pr_num: int) -> List[str]:
+        owner, name = self.gh_owner_and_name()
+        msg = f"Pull Request resolved: https://github.com/{owner}/{name}/pull/{pr_num}"
+        rc = self._run_git('log', '--format=%H', '--grep', msg).strip()
+        return rc.split("\n") if len(rc) > 0 else []
+
     def get_commit(self, ref: str) -> GitCommit:
         return parse_fuller_format(self._run_git('show', '--format=fuller', '--date=unix', '--shortstat', ref))
 
     def cherry_pick(self, ref: str) -> None:
         self._run_git('cherry-pick', '-x', ref)
+
+    def revert(self, ref: str) -> None:
+        self._run_git("revert", "--no-edit", ref)
 
     def compute_branch_diffs(self, from_branch: str, to_branch: str) -> Tuple[List[str], List[str]]:
         """
@@ -166,8 +194,19 @@ class GitRepo:
                 while len(from_values) > 0 and len(to_values) > 0:
                     frc = self.get_commit(from_values.pop())
                     toc = self.get_commit(to_values.pop())
+                    # FRC branch might have PR number added to the title
                     if frc.title != toc.title or frc.author_date != toc.author_date:
-                        raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
+                        # HACK: Same commit were merged, reverted and landed again
+                        # which creates a tracking problem
+                        if (
+                            "pytorch/pytorch" not in self.remote_url() or
+                            frc.commit_hash not in {"0a6a1b27a464ba5be5f587cce2ee12ab8c504dbf",
+                                                    "6d0f4a1d545a8f161df459e8d4ccafd4b9017dbe",
+                                                    "edf909e58f06150f7be41da2f98a3b9de3167bca",
+                                                    "a58c6aea5a0c9f8759a4154e46f544c8b03b8db1",
+                                                    "7106d216c29ca16a3504aa2bedad948ebcf4abc2"}
+                        ):
+                            raise RuntimeError(f"Unexpected differences between {frc} and {toc}")
                     from_commits.remove(frc.commit_hash)
                     to_commits.remove(toc.commit_hash)
                 continue
@@ -175,6 +214,17 @@ class GitRepo:
                 from_commits.remove(commit)
             for commit in to_values:
                 to_commits.remove(commit)
+        # Another HACK: Patch-id is not stable for commits with binary files or for big changes across commits
+        # I.e. cherry-picking those from one branch into another will change patchid
+        if "pytorch/pytorch" in self.remote_url():
+            for excluded_commit in {"8e09e20c1dafcdbdb45c2d1574da68a32e54a3a5",
+                                    "5f37e5c2a39c3acb776756a17730b865f0953432",
+                                    "b5222584e6d6990c6585981a936defd1af14c0ba",
+                                    "84d9a2e42d5ed30ec3b8b4140c38dd83abbce88d",
+                                    "f211ec90a6cdc8a2a5795478b5b5c8d7d7896f7e"}:
+                if excluded_commit in from_commits:
+                    from_commits.remove(excluded_commit)
+
         return (from_commits, to_commits)
 
     def cherry_pick_commits(self, from_branch: str, to_branch: str) -> None:
@@ -190,11 +240,17 @@ class GitRepo:
             self.cherry_pick(commit)
         self.checkout(orig_branch)
 
-    def push(self, branch: str, dry_run: bool) -> None:
-        if dry_run:
-            self._run_git("push", "--dry-run", self.remote, branch)
-        else:
-            self._run_git("push", self.remote, branch)
+    def push(self, branch: str, dry_run: bool, retry: int = 3) -> None:
+        for cnt in range(retry):
+            try:
+                if dry_run:
+                    self._run_git("push", "--dry-run", self.remote, branch)
+                else:
+                    self._run_git("push", self.remote, branch)
+            except RuntimeError as e:
+                print(f"{cnt} push attempt failed with {e}")
+                self.fetch()
+                self._run_git("rebase", f"{self.remote}/{branch}")
 
     def head_hash(self) -> str:
         return self._run_git("show-ref", "--hash", "HEAD").strip()
@@ -216,6 +272,12 @@ class GitRepo:
 
     def amend_commit_message(self, msg: str) -> None:
         self._run_git("commit", "--amend", "-m", msg)
+
+
+def clone_repo(username: str, password: str, org: str, project: str) -> GitRepo:
+    path = tempfile.mkdtemp()
+    _check_output(['git', 'clone', f'https://{username}:{password}@github.com/{org}/{project}', path]).strip()
+    return GitRepo(path=path)
 
 
 class PeekableIterator(Iterator[str]):

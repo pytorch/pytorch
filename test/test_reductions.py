@@ -13,8 +13,8 @@ import warnings
 from torch._six import inf, nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
-    get_all_dtypes, get_all_math_dtypes, get_all_int_dtypes, get_all_complex_dtypes, get_all_fp_dtypes,
-    integral_types_and, floating_and_complex_types_and
+    all_types_and_complex_and, get_all_math_dtypes, integral_types, complex_types, floating_types_and,
+    integral_types_and, floating_and_complex_types_and, all_types_and,
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
@@ -99,7 +99,7 @@ class TestReductions(TestCase):
     def _test_dim_keepdim(self, op: ReductionOpInfo, device, *, ndim, **dim_keepdim):
         """Tests output shape for input with ndim and dim and keepdim kwargs"""
         shape = torch.randint(2, 5, (ndim,)).tolist()
-        t = make_tensor(shape, device, torch.float)
+        t = make_tensor(shape, dtype=torch.float, device=device)
         args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
         result = op(t, *args, **dim_keepdim, **kwargs)
         expected_shape = _reduced_shape(shape, **dim_keepdim)
@@ -207,14 +207,14 @@ class TestReductions(TestCase):
     def test_dim_ndim_limit(self, device, op: ReductionOpInfo):
         """Tests that an exception is raised when reducing a tensor with more
         than 64 dims along some specific dimensions. dim=None is ok"""
-        t = make_tensor([1] * 65, device, torch.float)
+        t = make_tensor([1] * 65, dtype=torch.float, device=device)
         with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
             op(t, dim=0)
 
     @ops(filter(lambda op: op.identity is not None, reduction_ops), dtypes=OpDTypes.supported)
     def test_identity(self, device, dtype, op: ReductionOpInfo):
         """Tests that the identity value is an identity for the operator"""
-        t = make_tensor((10,), device, dtype)
+        t = make_tensor((10,), dtype=dtype, device=device)
         t[1::2] = op.identity
         args, kwargs = next(op.generate_args_kwargs(t))
         result = op(t[::2], *args, **kwargs)
@@ -230,7 +230,7 @@ class TestReductions(TestCase):
          allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
     def test_nan_policy_propagate(self, device, dtype, op: ReductionOpInfo):
         """Tests that nan is propagated to the output by default"""
-        t = make_tensor((5,), device, dtype)
+        t = make_tensor((5,), dtype=dtype, device=device)
         t[2] = torch.nan
         args, kwargs = next(op.generate_args_kwargs(t))
         result = op(t, *args, **kwargs)
@@ -240,7 +240,7 @@ class TestReductions(TestCase):
          allowed_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16))
     def test_nan_policy_omit(self, device, dtype, op: ReductionOpInfo):
         """Tests that NaN values do not affect the result."""
-        t = make_tensor((10,), device, dtype)
+        t = make_tensor((10,), dtype=dtype, device=device)
         t[1::2] = torch.nan
         args, kwargs = next(op.generate_args_kwargs(t))
         result = op(t[::2], *args, **kwargs)
@@ -250,7 +250,7 @@ class TestReductions(TestCase):
     @ops(reduction_ops, dtypes=OpDTypes.supported)
     def test_result_dtype(self, device, dtype, op: ReductionOpInfo):
         """Tests that the result has the correct dtype"""
-        t = make_tensor((5,), device, dtype)
+        t = make_tensor((5,), dtype=dtype, device=device)
         args, kwargs = next(op.generate_args_kwargs(t))
         result: torch.Tensor = op(t, *args, **kwargs)
         is_integral = dtype in integral_types_and(torch.bool)
@@ -260,6 +260,13 @@ class TestReductions(TestCase):
             self.assertEqual(result.dtype, torch.int64)
         elif op.result_dtype is not None:
             self.assertEqual(result.dtype, op.result_dtype)
+        elif op.complex_to_real:
+            _complex_to_real_dtype_map = {
+                torch.complex128: torch.float64,
+                torch.complex64: torch.float32,
+                torch.complex32: torch.float16,
+            }
+            self.assertEqual(result.dtype, _complex_to_real_dtype_map.get(dtype, dtype))
         else:
             self.assertEqual(result.dtype, dtype)
 
@@ -275,7 +282,7 @@ class TestReductions(TestCase):
 
         See discussion here https://github.com/pytorch/pytorch/issues/61901
         """
-        t = make_tensor((0, 2, 3), device, torch.float)
+        t = make_tensor((0, 2, 3), dtype=torch.float, device=device)
         for dim in [0] + [[0, 2]] if op.supports_multiple_dims else []:
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             if op.identity is not None:
@@ -295,7 +302,7 @@ class TestReductions(TestCase):
     def test_empty_tensor_nonempty_slice(self, device, op: ReductionOpInfo):
         """Tests that reducing a nonempty slice of an empty tensor returns an
         empty tensor with the dimensions reduced."""
-        t = make_tensor((0, 2, 3), device, torch.float)
+        t = make_tensor((0, 2, 3), dtype=torch.float, device=device)
         for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             result = op(t, *args, dim=dim, **kwargs)
@@ -315,31 +322,31 @@ class TestReductions(TestCase):
     @ops(reduction_ops)
     def test_noncontiguous_innermost(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing along noncontiguous innermost dimension."""
-        t = make_tensor((10, 10), device, dtype, low=-1, high=1)
+        t = make_tensor((10, 10), dtype=dtype, device=device, low=-1, high=1)
         self._test_noncontiguous(op, t[:, ::2], dim=1)
 
     @ops(reduction_ops)
     def test_noncontiguous_outermost(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing along noncontiguous outermost dimension."""
-        t = make_tensor((10, 10), device, dtype, low=-1, high=1)
+        t = make_tensor((10, 10), dtype=dtype, device=device, low=-1, high=1)
         self._test_noncontiguous(op, t[::2, :], dim=0)
 
     @ops(reduction_ops)
     def test_noncontiguous_all(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing all dimensions of a noncontiguous tensor."""
-        t = make_tensor((5, 5, 5), device, dtype, low=-1, high=1)
+        t = make_tensor((5, 5, 5), dtype=dtype, device=device, low=-1, high=1)
         self._test_noncontiguous(op, t[::2, ::3, 1:-1:2])
 
     @ops(reduction_ops)
     def test_noncontiguous_transposed(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing a transposed tensor."""
-        t = make_tensor((5, 5), device, dtype, low=-1, high=1)
+        t = make_tensor((5, 5), dtype=dtype, device=device, low=-1, high=1)
         self._test_noncontiguous(op, t.T)
 
     @ops(reduction_ops)
     def test_noncontiguous_expanded(self, device, dtype, op: ReductionOpInfo):
         """Tests reducing a tensor with expanded singleton dimensions."""
-        t = make_tensor((2, 3), device, dtype, low=-1, high=1)
+        t = make_tensor((2, 3), dtype=dtype, device=device, low=-1, high=1)
         self._test_noncontiguous(op, t.unsqueeze(1).expand(-1, 5, -1))
 
     # NumPy does not support BFloat16 so we don't test that against reference
@@ -357,16 +364,16 @@ class TestReductions(TestCase):
             self.assertEqual(result, expected, exact_dtype=False)
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
-         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+         allowed_dtypes=all_types_and_complex_and(torch.half, torch.bool))
     def test_ref_scalar_input(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for scalar input tensors"""
-        self._test_ref(op, make_tensor([], device, dtype))
+        self._test_ref(op, make_tensor([], dtype=dtype, device=device))
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
-         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+         allowed_dtypes=all_types_and_complex_and(torch.half, torch.bool))
     def test_ref_small_input(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for small input tensors"""
-        t = make_tensor((5, 3, 4, 2), device, dtype, low=-2, high=2, exclude_zero=True)
+        t = make_tensor((5, 3, 4, 2), dtype=dtype, device=device, low=-2, high=2, exclude_zero=True)
         self._test_ref(op, t)
         for dim in [0, 1, 3] + ([[0, 2], [1, 3]] if op.supports_multiple_dims else []):
             self._test_ref(op, t, dim=dim)
@@ -375,26 +382,27 @@ class TestReductions(TestCase):
          allowed_dtypes=[torch.float64])
     def test_ref_large_input_1D(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a large 1D input tensor to check stability"""
-        self._test_ref(op, make_tensor((2 ** 20,), device, dtype, low=-1, high=1, exclude_zero=True))
+        self._test_ref(op, make_tensor((2 ** 20,), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True))
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
     def test_ref_large_input_2D(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a large 2D input tensor to test parallelism"""
-        t = make_tensor((32, 2 ** 16), device, dtype, low=-1, high=1, exclude_zero=True)
+        t = make_tensor((32, 2 ** 16), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True)
         self._test_ref(op, t, dim=1)
 
+    @largeTensorTest("8gb")
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
          allowed_dtypes=[torch.float64])
     def test_ref_large_input_64bit_indexing(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for a very large input tensor that requires 64 bit indexing"""
-        self._test_ref(op, make_tensor((275000000,), device, dtype, low=-1, high=1, exclude_zero=True))
+        self._test_ref(op, make_tensor((275000000,), dtype=dtype, device=device, low=-1, high=1, exclude_zero=True))
 
     @ops(filter(lambda op: op.ref is not None, reduction_ops),
-         allowed_dtypes=get_all_dtypes(include_bfloat16=False))
+         allowed_dtypes=all_types_and_complex_and(torch.half, torch.bool))
     def test_ref_duplicate_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with duplicate values"""
-        t = make_tensor((4, 4), device, dtype, low=-2, high=2, exclude_zero=True)
+        t = make_tensor((4, 4), dtype=dtype, device=device, low=-2, high=2, exclude_zero=True)
         t[::2, ::2] = t[1::2, 1::2]
         self._test_ref(op, t)
         self._test_ref(op, t, dim=0)
@@ -404,7 +412,7 @@ class TestReductions(TestCase):
          allowed_dtypes=[torch.float32, torch.complex64])
     def test_ref_extremal_values(self, device, dtype, op: ReductionOpInfo):
         """Compares op against reference for input tensors with extremal values"""
-        t = make_tensor((5,), device, dtype, exclude_zero=True)
+        t = make_tensor((5,), dtype=dtype, device=device, exclude_zero=True)
         extremals = [0, 1, nan, inf, -inf]
         for extremal in extremals:
             t[2] = extremal
@@ -452,12 +460,24 @@ class TestReductions(TestCase):
         sizes = [1] * 65
         x = torch.randn(sizes, device=device)
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
-               torch.amin, torch.amax, torch.norm]
+               torch.norm]
         for op in ops:
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, 64)
             with self.assertRaisesRegex(RuntimeError, "only tensors with up to 64 dims are supported"):
                 op(x, -1)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.bfloat16)
+    def test_dim_reduction_lastdim(self, device, dtype):
+        x = torch.randn(3, 5, 40, device=device, dtype=dtype)
+        x = x[:, :, 0:40:2]
+        x2 = x.contiguous()
+        ops = [torch.norm, torch.argmax, torch.argmin]
+        for op in ops:
+            y = op(x, dim=-1)
+            y2 = op(x2, dim=-1)
+            self.assertEqual(y, y2)
 
     @skipIfNoSciPy
     def test_logsumexp(self, device):
@@ -730,6 +750,15 @@ class TestReductions(TestCase):
             lambda t, d: t.logsumexp(d),
             lambda n, d: logsumexp(n, d),
             use_integral=False)
+
+    @onlyCPU
+    def test_mean_int_with_optdtype(self, device):
+        a = make_tensor((3, 4, 5), dtype=torch.int64, device=device)
+
+        # If the optional desired output type is given, the input
+        # is internally cast.
+        a_float = a.to(torch.float32)
+        self.assertEqual(a_float.mean(), a.mean(dtype=torch.float32))
 
     # TODO: update this and tests that use it to handle device properly
     def _test_reduce_integer_upcast(self, fn, has_out=True, test_complex=True):
@@ -1089,6 +1118,10 @@ class TestReductions(TestCase):
         self.assertEqual(
             torch.tensor([1, 1, 1, 2], dtype=torch.int64, device=device),
             long_counts)
+        # test avoiding overflow for uint8 (#76979)
+        count_uint8 = torch.tensor([0, 1, 2, 3, 255], dtype=torch.uint8, device=device).bincount()
+        count_int16 = torch.tensor([0, 1, 2, 3, 255], dtype=torch.int16, device=device).bincount()
+        self.assertEqual(count_uint8, count_int16)
         # test minlength functionality
         int_counts = torch.bincount(
             torch.tensor([1, 1, 1, 1], device=device), minlength=5)
@@ -1403,7 +1436,7 @@ class TestReductions(TestCase):
             test_dtype_bfloat16(False, True)
             test_dtype_bfloat16(True, True)
 
-    @dtypes(*get_all_dtypes(include_bool=False, include_complex=False))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_nansum(self, device, dtype):
         args = product(
             (True, False),  # noncontiguous
@@ -1456,15 +1489,14 @@ class TestReductions(TestCase):
                             self.compare_with_numpy(torch_func_partial, np_func_partial, x, device=None, dtype=None,
                                                     atol=atol, rtol=rtol, exact_dtype=exact_dtype)
 
-    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False) +
-              get_all_complex_dtypes()))
+    @dtypes(*all_types_and_complex_and(torch.half))
     def test_count_nonzero(self, device, dtype):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
     def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
-            return dtype in get_all_int_dtypes()
+            return dtype in integral_types()
 
         # On Windows CI, the current version of `numpy` promotes all lower integers
         # dtypes to int32 while `torch` promotes them to int64. Hence we skip on checking
@@ -1493,28 +1525,30 @@ class TestReductions(TestCase):
                                                      with_keepdim=with_keepdim, with_extremal=with_extremal)
 
     @onlyNativeDeviceTypes
-    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*all_types_and(torch.half))
     def test_sum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.sum, np.sum, device, dtype, with_keepdim=True)
 
     @onlyNativeDeviceTypes
-    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*all_types_and(torch.half))
     def test_nansum_vs_numpy(self, device, dtype):
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_extremal=True)
         self._test_sum_reduction_vs_numpy(torch.nansum, np.nansum, device, dtype, with_keepdim=True)
 
-    @dtypes(*(get_all_complex_dtypes()))
+    @dtypes(*complex_types())
     def test_nansum_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)
         with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
             torch.nansum(x)
 
-    def test_nansum_out_dtype(self, device):
-        dtypes = list(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False))
-        for inp_dtype, out_dtype in combinations(dtypes, 2):
+    @dtypes(*all_types_and(torch.half))
+    def test_nansum_out_dtype(self, device, dtype):
+        out_dtype = dtype
+        inp_dtypes = all_types_and(torch.half) if out_dtype.is_floating_point else integral_types()
+        for inp_dtype in inp_dtypes:
             shape = _rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = _generate_input(shape, inp_dtype, device, with_extremal=False)
             torch_fn = partial(torch.nansum, dtype=out_dtype)
@@ -1522,7 +1556,7 @@ class TestReductions(TestCase):
             np_fn = partial(np.nansum, dtype=np_out_dtype)
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
-    @dtypes(*(get_all_int_dtypes() + get_all_fp_dtypes(include_bfloat16=False)))
+    @dtypes(*all_types_and(torch.half))
     def test_argminmax_multiple(self, device, dtype):
         # Case: All Ones
         t = torch.ones(3, 3, device=device, dtype=dtype)
@@ -1530,7 +1564,7 @@ class TestReductions(TestCase):
         self.compare_with_numpy(torch.argmin, np.argmin, t)
 
         # Case: With single `nan` present.
-        if dtype in get_all_fp_dtypes():
+        if dtype in floating_types_and(torch.half, torch.bfloat16):
             t[2, 2] = float('nan')
             self.compare_with_numpy(torch.argmax, np.argmax, t)
             self.compare_with_numpy(torch.argmin, np.argmin, t)
@@ -1607,8 +1641,7 @@ class TestReductions(TestCase):
                           [0, 0]], device=device, dtype=dtype)
         verify_against_numpy(t)
 
-    @dtypes(*(get_all_dtypes(include_half=True, include_bfloat16=False,
-                             include_bool=True, include_complex=True)))
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool))
     def test_all_any_vs_numpy(self, device, dtype):
         # Note [all, any uint8 compatibility]: However for compatibility reason,
         # for `uint8`, they return Tensor of same dtype `uint8`.
@@ -1723,7 +1756,7 @@ class TestReductions(TestCase):
     @onlyNativeDeviceTypes
     def test_repeated_dim(self, device):
         ops = [torch.mean, torch.sum, torch.nansum, torch.std, torch.logsumexp, torch.std, torch.var,
-               torch.amin, torch.amax, torch.norm]
+               torch.norm]
         x = torch.randn(3, 3, 3, 3, device=device)
 
         error_msg = r'appears multiple times in the list of dims'
@@ -1824,10 +1857,6 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.min(x, dim=0, out=(illegal_values, valid_indices))
         with self.assertRaisesRegex(RuntimeError, rmsg):
-            torch.amax(x, dim=0, out=illegal_values)
-        with self.assertRaisesRegex(RuntimeError, rmsg):
-            torch.amin(x, dim=0, out=illegal_values)
-        with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.max(x, dim=0, out=(valid_values, illegal_indices))
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.min(x, dim=0, out=(valid_values, illegal_indices))
@@ -1836,7 +1865,7 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(RuntimeError, rmsg):
             torch.min(x, dim=0, out=(illegal_values, illegal_indices))
 
-    @dtypes(*get_all_dtypes(include_bool=False, include_complex=False))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_dim_arg_reduction_scalar(self, device, dtype):
         example = 4.0
 
@@ -1854,7 +1883,7 @@ class TestReductions(TestCase):
 
 
     @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
-    @dtypes(*(set(get_all_dtypes(include_bool=False, include_complex=False)) - {torch.uint8}))
+    @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
     def test_dim_reduction(self, device, dtype):
         example = [[-1, 2, 1], [5, 3, 6]]
 
@@ -2780,6 +2809,15 @@ class TestReductions(TestCase):
         expanded = torch.randn(1, 5, 1, 2, device=device).expand(3, 5, 7, 2)
         test_against_np(expanded)
 
+    @onlyCPU
+    def test_histc_bfloat16(self, device):
+        actual = torch.histc(
+            torch.tensor([1, 2, 1], dtype=torch.bfloat16, device=device), bins=4, min=0, max=3)
+        self.assertEqual(
+            torch.tensor([0, 2, 1, 0], dtype=torch.bfloat16, device=device),
+            actual)
+        self.assertEqual(actual.dtype, torch.bfloat16)
+
     """
     Runs torch.histogram and numpy.histogram on the specified input parameters
     and asserts that their output is equal.
@@ -2850,8 +2888,8 @@ class TestReductions(TestCase):
 
         for contig, bins_contig, bin_ct, weighted, density, shape in \
                 product([True, False], [True, False], range(1, 10), [True, False], [True, False], shapes):
-            values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous=not contig)
-            weights = make_tensor(shape, device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            values = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9, noncontiguous=not contig)
+            weights = make_tensor(shape, dtype=dtype, device=device, low=0, high=9, noncontiguous=not contig) if weighted else None
 
             # Tests passing just the bin_ct
             self._test_histogram_numpy(values, bin_ct, None, weights, density)
@@ -2865,10 +2903,10 @@ class TestReductions(TestCase):
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
 
             # Tests with caller-specified bin edges
-            bin_edges = make_tensor(bin_ct + 1, device, dtype, low=-9, high=9).msort()
+            bin_edges = make_tensor(bin_ct + 1, dtype=dtype, device=device, low=-9, high=9).msort()
             if not bins_contig:
                 # Necessary because msort always produces contiguous output
-                bin_edges_noncontig = make_tensor(bin_ct + 1, device, dtype, noncontiguous=not bins_contig)
+                bin_edges_noncontig = make_tensor(bin_ct + 1, dtype=dtype, device=device, noncontiguous=not bins_contig)
                 bin_edges_noncontig.copy_(bin_edges)
                 bin_edges = bin_edges_noncontig
             self.assertEqual(bin_edges.is_contiguous(), bins_contig)
@@ -2876,17 +2914,21 @@ class TestReductions(TestCase):
 
             # Tests with input tensor in which all elements are equal
             elt = random.uniform(-9, 9)
-            values = make_tensor(shape, device, dtype, low=elt, high=elt, noncontiguous=not contig)
+            values = make_tensor(shape, dtype=dtype, device=device, low=elt, high=elt, noncontiguous=not contig)
             self._test_histogram_numpy(values, bin_ct, bin_range, weights, density)
             self._test_histogram_numpy(values, bin_edges, None, weights, density)
 
             # Tests with input equal to bin_edges
-            weights = make_tensor(bin_ct + 1, device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            weights = (
+                make_tensor(bin_ct + 1, dtype=dtype, device=device, low=0, high=9, noncontiguous=not contig)
+                if weighted
+                else None
+            )
             self._test_histogram_numpy(bin_edges, bin_edges, None, weights, density)
 
         # Tests values of default args
         for bin_ct, shape in product(range(1, 10), shapes):
-            values = make_tensor(shape, device, dtype, low=-9, high=9)
+            values = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
             (actual_hist, actual_bin_edges) = torch.histogram(values, bin_ct)
             (expected_hist, expected_bin_edges) = torch.histogram(
                 values, bin_ct, range=None, weight=None, density=False)
@@ -2970,8 +3012,12 @@ class TestReductions(TestCase):
                 product([True, False], [True, False], [True, False], [True, False], shapes):
             D = shape[-1]
 
-            values = make_tensor(shape, device, dtype, low=-9, high=9, noncontiguous=not contig)
-            weights = make_tensor(shape[:-1], device, dtype, low=0, high=9, noncontiguous=not contig) if weighted else None
+            values = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9, noncontiguous=not contig)
+            weights = (
+                make_tensor(shape[:-1], dtype=dtype, device=device, low=0, high=9, noncontiguous=not contig)
+                if weighted
+                else None
+            )
 
             # Tests passing a single bin count
             bin_ct = random.randint(1, 5)
@@ -2992,10 +3038,13 @@ class TestReductions(TestCase):
             self._test_histogramdd_numpy(values, bin_ct, bin_range, weights, density)
 
             # Tests with caller-specified bin edges
-            bin_edges = [make_tensor(ct + 1, device, dtype, low=-9, high=9).msort() for ct in bin_ct]
+            bin_edges = [make_tensor(ct + 1, dtype=dtype, device=device, low=-9, high=9).msort() for ct in bin_ct]
             if not bins_contig:
                 # Necessary because msort always produces contiguous output
-                bin_edges_noncontig = [make_tensor(ct + 1, device, dtype, noncontiguous=not bins_contig) for ct in bin_ct]
+                bin_edges_noncontig = [
+                    make_tensor(ct + 1, dtype=dtype, device=device, noncontiguous=not bins_contig)
+                    for ct in bin_ct
+                ]
                 for dim in range(D):
                     bin_edges_noncontig[dim].copy_(bin_edges[dim])
                 bin_edges = bin_edges_noncontig
@@ -3007,58 +3056,58 @@ class TestReductions(TestCase):
     @dtypes(torch.float32)
     def test_histogram_error_handling(self, device, dtype):
         with self.assertRaisesRegex(RuntimeError, 'not implemented for'):
-            values = make_tensor((), device, dtype=torch.int32)
+            values = make_tensor((), dtype=torch.int32, device=device)
             torch.histogram(values, 1)
 
         inconsistent_dtype = torch.float32 if dtype != torch.float32 else torch.float64
 
         with self.assertRaisesRegex(RuntimeError, 'input tensor and bins tensors should have the same dtype'):
-            values = make_tensor((), device, dtype=dtype)
-            bins = make_tensor((), device, dtype=inconsistent_dtype)
+            values = make_tensor((), dtype=dtype, device=device)
+            bins = make_tensor((), dtype=inconsistent_dtype, device=device)
             torch.histogram(values, bins)
 
         with self.assertRaisesRegex(RuntimeError, 'input tensor and weight tensor should have the same dtype'):
-            values = make_tensor((), device, dtype=dtype)
-            weight = make_tensor((), device, dtype=inconsistent_dtype)
+            values = make_tensor((), dtype=dtype, device=device)
+            weight = make_tensor((), dtype=inconsistent_dtype, device=device)
             torch.histogram(values, 1, weight=weight)
 
         with self.assertRaisesRegex(RuntimeError, 'input tensor and hist tensor should have the same dtype'):
-            values = make_tensor((), device, dtype=dtype)
-            hist = make_tensor((), device, dtype=inconsistent_dtype)
-            bin_edges = make_tensor((), device, dtype=dtype)
+            values = make_tensor((), dtype=dtype, device=device)
+            hist = make_tensor((), dtype=inconsistent_dtype, device=device)
+            bin_edges = make_tensor((), dtype=dtype, device=device)
             torch.histogram(values, 1, out=(hist, bin_edges))
 
         with self.assertRaisesRegex(RuntimeError, 'input tensor and bin_edges tensor should have the same dtype'):
-            values = make_tensor((), device, dtype=dtype)
-            hist = make_tensor((), device, dtype=dtype)
-            bin_edges = make_tensor((), device, dtype=inconsistent_dtype)
+            values = make_tensor((), dtype=dtype, device=device)
+            hist = make_tensor((), dtype=dtype, device=device)
+            bin_edges = make_tensor((), dtype=inconsistent_dtype, device=device)
             torch.histogram(values, 1, out=(hist, bin_edges))
 
         with self.assertRaisesRegex(RuntimeError, 'bins tensor should have one dimension'):
-            t = make_tensor((2, 2), device, dtype=dtype)
+            t = make_tensor((2, 2), dtype=dtype, device=device)
             torch.histogram(t, t)
 
         with self.assertRaisesRegex(RuntimeError, 'bins tensor should have at least 1 element'):
-            t = make_tensor((0), device, dtype=dtype)
+            t = make_tensor((0), dtype=dtype, device=device)
             torch.histogram(t, t)
 
         with self.assertRaisesRegex(RuntimeError, 'bins must be > 0'):
-            values = make_tensor((), device, dtype=dtype)
+            values = make_tensor((), dtype=dtype, device=device)
             torch.histogram(values, -1)
 
         with self.assertRaisesRegex(RuntimeError, 'if weight tensor is provided it should have the same shape \
 as the input tensor excluding its innermost dimension'):
-            values = make_tensor((2, 2), device, dtype=dtype)
-            weight = make_tensor((1), device, dtype=dtype)
+            values = make_tensor((2, 2), dtype=dtype, device=device)
+            weight = make_tensor((1), dtype=dtype, device=device)
             torch.histogram(values, 1, weight=weight)
 
         with self.assertRaisesRegex(TypeError, 'received an invalid combination of arguments'):
-            values = make_tensor((), device, dtype=dtype)
-            bin_edges = make_tensor((), device, dtype=dtype)
+            values = make_tensor((), dtype=dtype, device=device)
+            bin_edges = make_tensor((), dtype=dtype, device=device)
             torch.histogram(values, bin_edges, range=(0, 1))
 
         with self.assertRaisesRegex(RuntimeError, 'min should not exceed max'):
-            values = make_tensor((), device, dtype=dtype)
+            values = make_tensor((), dtype=dtype, device=device)
             torch.histogram(values, 2, range=(1, 0))
 
         with self.assertRaisesRegex(RuntimeError, r'range \[nan, nan\] is not finite'):
@@ -3218,8 +3267,7 @@ as the input tensor excluding its innermost dimension'):
         shape = (2, 0, 4)
         x = torch.randn(shape, device=device)
 
-        for dtype in get_all_dtypes(include_half=True, include_bfloat16=False,
-                                    include_bool=True, include_complex=True):
+        for dtype in all_types_and_complex_and(torch.half, torch.bool):
             # Refer: [all, any uint8 compatibility]
             if dtype == torch.uint8:
                 out_dtype = torch.uint8

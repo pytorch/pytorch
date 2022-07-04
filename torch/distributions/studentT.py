@@ -6,6 +6,7 @@ from torch.distributions import Chi2, constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _standard_normal, broadcast_all
 
+__all__ = ['StudentT']
 
 class StudentT(Distribution):
     r"""
@@ -32,6 +33,10 @@ class StudentT(Distribution):
         m = self.loc.clone(memory_format=torch.contiguous_format)
         m[self.df <= 1] = nan
         return m
+
+    @property
+    def mode(self):
+        return self.loc
 
     @property
     def variance(self):

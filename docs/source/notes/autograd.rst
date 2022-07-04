@@ -87,6 +87,24 @@ subject to change and that users should not rely on.
 You can control how PyTorch does packing / unpacking with :ref:`saved-tensors-hooks-doc`.
 
 
+.. _non-differentiable-func-grad:
+
+Gradients for non-differentiable functions
+------------------------------------------
+
+The gradient computation using Automatic Differentiation is only valid when each elementary function being used is differentiable.
+Unfortunately many of the functions we use in practice do not have this property (``relu`` or ``sqrt`` at ``0``, for example).
+To try and reduce the impact of functions that are non-differentiable, we define the gradients of the elementary operations by applying the following rules in order:
+
+#. If the function is differentiable and thus a gradient exists at the current point, use it.
+#. If the function is convex (at least locally), use the sub-gradient of minimum norm (it is the steepest descent direction).
+#. If the function is concave (at least locally), use the super-gradient of minimum norm (consider `-f(x)` and apply the previous point).
+#. If the function is defined, define the gradient at the current point by continuity (note that ``inf`` is possible here, for example for ``sqrt(0)``). If multiple values are possible, pick one arbitrarily.
+#. If the function is not defined (``sqrt(-1)``, ``log(-1)`` or most functions when the input is ``NaN``, for example) then the value used as the gradient is arbitrary (we might also raise an error but that is not guaranteed). Most functions will use ``NaN`` as the gradient, but for performance reasons, some functions will use other values (``log(-1)``, for example).
+#. If the function is not a deterministic mapping (i.e. it is not a `mathematical function`_), it will be marked as non-differentiable. This will make it error out in the backward if used on tensors that require grad outside of a ``no_grad`` environment.
+
+.. _mathematical function: https://en.wikipedia.org/wiki/Function_(mathematics)
+
 .. _locally-disable-grad-doc:
 
 Locally disabling gradient computation
@@ -222,7 +240,7 @@ Evaluation Mode (``nn.Module.eval()``)
 Evaluation mode is not actually a mechanism to locally disable gradient computation.
 It is included here anyway because it is sometimes confused to be such a mechanism.
 
-Functionally, ``module.eval()`` (or equivalently ``module.train()``) are completely
+Functionally, ``module.eval()`` (or equivalently ``module.train(False)``) are completely
 orthogonal to no-grad mode and inference mode. How ``model.eval()`` affects
 your model depends entirely on the specific modules used in your model and
 whether they define any training-mode specific behavior.
@@ -278,8 +296,8 @@ Multithreaded Autograd
 
 The autograd engine is responsible for running all the backward operations
 necessary to compute the backward pass. This section will describe all the details
-that can help you make the best use of it in a multithreaded environment.(this is
-relevant only for PyTorch 1.6+ as the behavior in previous version was different).
+that can help you make the best use of it in a multithreaded environment. (This is
+relevant only for PyTorch 1.6+ as the behavior in previous version was different.)
 
 User could train their model with multithreading code (e.g. Hogwild training), and
 does not block on the concurrent backward computations, example code could be:
@@ -352,9 +370,9 @@ Since Autograd allows the caller thread to drive its backward execution for
 potential parallelism, it's important that we ensure thread safety on CPU with
 parallel backwards that share part/whole of the GraphTask.
 
-Custom Python ``autograd.function`` is automatically thread safe because of GIL.
-for built-in C++ Autograd Nodes(e.g. AccumulateGrad, CopySlices) and custom
-``autograd::Function``, the Autograd Engine uses thread mutex locking to protect
+Custom Python ``autograd.Function`` is automatically thread safe because of GIL.
+For built-in C++ Autograd Nodes (e.g. AccumulateGrad, CopySlices) and custom
+``autograd::Function``\s, the Autograd Engine uses thread mutex locking to ensure
 thread safety on autograd Nodes that might have state write/read.
 
 No thread safety on C++ hooks

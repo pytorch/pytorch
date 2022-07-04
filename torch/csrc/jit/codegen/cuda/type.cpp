@@ -8,6 +8,17 @@ namespace jit {
 namespace fuser {
 namespace cuda {
 
+DataType indexModeToDtype(KernelIndexMode index_mode) {
+  switch (index_mode) {
+    case KernelIndexMode::INT32:
+      return DataType::Int32;
+    case KernelIndexMode::INT64:
+      return DataType::Int;
+    default:
+      TORCH_CHECK(false, "Invalid kernel index mode type.");
+  }
+}
+
 bool isFloatingPointType(DataType dtype) {
   switch (dtype) {
     case DataType::Bool:
@@ -17,14 +28,38 @@ bool isFloatingPointType(DataType dtype) {
     case DataType::Half:
     case DataType::BFloat16:
       return true;
+    case DataType::Index:
+    case DataType::Int:
+    case DataType::Int32:
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+      return false;
+    case DataType::Null:
+      TORCH_CHECK(
+          false, "Null type is not a valid argument to isFloatingPointType");
+    default:
+      TORCH_CHECK(false, "Type not supported in isFloatingPointType");
+  }
+}
+
+bool isBooleanType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Bool:
+      return true;
+    case DataType::Double:
+    case DataType::Float:
+    case DataType::Half:
+    case DataType::BFloat16:
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+    case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
       return false;
     case DataType::Null:
-      TORCH_CHECK(
-          false, "Null type is not a valid argument to isFloatingPoint");
+      TORCH_CHECK(false, "Null type is not a valid argument to isBooleanType");
     default:
-      TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+      TORCH_CHECK(false, "Type not supported in isBooleanType");
   }
 }
 
@@ -35,7 +70,10 @@ bool isIntegralType(DataType dtype) {
     case DataType::Float:
     case DataType::Half:
     case DataType::BFloat16:
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
       return false;
+    case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
       return true;
@@ -44,6 +82,83 @@ bool isIntegralType(DataType dtype) {
           false, "Null type is not a valid argument to isFloatingPoint");
     default:
       TORCH_CHECK(false, "Type not supported in isFloatingPoint");
+  }
+}
+
+bool isComplexType(DataType dtype) {
+  switch (dtype) {
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+      return true;
+    case DataType::Bool:
+    case DataType::Double:
+    case DataType::Float:
+    case DataType::Half:
+    case DataType::BFloat16:
+    case DataType::Int:
+    case DataType::Index:
+    case DataType::Int32:
+      return false;
+    case DataType::Null:
+      TORCH_CHECK(false, "Null type is not a valid argument to isComplexType");
+    default:
+      TORCH_CHECK(false, "Type not supported in isComplexType");
+  }
+}
+
+bool isVectorType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Float_2:
+    case DataType::Double_2:
+      return true;
+    default:
+      return false;
+  }
+}
+
+DataType getVectorType(DataType dtype, size_t vec_size) {
+  switch (dtype) {
+    case DataType::Float:
+      TORCH_INTERNAL_ASSERT(vec_size == 2, "Not supported vectorized type");
+      return DataType::Float_2;
+    case DataType::Double:
+      TORCH_INTERNAL_ASSERT(vec_size == 2, "Not supported vectorized type");
+      return DataType::Double_2;
+    default:
+      TORCH_INTERNAL_ASSERT(
+          false, "Not supported vectorized type:", dtype, " and ", vec_size);
+  }
+}
+
+int getVectorSizeFromType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Float_2:
+    case DataType::Double_2:
+      return 2;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
+  }
+}
+
+DataType getTypeFromVectorType(DataType dtype) {
+  switch (dtype) {
+    case DataType::Float_2:
+      return DataType::Float;
+    case DataType::Double_2:
+      return DataType::Double;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
+  }
+}
+
+DataType getTypeFromComplexType(DataType dtype) {
+  switch (dtype) {
+    case DataType::ComplexFloat:
+      return DataType::Float;
+    case DataType::ComplexDouble:
+      return DataType::Double;
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Not a vector type:", dtype);
   }
 }
 
@@ -71,7 +186,8 @@ DataType promote_type(const DataType& t1, const DataType& t2) {
       t1,
       " and ",
       t2);
-  return t1 < t2 ? t1 : t2;
+  return aten_to_data_type(
+      c10::promoteTypes(data_type_to_aten(t1), data_type_to_aten(t2)));
 }
 
 // Return highest on list (smallest enum val)
@@ -85,6 +201,9 @@ ValType promote_type(const ValType& t1, const ValType& t2) {
   }
   if (t2 == ValType::Scalar &&
       (t1 == ValType::Scalar || t1 == ValType::NamedScalar)) {
+    return ValType::Scalar;
+  }
+  if (t1 == ValType::NamedScalar && t2 == ValType::NamedScalar) {
     return ValType::Scalar;
   }
   TORCH_CHECK(false, "Expected promotable ValTypes but got: ", t1, " and ", t2);
@@ -104,10 +223,20 @@ static const char* data_type2string(DataType t) {
       return "__bfloat";
     case DataType::Int:
       return "int64_t";
+    case DataType::Index:
+      return "nvfuser_index_t";
     case DataType::Int32:
       return "int";
+    case DataType::ComplexFloat:
+      return "std::complex<float>";
+    case DataType::ComplexDouble:
+      return "std::complex<double>";
+    case DataType::Double_2:
+      return "Array<double, 2, 1>";
+    case DataType::Float_2:
+      return "Array<float, 2, 1>";
     case DataType::Null:
-      return "nullptr";
+      return "null_type";
     default:
       break;
   }
@@ -127,8 +256,35 @@ static const char* val_type2string(ValType t) {
       return "Scalar";
     case ValType::NamedScalar:
       return "NamedScalar";
+    case ValType::Predicate:
+      return "Predicate";
+    case ValType::TensorIndex:
+      return "TensorIndex";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for val type.");
+  }
+}
+
+static const char* predicate_type2string(PredicateType t) {
+  switch (t) {
+    case PredicateType::Manual:
+      return "Manual";
+    case PredicateType::Inline:
+      return "Inline";
+    case PredicateType::Unswitch:
+      return "Unswitch";
+    case PredicateType::Vectorize:
+      return "Vectorize";
+    case PredicateType::Misaligned:
+      return "Misaligned";
+    case PredicateType::Shift:
+      return "Shift";
+    case PredicateType::Padding:
+      return "Padding";
+    case PredicateType::ReductionWrite:
+      return "ReductionWrite";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "No string found for predicate type.");
   }
 }
 
@@ -142,14 +298,56 @@ static const char* expr_type2string(ExprType t) {
       return "TernaryOp";
     case ExprType::ReductionOp:
       return "ReductionOp";
+    case ExprType::GroupedReductionOp:
+      return "GroupedReductionOp";
     case ExprType::BroadcastOp:
       return "BroadcastOp";
+    case ExprType::WelfordOp:
+      return "WelfordOp";
+    case ExprType::LoadStoreOp:
+      return "LoadStoreOp";
+    case ExprType::MmaOp:
+      return "MmaOp";
+    case ExprType::TransposeOp:
+      return "TransposeOp";
+    case ExprType::ExpandOp:
+      return "ExpandOp";
     case ExprType::ShiftOp:
       return "ShiftOp";
+    case ExprType::GatherOp:
+      return "GatherOp";
+    case ExprType::ViewAsScalar:
+      return "ViewAsScalar";
+    case ExprType::ViewOp:
+      return "ViewOp";
     case ExprType::Split:
       return "Split";
     case ExprType::Merge:
       return "Merge";
+    case ExprType::Allocate:
+      return "Allocate";
+    case ExprType::BlockSync:
+      return "BlockSync";
+    case ExprType::GridSync:
+      return "GridSync";
+    case ExprType::CpAsyncWait:
+      return "CpAsyncWait";
+    case ExprType::InitMagicZero:
+      return "InitMagicZero";
+    case ExprType::UpdateMagicZero:
+      return "UpdateMagicZero";
+    case ExprType::ForLoop:
+      return "ForLoop";
+    case ExprType::IfThenElse:
+      return "IfThenElse";
+    case ExprType::GridReduction:
+      return "GridReduction";
+    case ExprType::GroupedGridReduction:
+      return "GroupedGridReduction";
+    case ExprType::GridBroadcast:
+      return "GridBroadcast";
+    case ExprType::GridWelford:
+      return "GridWelford";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for expr type.");
   }
@@ -162,11 +360,18 @@ bool needFloatSuffix(UnaryOpType t) {
     case UnaryOpType::Frac:
     case UnaryOpType::Gelu:
     case UnaryOpType::Silu:
+    case UnaryOpType::BitCast:
     case UnaryOpType::Neg:
     case UnaryOpType::Relu:
     case UnaryOpType::Reciprocal:
     case UnaryOpType::Set:
     case UnaryOpType::Sigmoid:
+    case UnaryOpType::IsFinite:
+    case UnaryOpType::IsInf:
+    case UnaryOpType::IsNan:
+    case UnaryOpType::IsNegInf:
+    case UnaryOpType::IsPosInf:
+    case UnaryOpType::IsReal:
       return false;
     default:
       return true;
@@ -205,8 +410,6 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "floor";
     case UnaryOpType::Frac:
       return "frac";
-    case UnaryOpType::Gelu:
-      return "gelu";
     case UnaryOpType::Silu:
       return "silu";
     case UnaryOpType::Lgamma:
@@ -219,6 +422,8 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "log1p";
     case UnaryOpType::Log2:
       return "log2";
+    case UnaryOpType::BitCast:
+      return "erase_type";
     case UnaryOpType::Neg:
       return "neg";
     case UnaryOpType::Not:
@@ -249,6 +454,18 @@ static const char* unary_op_type2string(UnaryOpType t) {
       return "tanh";
     case UnaryOpType::Trunc:
       return "trunc";
+    case UnaryOpType::IsFinite:
+      return "isfinite";
+    case UnaryOpType::IsInf:
+      return "isinf";
+    case UnaryOpType::IsNan:
+      return "isnan";
+    case UnaryOpType::IsNegInf:
+      return "isneginf";
+    case UnaryOpType::IsPosInf:
+      return "isposinf";
+    case UnaryOpType::IsReal:
+      return "isreal";
     default:
       TORCH_INTERNAL_ASSERT(false, "No string found for unary op type.");
   }
@@ -281,7 +498,6 @@ bool needFloatSuffix(BinaryOpType t) {
     case BinaryOpType::Atan2:
     case BinaryOpType::Div:
     case BinaryOpType::Fmod:
-    case BinaryOpType::Pow:
       return true;
     default:
       return false;
@@ -355,6 +571,18 @@ static const char* binary_op_integer_op2string(BinaryOpType t) {
   return nullptr;
 }
 
+static const char* binary_op_bool_op2string(BinaryOpType t) {
+  switch (t) {
+    case BinaryOpType::Max:
+      return "max";
+    case BinaryOpType::Min:
+      return "min";
+    default:
+      break;
+  }
+  return nullptr;
+}
+
 static const char* binary_op_type_inline_op2string(BinaryOpType t) {
   switch (t) {
     case BinaryOpType::Add:
@@ -416,12 +644,14 @@ static const char* ternary_op_type2string(TernaryOpType t) {
   switch (t) {
     case TernaryOpType::Clamp:
       return "clamp";
+    case TernaryOpType::Lerp:
+      return "lerp";
     case TernaryOpType::Threshold:
       return "threshold";
     case TernaryOpType::Where:
       return "where";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected TernaryOpType", t);
+      TORCH_INTERNAL_ASSERT(false, "Unexpected TernaryOpType");
   }
 }
 
@@ -447,10 +677,12 @@ static const char* parallel_type2string(ParallelType t) {
       return "UR";
     case ParallelType::Unswitch:
       return "US";
+    case ParallelType::Mma:
+      return "MMA";
     case ParallelType::Serial:
       return "S";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected ParallelType", t);
+      TORCH_INTERNAL_ASSERT(false, "Unexpected ParallelType");
   }
 }
 
@@ -463,7 +695,21 @@ static const char* memory_type2string(MemoryType t) {
     case MemoryType::Global:
       return "global";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected MemoryType", t);
+      TORCH_INTERNAL_ASSERT(false, "Unexpected MemoryType");
+  }
+}
+
+static const char* id_map_mode_type2string(IdMappingMode t) {
+  switch (t) {
+    case IdMappingMode::PERMISSIVE:
+      return "permissive";
+    case IdMappingMode::EXACT:
+      return "exact";
+    case IdMappingMode::LOOP:
+      return "loop";
+    default:
+      // Don't try to print t as it would recursively call this function
+      TORCH_INTERNAL_ASSERT(false, "Unexpected IdMappingMode Type.");
   }
 }
 
@@ -473,14 +719,14 @@ static const char* iter_type2string(IterType t) {
       return "i";
     case IterType::Reduction:
       return "r";
-    case IterType::BroadcastWithStride:
-      return "sb";
-    case IterType::BroadcastWithoutStride:
+    case IterType::Broadcast:
       return "b";
     case IterType::Gather:
       return "g";
     case IterType::Stride:
       return "s";
+    case IterType::VectorComponent:
+      return "v";
     default:
       // Don't try to print t as it would recursively call this function
       TORCH_INTERNAL_ASSERT(false, "Unexpected IterType");
@@ -502,7 +748,20 @@ static const char* thread_size2string(ParallelType t) {
     case ParallelType::TIDx:
       return "blockDim.x";
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type", t);
+      TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type");
+  }
+}
+
+static const char* load_store_type2string(LoadStoreOpType t) {
+  switch (t) {
+    case LoadStoreOpType::LdMatrix:
+      return "LdMatrix";
+    case LoadStoreOpType::LdMatrixTranspose:
+      return "LdMatrixTranspose";
+    case LoadStoreOpType::CpAsync:
+      return "CpAsync";
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unexpected parallel type");
   }
 }
 
@@ -514,37 +773,86 @@ constexpr unsigned int supported_switch_pair(DataType t1, DataType t2) {
 static const char* supported_casts2string(
     const std::pair<DataType, DataType>& t) {
   switch (supported_switch_pair(std::get<0>(t), std::get<1>(t))) {
+    case supported_switch_pair(DataType::Index, DataType::Float):
     case supported_switch_pair(DataType::Int, DataType::Float):
     case supported_switch_pair(DataType::Int32, DataType::Float):
     case supported_switch_pair(DataType::Double, DataType::Float):
+    case supported_switch_pair(DataType::Bool, DataType::Float):
       return "(float)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Float):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Float):
+      return "(float)std::real";
+    case supported_switch_pair(DataType::Index, DataType::Int):
     case supported_switch_pair(DataType::Int32, DataType::Int):
     case supported_switch_pair(DataType::Float, DataType::Int):
     case supported_switch_pair(DataType::Double, DataType::Int):
+    case supported_switch_pair(DataType::Bool, DataType::Int):
       return "(int64_t)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Int):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Int):
+      return "(int64_t)std::real";
+    case supported_switch_pair(DataType::Index, DataType::Int32):
+    case supported_switch_pair(DataType::Int, DataType::Int32):
     case supported_switch_pair(DataType::Float, DataType::Int32):
     case supported_switch_pair(DataType::Double, DataType::Int32):
+    case supported_switch_pair(DataType::Bool, DataType::Int32):
       return "(int32_t)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Int32):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Int32):
+      return "(int32_t)std::real";
+    case supported_switch_pair(DataType::Int, DataType::Index):
+    case supported_switch_pair(DataType::Int32, DataType::Index):
+    case supported_switch_pair(DataType::Float, DataType::Index):
+    case supported_switch_pair(DataType::Double, DataType::Index):
+      return "(nvfuser_index_t)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Index):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Index):
+      return "(nvfuser_index_t)std::real";
+    case supported_switch_pair(DataType::Index, DataType::Double):
     case supported_switch_pair(DataType::Int, DataType::Double):
     case supported_switch_pair(DataType::Int32, DataType::Double):
     case supported_switch_pair(DataType::Float, DataType::Double):
+    case supported_switch_pair(DataType::Bool, DataType::Double):
       return "(double)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Double):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Double):
+      return "(double)std::real";
+    case supported_switch_pair(DataType::Float, DataType::Bool):
+    case supported_switch_pair(DataType::Double, DataType::Bool):
+    case supported_switch_pair(DataType::Int32, DataType::Bool):
+    case supported_switch_pair(DataType::Int, DataType::Bool):
+      return "(bool)";
+    case supported_switch_pair(DataType::ComplexFloat, DataType::Bool):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::Bool):
+      return "(bool)std::real";
+    case supported_switch_pair(DataType::Index, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Int, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Int32, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Double, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Float, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::Bool, DataType::ComplexDouble):
+    case supported_switch_pair(DataType::ComplexFloat, DataType::ComplexDouble):
+      return "(std::complex<double>)";
+    case supported_switch_pair(DataType::Index, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Int, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Int32, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Double, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Float, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::Bool, DataType::ComplexFloat):
+    case supported_switch_pair(DataType::ComplexDouble, DataType::ComplexFloat):
+      return "(std::complex<float>)";
     case supported_switch_pair(DataType::Float, DataType::Half):
       return "__float2half";
+    case supported_switch_pair(DataType::Double, DataType::Half):
+      return "__double2half";
     case supported_switch_pair(DataType::Float, DataType::BFloat16):
       return "__float2bfloat";
     case supported_switch_pair(DataType::Half, DataType::Float):
       return "__half2float";
+    case supported_switch_pair(DataType::Half, DataType::Double):
+      return "__half2double";
     case supported_switch_pair(DataType::BFloat16, DataType::Float):
       return "__bfloat2float";
-    case supported_switch_pair(DataType::Bool, DataType::Double):
-      return "double";
-    case supported_switch_pair(DataType::Bool, DataType::Float):
-      return "float";
-    case supported_switch_pair(DataType::Bool, DataType::Int):
-      return "int64_t";
-    case supported_switch_pair(DataType::Bool, DataType::Int32):
-      return "int32_t";
     default:
       return nullptr;
   }
@@ -566,6 +874,10 @@ DataType aten_to_data_type(const at::ScalarType& scalar_type) {
       return DataType::Int;
     case at::ScalarType::Int:
       return DataType::Int32;
+    case at::ScalarType::ComplexFloat:
+      return DataType::ComplexFloat;
+    case at::ScalarType::ComplexDouble:
+      return DataType::ComplexDouble;
     default:
       return DataType::Null;
   }
@@ -585,8 +897,19 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
       return at::ScalarType::BFloat16;
     case DataType::Int:
       return at::ScalarType::Long;
+    case DataType::Index:
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "Index is determined at compile time,",
+          " to convert from an aten type you need to have the compiled information. ",
+          "This information is passed to GpuLower at compile time, and then copied to kerned.",
+          "There's also this information in FusionExecutorCache and the Registry system.");
     case DataType::Int32:
       return at::ScalarType::Int;
+    case DataType::ComplexFloat:
+      return at::ScalarType::ComplexFloat;
+    case DataType::ComplexDouble:
+      return at::ScalarType::ComplexDouble;
     default:
       TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
   }
@@ -594,6 +917,10 @@ at::ScalarType data_type_to_aten(const DataType& data_type) {
 
 std::ostream& operator<<(std::ostream& out, const ValType vtype) {
   return out << val_type2string(vtype);
+}
+
+std::ostream& operator<<(std::ostream& out, const PredicateType ptype) {
+  return out << predicate_type2string(ptype);
 }
 
 std::ostream& operator<<(std::ostream& out, const DataType dtype) {
@@ -624,6 +951,16 @@ std::ostream& operator<<(std::ostream& out, const MemoryType mtype) {
   return out << memory_type2string(mtype);
 }
 
+std::ostream& operator<<(std::ostream& out, const IdMappingMode immtype) {
+  return out << id_map_mode_type2string(immtype);
+}
+
+std::ostream& operator<<(
+    std::ostream& out,
+    const LoadStoreOpType load_store_type) {
+  return out << load_store_type2string(load_store_type);
+}
+
 TORCH_CUDA_CU_API std::ostream& operator<<(
     std::ostream& out,
     const IterType bt) {
@@ -649,6 +986,12 @@ c10::optional<std::string> integer_op_str(const BinaryOpType botype) {
                         : c10::nullopt;
 }
 
+c10::optional<std::string> bool_op_str(const BinaryOpType botype) {
+  const char* str = binary_op_bool_op2string(botype);
+  return str != nullptr ? c10::optional<std::string>(std::string(str))
+                        : c10::nullopt;
+}
+
 std::string stringifyThreadSize(const ParallelType ptype) {
   return thread_size2string(ptype);
 }
@@ -667,9 +1010,13 @@ std::string typePrefix(const DataType data_type) {
     case DataType::Half:
     case DataType::BFloat16:
       return "f";
+    case DataType::Index:
     case DataType::Int:
     case DataType::Int32:
       return "i";
+    case DataType::ComplexFloat:
+    case DataType::ComplexDouble:
+      return "c";
     default:
       TORCH_INTERNAL_ASSERT(false, "No data type found for scalar type.");
   }
@@ -705,6 +1052,10 @@ size_t dataTypeSize(DataType type) {
   switch (type) {
     case DataType::Bool:
       return sizeof(bool);
+    case DataType::ComplexDouble:
+      return sizeof(std::complex<double>);
+    case DataType::ComplexFloat:
+      return sizeof(std::complex<float>);
     case DataType::Double:
       return sizeof(double);
     case DataType::Float:
@@ -713,13 +1064,31 @@ size_t dataTypeSize(DataType type) {
       return sizeof(at::Half);
     case DataType::BFloat16:
       return sizeof(at::BFloat16);
+    case DataType::Index:
+      TORCH_INTERNAL_ASSERT(
+          false, "The actual type of Index is only known at compile time.");
     case DataType::Int:
       return sizeof(uint64_t);
     case DataType::Int32:
       return sizeof(uint32_t);
+    case DataType::Double_2:
+      return sizeof(double) * 2;
+    case DataType::Float_2:
+      return sizeof(float) * 2;
     default:
       TORCH_INTERNAL_ASSERT(false, "Size undefined for data type, ", type);
   }
+}
+
+size_t dataTypeSize(DataType type, DataType index_type) {
+  if (type == DataType::Index) {
+    TORCH_INTERNAL_ASSERT(
+        index_type == DataType::Int32 || index_type == DataType::Int,
+        "Invalid index type of ",
+        index_type);
+    return dataTypeSize(index_type);
+  }
+  return dataTypeSize(type);
 }
 
 } // namespace cuda

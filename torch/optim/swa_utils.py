@@ -1,9 +1,13 @@
-import torch
+import itertools
 import math
-from torch.nn import Module
 from copy import deepcopy
+import warnings
+
+import torch
+from torch.nn import Module
 from torch.optim.lr_scheduler import _LRScheduler
 
+__all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).
@@ -26,8 +30,8 @@ class AveragedModel(Module):
             :class:`AveragedModel` parameter, the current value of :attr:`model`
             parameter and the number of models already averaged; if None,
             equally weighted average is used (default: None)
-        mode (str, optional): whether to use ``'parameters'`` or ``'state_dict'`` for update
-            (default: ``'parameters'``)
+        use_buffers (bool): if ``True``, it will compute running averages for
+            both the parameters and the buffers of the model. (default: ``False``)
 
     Example:
         >>> loader, optimizer, model, loss_fn = ...
@@ -55,15 +59,21 @@ class AveragedModel(Module):
     equally-weighted average of the weights.
 
     Example:
-        >>> # Compute exponential moving averages of the weights
+        >>> # Compute exponential moving averages of the weights and buffers
         >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
                             0.1 * averaged_model_parameter + 0.9 * model_parameter
-        >>> swa_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
+        >>> swa_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg, use_buffers=True)
 
     .. note::
         When using SWA with models containing Batch Normalization you may
         need to update the activation statistics for Batch Normalization.
-        You can do so by using :meth:`torch.optim.swa_utils.update_bn` utility.
+        This can be done either by using the :meth:`torch.optim.swa_utils.update_bn`
+        or by setting :attr:`use_buffers` to `True`. The first approach updates the
+        statistics in a post-training step by passing data through the model. The
+        second does it during the parameter update phase by averaging all buffers.
+        Empirical evidence has shown that updating the statistics in normalization
+        layers increases accuracy, but you may wish to empirically test which
+        approach yields the best results in your problem.
 
     .. note::
         :attr:`avg_fn` is not saved in the :meth:`state_dict` of the model.
@@ -86,7 +96,7 @@ class AveragedModel(Module):
         Generalizes Well:
         https://arxiv.org/abs/2001.02312
     """
-    def __init__(self, model, device=None, avg_fn=None, mode='parameters'):
+    def __init__(self, model, device=None, avg_fn=None, use_buffers=False):
         super(AveragedModel, self).__init__()
         self.module = deepcopy(model)
         if device is not None:
@@ -98,17 +108,20 @@ class AveragedModel(Module):
                 return averaged_model_parameter + \
                     (model_parameter - averaged_model_parameter) / (num_averaged + 1)
         self.avg_fn = avg_fn
-        modes = ['parameters', 'state_dict']
-        if mode not in modes:
-            raise ValueError(f'Invalid mode passed, valid values are {", ".join(modes)}.')
-        self.use_state_dict = mode == 'state_dict'
+        self.use_buffers = use_buffers
 
     def forward(self, *args, **kwargs):
         return self.module(*args, **kwargs)
 
     def update_parameters(self, model):
-        self_param = self.module.state_dict().values() if self.use_state_dict else self.parameters()
-        model_param = model.state_dict().values() if self.use_state_dict else model.parameters()
+        self_param = (
+            itertools.chain(self.module.parameters(), self.module.buffers())
+            if self.use_buffers else self.parameters()
+        )
+        model_param = (
+            itertools.chain(model.parameters(), model.buffers())
+            if self.use_buffers else model.parameters()
+        )
         for p_swa, p_model in zip(self_param, model_param):
             device = p_swa.device
             p_model_ = p_model.detach().to(device)
@@ -192,7 +205,7 @@ class SWALR(_LRScheduler):
             (default: "cos")
         last_epoch (int): the index of the last epoch (default: -1)
 
-    The :class:`SWALR` scheduler is can be used together with other
+    The :class:`SWALR` scheduler can be used together with other
     schedulers to switch to a constant learning rate late in the training
     as in the example below.
 

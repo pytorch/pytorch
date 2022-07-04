@@ -270,6 +270,7 @@ on them and append them to the :class:`Graph`.
         graph : fx.Graph = tracer_class().trace(model)
         new_graph = fx.Graph()
         env = {}
+        tracer = torch.fx.proxy.GraphAppendingTracer(new_graph)
         for node in graph.nodes:
             if node.op == 'call_function' and node.target in decomposition_rules:
                 # By wrapping the arguments with proxies,
@@ -277,7 +278,7 @@ on them and append them to the :class:`Graph`.
                 # decomposition rule and implicitly add it
                 # to the Graph by symbolically tracing it.
                 proxy_args = [
-                    fx.Proxy(env[x.name]) if isinstance(x, fx.Node) else x for x in node.args]
+                    fx.Proxy(env[x.name], tracer) if isinstance(x, fx.Node) else x for x in node.args]
                 output_proxy = decomposition_rules[node.target](*proxy_args)
 
                 # Operations on `Proxy` always yield new `Proxy`s, and the
@@ -297,7 +298,13 @@ In addition to avoiding explicit graph manipulation, using :class:`Proxy`\s
 also allows you to specify your rewrite rules as native Python code.
 For transformations that require a large amount of rewrite rules
 (such as vmap or grad), this can often improve readability and
-maintainability of the rules.
+maintainability of the rules. Note that while calling :class:`Proxy` we also
+passed a tracer pointing to the underlying variable `graph`. This is done so
+if in case the operations in graph are n-ary (e.g. add is a binary operator)
+the call to :class:`Proxy` does not create multiple instances of a graph
+tracer which can lead to unexpected runtime errors. We recommend this method
+of using :class:`Proxy` especially when the underlying operators can not be
+safely assumed to be unary.
 
 A worked example of using :class:`Proxy`\s for :class:`Graph` manipulation
 can be found
@@ -1102,3 +1109,16 @@ API Reference
   :members:
 
 .. autofunction:: torch.fx.replace_pattern
+
+
+.. The experimental and passes submodules are missing docs.
+.. Adding it here for coverage but this doesn't add anything to the
+.. rendered doc.
+.. py:module:: torch.fx.passes
+.. py:module:: torch.fx.passes.infra
+.. py:module:: torch.fx.passes.utils
+.. py:module:: torch.fx.passes.tests
+.. py:module:: torch.fx.experimental
+.. py:module:: torch.fx.experimental.unification
+.. py:module:: torch.fx.experimental.unification.multipledispatch
+.. py:module:: torch.fx.experimental.migrate_gradual_types

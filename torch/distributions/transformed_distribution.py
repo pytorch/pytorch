@@ -6,6 +6,7 @@ from torch.distributions.transforms import ComposeTransform, Transform
 from torch.distributions.utils import _sum_rightmost
 from typing import Dict
 
+__all__ = ['TransformedDistribution']
 
 class TransformedDistribution(Distribution):
     r"""
@@ -181,8 +182,6 @@ class TransformedDistribution(Distribution):
         transform(s) and computing the score of the base distribution.
         """
         value = self._monotonize_cdf(value)
-        if self._validate_args:
-            self.base_dist._validate_sample(value)
         value = self.base_dist.icdf(value)
         for transform in self.transforms:
             value = transform(value)

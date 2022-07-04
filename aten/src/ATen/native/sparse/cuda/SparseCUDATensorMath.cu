@@ -1,8 +1,9 @@
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseTensorMath.h>
 #include <ATen/native/sparse/cuda/SparseBlasLegacy.h>
@@ -14,6 +15,25 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ExpandUtils.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_sum_native.h>
+#include <ATen/ops/add_native.h>
+#include <ATen/ops/addmm_native.h>
+#include <ATen/ops/bmm_native.h>
+#include <ATen/ops/cat.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
+#include <ATen/ops/hspmm_native.h>
+#include <ATen/ops/mul.h>
+#include <ATen/ops/result_type.h>
+#include <ATen/ops/scalar_tensor.h>
+#endif
 
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
@@ -299,8 +319,9 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
     if (sparse.dense_dim() == 0) {
       TORCH_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
-        at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf, at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16,
+        commonDtype, "add_out_dense_sparse_cuda", [&] {
           apply::sparseElementwiseKernelScalar<<<grid, block, 0, stream>>>(
               TensorCAddOp<scalar_t>(value.to<scalar_t>()),
               V_INFO(r), I_INFO(indices), V_INFO(values),
@@ -313,8 +334,8 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, const SparseT
       // sparseElementwiseKernel needs values to be contiguous too
       values = values.contiguous();
 
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
-        at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
+      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+        at::ScalarType::ComplexHalf, at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "add_out_dense_sparse_cuda", [&] {
           apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
             <<<grid, block, 0, stream>>>(
               TensorCAddOp<scalar_t>(value.to<scalar_t>()),
@@ -474,7 +495,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
 
   Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
 
-  int64_t valueSize = t_values_.stride(0);
+  int64_t valueSize = std::max<int64_t>(1, t_values_.stride(0));
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
   dim3 grid;
   int curDevice = -1;
@@ -483,8 +504,8 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
   TORCH_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   Tensor resultNnz = at::empty({1}, CUDA(kLong));
-  AT_DISPATCH_ALL_TYPES_AND(
-    at::ScalarType::Half, commonDtype, "mul_out_sparse_cuda", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
+    at::ScalarType::Half, at::ScalarType::BFloat16, commonDtype, "mul_out_sparse_cuda", [&] {
         apply::valueSparseIntersectionKernel<<<grid, block, 0, stream>>>(
             TensorMulOp<scalar_t>(),
             I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),

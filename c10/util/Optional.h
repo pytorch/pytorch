@@ -12,7 +12,7 @@
 // C10
 // - Move file to `c10` namespace.
 // - Remove macro use in line 478 because the nvcc device compiler cannot handle
-// it it.
+// it.
 // - Revise constructor logic so that it is 1) consistent with c++ 17 standard
 // documented here in (8):
 // https://en.cppreference.com/w/cpp/utility/optional/optional, and 2) able to
@@ -174,7 +174,12 @@ union storage_t {
   unsigned char dummy_;
   T value_;
 
-  constexpr storage_t(trivial_init_t) noexcept : dummy_(){};
+#if __cplusplus >= 202002L
+  constexpr
+#endif
+      storage_t(trivial_init_t) noexcept {
+    new (&dummy_) unsigned char;
+  }
 
   template <class... Args>
   constexpr storage_t(Args&&... args)
@@ -188,7 +193,15 @@ union constexpr_storage_t {
   unsigned char dummy_;
   T value_;
 
-  constexpr constexpr_storage_t(trivial_init_t) noexcept : dummy_(){};
+#if __cplusplus >= 202002L
+  // C++20 lifted the requirement to initialize a union member in order to be
+  // constexpr.
+  constexpr constexpr_storage_t(trivial_init_t) noexcept {
+    new (&dummy_) unsigned char;
+  }
+#else
+  constexpr constexpr_storage_t(trivial_init_t) noexcept : dummy_() {}
+#endif
 
   template <class... Args>
   constexpr constexpr_storage_t(Args&&... args)

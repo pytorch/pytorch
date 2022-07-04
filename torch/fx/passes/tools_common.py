@@ -6,6 +6,7 @@ import torch.fx
 from torch.fx.node import _get_qualified_name
 from torch.fx._compatibility import compatibility
 
+__all__ = ['get_acc_ops_name', 'get_node_target', 'is_node_output_tensor', 'FxNetAccFusionsFinder', 'legalize_graph']
 
 Tensors = Union[Tuple[torch.Tensor], List[torch.Tensor]]
 TensorOrTensors = Union[torch.Tensor, Tensors]
@@ -13,6 +14,18 @@ NodeList = List[torch.fx.Node]
 NodeSet = Set[torch.fx.Node]
 Names = List[str]
 CALLABLE_NODE_OPS = {"call_module", "call_function", "call_method"}
+
+
+@compatibility(is_backward_compatible=False)
+def get_acc_ops_name(k):
+    if isinstance(k, str):
+        return k
+    elif k.__module__ and "acc_ops" in k.__module__:
+        return f"acc_ops.{k.__name__}"
+    else:
+        module = k.__module__
+        return f"{module if module else ''}.{k.__name__}"
+
 
 @compatibility(is_backward_compatible=False)
 def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.Node) -> str:
@@ -36,7 +49,9 @@ def get_node_target(submodules: Mapping[str, torch.nn.Module], node: torch.fx.No
 
     if node.op == "call_module":
         assert isinstance(node.target, str)
-        return torch.typename(submodules[node.target])
+        submod = submodules[node.target]
+        submod_type = getattr(submod, "_base_class_origin", type(submod))
+        return get_acc_ops_name(submod_type)
     elif node.op == "call_function":
         target: Any = node.target
         return (
@@ -191,3 +206,57 @@ class FxNetAccFusionsFinder:
                     result[n] = fusion_group.nodes
 
         return result
+
+
+@compatibility(is_backward_compatible=False)
+def legalize_graph(gm: torch.fx.GraphModule):
+    """
+    Replace the graph of the given GraphModule with one that contains the same nodes as the
+    original, but in topologically sorted order.
+
+    This is used by the merge_matmul transformation below, which disturbs the topologically sorted
+    order of its input GraphModule, so that this order is restored before further transformation.
+
+    Arguments:
+        gm: The graph module to topologically sort. It is modified in-place.
+
+    """
+    # Build an adjacency list representation of node dependencies in the graph. This also
+    # serves as a list of nodes that still need to be inserted into the new, topologically
+    # sorted graph.
+    dependencies = {node: node.all_input_nodes.copy() for node in gm.graph.nodes}
+
+    # Construct a new graph that will contain all nodes in topologically sorted order.
+    new_graph = torch.fx.Graph()
+    value_remap: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    # Copy over all nodes with no dependencies.
+    for node, deps in dependencies.items():
+        if not deps:
+            value_remap[node] = new_graph.node_copy(node, lambda n: value_remap[n])
+
+    # Remove the copied over nodes from the adjacency list.
+    for copied_node in value_remap.keys():
+        del dependencies[copied_node]
+
+    # While there are still nodes to insert into the new graph:
+    while dependencies:
+        copied_this_round = []
+
+        # Copy over all nodes whose dependencies already exist in the new graph.
+        for node, deps in dependencies.items():
+            all_deps_copied = True
+            for dep in deps:
+                if dep not in value_remap:
+                    all_deps_copied = False
+
+            if all_deps_copied:
+                value_remap[node] = new_graph.node_copy(node, lambda n: value_remap[n])
+                copied_this_round.append(node)
+
+        # Delete all nodes copied over in this iteration from dependencies.
+        for copied_node in copied_this_round:
+            del dependencies[copied_node]
+
+    # Replace the old graph with the new, topologically sorted one.
+    gm.graph = new_graph

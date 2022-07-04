@@ -1,11 +1,12 @@
 #include <c10d/NCCLUtils.hpp>
 
+#include <c10/util/CallOnce.h>
+
 #ifdef USE_C10D_NCCL
 
 #include <mutex>
 
 namespace c10d {
-
 
 ncclComm_t NCCLComm::getNcclComm() {
   std::unique_lock<std::mutex> lock(mutex_);
@@ -25,10 +26,10 @@ ncclComm_t NCCLComm::getNcclComm() {
 }
 
 std::string getNcclVersion() {
-  static std::once_flag ncclGetVersionFlag;
+  static c10::once_flag ncclGetVersionFlag;
   static std::string versionString;
 
-  std::call_once(ncclGetVersionFlag, []() {
+  c10::call_once(ncclGetVersionFlag, []() {
     int version;
     ncclResult_t status = ncclGetVersion(&version);
     // can't compute the version if call did not return successfully or version
@@ -36,9 +37,13 @@ std::string getNcclVersion() {
     if (status != ncclSuccess || version < 100) {
       versionString = "Unknown NCCL version";
     } else {
-      auto ncclMajor = version / 1000;
-      auto ncclMinor = (version % 1000) / 100;
-      auto ncclPatch = version % (ncclMajor * 1000 + ncclMinor * 100);
+      // NCCL changed version coding starting 2.9
+      const int majorBase = version < 2900 ? 1000 : 10000;
+      const int minorBase = 100;
+      auto ncclMajor = version / majorBase;
+      auto ncclMinor = (version % majorBase) / minorBase;
+      auto ncclPatch =
+          version % (ncclMajor * majorBase + ncclMinor * minorBase);
       versionString = std::to_string(ncclMajor) + "." +
           std::to_string(ncclMinor) + "." + std::to_string(ncclPatch);
     }
