@@ -26,9 +26,6 @@ inputs:
   push-ghcr-image:
     description: If set to any value, push docker image to the ghcr.io.
     required: false
-  ghcr-pat:
-    description: Ghcr.io login credentials.
-    required: false
 
 outputs:
   docker-image:
@@ -109,7 +106,7 @@ runs:
         DOCKER_SKIP_PUSH: ${{ steps.check.outputs.skip_push || inputs.skip_push }}
         DOCKER_TAG: ${{ steps.calculate-tag.outputs.docker-tag }}
         PUSH_GHCR_IMAGE: ${{ inputs.push-ghcr-image }}
-        GHCR_PAT: "${{ inputs.ghcr-pat }}"
+        GHCR_PAT: ${{ env.GHCR_PAT }}
       working-directory: .circleci/docker
       shell: bash
       run: |
