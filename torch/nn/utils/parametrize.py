@@ -4,6 +4,7 @@ from torch.nn.parameter import Parameter
 from torch import Tensor
 
 import collections
+import copyreg
 from copy import deepcopy
 from contextlib import contextmanager
 from typing import Union, Optional, Dict, Tuple, Sequence
@@ -286,14 +287,20 @@ def _inject_new_class(module: Module) -> None:
     """
     cls = module.__class__
 
-    def default_deepcopy(self, memo=None):
+    def default_deepcopy(self, memo):
         # Just emulate a standard deepcopy procedure when __deepcopy__ doesn't exist in the current class.
-        memo = {} if memo is None else memo
-        replica = self.__new__(self.__class__)
-        memo[id(self)] = replica
-        for key, value in self.__dict__.items():
-            replica.__dict__[key] = deepcopy(value, memo)
-        return replica
+        if id(self) in memo:
+            return memo[id(self)]
+        else:
+            replica = self.__new__(self.__class__)
+            memo[id(self)] = replica
+            replica.__dict__ = deepcopy(self.__dict__, memo)
+            # Also save all slots if they exist.
+            slots_to_save = copyreg._slotnames(self.__class__)  # type: ignore[attr-defined]
+            for slot in slots_to_save:
+                if hasattr(self, slot):
+                    setattr(replica, slot, deepcopy(getattr(self, slot), memo))
+            return replica
 
     def getstate(self):
         raise RuntimeError(
@@ -307,7 +314,7 @@ def _inject_new_class(module: Module) -> None:
     # We don't allow serialization of parametrized modules but should still allow deepcopying.
     # Default 'deepcopy' function invokes __deepcopy__ method instead of __getstate__ when it exists.
     if not hasattr(cls, "__deepcopy__"):
-        dct["__deepcopy__"] = default_deepcopy
+        dct["__deepcopy__"] = default_deepcopy  # type: ignore[assignment]
 
     param_cls = type(
         f"Parametrized{cls.__name__}",

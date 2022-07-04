@@ -3314,9 +3314,9 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         class ActualModel(ModelWithoutDeepcopy):
             # Emulate custom implementation of the deepcopying.
             def __deepcopy__(self, memo):
-                memo[id(self)] = result = self.__new__(ActualModel)
-                for key, value in self.__dict__.items():
-                    result.__dict__[key] = deepcopy(value, memo)
+                result = self.__new__(self.__class__)
+                memo[id(self)] = result
+                result.__dict__ = deepcopy(self.__dict__, memo)
                 return result
 
         def check_deepcopy(m1: nn.Module, m2: nn.Module):
@@ -3326,13 +3326,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             b2 = m2.parametrizations.bias.original if parametrize.is_parametrized(m2, "bias") else m2.bias
             # Weights, biases and attributes should be equal but they must be different objects.
             self.assertEqual(m1.__dict__.keys(), m2.__dict__.keys())
-            self.assertNotEqual(id(m1), id(m2))
+            self.assertIsNot(m1, m2)
             self.assertEqual(w1, w2)
-            self.assertNotEqual(id(w1), id(w2))
+            self.assertIsNot(w1, w2)
             self.assertEqual(b1, b2)
-            self.assertNotEqual(id(b1), id(b2))
+            self.assertIsNot(b1, b2)
             self.assertEqual(m1.attr, m2.attr)
-            self.assertNotEqual(id(m1.attr), id(m2.attr))
+            self.assertIsNot(m1.attr, m2.attr)
 
         for model in (ModelWithoutDeepcopy(), ActualModel()):
             # General check that we are able to create deepcopy.
