@@ -43,7 +43,6 @@ jobs:
           - docker-image-name: pytorch-linux-focal-py3-clang10-onnx
     env:
       DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
-      GHCR_PAT: ${{ secrets.GHCR_PAT }}
     steps:
       - name: Clean workspace
         shell: bash
@@ -69,6 +68,7 @@ jobs:
           skip_push: false
           force_push: true
           push-ghcr-image: true
+          ghcr-pat: ${{ secrets.GHCR_PAT }}
 
       - name: Pull docker image
         uses: ./.github/actions/pull-docker-image
