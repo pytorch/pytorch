@@ -13,6 +13,7 @@
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/Parallel.h>
+#include <ATen/TensorIndexing.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorUtils.h>
@@ -27,6 +28,10 @@
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
+#include <ATen/ops/_linalg_det.h>
+#include <ATen/ops/_linalg_det_native.h>
+#include <ATen/ops/_linalg_slogdet.h>
+#include <ATen/ops/_linalg_slogdet_native.h>
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
@@ -48,8 +53,8 @@
 #include <ATen/ops/frobenius_norm_native.h>
 #include <ATen/ops/from_blob.h>
 #include <ATen/ops/full.h>
-#include <ATen/ops/ger_native.h>
 #include <ATen/ops/gelu.h>
+#include <ATen/ops/ger_native.h>
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/inner_native.h>
 #include <ATen/ops/is_complex_native.h>
@@ -59,8 +64,6 @@
 #include <ATen/ops/linalg_cond_native.h>
 #include <ATen/ops/linalg_det.h>
 #include <ATen/ops/linalg_det_native.h>
-#include <ATen/ops/_linalg_det.h>
-#include <ATen/ops/_linalg_det_native.h>
 #include <ATen/ops/linalg_diagonal_native.h>
 #include <ATen/ops/linalg_eigh.h>
 #include <ATen/ops/linalg_eigvalsh.h>
@@ -82,8 +85,6 @@
 #include <ATen/ops/linalg_pinv_native.h>
 #include <ATen/ops/linalg_slogdet.h>
 #include <ATen/ops/linalg_slogdet_native.h>
-#include <ATen/ops/_linalg_slogdet.h>
-#include <ATen/ops/_linalg_slogdet_native.h>
 #include <ATen/ops/linalg_solve.h>
 #include <ATen/ops/linalg_svdvals.h>
 #include <ATen/ops/linalg_tensorinv.h>
