@@ -173,6 +173,7 @@ supported:
   - _copy_from
   - _copy_from_and_resize
   - empty.memory_format
+  - empty.SymInt
   - empty_strided
   - fill_.Scalar
   - normal_
