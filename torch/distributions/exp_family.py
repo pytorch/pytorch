@@ -1,6 +1,7 @@
 import torch
 from torch.distributions.distribution import Distribution
 
+__all__ = ['ExponentialFamily']
 
 class ExponentialFamily(Distribution):
     r"""
@@ -56,5 +57,5 @@ class ExponentialFamily(Distribution):
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
         result += lg_normal
         for np, g in zip(nparams, gradients):
-            result -= np * g
+            result -= (np * g).reshape(self._batch_shape + (-1,)).sum(-1)
         return result

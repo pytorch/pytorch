@@ -69,10 +69,19 @@ void TORCH_API unregisterStat(Stat<double>* stat);
 void TORCH_API unregisterStat(Stat<int64_t>* stat);
 } // namespace detail
 
-// Stat is a base class for stats. These stats are used to compute summary
-// statistics in a performant way over repeating intervals. When the window
-// closes the stats are logged via the event handlers as a `torch.monitor.Stat`
-// event.
+// Stat is used to compute summary statistics in a performant way over fixed
+// intervals. Stat logs the statistics as an Event once every `windowSize`
+// duration. When the window closes the stats are logged via the event handlers
+// as a `torch.monitor.Stat` event.
+//
+// `windowSize` should be set to something relatively high to avoid a huge
+// number of events being logged. Ex: 60s. Stat uses millisecond precision.
+//
+// If maxSamples is set, the stat will cap the number of samples per window by
+// discarding `add` calls once `maxSamples` adds have occurred. If it's not set,
+// all `add` calls during the window will be included.
+// This is an optional field to make aggregations more directly comparable
+// across windows when the number of samples might vary.
 //
 // Stats support double and int64_t data types depending on what needs to be
 // logged and needs to be templatized with one of them.
@@ -91,8 +100,27 @@ class Stat {
   };
 
  public:
-  Stat(std::string name, std::vector<Aggregation> aggregations)
-      : name_(std::move(name)), aggregations_(merge(aggregations)) {
+  Stat(
+      std::string name,
+      std::initializer_list<Aggregation> aggregations,
+      std::chrono::milliseconds windowSize,
+      int64_t maxSamples = std::numeric_limits<int64_t>::max())
+      : name_(std::move(name)),
+        aggregations_(merge(aggregations)),
+        windowSize_(windowSize),
+        maxSamples_(maxSamples) {
+    detail::registerStat(this);
+  }
+
+  Stat(
+      std::string name,
+      std::vector<Aggregation> aggregations,
+      std::chrono::milliseconds windowSize,
+      int64_t maxSamples = std::numeric_limits<int64_t>::max())
+      : name_(std::move(name)),
+        aggregations_(merge(aggregations)),
+        windowSize_(windowSize),
+        maxSamples_(maxSamples) {
     detail::registerStat(this);
   }
 
@@ -109,6 +137,10 @@ class Stat {
   void add(T v) {
     std::lock_guard<std::mutex> guard(mu_);
     maybeLogLocked();
+
+    if (alreadyLogged()) {
+      return;
+    }
 
     if (aggregations_.test(static_cast<int>(Aggregation::VALUE))) {
       current_.value = v;
@@ -150,7 +182,29 @@ class Stat {
   }
 
  protected:
-  virtual void maybeLogLocked() = 0;
+  virtual uint64_t currentWindowId() const {
+    std::chrono::milliseconds now =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch());
+
+    // always returns a currentWindowId of at least 1 to avoid 0 window issues
+    return (now / windowSize_) + 1;
+  }
+
+ private:
+  bool alreadyLogged() {
+    return lastLoggedWindowId_ == currentWindowId();
+  }
+
+  void maybeLogLocked() {
+    auto windowId = currentWindowId();
+    bool shouldLog = windowId_ != windowId || current_.count >= maxSamples_;
+    if (shouldLog && !alreadyLogged()) {
+      logLocked();
+      lastLoggedWindowId_ = windowId_;
+      windowId_ = windowId;
+    }
+  }
 
   void logLocked() {
     prev_ = current_;
@@ -215,72 +269,11 @@ class Stat {
   std::mutex mu_;
   Values current_;
   Values prev_;
-};
-
-// IntervalStat is a Stat that logs the stat once every `windowSize` duration.
-// This should be set to something relatively high to avoid a huge number of
-// events being logged. Ex: 60s.
-template <typename T>
-class IntervalStat : public Stat<T> {
- public:
-  IntervalStat(
-      std::string name,
-      std::initializer_list<Aggregation> aggregations,
-      std::chrono::milliseconds windowSize)
-      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
-
-  IntervalStat(
-      std::string name,
-      std::vector<Aggregation> aggregations,
-      std::chrono::milliseconds windowSize)
-      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
-
- protected:
-  virtual uint64_t currentWindowId() const {
-    auto now = std::chrono::steady_clock::now().time_since_epoch();
-    return now / windowSize_;
-  }
-
- private:
-  void maybeLogLocked() override {
-    auto windowId = currentWindowId();
-    if (windowId_ != windowId) {
-      Stat<T>::logLocked();
-      windowId_ = windowId;
-    }
-  }
 
   uint64_t windowId_{0};
+  uint64_t lastLoggedWindowId_{0};
   const std::chrono::milliseconds windowSize_;
-};
-
-// FixedCountStat is a Stat that logs the stat every `windowSize` number of add
-// calls. For high performance stats this window size should be fairly large to
-// ensure that the event logging frequency is in the range of 1s to 60s under
-// normal usage. Core stats should error on the side of less frequent.
-template <typename T>
-class FixedCountStat : public Stat<T> {
- public:
-  FixedCountStat(
-      std::string name,
-      std::initializer_list<Aggregation> aggregations,
-      int64_t windowSize)
-      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
-
-  FixedCountStat(
-      std::string name,
-      std::vector<Aggregation> aggregations,
-      int64_t windowSize)
-      : Stat<T>(std::move(name), aggregations), windowSize_(windowSize) {}
-
- private:
-  void maybeLogLocked() override {
-    if (Stat<T>::current_.count >= windowSize_) {
-      Stat<T>::logLocked();
-    }
-  }
-
-  const int64_t windowSize_;
+  const int64_t maxSamples_;
 };
 } // namespace monitor
 } // namespace torch

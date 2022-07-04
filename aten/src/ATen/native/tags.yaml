@@ -1,0 +1,18 @@
+# This yaml file contains all the possible tags that can be defined in `tags` in `native_functions.yaml`
+
+- tag: inplace_view
+  desc: |
+          This tag indicates if an operator *only* modifies the tensor metadata
+- tag: view_copy
+  desc: |
+          This tag indicates operators that are *_copy* variants
+          of view/aliasing operators. If an operator has a view_copy tag,
+          then it should have the name {op}_copy, where {op} is a view operator.
+- tag: dynamic_output_shape
+  desc: |
+          This tag indicates if an operator's output's shape depends on input Tensor
+          data.
+- tag: generated
+  desc: |
+          This tag indicates that the operator doesn't have an explicit entry in
+          native_functions.yaml, and instead was generated automatically by the codegen.

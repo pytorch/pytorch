@@ -29,7 +29,8 @@ enum class MemoryFormat : int8_t {
   Contiguous,
   Preserve,
   ChannelsLast,
-  ChannelsLast3d
+  ChannelsLast3d,
+  NumOptions
 };
 
 // If you are seeing this, it means that this call site was not checked if
@@ -54,7 +55,7 @@ inline std::ostream& operator<<(
     case MemoryFormat::ChannelsLast3d:
       return stream << "ChannelsLast3d";
     default:
-      TORCH_CHECK(false, "Unknown memory format");
+      TORCH_CHECK(false, "Unknown memory format ", memory_format);
   }
 }
 

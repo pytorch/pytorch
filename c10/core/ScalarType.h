@@ -1,9 +1,8 @@
 #pragma once
 
-#include <c10/util/ArrayRef.h>
 #include <c10/util/BFloat16.h>
+#include <c10/util/Exception.h>
 #include <c10/util/Half.h>
-#include <c10/util/Optional.h>
 #include <c10/util/complex.h>
 #include <c10/util/qint32.h>
 #include <c10/util/qint8.h>
@@ -63,6 +62,21 @@ namespace c10 {
   _(bool, Bool)                                                    \
   _(at::BFloat16, BFloat16)
 
+#define AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(_) \
+  _(uint8_t, Byte)                             \
+  _(int8_t, Char)                              \
+  _(int16_t, Short)                            \
+  _(int, Int)                                  \
+  _(int64_t, Long)                             \
+  _(at::Half, Half)                            \
+  _(float, Float)                              \
+  _(double, Double)                            \
+  _(c10::complex<c10::Half>, ComplexHalf)      \
+  _(c10::complex<float>, ComplexFloat)         \
+  _(c10::complex<double>, ComplexDouble)       \
+  _(bool, Bool)                                \
+  _(at::BFloat16, BFloat16)
+
 enum class ScalarType : int8_t {
 #define DEFINE_ENUM(_1, n) n,
   AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_ENUM)
@@ -99,6 +113,9 @@ struct ScalarTypeToCPPType;
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_ScalarTypeToCPPType)
 
 #undef SPECIALIZE_ScalarTypeToCPPType
+
+template <c10::ScalarType N>
+using ScalarTypeToCPPTypeT = typename ScalarTypeToCPPType<N>::type;
 
 } // namespace impl
 
@@ -307,7 +324,7 @@ static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
 }
 
-static inline ScalarType toValueType(ScalarType t) {
+static inline ScalarType toRealValueType(ScalarType t) {
   switch (t) {
     case ScalarType::ComplexHalf:
       return ScalarType::Half;
@@ -322,6 +339,10 @@ static inline ScalarType toValueType(ScalarType t) {
 
 static inline ScalarType toComplexType(ScalarType t) {
   switch (t) {
+    case ScalarType::BFloat16:
+      // BFloat16 has range equivalent to Float,
+      // so we map it to ComplexFloat.
+      return ScalarType::ComplexFloat;
     case ScalarType::Half:
       return ScalarType::ComplexHalf;
     case ScalarType::Float:
@@ -402,28 +423,28 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
         toString(b));
   }
 
-  // this matrix has to be consistent with AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
-  // so that's why we have to add undefined as we are not sure what is the
-  // corrent values for the type promotions in complex type cases.
+  // this matrix has to be consistent with
+  // AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS undefined is used where we
+  // are not sure about the correct value for type promotion.
   static constexpr ScalarType _promoteTypesLookup[static_cast<int>(
       ScalarType::NumOptions)][static_cast<int>(ScalarType::NumOptions)] = {
       /*        u1  i1  i2  i4  i8  f2  f4  f8  c2  c4  c8  b1  q1  q2  q3  bf*/
-      /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, u1, ud, ud, ud, bf},
-      /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, i1, ud, ud, ud, bf},
-      /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, ud, c4, c8, i2, ud, ud, ud, bf},
-      /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, ud, c4, c8, i4, ud, ud, ud, bf},
-      /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, ud, c4, c8, i8, ud, ud, ud, bf},
-      /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, ud, c4, c8, f2, ud, ud, ud, f4},
-      /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, ud, c4, c8, f4, ud, ud, ud, f4},
-      /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, ud, c8, c8, f8, ud, ud, ud, f8},
-      /* c2 */ {ud, ud, ud, ud, ud, ud, ud, ud, c2, c4, c8, ud, ud, ud, ud, ud},
+      /* u1 */ {u1, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, u1, ud, ud, ud, bf},
+      /* i1 */ {i2, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, i1, ud, ud, ud, bf},
+      /* i2 */ {i2, i2, i2, i4, i8, f2, f4, f8, c2, c4, c8, i2, ud, ud, ud, bf},
+      /* i4 */ {i4, i4, i4, i4, i8, f2, f4, f8, c2, c4, c8, i4, ud, ud, ud, bf},
+      /* i8 */ {i8, i8, i8, i8, i8, f2, f4, f8, c2, c4, c8, i8, ud, ud, ud, bf},
+      /* f2 */ {f2, f2, f2, f2, f2, f2, f4, f8, c2, c4, c8, f2, ud, ud, ud, f4},
+      /* f4 */ {f4, f4, f4, f4, f4, f4, f4, f8, c4, c4, c8, f4, ud, ud, ud, f4},
+      /* f8 */ {f8, f8, f8, f8, f8, f8, f8, f8, c8, c8, c8, f8, ud, ud, ud, f8},
+      /* c2 */ {c2, c2, c2, c2, c2, c2, c4, c8, c2, c4, c8, c2, ud, ud, ud, c4},
       /* c4 */ {c4, c4, c4, c4, c4, c4, c4, c8, c4, c4, c8, c4, ud, ud, ud, c4},
       /* c8 */ {c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, c8, ud, ud, ud, c8},
-      /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, ud, c4, c8, b1, ud, ud, ud, bf},
+      /* b1 */ {u1, i1, i2, i4, i8, f2, f4, f8, c2, c4, c8, b1, ud, ud, ud, bf},
       /* q1 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
       /* q2 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
       /* q3 */ {ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud, ud},
-      /* bf */ {bf, bf, bf, bf, bf, f4, f4, f8, ud, c4, c8, bf, ud, ud, ud, bf},
+      /* bf */ {bf, bf, bf, bf, bf, f4, f4, f8, c4, c4, c8, bf, ud, ud, ud, bf},
   };
   return _promoteTypesLookup[static_cast<int>(a)][static_cast<int>(b)];
 }

@@ -13,13 +13,6 @@ namespace native {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ fill ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Tensor& fill_out(Tensor& self, const Scalar& value) {
-  if (self.is_quantized()) {
-    at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
-    out = out.to(self.device());
-    // Trust the `copy_` to handle the quantization and the boundary chacks.
-    self.copy_(out);
-    return self;
-  }
   if (self.device() == at::kCPU && self.numel() == 1) {
     return at::detail::scalar_fill(self, value);
   }
@@ -33,13 +26,30 @@ Tensor& fill_out(Tensor& self, const Scalar& value) {
   return self;
 }
 
+Tensor& fill_out_quantized(Tensor& self, const Scalar& value) {
+  at::Tensor out = at::ones(self.sizes()).to(kFloat) * value;
+  out = out.to(self.device()).to(self.suggest_memory_format());
+  // Trust the `copy_` to handle the quantization and the boundary chacks.
+  self.copy_(out);
+  return self;
+}
+
 Tensor& fill_(Tensor& self, const Scalar& value) {
   return fill_out(self, value);
+}
+
+Tensor& fill_quantized_(Tensor& self, const Scalar& value) {
+  return fill_out_quantized(self, value);
 }
 
 Tensor& fill_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
   return fill_out(self, value.item());
+}
+
+Tensor& fill_quantized_(Tensor& self, const Tensor& value) {
+  TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
+  return fill_out_quantized(self, value.item());
 }
 
 Tensor& fill_meta_(Tensor& self, const Scalar& value) {
@@ -49,6 +59,14 @@ Tensor& fill_meta_(Tensor& self, const Scalar& value) {
 Tensor& fill_meta_(Tensor& self, const Tensor& value) {
   TORCH_CHECK(value.dim() == 0, "fill_ only supports 0-dimension value tensor but got tensor with ", value.dim(), " dimensions.");
   return self;
+}
+
+Tensor fill(const Tensor& self, const Scalar& value) {
+  return at::empty_like(self).fill_(value);
+}
+
+Tensor fill(const Tensor& self, const Tensor& value) {
+  return at::empty_like(self).fill_(value);
 }
 
 DEFINE_DISPATCH(fill_stub);

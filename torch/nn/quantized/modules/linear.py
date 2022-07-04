@@ -3,8 +3,13 @@ import torch
 
 import torch.nn as nn
 import torch.nn.intrinsic as nni
-from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr, ReferenceableQuantizedModule
+import torch.nn.intrinsic.qat as nniqat
+from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr, WeightedQuantizedModule
+from torch.nn.utils.fusion import fuse_linear_bn_weights
+from torch.nn.utils.parametrize import type_before_parametrizations
 from typing import Optional
+
+__all__ = ['LinearPackedParams', 'Linear']
 
 class LinearPackedParams(torch.nn.Module):
     _version = 3
@@ -83,32 +88,12 @@ class LinearPackedParams(torch.nn.Module):
         super(LinearPackedParams, self)._load_from_state_dict(state_dict, prefix, local_metadata, False,
                                                               missing_keys, unexpected_keys, error_msgs)
 
-    @torch.jit.export
-    def __getstate__(self):
-        qweight, bias = self._weight_bias()
-        return qweight, bias, self.training, self.dtype
-
-    @torch.jit.export
-    def __setstate__(self, state):
-        self.dtype = state[3]
-        self.set_weight_bias(state[0], state[1])
-        self.training = state[2]
-
-    def __deepcopy__(self, memo):
-        new_instance = type(self).__new__(type(self))
-        torch.nn.Module.__init__(new_instance)
-        state = self.__getstate__()
-        new_instance.__setstate__(state)
-        return new_instance
-
-    def __copy__(self):
-        return self.__deepcopy__({})
 
     def __repr__(self):
         return self._weight_bias().__repr__()
 
 
-class Linear(ReferenceableQuantizedModule):
+class Linear(WeightedQuantizedModule):
     r"""
     A quantized linear module with quantized tensor as inputs and outputs.
     We adopt the same interface as `torch.nn.Linear`, please see
@@ -259,7 +244,10 @@ class Linear(ReferenceableQuantizedModule):
                           utilities or provided by the user
         """
         if hasattr(mod, 'weight_fake_quant'):
-            # assert type(mod) == QATLinear, 'training mode nnq.Linear.from_float only works for nn.qat.Linear'
+            if type_before_parametrizations(mod) == nniqat.LinearBn1d:
+                mod.weight, mod.bias = fuse_linear_bn_weights(
+                    mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
+                    mod.bn.eps, mod.bn.weight, mod.bn.bias)
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
@@ -270,10 +258,10 @@ class Linear(ReferenceableQuantizedModule):
                 cls._FLOAT_MODULE = [cls._FLOAT_MODULE]  # type: ignore[assignment]
             supported_modules = ', '.join([float_mod.__name__ for float_mod in cls._FLOAT_MODULE])  # type: ignore[attr-defined]
             error_msg = 'nnq.{}.from_float only works for {}, but got: {}'.format(cls.__name__, supported_modules, type(mod))
-            assert type(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
+            assert type_before_parametrizations(mod) in cls._FLOAT_MODULE, error_msg.format()  # type: ignore[attr-defined]
             assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
             activation_post_process = mod.activation_post_process
-            if type(mod) == nni.LinearReLU:
+            if type_before_parametrizations(mod) == nni.LinearReLU:
                 mod = mod[0]
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
@@ -294,7 +282,7 @@ class Linear(ReferenceableQuantizedModule):
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
 
         Args:
-            ref_module (Module): a reference quantized  module, either produced by torch.ao.quantization
+            ref_qlinear (Module): a reference quantized linear module, either produced by torch.ao.quantization
                           utilities or provided by the user
             output_scale (float): scale for output Tensor
             zero_point (int): zero point for output Tensor

@@ -47,11 +47,13 @@ list(APPEND ATen_CPU_TEST_SRCS
 
 list(APPEND ATen_CUDA_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_atomic_ops_test.cu
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_caching_host_allocator_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_complex_math_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_integer_divider_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_apply_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_stream_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/cuda_device_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_half_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_distributions_test.cu
   ${CMAKE_CURRENT_SOURCE_DIR}/cuda_optional_test.cu
@@ -83,7 +85,6 @@ list(APPEND ATen_HIP_TEST_SRCS
 #  ${CMAKE_CURRENT_SOURCE_DIR}/hip/hip_stream_test.cpp
 
 list(APPEND ATen_VULKAN_TEST_SRCS
-  ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_test.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/vulkan_api_test.cpp)
 
 list(APPEND ATen_MOBILE_TEST_SRCS

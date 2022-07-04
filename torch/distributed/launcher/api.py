@@ -20,6 +20,7 @@ from torch.distributed.elastic.rendezvous import RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 from torch.distributed.elastic.utils.logging import get_logger
 
+__all__ = ['LaunchConfig', 'elastic_launch', 'launch_agent']
 
 logger = get_logger()
 
@@ -44,7 +45,7 @@ class LaunchConfig:
         rdzv_configs: Key, value pair that specifies rendezvous specific configuration.
         rdzv_timeout: Legacy argument that specifies timeout for the rendezvous. It is going
             to be removed in future versions, see the note below. The default timeout is 900 seconds.
-        rdzv_id: The unique run id of the job (if not passed a unique one will be
+        run_id: The unique run id of the job (if not passed a unique one will be
                 deduced from run environment - flow workflow id in flow - or auto generated).
         role: User defined role of the worker (defaults to "trainer").
         max_restarts: The maximum amount of restarts that elastic agent will conduct

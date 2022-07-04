@@ -37,13 +37,10 @@ ALLOW_LIST = [
     # Internal, profiler-specific ops
     ("profiler::_call_end_callbacks_on_jit_fut*", datetime.date(9999, 1, 1)),
     ("profiler::_record_function_enter", datetime.date(9999, 1, 1)),
-    ("aten::linalg_matrix_rank", datetime.date(2021, 10, 30)),
-    ("aten::linalg_pinv", datetime.date(2021, 10, 30)),
+    ("aten::_sparse_addmm", datetime.date(2022, 6, 30)),
     ("aten::_cholesky_helper", datetime.date(9999, 1, 1)),
     ("aten::_lstsq_helper", datetime.date(9999, 1, 1)),
     ("aten::_syevd_helper", datetime.date(9999, 1, 1)),
-    ("aten::_lu_solve_helper", datetime.date(9999, 1, 1)),
-    ("aten::_lu_with_info", datetime.date(9999, 1, 1)),
     ("aten::_linalg_solve_out_helper_", datetime.date(9999, 1, 1)),
     ("aten::select_backward", datetime.date(9999, 1, 1)),
     ("aten::slice_backward", datetime.date(9999, 1, 1)),
@@ -52,51 +49,24 @@ ALLOW_LIST = [
     ("aten::adaptive_avg_pool3d_backward", datetime.date(9999, 1, 1)),
     ("aten::_embedding_bag_dense_backward", datetime.date(9999, 1, 1)),
     ("aten::randperm", datetime.date(9999, 1, 1)),
-    ("aten::_conv_depthwise2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::conv_depthwise3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution.deprecated", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution.deprecated2", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose.deprecated", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose.deprecated2", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::cudnn_convolution_transpose_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::mkldnn_convolution_backward_weights", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward_input", datetime.date(2022, 1, 31)),
-    ("aten::_nnpack_spatial_convolution_backward_weight", datetime.date(2022, 1, 31)),
-    ("aten::_slow_conv2d_forward", datetime.date(2022, 1, 31)),
-    ("aten::_slow_conv2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv3d_forward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_dilated2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_dilated3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose2d", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose2d_backward", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose3d", datetime.date(2022, 1, 31)),
-    ("aten::slow_conv_transpose3d_backward", datetime.date(2022, 1, 31)),
-    ("aten::_log_softmax_backward_data", datetime.date(2021, 10, 21)),
-    ("aten::_softmax_backward_data", datetime.date(2021, 10, 21)),
-    ("aten::fused_moving_avg_obs_fake_quant", datetime.date(2021, 10, 21)),
-    ("aten::_fused_moving_avg_obs_fq_helper", datetime.date(2021, 10, 21)),
-    ("aten::_baddbmm_mkl_", datetime.date(2021, 10, 31)),
-    ("aten::grid_sampler_2d_backward", datetime.date(2021, 10, 21)),
-    ("aten::index_add.alpha", datetime.date(2021, 12, 31)),
-    ("aten::index_add_.alpha", datetime.date(2021, 12, 31)),
-    ("prim::TensorExprDynamicGuard", datetime.date(2021, 11, 20)),
-    ("aten::split_with_sizes", datetime.date(2021, 11, 20)),
-    ("aten::split", datetime.date(2021, 12, 20)),
-    ("aten::vsplit", datetime.date(2021, 11, 20)),
-    ("aten::tensor_split", datetime.date(2021, 11, 20)),
-    ("aten::chunk", datetime.date(2021, 11, 20)),
-    ("aten::unbind", datetime.date(2021, 11, 20)),
-    ("aten::hsplit", datetime.date(2021, 11, 20)),
-    ("aten::dsplit", datetime.date(2021, 11, 20)),
+    ("aten::linalg_solve", datetime.date(2022, 8, 31)),
+    ("aten::linalg_solve.out", datetime.date(2022, 8, 31)),
+    ("aten::binary_cross_entropy_with_logits_backward", datetime.date(2022, 9, 21)),
+    ("aten::_linalg_qr_helper", datetime.date(2022, 8, 1)),
+    ("aten::linalg_lu_solve", datetime.date(2022, 8, 1)),
+    ("aten::linalg_lu_solve.out", datetime.date(2022, 8, 1)),
+    ("aten::linalg_det", datetime.date(2022, 8, 1)),
+    ("aten::linalg_det.out", datetime.date(2022, 8, 1)),
+    ("aten::_det_lu_based_helper", datetime.date(2022, 8, 1)),
+    ("aten::slogdet", datetime.date(2022, 8, 1)),
+    ("aten::slogdet.out", datetime.date(2022, 8, 1)),
+    ("aten::linalg_slogdet", datetime.date(2022, 8, 1)),
+    ("aten::linalg_slogdet.out", datetime.date(2022, 8, 1)),
+    ("aten::_linalg_solve", datetime.date(2022, 10, 1)),
+    ("aten::_linalg_solve.solution", datetime.date(2022, 10, 1)),
+    ("aten::solve", datetime.date(9999, 1, 1)),
+    ("aten::solve.solution", datetime.date(9999, 1, 1)),
+    ("aten::_solve_helper", datetime.date(9999, 1, 1)),
     ("aten::_convolution_nogroup", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_convolution_backward_bias", datetime.date(9999, 1, 1)),
@@ -108,17 +78,28 @@ ALLOW_LIST = [
     ("aten::miopen_depthwise_convolution_backward", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_input", datetime.date(9999, 1, 1)),
     ("aten::miopen_depthwise_convolution_backward_weight", datetime.date(9999, 1, 1)),
-    ("caffe2::", datetime.date(2021, 10, 23)),
+    ("aten::_nested_tensor", datetime.date(9999, 1, 1)),
     ("prepacked::unpack_prepacked_sizes_conv2d", datetime.date(9999, 1, 1)),
     ("prepacked::unpack_prepacked_sizes_linear", datetime.date(9999, 1, 1)),
-    ("q::_FloatToBfloat16Quantized", datetime.date(2021, 12, 21)),
-    ("q::_Bfloat16QuantizedToFloat", datetime.date(2021, 12, 21)),
-    ("aten::_inverse_helper", datetime.date(2021, 12, 31)),
-    ("aten::softplus_backward", datetime.date(2022, 1, 31)),
-    ("aten::softplus_backward.grad_input", datetime.date(2022, 1, 31)),
+    ("aten::linalg_solve", datetime.date(2022, 8, 31)),
+    ("aten::linalg_solve.out", datetime.date(2022, 8, 31)),
     ("aten::quantile", datetime.date(2022, 9, 30)),
     ("aten::nanquantile", datetime.date(2022, 9, 30)),
-    ("aten::_convolution_double_backward", datetime.date(2022, 3, 31)),
+    ("aten::native_multi_head_self_attention", datetime.date(9999, 1, 1)),
+    ("aten::_native_multi_head_self_attention", datetime.date(9999, 1, 1)),
+    ("aten::grid_sampler_3d_backward", datetime.date(9999, 1, 1)),
+    ("aten::_transform_bias_rescale_qkv", datetime.date(9999, 1, 1)),
+    ("aten::_s_where", datetime.date(2022, 9, 30)),
+    ("prim::infer_squeeze_size.dim", datetime.date(9999, 1, 1)),
+    ("prim::infer_squeeze_size", datetime.date(9999, 1, 1)),
+    ("aten::_weight_norm_cuda_interface", datetime.date(9999, 1, 1)),
+    ("aten::_weight_norm_cuda_interface_backward", datetime.date(9999, 1, 1)),
+    ("aten::segment_reduce", datetime.date(2022, 6, 30)),
+    ("aten::_segment_reduce_backward", datetime.date(2022, 6, 30)),
+    ("aten::empty.SymInt", datetime.date(9999, 1, 1)),
+    ("c10d::broadcast", datetime.date(2022, 6, 25)),
+    # TODO: FIXME: prims shouldn't be checked
+    ("prims::.*", datetime.date(9999, 1, 1)),
 ]
 
 ALLOW_LIST_COMPILED = [
@@ -147,6 +128,33 @@ dont_parse_list = [
     ("dist_c10d", datetime.date(2099, 9, 17)),
 ]
 
+def has_valid_upgraders(schema, version_map):
+    # we want to parse through the map to find if
+    # the schema has valid upgraders. Since the
+    # version map has entry for each overload
+    # we need to do some ugly parsing.
+
+    # the name of the operator
+    schema_name = schema.name
+
+    if schema_name not in version_map:
+        return False
+
+    entries = version_map[schema_name]
+
+    possible_overloads = []
+    possible_schemas = []
+    for key, upgrader_schema_entries in entries.items():
+        possible_overloads.append(key)
+        possible_schemas.extend(upgrader_schema_entries)
+
+    # let's make sure this existing schema is part of possible
+    # schemas
+    for old_schema in possible_schemas:
+        if old_schema == schema:
+            return True
+
+    return False
 
 def dont_parse(schema_line):
     for item in dont_parse_list:
@@ -165,13 +173,32 @@ def load_schemas_to_dict():
         new_schema_dict[s.name].append(s)
     return new_schema_dict
 
+def process_version_map(version_map):
+    # version map maps full schema name to
+    # list of upgraders. Since we only have
+    # the name of the schema (aka no overload)
+    # we want to first process the map to make
+    # the key lookup easier. After this it will be:
+    # Dict[schema_name, Dict[overload, List[schema]]]
+
+    output = defaultdict(dict)
+    for (key, entries) in version_map.items():
+        operator_name = key.split(".")[0]
+        schema_entries = [parse_schema(entry.old_schema) for entry in entries]
+        output[operator_name][key] = schema_entries
+    return output
+
 def check_bc(existing_schemas):
     new_schema_dict = load_schemas_to_dict()
+    version_map = process_version_map(torch._C._get_operator_version_map())
     is_bc = True
     broken_ops = []
     for existing_schema in existing_schemas:
         if allow_listed(existing_schema):
             print("schema: ", str(existing_schema), " found on allowlist, skipping")
+            continue
+        if has_valid_upgraders(existing_schema, version_map):
+            print("schema: ", str(existing_schema), " has valid upgrader, skipping")
             continue
         print("processing existing schema: ", str(existing_schema))
         matching_new_schemas = new_schema_dict.get(existing_schema.name, [])

@@ -2,9 +2,12 @@
 
 #include <ATen/ATen.h>
 #include <c10/core/CPUAllocator.h>
+#include <c10/util/Exception.h>
+#include <caffe2/serialize/versions.h>
 #include <flatbuffers/flatbuffers.h>
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/flatbuffer_loader.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/export.h>
@@ -28,8 +31,31 @@ using mobile::serialization::CreateTupleDirect;
 
 namespace {
 
+// TODO: remove once caffe2::kProducedBytecodeVersion is >= 9 and flatbuffer is
+// launched.
+constexpr uint32_t kMinVersion = 9;
+
 // We will store IValue NONE in index 0 in flatbuffer.
 constexpr int kNoneIndex = 0;
+
+static TypePtr realType(TypePtr type) {
+  if (auto dyn = type->castRaw<c10::DynamicType>()) {
+    return dyn->fallback();
+  } else {
+    return type;
+  }
+}
+
+auto print_type(const c10::Type& t) -> c10::optional<std::string> {
+  auto namedType = t.cast<c10::NamedType>();
+  if (namedType && namedType->name()) {
+    return namedType->name().value().qualifiedName();
+  }
+  if (auto dyn = t.castRaw<c10::DynamicType>()) {
+    return dyn->fallback()->annotation_str();
+  }
+  return c10::nullopt;
+}
 
 class FlatbufferSerializer {
  public:
@@ -37,7 +63,10 @@ class FlatbufferSerializer {
 
   flatbuffers::DetachedBuffer serializeModule(
       const mobile::Module& module,
-      bool include_tensor_data_in_flatbuffer);
+      bool include_tensor_data_in_flatbuffer,
+      const ExtraFilesMap& extra_files = ExtraFilesMap(),
+      const ExtraFilesMap& jit_sources = ExtraFilesMap(),
+      const std::vector<IValue>& jit_constants = {});
 
  private:
   template <typename It>
@@ -103,6 +132,12 @@ class FlatbufferSerializer {
       flatbuffers::FlatBufferBuilder& fbb,
       ClassTypePtr class_type);
 
+  flatbuffers::Offset<flatbuffers::Vector<
+      flatbuffers::Offset<mobile::serialization::ExtraFile>>>
+  storeExtraFilesAndGetOffset(
+      FlatBufferBuilder& fbb,
+      const ExtraFilesMap& extra_files);
+
   uint32_t insertIValue(
       flatbuffers::Offset<mobile::serialization::IValue> ivalue) {
     uint32_t size = ivalue_offsets_.size();
@@ -149,7 +184,8 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
     arg_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(arg.name()),
-        fbb.CreateSharedString(arg.type()->annotation_str(type_printer)),
+        fbb.CreateSharedString(
+            realType(arg.type())->annotation_str(type_printer)),
         index));
   }
 
@@ -158,7 +194,8 @@ flatbuffers::Offset<jit::mobile::serialization::Schema> FlatbufferSerializer::
     return_vec.emplace_back(CreateArg(
         fbb,
         fbb.CreateSharedString(ret.name()),
-        fbb.CreateSharedString(ret.type()->annotation_str(type_printer)),
+        fbb.CreateSharedString(
+            realType(ret.type())->annotation_str(type_printer)),
         index));
   }
   return CreateSchema(
@@ -206,11 +243,11 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
   std::vector<flatbuffers::Offset<flatbuffers::String>> type_offsets;
 
   for (const TypePtr& t : code.types_) {
-    auto type_str = t->annotation_str();
+    auto type_str = realType(t)->annotation_str();
     if (type_str.find(torch_prefix) == 0) {
       TORCH_CHECK(
           type_str.find(class_prefix) == 0,
-          "__torch__ types other than torchbind (__torch__.torch.classes)"
+          "__torch__ types other than custom c++ classes (__torch__.torch.classes)"
           "are not supported in lite interpreter. ",
           "Workaround: instead of using arbitrary class type (class Foo()), ",
           "define a pytorch class (class Foo(torch.nn.Module)).");
@@ -229,10 +266,14 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
     if (namedType && namedType->name()) {
       return namedType->name().value().qualifiedName();
     }
+    if (auto dyn = t.castRaw<c10::DynamicType>()) {
+      return dyn->fallback()->annotation_str();
+    }
     return c10::nullopt;
   };
 
   flatbuffers::Offset<mobile::serialization::Schema> schema_offset = 0;
+  uint32_t class_index = 0;
   if (func.hasSchema()) {
     const auto& schema = func.getSchema();
     TORCH_CHECK(
@@ -246,13 +287,12 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
         "A variable number of return values is not supported in mobile modules.");
     schema_offset =
         CreateFBSchema(fbb, schema.arguments(), schema.returns(), type_printer);
+    auto classtype = schema.arguments()[0].type()->cast<ClassType>();
+    class_index = storeClassTypeAndGetIndex(fbb, classtype);
   }
 
   auto debug_info_offset =
       CreateDebugInfo(fbb, fbb.CreateVector(code.debug_handles_));
-
-  // auto classtype = schema.arguments()[0].type()->cast<ClassType>();
-  // uint32_t class_type = storeClassTypeAndGetIndex(fbb, classtype);
 
   auto function_offset = CreateFunctionDirect(
       fbb,
@@ -264,13 +304,35 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
       register_size,
       schema_offset,
       debug_info_offset,
-      0);
+      class_index);
   return function_offset;
+}
+
+flatbuffers::Offset<
+    flatbuffers::Vector<flatbuffers::Offset<mobile::serialization::ExtraFile>>>
+FlatbufferSerializer::storeExtraFilesAndGetOffset(
+    FlatBufferBuilder& fbb,
+    const ExtraFilesMap& extra_files) {
+  std::vector<flatbuffers::Offset<mobile::serialization::ExtraFile>>
+      extra_file_offsets;
+
+  for (const auto& extra_file : extra_files) {
+    flatbuffers::Offset<mobile::serialization::ExtraFile> extra_file_offset =
+        mobile::serialization::CreateExtraFile(
+            fbb,
+            fbb.CreateSharedString(extra_file.first),
+            fbb.CreateString(extra_file.second));
+    extra_file_offsets.emplace_back(extra_file_offset);
+  }
+  return fbb.CreateVector(extra_file_offsets);
 }
 
 flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
     const mobile::Module& module,
-    bool include_tensor_data_in_flatbuffer) {
+    bool include_tensor_data_in_flatbuffer,
+    const ExtraFilesMap& extra_files,
+    const ExtraFilesMap& jit_sources,
+    const std::vector<IValue>& jit_constants) {
   FlatBufferBuilder fbb;
 
   mcu_ = &module.compilation_unit();
@@ -293,6 +355,23 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
   flatbuffers::Offset<flatbuffers::Vector<
       flatbuffers::Offset<mobile::serialization::StorageData>>>
       storage_data_offset = 0;
+  auto extra_files_offset = storeExtraFilesAndGetOffset(fbb, extra_files);
+
+  auto jit_source_offset = storeExtraFilesAndGetOffset(fbb, jit_sources);
+  std::vector<uint32_t> jit_constants_indexes;
+  jit_constants_indexes.reserve(jit_constants.size());
+  const uint32_t mobile_ivalue_size = ivalue_offsets_.size();
+  for (const auto& ival : jit_constants) {
+    jit_constants_indexes.emplace_back(storeIValueAndGetIndex(fbb, ival));
+  }
+  const uint32_t operator_version =
+      static_cast<uint32_t>(module.min_operator_version());
+  uint32_t bytecode_version = static_cast<uint32_t>(module.bytecode_version());
+  if (bytecode_version < kMinVersion) {
+    bytecode_version = kMinVersion;
+  }
+
+  // NOTE: saving of storage has to be the last thing to do.
   if (include_tensor_data_in_flatbuffer) {
     std::vector<flatbuffers::Offset<mobile::serialization::StorageData>>
         storage_data;
@@ -322,15 +401,19 @@ flatbuffers::DetachedBuffer FlatbufferSerializer::serializeModule(
 
   auto mod = CreateModule(
       fbb,
-      0, /* version */
-      0, /* extra_files */
+      /*bytecode_version=*/bytecode_version,
+      extra_files_offset, /* extra_files */
       functions_offset,
       ivalue_index,
       fbb.CreateVector(ivalue_offsets_),
       tensor_data_.size(),
       storage_data_offset,
-      fbb.CreateVector(obj_types_offset_));
-  fbb.Finish(mod);
+      fbb.CreateVector(obj_types_offset_),
+      jit_source_offset,
+      fbb.CreateVector(jit_constants_indexes),
+      operator_version,
+      mobile_ivalue_size);
+  FinishModuleBuffer(fbb, mod);
   return fbb.Release();
 }
 
@@ -351,7 +434,8 @@ flatbuffers::Offset<mobile::serialization::List> FlatbufferSerializer::listToFB(
   return CreateList(
       fbb,
       fbb.CreateVector(items),
-      fbb.CreateSharedString(list.type()->annotation_str()));
+      fbb.CreateSharedString(
+          realType(list.type<c10::Type>())->annotation_str(print_type)));
 }
 
 flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
@@ -368,11 +452,13 @@ flatbuffers::Offset<mobile::serialization::Dict> FlatbufferSerializer::dictToFB(
     int value_index = storeIValueAndGetIndex(fbb, entry.value());
     values.push_back(value_index);
   }
+
   return CreateDict(
       fbb,
       fbb.CreateVector(keys),
       fbb.CreateVector(values),
-      fbb.CreateSharedString(ivalue.type()->annotation_str()));
+      fbb.CreateSharedString(
+          realType(ivalue.type<c10::Type>())->annotation_str(print_type)));
 }
 
 flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
@@ -384,10 +470,14 @@ flatbuffers::Offset<mobile::serialization::ObjectType> FlatbufferSerializer::
       flatbuffers::Vector<flatbuffers::Offset<flatbuffers::String>>>
       names_offset = 0;
   c10::QualifiedName setstate_name(*class_ptr->name(), "__setstate__");
+  c10::QualifiedName getstate_name(*class_ptr->name(), "__getstate__");
   const mobile::Function* setstate = mcu_->find_function(setstate_name);
-  if (setstate != nullptr) {
+  const mobile::Function* getstate = mcu_->find_function(getstate_name);
+  if (setstate != nullptr && getstate != nullptr) {
     typetype = mobile::serialization::TypeType::CLASS_WITH_SETSTATE;
-  } else if (class_ptr->findMethod("__setstate__")) {
+  } else if (
+      class_ptr->findMethod("__setstate__") &&
+      class_ptr->findMethod("__getstate__")) {
     typetype = mobile::serialization::TypeType::CUSTOM_CLASS;
   } else {
     size_t num_attr = class_ptr->numAttributes();
@@ -663,19 +753,48 @@ flatbuffers::Offset<mobile::serialization::IValue> FlatbufferSerializer::
 
 void save_mobile_module(
     const mobile::Module& module,
-    const std::string& filename) {
-  FlatbufferSerializer fb_serializer;
-  auto buffer = fb_serializer.serializeModule(module, true);
+    const std::string& filename,
+    const ExtraFilesMap& extra_files,
+    const ExtraFilesMap& jit_sources,
+    const std::vector<IValue>& jit_constants) {
+  auto buffer = save_mobile_module_to_bytes(
+      module, extra_files, jit_sources, jit_constants);
   std::fstream ofile(filename, std::ios::binary | std::ios::out);
   ofile.write(reinterpret_cast<char*>(buffer.data()), buffer.size());
   ofile.close();
 }
 
 flatbuffers::DetachedBuffer save_mobile_module_to_bytes(
-    const mobile::Module& module) {
+    const mobile::Module& module,
+    const ExtraFilesMap& extra_files,
+    const ExtraFilesMap& jit_sources,
+    const std::vector<IValue>& jit_constants) {
   FlatbufferSerializer fb_serializer;
-  return fb_serializer.serializeModule(module, true);
+  return fb_serializer.serializeModule(
+      module,
+      /*include_tensor_data_in_flatbuffer*/ true,
+      extra_files,
+      jit_sources,
+      jit_constants);
 }
+
+static void save_mobile_module_to_func(
+    const mobile::Module& module,
+    const std::function<size_t(const void*, size_t)>& writer_func) {
+  auto buffer = save_mobile_module_to_bytes(module);
+  writer_func(buffer.data(), buffer.size());
+}
+
+bool register_flatbuffer_serializer() {
+  _save_mobile_module_to = save_mobile_module_to_func;
+  return true;
+}
+
+// iOS builds are often build with -Wglobal-constructor to minimize
+// startup time. So let them call register manually if needed.
+#if !defined(__APPLE__)
+const bool kFlatbufferSerializerRegistered = register_flatbuffer_serializer();
+#endif
 
 } // namespace jit
 } // namespace torch

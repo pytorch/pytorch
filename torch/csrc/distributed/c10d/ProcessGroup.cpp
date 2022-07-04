@@ -2,6 +2,7 @@
 #include <c10d/ProcessGroup.hpp>
 
 #include <c10/util/Logging.h>
+#include <fmt/format.h>
 
 namespace c10d {
 
@@ -44,12 +45,14 @@ std::string opTypeToString(OpType opType) {
     case OpType::_REDUCE_SCATTER_BASE:
       return "_REDUCE_SCATTER_BASE";
     default:
-      TORCH_INTERNAL_ASSERT("Unknown op type!");
+      TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
   return "UNKNOWN";
 }
 
-bool isP2POp(OpType opType) {
+bool isP2POp(OpType opType, bool batchP2P /*= false*/) {
+  if (batchP2P)
+    return false;
   return opType == OpType::SEND || opType == OpType::RECV ||
       opType == OpType::RECVANYSOURCE;
 }
@@ -76,7 +79,9 @@ ProcessGroup::Work::Work(
           inputs.emplace_back(tensor);
         }
       }
-      recordingFunction->before(profilingTitle, inputs);
+      recordingFunction->before(
+          profilingTitle,
+          c10::ArrayRef<const c10::IValue>(inputs.data(), inputs.size()));
       std::function<void()> end_handler = [recordingFunction]() {
         recordingFunction->end();
       };
@@ -89,7 +94,7 @@ OpType ProcessGroup::Work::retrieveOpType() {
   return opType_;
 }
 
-ProcessGroup::Work::~Work()=default;
+ProcessGroup::Work::~Work() = default;
 
 bool ProcessGroup::Work::isCompleted() {
   std::lock_guard<std::mutex> lock(mutex_);
@@ -107,7 +112,8 @@ std::exception_ptr ProcessGroup::Work::exception() const {
 }
 
 int ProcessGroup::Work::sourceRank() const {
-  TORCH_CHECK(false,
+  TORCH_CHECK(
+      false,
       "sourceRank() may only be called on work objects "
       "that correspond to a recv or recv-from-any call.");
 }
@@ -174,10 +180,67 @@ void ProcessGroup::Work::finishAndThrow(std::exception_ptr exception) {
 }
 
 ProcessGroup::ProcessGroup(int rank, int size)
-    : rank_(rank), size_(size), dist_debug_level_(parseDistDebugLevel()) {
+    : rank_(rank), size_(size), dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
 
 ProcessGroup::~ProcessGroup() {}
 
+void ProcessGroup::init() {
+  C10_LOG_API_USAGE_ONCE(
+      fmt::format("c10d.process_group_{}", getBackendName()));
+}
+
+class FutureWrappingWork : public ProcessGroup::Work {
+ public:
+  FutureWrappingWork(c10::intrusive_ptr<c10::ivalue::Future> fut)
+      : Work(), _fut(fut) {}
+
+  ~FutureWrappingWork() {}
+
+  bool isCompleted() override {
+    return _fut->completed();
+  }
+
+  bool isSuccess() const override {
+    return _fut->hasValue();
+  }
+
+  std::exception_ptr exception() const override {
+    return _fut->exception_ptr();
+  }
+
+  int sourceRank() const override {
+    TORCH_CHECK(false, "FutureWrappingWork::sourceRank() not implemented");
+  }
+
+  std::vector<at::Tensor> result() override {
+    return _fut->value().toPyObjectHolder()->extractTensors();
+  }
+
+  bool wait(std::chrono::milliseconds timeout) override {
+    // FIXME
+    TORCH_CHECK(
+        timeout == kNoTimeout,
+        "FutureWrappingWork::wait() with finite timeout not implemented");
+    _fut->wait();
+    return true;
+  }
+
+  void abort() override {
+    TORCH_CHECK(false, "FutureWrappingWork::abort() not implemented");
+  }
+
+  c10::intrusive_ptr<c10::ivalue::Future> getFuture() override {
+    return _fut;
+  }
+
+ private:
+  c10::intrusive_ptr<c10::ivalue::Future> _fut;
+};
+
+c10::intrusive_ptr<ProcessGroup::Work> ProcessGroup::Work::create_from_future(
+    c10::intrusive_ptr<c10::ivalue::Future> future) {
+  return c10::make_intrusive<FutureWrappingWork>(future);
+}
 } // namespace c10d

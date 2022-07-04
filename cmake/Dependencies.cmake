@@ -183,22 +183,22 @@ if(BLAS STREQUAL "Eigen")
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
   include_directories(SYSTEM ${ATLAS_INCLUDE_DIRS})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS cblas)
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
+  list(APPEND Caffe2_DEPENDENCY_LIBS cblas)
   set(BLAS_INFO "atlas")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${ATLAS_LIBRARIES} cblas)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(SYSTEM ${OpenBLAS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${OpenBLAS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenBLAS_LIB})
   set(BLAS_INFO "open")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${OpenBLAS_LIB})
 elseif(BLAS STREQUAL "BLIS")
   find_package(BLIS REQUIRED)
   include_directories(SYSTEM ${BLIS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLIS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${BLIS_LIB})
 elseif(BLAS STREQUAL "MKL")
   if(BLAS_SET_BY_USER)
     find_package(MKL REQUIRED)
@@ -216,7 +216,7 @@ elseif(BLAS STREQUAL "MKL")
     set(CAFFE2_USE_MKL ON)
     set(BLAS_INFO "mkl")
     set(BLAS_FOUND 1)
-    set(BLAS_LIBRARIES caffe2::mkl)
+    set(BLAS_LIBRARIES ${MKL_LIBRARIES})
   else()
     message(WARNING "MKL could not be found. Defaulting to Eigen")
     set(CAFFE2_USE_EIGEN_FOR_BLAS ON)
@@ -225,19 +225,24 @@ elseif(BLAS STREQUAL "MKL")
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(SYSTEM ${vecLib_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
   set(BLAS_INFO "veclib")
   set(BLAS_FOUND 1)
   set(BLAS_LIBRARIES ${vecLib_LINKER_LIBS})
 elseif(BLAS STREQUAL "FlexiBLAS")
   find_package(FlexiBLAS REQUIRED)
   include_directories(SYSTEM ${FlexiBLAS_INCLUDE_DIR})
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${FlexiBLAS_LIB})
 elseif(BLAS STREQUAL "Generic")
   # On Debian family, the CBLAS ABIs have been merged into libblas.so
-  find_library(BLAS_LIBRARIES blas)
+  if(ENV{GENERIC_BLAS_LIBRARIES} STREQUAL "")
+    set(GENERIC_BLAS "blas")
+  else()
+    set(GENERIC_BLAS $ENV{GENERIC_BLAS_LIBRARIES})
+  endif()
+  find_library(BLAS_LIBRARIES NAMES ${GENERIC_BLAS})
   message("-- Using BLAS: ${BLAS_LIBRARIES}")
-  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
+  list(APPEND Caffe2_DEPENDENCY_LIBS ${BLAS_LIBRARIES})
   set(GENERIC_BLAS_FOUND TRUE)
   set(BLAS_INFO "generic")
   set(BLAS_FOUND 1)
@@ -293,15 +298,15 @@ endif()
 # --- [ PocketFFT
 set(AT_POCKETFFT_ENABLED 0)
 if(NOT AT_MKL_ENABLED)
-  find_path(POCKETFFT_INCLUDE_DIR NAMES pocketfft_hdronly.h PATHS
-            /usr/local/include
-            ENV POCKETFFT_HOME
-            "${PROJECT_SOURCE_DIR}/third_party/pocketfft"
-           )
-  if(POCKETFFT_INCLUDE_DIR)
-    set(AT_POCKETFFT_ENABLED 1)
-    message(STATUS "Using pocketfft in directory: ${POCKETFFT_INCLUDE_DIR}")
+  set(POCKETFFT_INCLUDE_DIR "${Torch_SOURCE_DIR}/third_party/pocketfft/")
+  if(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}")
+    message(FATAL_ERROR "pocketfft directory not found, expected ${POCKETFFT_INCLUDE_DIR}")
+  elif(NOT EXISTS "${POCKETFFT_INCLUDE_DIR}/pocketfft_hdronly.h")
+    message(FATAL_ERROR "pocketfft headers not found in ${POCKETFFT_INCLUDE_DIR}")
   endif()
+
+  set(AT_POCKETFFT_ENABLED 1)
+  message(STATUS "Using pocketfft in directory: ${POCKETFFT_INCLUDE_DIR}")
 endif()
 
 # ---[ Dependencies
@@ -816,6 +821,14 @@ if(USE_FBGEMM)
     set_property(TARGET fbgemm_avx2 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm_avx512 PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET fbgemm PROPERTY POSITION_INDEPENDENT_CODE ON)
+    if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.0.0)
+      # See https://github.com/pytorch/pytorch/issues/74352
+      target_compile_options(asmjit PRIVATE -Wno-deprecated-copy)
+      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 13.1.0)
+        # -Wno-unused-but-set-variable doesn't exist in Apple clang version 13.0.0 (clang-1300.0.29.30)
+        target_compile_options(asmjit PRIVATE -Wno-unused-but-set-variable)
+      endif()
+    endif()
   endif()
 
   if(USE_FBGEMM)
@@ -824,8 +837,6 @@ if(USE_FBGEMM)
 endif()
 
 if(USE_FBGEMM)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}")
   caffe2_update_option(USE_FBGEMM ON)
 else()
   caffe2_update_option(USE_FBGEMM OFF)
@@ -1072,11 +1083,17 @@ if(BUILD_PYTHON)
   endif()
 
   if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
-    include_directories(SYSTEM ${PYTHON_INCLUDE_DIR})
+    add_library(python::python INTERFACE IMPORTED)
+    target_include_directories(python::python SYSTEM INTERFACE ${PYTHON_INCLUDE_DIRS})
+    if(WIN32)
+      target_link_libraries(python::python INTERFACE ${PYTHON_LIBRARIES})
+    endif()
+
     caffe2_update_option(USE_NUMPY OFF)
     if(NUMPY_FOUND)
       caffe2_update_option(USE_NUMPY ON)
-      include_directories(SYSTEM ${NUMPY_INCLUDE_DIR})
+      add_library(numpy::numpy INTERFACE IMPORTED)
+      target_include_directories(numpy::numpy SYSTEM INTERFACE ${NUMPY_INCLUDE_DIR})
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
@@ -1087,7 +1104,7 @@ if(BUILD_PYTHON)
 endif()
 
 # ---[ pybind11
-if(USE_SYSTEM_BIND11)
+if(USE_SYSTEM_PYBIND11)
   find_package(pybind11 CONFIG)
   if(NOT pybind11_FOUND)
     find_package(pybind11)
@@ -1103,7 +1120,9 @@ else()
             FILES_MATCHING PATTERN "*.h")
 endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
-include_directories(SYSTEM ${pybind11_INCLUDE_DIRS})
+add_library(pybind::pybind11 INTERFACE IMPORTED)
+target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
+target_link_libraries(pybind::pybind11 INTERFACE python::python)
 
 # ---[ MPI
 if(USE_MPI)
@@ -1288,7 +1307,7 @@ if(USE_ROCM)
     hip_include_directories(${Caffe2_HIP_INCLUDE})
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
-      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${PYTORCH_RCCL_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+      ${PYTORCH_HIP_HCC_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
 
     # Note [rocblas & rocfft cmake bug]
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1352,18 +1371,39 @@ if(USE_CUDA)
   endif()
 endif()
 
+if(USE_DISTRIBUTED AND USE_TENSORPIPE)
+  if(MSVC)
+    message(WARNING "Tensorpipe cannot be used on Windows.")
+  else()
+    if(USE_CUDA)
+      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
+      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
+    endif()
+    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
+    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
+
+    # Tensorpipe uses cuda_add_library
+    torch_update_find_cuda_flags()
+    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
+
+    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
+    if(USE_CUDA)
+      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
+    elseif(USE_ROCM)
+      message(WARNING "TensorPipe doesn't yet support ROCm")
+      # Not yet...
+      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
+    endif()
+  endif()
+endif()
+
 if(USE_GLOO)
   if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(WARNING "Gloo can only be used on 64-bit systems.")
     caffe2_update_option(USE_GLOO OFF)
   else()
-    if(MSVC)
-      # Don't install gloo on Windows
-      # It is already handled in builder scripts
-      set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
-    else()
-      set(GLOO_INSTALL ON CACHE BOOL "" FORCE)
-    endif()
+    # Don't install gloo
+    set(GLOO_INSTALL OFF CACHE BOOL "" FORCE)
     set(GLOO_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
 
     # Temporarily override variables to avoid building Gloo tests/benchmarks
@@ -1375,6 +1415,10 @@ if(USE_GLOO)
       set(ENV{GLOO_ROCM_ARCH} "${PYTORCH_ROCM_ARCH}")
     endif()
     if(NOT USE_SYSTEM_GLOO)
+      if(USE_DISTRIBUED AND USE_TENSORPIPE)
+        get_target_property(_include_dirs uv_a INCLUDE_DIRECTORIES)
+        set_target_properties(uv_a PROPERTIES INTERFACE_INCLUDE_DIRECTORIES "${_include_dirs}")
+      endif()
       # gloo uses cuda_add_library
       torch_update_find_cuda_flags()
       add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/gloo)
@@ -1409,32 +1453,6 @@ if(USE_GLOO)
       list(APPEND Caffe2_HIP_DEPENDENCY_LIBS gloo_hip)
     endif()
     add_compile_options(-DCAFFE2_USE_GLOO)
-  endif()
-endif()
-
-if(USE_DISTRIBUTED AND USE_TENSORPIPE)
-  if(MSVC)
-    message(WARNING "Tensorpipe cannot be used on Windows.")
-  else()
-    if(USE_CUDA)
-      set(TP_USE_CUDA ON CACHE BOOL "" FORCE)
-      set(TP_ENABLE_CUDA_IPC ON CACHE BOOL "" FORCE)
-    endif()
-    set(TP_BUILD_LIBUV ON CACHE BOOL "" FORCE)
-    set(TP_STATIC_OR_SHARED STATIC CACHE STRING "" FORCE)
-
-    # Tensorpipe uses cuda_add_library
-    torch_update_find_cuda_flags()
-    add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/tensorpipe)
-
-    list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
-    if(USE_CUDA)
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS tensorpipe_cuda)
-    elseif(USE_ROCM)
-      message(WARNING "TensorPipe doesn't yet support ROCm")
-      # Not yet...
-      # list(APPEND Caffe2_HIP_DEPENDENCY_LIBS tensorpipe_hip)
-    endif()
   endif()
 endif()
 
@@ -1635,7 +1653,6 @@ if(NOT INTERN_BUILD_MOBILE)
                                    " -D__CUDA_NO_HALF_CONVERSIONS__"
                                    " -D__CUDA_NO_HALF2_OPERATORS__"
                                    " -D__CUDA_NO_BFLOAT16_CONVERSIONS__")
-    add_compile_options(-DCUDA_HAS_FP16=1)
   else()
     message(STATUS "Could not find CUDA with FP16 support, compiling without torch.CudaHalfTensor")
   endif()
@@ -1662,23 +1679,6 @@ if(NOT INTERN_BUILD_MOBILE)
     find_package(MAGMA)
   endif()
   if((USE_CUDA OR USE_ROCM) AND MAGMA_FOUND)
-    include_directories(SYSTEM ${MAGMA_INCLUDE_DIR})
-    if(USE_CUDA)
-      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR};${CUDA_INCLUDE_DIRS}")
-    endif()
-    if(USE_ROCM)
-      set(CMAKE_REQUIRED_INCLUDES "${MAGMA_INCLUDE_DIR}")
-    endif()
-    include(CheckPrototypeDefinition)
-    check_prototype_definition(magma_get_sgeqrf_nb
-     "magma_int_t magma_get_sgeqrf_nb( magma_int_t m, magma_int_t n );"
-     "0"
-     "magma.h"
-      MAGMA_V2)
-    if(MAGMA_V2)
-      add_definitions(-DMAGMA_V2)
-    endif(MAGMA_V2)
-
     set(USE_MAGMA 1)
     message(STATUS "Compiling with MAGMA support")
     message(STATUS "MAGMA INCLUDE DIRECTORIES: ${MAGMA_INCLUDE_DIR}")
@@ -1710,56 +1710,6 @@ if(NOT INTERN_BUILD_MOBILE)
   if(CORTEXA9_FOUND)
     message(STATUS "Cortex-A9 Found with compiler flag : -mcpu=cortex-a9")
     add_compile_options(-mcpu=cortex-a9)
-  endif()
-
-  CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
-  # Check for a cpuid intrinsic
-  if(HAVE_CPUID_H)
-      CHECK_C_SOURCE_COMPILES("#include <cpuid.h>
-          int main()
-          {
-              unsigned int eax, ebx, ecx, edx;
-              return __get_cpuid(0, &eax, &ebx, &ecx, &edx);
-          }" HAVE_GCC_GET_CPUID)
-  endif()
-  if(HAVE_GCC_GET_CPUID)
-    add_compile_options(-DHAVE_GCC_GET_CPUID)
-  endif()
-
-  CHECK_C_SOURCE_COMPILES("#include <stdint.h>
-      static inline void cpuid(uint32_t *eax, uint32_t *ebx,
-                               uint32_t *ecx, uint32_t *edx)
-      {
-        uint32_t a = *eax, b, c = *ecx, d;
-        asm volatile ( \"cpuid\" : \"+a\"(a), \"=b\"(b), \"+c\"(c), \"=d\"(d) );
-        *eax = a; *ebx = b; *ecx = c; *edx = d;
-      }
-      int main() {
-        uint32_t a,b,c,d;
-        cpuid(&a, &b, &c, &d);
-        return 0;
-      }" NO_GCC_EBX_FPIC_BUG)
-
-  if(NOT NO_GCC_EBX_FPIC_BUG)
-    add_compile_options(-DUSE_GCC_GET_CPUID)
-  endif()
-
-  find_package(VSX) # checks VSX
-  find_package(ZVECTOR) # checks ZVECTOR
-  # checks AVX and AVX2. Already called once in MiscCheck.cmake. Called again here for clarity --
-  # cached results will be used so no extra overhead.
-  find_package(AVX)
-
-  # we don't set -mavx and -mavx2 flags globally, but only for specific files
-  # however, we want to enable the AVX codepaths, so we still need to
-  # add USE_AVX and USE_AVX2 macro defines
-  if(C_AVX_FOUND)
-    message(STATUS "AVX compiler support found")
-    add_compile_options(-DUSE_AVX)
-  endif()
-  if(C_AVX2_FOUND)
-    message(STATUS "AVX2 compiler support found")
-    add_compile_options(-DUSE_AVX2)
   endif()
 
   if(WIN32 AND NOT CYGWIN)
@@ -1818,7 +1768,7 @@ if(NOT INTERN_BUILD_MOBILE)
       include_directories(AFTER SYSTEM ${MKLDNN_INCLUDE_DIR})
       if(BUILD_CAFFE2_OPS)
         set(CAFFE2_USE_MKLDNN ON)
-        list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS caffe2::mkldnn)
+        list(APPEND Caffe2_DEPENDENCY_LIBS caffe2::mkldnn)
       endif(BUILD_CAFFE2_OPS)
     else()
       message(WARNING "MKLDNN could not be found.")
@@ -1894,10 +1844,6 @@ set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
 
-if(USE_BREAKPAD)
-  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/breakpad)
-endif()
-
 # ---[ Kineto
 # edge profiler depends on KinetoProfiler but it only does cpu
 # profiling. Thus we dont need USE_CUDA/USE_ROCM
@@ -1957,13 +1903,15 @@ if(USE_KINETO)
     find_library(CUPTI_LIBRARY_PATH ${CUPTI_LIB_NAME} PATHS
         ${CUDA_SOURCE_DIR}
         ${CUDA_SOURCE_DIR}/extras/CUPTI/lib64
-        ${CUDA_SOURCE_DIR}/lib64)
+        ${CUDA_SOURCE_DIR}/lib64
+        NO_DEFAULT_PATH)
 
     find_path(CUPTI_INCLUDE_DIR cupti.h PATHS
+        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
         ${CUDA_INCLUDE_DIRS}
         ${CUDA_SOURCE_DIR}
-        ${CUDA_SOURCE_DIR}/extras/CUPTI/include
-        ${CUDA_SOURCE_DIR}/include)
+        ${CUDA_SOURCE_DIR}/include
+        NO_DEFAULT_PATH)
 
     if(CUPTI_LIBRARY_PATH AND CUPTI_INCLUDE_DIR)
       message(STATUS "  CUPTI_INCLUDE_DIR = ${CUPTI_INCLUDE_DIR}")
@@ -1971,6 +1919,32 @@ if(USE_KINETO)
       message(STATUS "  CUDA_cupti_LIBRARY = ${CUDA_cupti_LIBRARY}")
       message(STATUS "Found CUPTI")
       set(LIBKINETO_NOCUPTI OFF CACHE STRING "" FORCE)
+
+      # I've only tested this sanity check on Linux; if someone
+      # runs into this bug on another platform feel free to
+      # generalize it accordingly
+      if(NOT USE_CUPTI_SO AND UNIX)
+        include(CheckCXXSourceRuns)
+        # rt is handled by the CMAKE_REQUIRED_LIBRARIES set above
+        if(NOT APPLE)
+          set(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} "dl")
+        endif()
+        set(CMAKE_REQUIRED_LINK_OPTIONS "-Wl,--whole-archive,${CUPTI_LIBRARY_PATH},--no-whole-archive")
+        check_cxx_source_runs("#include <stdexcept>
+  int main() {
+    try {
+      throw std::runtime_error(\"error\");
+    } catch (...) {
+      return 0;
+    }
+    return 1;
+  }" EXCEPTIONS_WORK)
+        set(CMAKE_REQUIRED_LINK_OPTIONS "")
+        if(NOT EXCEPTIONS_WORK)
+          message(FATAL_ERROR "Detected that statically linking against CUPTI causes exceptions to stop working.  See https://github.com/pytorch/pytorch/issues/57744 for more details.  Perhaps try: USE_CUPTI_SO=1 python setup.py develop --cmake")
+        endif()
+      endif()
+
     else()
       message(STATUS "Could not find CUPTI library, using CPU-only Kineto build")
       set(LIBKINETO_NOCUPTI ON CACHE STRING "" FORCE)

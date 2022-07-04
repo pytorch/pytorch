@@ -9,7 +9,7 @@ import sys
 import tempfile
 import threading
 import time
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from datetime import timedelta
 from itertools import product
 from unittest import mock
@@ -49,11 +49,8 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     sandcastle_skip,
-    instantiate_parametrized_tests,
-    parametrize,
     sandcastle_skip_if,
 )
-from torch.utils.checkpoint import checkpoint
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
@@ -422,7 +419,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
 
         def allgather(output_ts, input_ts):
             work = pg.allgather(output_ts, input_ts)
-            work.wait()
+            return work.wait()
 
         tensors = [torch.empty(2, 2).fill_(2).cuda(device=i) for i in local_device_ids]
         output_tensors = []
@@ -435,7 +432,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
             expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
 
-        allgather(output_tensors, tensors)
+        result = allgather(output_tensors, tensors)
 
         # Verification
         self.assertEqual(output_tensors, expected_output)
@@ -494,6 +491,260 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             )
             # fails the check because the dtype is different
             allgather_base(output_t, tensor)
+
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_gather_ops(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_ids = self.rank_to_GPU[self.rank]
+        num_gpus = len(local_device_ids)
+
+        def gather(output_t, input_t, rootRank):
+            opts = c10d.GatherOptions()
+            opts.rootRank = rootRank
+            if rootRank == self.rank:
+                work = pg.gather(output_t, input_t, opts)
+            else:
+                work = pg.gather([], input_t, opts)
+            work.wait()
+
+        # init input
+        tensors = []
+        for device_id in local_device_ids:
+            tensors.append(torch.tensor([self.rank]).cuda(device_id))
+
+        # init output
+        output_ts = []
+        for idx in range(num_gpus):
+            gpu_idx = local_device_ids[idx]
+            output_ts.append([])
+            for rank in range(self.world_size):
+                output_ts[idx].append(torch.tensor([-1]).cuda(gpu_idx))
+
+        expected = [[torch.tensor([rank]) for rank in range(self.world_size)]]
+        for rank in range(self.world_size):
+            gather(output_ts, tensors, rank)
+            if rank == self.rank:
+                self.assertEqual(expected, output_ts)
+
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_gather_stress(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_ids = self.rank_to_GPU[self.rank]
+        num_gpus = len(local_device_ids)
+
+        def gather(output_t, input_t, rootRank):
+            opts = c10d.GatherOptions()
+            opts.rootRank = rootRank
+            if rootRank == self.rank:
+                work = pg.gather(output_t, input_t, opts)
+            else:
+                work = pg.gather([], input_t, opts)
+            work.wait()
+
+        stress_length = 1000
+
+        # init input
+        tensors = []
+        for i in range(stress_length):
+            tensors.append([])
+            for device_id in local_device_ids:
+                tensors[i].append(torch.tensor([self.rank]).cuda(device_id))
+
+        # init output
+        output_ts = []
+        for i in range(stress_length):
+            output_ts.append([[] for _ in range(num_gpus)])
+            for idx, ls in enumerate(output_ts[i]):
+                gpu_idx = local_device_ids[idx]
+                for _ in range(self.world_size):
+                    ls.append(torch.tensor([-1]).cuda(gpu_idx))
+
+        expected = [[torch.tensor([rank]) for rank in range(self.world_size)]]
+        for i in range(stress_length):
+            for rank in range(self.world_size):
+                gather(output_ts[i], tensors[i], rank)
+                # Verification
+                if rank == self.rank:
+                    self.assertEqual(output_ts[i], expected)
+
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_gather_checks(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_ids = self.rank_to_GPU[self.rank]
+        num_gpus = len(local_device_ids)
+
+        # init input
+        tensors = []
+        for device_id in local_device_ids:
+            tensors.append(torch.tensor([self.rank]).cuda(device_id))
+
+        # init output
+        output_ts = []
+        for idx in range(num_gpus):
+            gpu_idx = local_device_ids[idx]
+            output_ts.append([])
+            for rank in range(self.world_size):
+                output_ts[idx].append(torch.tensor([-1]).cuda(gpu_idx))
+
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = -1
+            pg.gather(output_ts, tensors, opts)
+
+        with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+            pg.gather(output_ts, tensors, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+            opts = c10d.GatherOptions()
+            opts.rootRank = self.world_size
+            pg.gather(output_ts, tensors, opts)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor list must be nonempty"
+        ):
+            opts = c10d.GatherOptions()
+            opts.rootRank = 0
+            pg.gather(output_ts, [], opts)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensors must be on distinct GPU devices"
+        ):
+            # init input
+            tensors2 = []
+            for device_id in local_device_ids:
+                tensors2.append(torch.tensor([self.rank]).cuda(device_id))
+                tensors2.append(torch.tensor([self.rank]).cuda(device_id))
+
+            opts = c10d.GatherOptions()
+            opts.rootRank = 0
+            pg.gather(output_ts, tensors2, opts)
+
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_scatter_ops(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_ids = self.rank_to_GPU[self.rank]
+        num_gpus = len(local_device_ids)
+
+        def scatter(output_t, input_t, rootRank):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = rootRank
+            if rootRank == self.rank:
+                work = pg.scatter(output_t, input_t, opts)
+            else:
+                work = pg.scatter(output_t, [], opts)
+            work.wait()
+
+        # init output
+        tensors = []
+        for device_id in local_device_ids:
+            tensors.append(torch.tensor([-1]).cuda(device_id))
+
+        # init input
+        scatter_list = []
+        for idx in range(num_gpus):
+            gpu_idx = local_device_ids[idx]
+            scatter_list.append([])
+            for rank in range(self.world_size):
+                scatter_list[idx].append(torch.tensor([rank]).cuda(gpu_idx))
+
+        # test each rank to scatter
+        expected = [torch.tensor([self.rank])]
+        for rank in range(self.world_size):
+            scatter(tensors, scatter_list, rank)
+            self.assertEqual(expected, tensors)
+
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_scatter_stress(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_ids = self.rank_to_GPU[self.rank]
+        num_gpus = len(local_device_ids)
+
+        def scatter(output_t, input_t, rootRank):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = rootRank
+            if rootRank == self.rank:
+                work = pg.scatter(output_t, input_t, opts)
+            else:
+                work = pg.scatter(output_t, [], opts)
+            work.wait()
+
+        stress_length = 1000
+
+        # init output
+        tensors = []
+        for i in range(stress_length):
+            tensors.append([])
+            for device_id in local_device_ids:
+                tensors[i].append(torch.tensor([-1]).cuda(device_id))
+
+        # init input
+        scatter_list = []
+        for i in range(stress_length):
+            scatter_list.append([[] for _ in range(num_gpus)])
+            for idx, ls in enumerate(scatter_list[i]):
+                gpu_idx = local_device_ids[idx]
+                for rank in range(self.world_size):
+                    ls.append(torch.tensor([rank]).cuda(gpu_idx))
+
+
+        # test each rank to scatter
+        expected = [torch.tensor([self.rank])]
+        for i in range(stress_length):
+            for rank in range(self.world_size):
+                scatter(tensors[i], scatter_list[i], rank)
+                # Verification
+                self.assertEqual(tensors[i], expected)
+
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_scatter_checks(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_nccl(store, self.opts())
+        local_device_ids = self.rank_to_GPU[self.rank]
+        num_gpus = len(local_device_ids)
+
+        # init output
+        tensors = []
+        for device_id in local_device_ids:
+            tensors.append(torch.tensor([-1]).cuda(device_id))
+
+        # init input
+        scatter_list = []
+        for idx in range(num_gpus):
+            gpu_idx = local_device_ids[idx]
+            scatter_list.append([])
+            for rank in range(self.world_size):
+                scatter_list[idx].append(torch.tensor([rank]).cuda(gpu_idx))
+
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = -1
+            pg.scatter(tensors, scatter_list, opts)
+
+        with self.assertRaisesRegex(TypeError, "incompatible function arguments"):
+            pg.scatter(tensors, scatter_list, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "invalid root rank"):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = self.world_size
+            pg.scatter(tensors, scatter_list, opts)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Tensor list must be nonempty"
+        ):
+            opts = c10d.ScatterOptions()
+            opts.rootRank = 0
+            pg.scatter([], scatter_list, opts)
 
     @requires_nccl()
     @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
@@ -693,9 +944,32 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
                     torch.tensor([(j + 1) * self.world_size]), tensors_list[i - 1][j]
                 )
 
+    @requires_nccl()
+    @sandcastle_skip_if(torch.cuda.device_count() < 2, "NCCL test requires 2+ GPUs")
+    def test_send_recv(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        self._create_process_group_nccl(store, self.opts())
+        device = self.rank_to_GPU[self.rank][0]
+
+        # Generate the same random tensor
+        torch.manual_seed(0)
+        send_tensor = torch.rand(10, 10, device=device)
+        if self.rank == 0:
+            dist.send(send_tensor, 1)
+        if self.rank == 1:
+            recv_tensor = torch.rand(10, 10, device=device)
+            dist.recv(recv_tensor, 0)
+            self.assertEqual(send_tensor, recv_tensor)
+
+        # Test with non-contiguous tensors.
+        send_tensor_view = send_tensor.t()
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, 'Tensors must be contiguous'):
+                dist.send(send_tensor_view, 1)
+
 
 class DistributedDataParallelTest(
-    test_c10d_common.AbstractDistributedDataParallelTest, MultiProcessTestCase
+    test_c10d_common.CommonDistributedDataParallelTest, MultiProcessTestCase
 ):
     def setUp(self):
         super(DistributedDataParallelTest, self).setUp()
@@ -703,6 +977,10 @@ class DistributedDataParallelTest(
         # that use NCCL_BLOCKING_WAIT will test it as expected.
         os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "1"
         self._spawn_processes()
+
+    def _get_process_group(self):
+        store = self._get_store()
+        return c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
     def _test_nccl_backend(
         self, devices, device_ids, multi_device=False, gradient_as_bucket_view=False
@@ -1096,7 +1374,7 @@ class DistributedDataParallelTest(
                         # Only one such parameter in model.fc3, since bias=False
                         break
 
-            if dist._get_debug_mode() != dist._DistributedDebugLevel.OFF:
+            if dist.get_debug_level() != dist.DebugLevel.OFF:
                 unused_index_str += f" with name {unused_fqn}"
 
             self.assertTrue(unused_index_str in str(ex))
@@ -1759,12 +2037,15 @@ class DistributedDataParallelTest(
 
         # Get GPU model with the hook registered.
         # Test the hook with different algorithmic configs.
-        for use_error_feedback, warm_start in product([True, False], [True, False]):
+        for use_error_feedback, warm_start, batch_tensors_with_same_shape in product(
+            [True, False], [True, False], [True, False],
+        ):
             state = powerSGD.PowerSGDState(
                 process_group=process_group,
                 matrix_approximation_rank=1,
                 use_error_feedback=use_error_feedback,
                 warm_start=warm_start,
+                batch_tensors_with_same_shape=batch_tensors_with_same_shape,
             )
             for hook in [powerSGD.powerSGD_hook, powerSGD.batched_powerSGD_hook]:
                 gpu_model = self._gpu_model_with_ddp_comm_hook(
@@ -1962,349 +2243,15 @@ class DistributedDataParallelTest(
                         ),
                     )
 
-    # A list of tests for ddp with activation checkpointing
-    # when gradient_as_bucket_view=True, False.
-    # Most of the tests are referred to
-    # https://github.com/facebookresearch/fairscale/blob/main/tests/nn/pipe/test_checkpoint_ddp.py
-    class CheckpointOnceModule(nn.Module):
-        """
-        Runs checkpoint for a single layer in the model.
-        """
-        def __init__(self, use_reentrant=True):
-            super().__init__()
-            self.l1 = nn.Linear(20, 20)
-            self.l2 = nn.Linear(20, 20)
-            self.use_reentrant = use_reentrant
-
-        def forward(self, inp):
-            x = self.l1(inp)
-            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
-            return x
-
-    class CheckpointTwiceModule(CheckpointOnceModule):
-        """
-        Runs checkpoint for the same layer twice in a model. This simulates use
-        cases such as pipeline parallel where the same layer can be checkpointed
-        more than one time.
-        """
-        def __init__(self, use_reentrant=True):
-            super().__init__(use_reentrant=use_reentrant)
-
-        def forward(self, inp):
-            x = self.l1(inp)
-            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
-            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
-            return x
-
-    class CheckpointTwiceModuleWeightSharing(CheckpointTwiceModule):
-        """
-        Similar to CheckpointTwiceModule but the weights are shared.
-        """
-        def __init__(self, use_reentrant=True):
-            super().__init__(use_reentrant=use_reentrant)
-
-        def forward(self, inp):
-            x = self.l1(inp)
-            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
-            x = checkpoint(self.l2, x, use_reentrant=self.use_reentrant)
-            return x
-
-
-    class DynamicCheckpointTwiceModule(CheckpointTwiceModule):
-        def __init__(self, use_reentrant=True):
-            super().__init__(use_reentrant=use_reentrant)
-            self.count = 0
-
-        def forward(self, inp):
-            if self.count % 2:
-                x = checkpoint(self.l1, inp, use_reentrant=self.use_reentrant)
-            else:
-                x = checkpoint(self.l2, inp, use_reentrant=self.use_reentrant)
-
-            self.count += 1
-            return x
-
-    class DynamicCheckpointTwiceModuleWeightSharing(DynamicCheckpointTwiceModule):
-        def __init__(self, use_reentrant=True):
-            super().__init__(use_reentrant=use_reentrant)
-            self.l1.weight = self.l2.weight
-
-
-    def _prepare_dummy_data(self):
-        ddp_bs = 16
-        bs = ddp_bs * self.world_size
-        input = torch.rand((bs, 20), device="cuda", requires_grad=True)
-        target = torch.randn((bs, 20), device="cuda")
-        offset = self.rank * ddp_bs
-        ddp_input = input[offset : offset + ddp_bs]
-        ddp_target = target[offset : offset + ddp_bs]
-        return input, ddp_input, target, ddp_target
-
-    def _train_model(self, model, input_var, target, loss, run_checkpoint=False, use_reentrant=True):
-        model.train()
-        if run_checkpoint:
-            output = checkpoint(model, input_var, use_reentrant=use_reentrant)
-        else:
-            output = model(input_var)
-        l = loss(output, target)
-        l.backward()
-
-    def _test_ddp_checkpointing(
-        self,
-        input_model,
-        process_group,
-        use_bucket_view,
-        find_unused_parameters=False,
-        static_graph=False,
-        run_checkpoint=False,
-        use_reentrant=True,
-        allow_none_grads=False,
-    ):
-        # to reproduce the same training results
-        torch.cuda.set_device(self.rank)
-        torch.manual_seed(31415)
-        model = copy.deepcopy(input_model).cuda()
-        ddp_model = copy.deepcopy(input_model).cuda()
-        ddp_model = nn.parallel.DistributedDataParallel(
-            ddp_model,
-            bucket_cap_mb=1,
-            gradient_as_bucket_view=use_bucket_view,
-            device_ids=[self.rank],
-            process_group=process_group,
-            find_unused_parameters=find_unused_parameters,
-            static_graph=static_graph,
-        )
-        self.assertEqual(
-            ddp_model._get_ddp_logging_data().get("static_graph", 0), static_graph
-        )
-        input, ddp_input, target, ddp_target = self._prepare_dummy_data()
-        loss = nn.MSELoss()
-        n_iters = 5
-        for i in range(n_iters):
-            model.zero_grad(set_to_none=False)
-            ddp_model.zero_grad(set_to_none=False)
-            self._train_model(model, input, target, loss, run_checkpoint=run_checkpoint, use_reentrant=use_reentrant)
-            self._train_model(
-                ddp_model, ddp_input, ddp_target, loss, run_checkpoint=run_checkpoint, use_reentrant=use_reentrant
-            )
-            for i, j in zip(model.parameters(), ddp_model.parameters()):
-                if not allow_none_grads:
-                    self.assertTrue(i.grad is not None)
-                    self.assertTrue(j.grad is not None)
-                self.assertEqual(i.grad, j.grad, rtol=1.3e-06, atol=5e-5)
-
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @parametrize("use_reentrant", [True, False])
-    def test_ddp_checkpointing_once(self, use_reentrant):
-        """
-        DDP works as expected when layer is checkpointed only once.
-        """
+    def test_channels_last_contig(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        for use_bucket_view, static_graph in product((False, True), (False, True)):
-            self._test_ddp_checkpointing(
-                self.CheckpointOnceModule(use_reentrant=use_reentrant),
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                static_graph=static_graph,
-            )
-            if static_graph:
-                # find_unused_parameters does not make a difference, since it is
-                # ignored for static graph.
-                self._test_ddp_checkpointing(
-                    self.CheckpointOnceModule(),
-                    process_group=process_group,
-                    use_bucket_view=use_bucket_view,
-                    static_graph=static_graph,
-                    find_unused_parameters=True,
-                )
+        device = torch.device(f"cuda:{self.rank}")
+        tensor = torch.ones((2, 16, 768, 1152), dtype=torch.float32, device=device).to(memory_format=torch.channels_last)
+        process_group.broadcast([tensor]).wait()
 
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @parametrize("use_reentrant", [True, False])
-    def test_ddp_checkpointing_unused_params(self, use_reentrant):
-        """
-        With reentrant autograd checkpointing impl, DDP will fail when there are
-        unused params in the model and no static graph training. With
-        non-reentrant checkpointing implementation, this works as expected.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        for use_bucket_view in (True, False):
-            err_ctx = (
-                suppress() if not use_reentrant else
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Expected to mark a variable ready only once."
-                )
-            )
-            with err_ctx:
-                model = self._test_ddp_checkpointing(
-                    self.CheckpointOnceModule(use_reentrant=use_reentrant),
-                    process_group=process_group,
-                    use_bucket_view=use_bucket_view,
-                    find_unused_parameters=True,
-                )
-            # test passes when static_graph is true
-            model = self._test_ddp_checkpointing(
-                self.CheckpointOnceModule(use_reentrant=use_reentrant),
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                find_unused_parameters=True,
-                static_graph=True,
-            )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @parametrize("use_reentrant", [True, False])
-    def test_ddp_checkpointing_twice(self, use_reentrant):
-        """
-        Checkpoitning twice fails for non-static graph with reentrant checkpoint
-        implementation, succeeds with non-reentrant checkpoint implementation.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        for use_bucket_view in (True, False):
-            err_ctx = (
-                suppress() if not use_reentrant else
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Expected to mark a variable ready only once."
-                )
-            )
-            with err_ctx:
-                model = self._test_ddp_checkpointing(
-                    self.CheckpointTwiceModule(use_reentrant=use_reentrant),
-                    process_group=process_group,
-                    use_bucket_view=use_bucket_view,
-                    static_graph=False,
-                )
-
-            with err_ctx:
-                model = self._test_ddp_checkpointing(
-                    self.CheckpointTwiceModule(use_reentrant=use_reentrant),
-                    process_group=process_group,
-                    use_bucket_view=use_bucket_view,
-                    static_graph=False,
-                    find_unused_parameters=True,
-                )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @parametrize("use_reentrant", [True, False])
-    def test_ddp_checkpointing_twice_static_graph(self, use_reentrant):
-        """
-        Regardless of reentrant or non-reentrant checkpointing impl,
-        checkpointing twice works with static graph enabled.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        for use_bucket_view in (True, False):
-            # Test passes when static_graph=True.
-            model = self._test_ddp_checkpointing(
-                self.CheckpointTwiceModule(use_reentrant=use_reentrant),
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                static_graph=True,
-            )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_dynamic_module(self):
-        """
-        Dynamic module can be checkpointed, multiple times, with non-reentrant
-        checkpointing implementation.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        for use_bucket_view in (True, False):
-            model = self._test_ddp_checkpointing(
-                self.DynamicCheckpointTwiceModule(use_reentrant=False),
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                static_graph=False,
-                find_unused_parameters=True,
-                # Grads can be none sometimes due to dynamic module not using
-                # all params.
-                allow_none_grads=True
-            )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_dynamic_weight_sharing(self):
-        """
-        Dynamic module can be checkpointed multiple times with weight sharing
-        using non-reentrant checkpointing implementation.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        for use_bucket_view in (True, False):
-            model = self._test_ddp_checkpointing(
-                self.DynamicCheckpointTwiceModuleWeightSharing(use_reentrant=False),
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                static_graph=False,
-                find_unused_parameters=True,
-                # Grads can be none sometimes due to dynamic module not using
-                # all params.
-                allow_none_grads=True
-            )
-
-    # DDP works as expected if there is weight sharing among layers
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    @parametrize("use_reentrant", [True, False])
-    def test_ddp_checkpointing_weight_sharing(self, use_reentrant):
-        """
-        Test that checkpointing with weight sharing works.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        torch.cuda.set_device(self.rank)
-        for use_bucket_view, static_graph in product((False, True), (False, True)):
-            torch.manual_seed(31415)
-            l1 = nn.Linear(20, 20)
-            l2 = nn.Linear(20, 20)
-            l1.weight = l2.weight
-            model = nn.Sequential(l1, l2)
-            # TODO: non-reentrant based checkpointing of DDP module with
-            # static_graph runs into the below issue, see
-            # https://github.com/pytorch/pytorch/issues/70865 and
-            # https://github.com/pytorch/pytorch/issues/58111 for details.
-            err_ctx = (
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "Your training graph has changed in this iteration"
-                ) if static_graph and not use_reentrant else suppress()
-            )
-            with err_ctx:
-                self._test_ddp_checkpointing(
-                    model,
-                    process_group=process_group,
-                    use_bucket_view=use_bucket_view,
-                    static_graph=static_graph,
-                    run_checkpoint=True,
-                    use_reentrant=use_reentrant,
-                )
-
-    @requires_nccl()
-    @skip_if_lt_x_gpu(2)
-    def test_ddp_checkpointing_twice_weight_sharing(self):
-        """
-        Checkpointing should work with static graph in the case of checkpointing
-        same layer twice and having weights shared acrosss layers.
-        """
-        store = c10d.FileStore(self.file_name, self.world_size)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
-        torch.cuda.set_device(self.rank)
-        for use_bucket_view in (True, False):
-            model = self._test_ddp_checkpointing(
-                self.CheckpointTwiceModuleWeightSharing(),
-                process_group=process_group,
-                use_bucket_view=use_bucket_view,
-                static_graph=True,
-            )
 
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
@@ -2603,6 +2550,17 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_all_reduce_coalesced_nccl(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        device = torch.device("cuda:%d" % self.rank)
+        tensors = [torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float) for i in range(5)]
+        torch.distributed.all_reduce_coalesced(tensors, group=process_group)
+        for i, t in enumerate(tensors):
+            self.assertEqual(t, torch.full_like(t, self.world_size * (i + (self.world_size + 1.) / 2.)))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_sequence_num_set_default_pg_nccl(self):
         torch.cuda.set_device(self.rank)
         self._test_sequence_num_set_default_pg(backend="nccl")
@@ -2787,8 +2745,6 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
     @with_dist_debug_levels(levels=["OFF"])
     def test_nccl_warn_not_in_group_debug_off(self):
         self._test_warn_not_in_group(backend="nccl")
-
-instantiate_parametrized_tests(DistributedDataParallelTest)
 
 if __name__ == "__main__":
     assert (

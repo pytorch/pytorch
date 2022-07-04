@@ -5,6 +5,7 @@ from .. import functional as F
 from torch import Tensor
 from ..common_types import _size_any_t
 
+__all__ = ['Fold', 'Unfold']
 
 class Fold(Module):
     r"""Combines an array of sliding local blocks into a large containing
@@ -103,7 +104,7 @@ class Fold(Module):
     Shape:
         - Input: :math:`(N, C \times \prod(\text{kernel\_size}), L)` or :math:`(C \times \prod(\text{kernel\_size}), L)`
         - Output: :math:`(N, C, \text{output\_size}[0], \text{output\_size}[1], \dots)`
-                  or :math:`(C, \text{output\_size}[0], \text{output\_size}[1], \dots)` as described above
+          or :math:`(C, \text{output\_size}[0], \text{output\_size}[1], \dots)` as described above
 
     Examples::
 

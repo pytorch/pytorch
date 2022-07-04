@@ -10,6 +10,7 @@
 #include <torch/csrc/jit/mobile/train/optim/sgd.h>
 #include <torch/csrc/jit/mobile/train/random.h>
 #include <torch/csrc/jit/mobile/train/sequential.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/data/dataloader.h>
 #include <torch/torch.h>
@@ -158,6 +159,88 @@ TEST(MobileTest, SaveLoadParametersEmpty) {
   AT_ASSERT(mobile_params.size() == 0);
 }
 
+TEST(MobileTest, SaveParametersDefaultsToZip) {
+  // Save some empty parameters.
+  std::map<std::string, at::Tensor> empty_parameters;
+  std::stringstream ss_data;
+  _save_parameters(empty_parameters, ss_data);
+
+  // Verify that parameters were serialized to a ZIP container.
+  EXPECT_GE(ss_data.str().size(), 4);
+  EXPECT_EQ(ss_data.str()[0], 'P');
+  EXPECT_EQ(ss_data.str()[1], 'K');
+  EXPECT_EQ(ss_data.str()[2], '\x03');
+  EXPECT_EQ(ss_data.str()[3], '\x04');
+}
+
+TEST(MobileTest, SaveParametersCanUseFlatbuffer) {
+  // Save some empty parameters using flatbuffer.
+  register_flatbuffer_all();
+  std::map<std::string, at::Tensor> empty_parameters;
+  std::stringstream ss_data;
+  _save_parameters(empty_parameters, ss_data, /*use_flatbuffer=*/true);
+
+  // Verify that parameters were serialized to a flatbuffer. The flatbuffer
+  // magic bytes should be at offsets 4..7. The first four bytes contain an
+  // offset to the actual flatbuffer data.
+  EXPECT_GE(ss_data.str().size(), 8);
+  EXPECT_EQ(ss_data.str()[4], 'P');
+  EXPECT_EQ(ss_data.str()[5], 'T');
+  EXPECT_EQ(ss_data.str()[6], 'M');
+  EXPECT_EQ(ss_data.str()[7], 'F');
+}
+
+TEST(MobileTest, SaveLoadParametersUsingFlatbuffers) {
+  // Create some simple parameters to save.
+  register_flatbuffer_all();
+  std::map<std::string, at::Tensor> input_params;
+  input_params["four_by_ones"] = 4 * torch::ones({});
+  input_params["three_by_ones"] = 3 * torch::ones({});
+
+  // Serialize them using flatbuffers.
+  std::stringstream data;
+  _save_parameters(input_params, data, /*use_flatbuffer=*/true);
+
+  // The flatbuffer magic bytes should be at offsets 4..7.
+  EXPECT_EQ(data.str()[4], 'P');
+  EXPECT_EQ(data.str()[5], 'T');
+  EXPECT_EQ(data.str()[6], 'M');
+  EXPECT_EQ(data.str()[7], 'F');
+
+  // Read them back and check that they survived the trip.
+  auto output_params = _load_parameters(data);
+  EXPECT_EQ(output_params.size(), 2);
+  {
+    auto four_by_ones = 4 * torch::ones({});
+    EXPECT_EQ(
+        output_params["four_by_ones"].item<int>(), four_by_ones.item<int>());
+  }
+  {
+    auto three_by_ones = 3 * torch::ones({});
+    EXPECT_EQ(
+        output_params["three_by_ones"].item<int>(), three_by_ones.item<int>());
+  }
+}
+
+TEST(MobileTest, LoadParametersUnexpectedFormatShouldThrow) {
+  // Manually create some data that doesn't look like a ZIP or Flatbuffer file.
+  // Make sure it's longer than 8 bytes, since getFileFormat() needs that much
+  // data to detect the type.
+  std::stringstream bad_data;
+  bad_data << "abcd"
+           << "efgh"
+           << "ijkl";
+
+  // Loading parameters from it should throw an exception.
+  EXPECT_ANY_THROW(_load_parameters(bad_data));
+}
+
+TEST(MobileTest, LoadParametersEmptyDataShouldThrow) {
+  // Loading parameters from an empty data stream should throw an exception.
+  std::stringstream empty;
+  EXPECT_ANY_THROW(_load_parameters(empty));
+}
+
 TEST(LiteTrainerTest, SGD) {
   Module m("m");
   m.register_parameter("foo", torch::ones({1}, at::requires_grad()), false);
@@ -251,19 +334,16 @@ TEST(LiteTrainerTest, RandomSamplerReturnsIndicesInCorrectRange) {
 
   std::vector<size_t> indices = sampler.next(3).value();
   for (auto i : indices) {
-    AT_ASSERT(i >= 0);
     AT_ASSERT(i < 10);
   }
 
   indices = sampler.next(5).value();
   for (auto i : indices) {
-    AT_ASSERT(i >= 0);
     AT_ASSERT(i < 10);
   }
 
   indices = sampler.next(2).value();
   for (auto i : indices) {
-    AT_ASSERT(i >= 0);
     AT_ASSERT(i < 10);
   }
 

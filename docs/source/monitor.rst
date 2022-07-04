@@ -24,20 +24,12 @@ API Reference
 -------------
 
 .. automodule:: torch.monitor
-    :members:
 
 .. autoclass:: torch.monitor.Aggregation
     :members:
 
 .. autoclass:: torch.monitor.Stat
     :members:
-
-.. autoclass:: torch.monitor.IntervalStat
-    :members: +add, count, name
-    :special-members: __init__
-
-.. autoclass:: torch.monitor.FixedCountStat
-    :members: +add, count, name
     :special-members: __init__
 
 .. autoclass:: torch.monitor.data_value_t
@@ -55,3 +47,7 @@ API Reference
 .. autofunction:: torch.monitor.register_event_handler
 
 .. autofunction:: torch.monitor.unregister_event_handler
+
+.. autoclass:: torch.monitor.TensorboardEventHandler
+    :members:
+    :special-members: __init__

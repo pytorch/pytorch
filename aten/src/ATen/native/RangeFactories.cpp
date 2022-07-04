@@ -11,17 +11,8 @@
 namespace at { namespace native {
 
 
-Tensor& linspace_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, Tensor& result) {
-  const auto steps = optional_steps.value_or(100);
+Tensor& linspace_out(const Scalar& start, const Scalar& end, int64_t steps, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-
-  if (!optional_steps.has_value()) {
-    TORCH_WARN_ONCE(
-      "Not providing a value for linspace's steps is deprecated and will "
-      "throw a runtime error in a future release. This warning will appear "
-      "only once per process.");
-  }
-
   if (result.numel() != steps) {
     result.resize_({steps});
   }
@@ -46,16 +37,8 @@ Tensor& linspace_out(const Scalar& start, const Scalar& end, c10::optional<int64
   return result;
 }
 
-Tensor& logspace_out(const Scalar& start, const Scalar& end, c10::optional<int64_t> optional_steps, double base, Tensor& result) {
-  const auto steps = optional_steps.value_or(100);
+Tensor& logspace_out(const Scalar& start, const Scalar& end, int64_t steps, double base, Tensor& result) {
   TORCH_CHECK(steps >= 0, "number of steps must be non-negative");
-
-  if (!optional_steps.has_value()) {
-    TORCH_WARN_ONCE(
-      "Not providing a value for logspace's steps is deprecated and will "
-      "throw a runtime error in a future release. This warning will appear "
-      "only once per process.");
-  }
 
   if (result.numel() != steps) {
     result.resize_({steps});
@@ -160,7 +143,7 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
 }
 
 Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND(kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();

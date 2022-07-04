@@ -145,16 +145,16 @@ class TORCH_API TensorExprKernel {
             pre_alloc,
             symbolic_strides) {}
 
-  void run(Stack& stack);
+  void run(Stack& stack) const;
   void runFast(
       const std::vector<void*>& inputs,
-      const std::vector<void*>& outputs);
+      const std::vector<void*>& outputs) const;
   // Expected format of stack:
   //  ... <outputs> <inputs>
   // i.e., output IValues must be below the input IValues in the stack.
-  void runWithAllocatedOutputs(Stack& stack);
+  void runWithAllocatedOutputs(Stack& stack) const;
 
-  void fallback(Stack& stack) {
+  void fallback(Stack& stack) const {
     InterpreterState(code_).run(stack);
   }
   void recompile();
@@ -181,6 +181,10 @@ class TORCH_API TensorExprKernel {
     return codegen_->kernel_func_name();
   }
 
+  const std::vector<int64_t>& getSymbolicShapeInputs() const {
+    return symbolic_shape_inputs_;
+  }
+
  private:
   enum BackendType {
     kUninitialized,
@@ -190,11 +194,15 @@ class TORCH_API TensorExprKernel {
     kBlockCodeGen,
   };
 
+  enum MemoryLayoutPolicy {
+    kContiguous,
+    kChannelsLastNdContiguous,
+  };
+
   void compile();
   void genInputDebugNames();
-  void runKernel(Stack& stack);
+  void runKernel(Stack& stack) const;
 
-  std::vector<DimArg> dimsFromSizes(const std::vector<ExprHandle>& sizes);
   std::vector<ExprHandle> sizesForValue(const torch::jit::Value* v);
 
   // These functions broadcast shape and also store a `hasBroadcast_` variable.
@@ -207,10 +215,6 @@ class TORCH_API TensorExprKernel {
   ArgValue toArg(const torch::jit::Value* v) const;
   ExprHandle constant(const torch::jit::Value* v);
 
-  ExprHandle tensorOrConstant(
-      const torch::jit::Value* v,
-      const std::vector<ExprHandle>& axes);
-
   Tensor computeValue(const torch::jit::Value* v);
 
   void bindConstant(const torch::jit::Value* v);
@@ -219,18 +223,35 @@ class TORCH_API TensorExprKernel {
 
   std::string getCodeGenName(BackendType backendType);
 
-  void updateOutputSizesAndStrides(const at::ArrayRef<IValue>& inputs);
+  void getStaticOutputSizesAndStrides(
+      const at::ArrayRef<IValue>& inputs,
+      std::vector<std::vector<int64_t>>* static_sizes,
+      std::vector<std::vector<int64_t>>* static_strides) const;
+
   std::vector<CodeGen::CallArg> prepareRunArgs(
       const at::ArrayRef<IValue>& inputs,
-      std::vector<at::Tensor>& outputs);
+      std::vector<at::Tensor>& outputs) const;
   BackendType inferBackendTypeFromDevice(at::Device device);
 
   Tensor bindInput(const torch::jit::Value* input);
   BlockPtr bindAllInputs();
 
+  // Deduce the memory layout policy to be propagated within
+  // NNC fusion group. The memory layout policy could be `kContiguous`
+  // or `kChannelsLastNdContiguous`.
+  //    `kContiguous`: Always convert the non-contiguous input tensors and
+  //        internal buffers to contiguous.
+  //    `kChannelsLastNdContiguous`: Always convert the input tensors and
+  //        internal buffers to channels-last contiguous.
+  // Currently, the rule is simple.
+  //    If all the input and out tensors of NNC fusion group are channels-last
+  //    contiguous, the policy is `kChannelsLastNdContiguous`. Otherwise, it
+  //    is always `kContiguous`.
+  void deduceMemoryLayoutPolicy();
+
   Tensor convertSymbolicOutputToCorrectStrides(torch::jit::Value* v);
   Tensor convertStaticShapeOutputToCorrectStrides(torch::jit::Value* v);
-  Tensor convertOutputToCorrectStrides(
+  Tensor convertSymbolicOutputToCorrectStrides(
       const std::vector<ExprHandle>& sizes,
       const std::vector<size_t>& sorted_stride_indices_descending,
       const std::vector<ExprPtr>& strides,
@@ -271,6 +292,13 @@ class TORCH_API TensorExprKernel {
   std::vector<ExprHandle> getInputStrides(
       const torch::jit::Value* input,
       const std::vector<ExprHandle>& inputTensorDims);
+  std::vector<torch::jit::StrideInput>& getSymbolicStrideDesc(
+      const torch::jit::Value* value);
+
+  // Apply the optimizations to the graph owned by the current fusion group,
+  // like concatenation optimization, post-op fusion, and some other graph-level
+  // optimizations.
+  void optimizeOwningGraph();
 
   int64_t nInputs_ = 0;
   int64_t nOutputs_ = 0;
@@ -278,6 +306,7 @@ class TORCH_API TensorExprKernel {
   std::vector<std::vector<int64_t>> tensorOutputSizes_;
   std::vector<std::vector<int64_t>> tensorOutputStrides_;
   std::vector<torch::jit::StrideInput> tensorOutputStrideDesc_;
+  std::vector<bool> isOutputScalar_;
   std::vector<UnpackedTensorOptions> tensorOutputTensorOptions_;
   std::unordered_set<BufPtr> bufOutputs_;
   std::unordered_map<const torch::jit::Value*, BufPtr> bufs_;
@@ -322,6 +351,9 @@ class TORCH_API TensorExprKernel {
       const torch::jit::Value*,
       std::vector<torch::jit::StrideInput>>
       symbolic_strides_;
+
+  // Memory layout to be propagated with fusion group
+  MemoryLayoutPolicy memory_layout_policy_ = MemoryLayoutPolicy::kContiguous;
 };
 
 TORCH_API int& getTECudaPointwiseLoopLevels();

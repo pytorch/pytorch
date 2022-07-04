@@ -257,37 +257,75 @@ struct NormalStub {
   }
 };
 
+template<typename RNG>
+struct NormalMeta {
+  // No-op!
+  void operator()(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
+  }
+};
+
+// inplace
 Tensor& normal_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl_<NormalStub, Generator>(self, mean, std, gen);
 }
 
 Tensor& normal_meta_(Tensor& self, double mean, double std, c10::optional<Generator> gen) {
-  TORCH_CHECK(std > 0.0, "normal_ expects std > 0.0, but found std=", std);  // TODO: dedupe
-  return self;
+  return at::native::templates::normal_impl_<NormalMeta, Generator>(self, mean, std, gen);
 }
 
+// out tensor float
 Tensor& normal_out(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
+Tensor& normal_out_meta(const Tensor& mean, double std, c10::optional<Generator> gen, Tensor& output) {
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+}
+
+// out float tensor
 Tensor& normal_out(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
+Tensor& normal_out_meta(double mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+
+}
+
+// out tensor tensor
 Tensor& normal_out(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
   return at::native::templates::normal_out_impl<NormalStub, Generator>(output, mean, std, gen);
 }
 
+Tensor& normal_out_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen, Tensor& output) {
+  return at::native::templates::normal_out_impl<NormalMeta, Generator>(output, mean, std, gen);
+}
+
+// functional tensor float
 Tensor normal(const Tensor& mean, double std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
+Tensor normal_meta(const Tensor& mean, double std, c10::optional<Generator> gen) {
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
+}
+
+// functional float tensor
 Tensor normal(double mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
 }
 
+Tensor normal_meta(double mean, const Tensor& std, c10::optional<Generator> gen) {
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
+}
+
+// functional tensor tensor
 Tensor normal(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
   return at::native::templates::normal_impl<NormalStub, Generator>(mean, std, gen);
+}
+
+Tensor normal_meta(const Tensor& mean, const Tensor& std, c10::optional<Generator> gen) {
+  return at::native::templates::normal_impl<NormalMeta, Generator>(mean, std, gen);
 }
 
 // ==================================================== Random ========================================================
@@ -411,7 +449,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, c10::optional<Generator> gen) {
     .add_output(ret)
     .add_input(lambda)
     .build();
-  AT_DISPATCH_FLOATING_TYPES(ret.scalar_type(), "poisson_cpu", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND(at::ScalarType::BFloat16, ret.scalar_type(), "poisson_cpu", [&] {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);

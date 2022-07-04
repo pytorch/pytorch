@@ -7,8 +7,9 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
-#include <ATen/native/cuda/Loops.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
+#include <ATen/OpMathType.h>
 #include <c10/macros/Macros.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <functional>
@@ -16,6 +17,9 @@
 #include <type_traits>
 #include <utility>
 #include <thrust/pair.h>
+
+#include <ATen/native/cuda/jit_utils.h>
+#include <iostream>
 
 namespace at { namespace native {
 
@@ -64,6 +68,10 @@ template <>
 struct mnt_wrapper <c10::complex<double>>{
   static constexpr int MAX_NUM_THREADS = 256;
 };
+
+constexpr int max_reduce_threads(c10::ScalarType type) {
+  return type == kComplexDouble ? 256 : 512;
+}
 
 struct ReduceConfig {
   static constexpr int BLOCK_X = 0;
@@ -272,6 +280,65 @@ func_wrapper_t<scalar_t, func_t> func_wrapper(const func_t& op) {
   return func_wrapper_t<scalar_t, func_t> { op };
 }
 
+template <typename scalar_t, typename out_scalar_t=scalar_t>
+struct ReduceJitOp {
+//ReduceJitOp is almost like ReduceOp, but it doesn't have ops functor that specifies reduction operations
+//Maybe we can find a way to unify ReduceOp and ReduceJitOp
+  using InputCalculator = OffsetCalculator<1, uint32_t>;
+  using OutputCalculator = OffsetCalculator<2, uint32_t>;
+  //TODO for now arg_t is always opmath_t of the input, later we'll need to change it
+  using arg_t = at::opmath_type<scalar_t>;
+
+  static constexpr int input_vec_size = ReduceConfig::input_vec_size;
+  //TODO - ReduceJitOp will probably need to be changed for reductions that need full functor,
+  //not just wrapper
+  arg_t ident;
+  ReduceConfig config;
+  InputCalculator input_calc;
+  OutputCalculator output_calc;
+  const void* src;
+  const char* dst[2]; //it accepts at most two destinations
+  // acc_buf used for accumulation among sub Tensor Iterator when accumulation on
+  // output is not permissible
+  void* acc_buf;
+  // cta_buf used for accumulation between blocks during global reduction
+  void* cta_buf;
+  int* semaphores;
+  int64_t base_idx;
+  bool accumulate;
+  bool final_output;
+  int noutputs;
+
+  ReduceJitOp(
+      ReduceConfig config,
+      InputCalculator input_calc,
+      OutputCalculator output_calc,
+      const void* src,
+      char* dst0,
+      optional<char*> dst1,
+      void* acc_buf,
+      void* cta_buf,
+      int* semaphores,
+      arg_t ident,
+      int noutputs,
+      int64_t base_idx)
+      : ident(ident),
+        config(config),
+        input_calc(input_calc),
+        output_calc(output_calc),
+        src(src),
+        acc_buf(acc_buf),
+        cta_buf(cta_buf),
+        semaphores(semaphores),
+        base_idx(base_idx),
+        noutputs(noutputs) {
+    dst[0] = dst0;
+    if (dst1.has_value()) {
+      dst[1] = dst1.value();
+    }
+  }
+};
+
 template <typename scalar_t, typename ops_t, typename index_t, typename out_scalar_t=scalar_t, int vt0=4>
 struct ReduceOp {
   using traits = function_traits<decltype(&ops_t::reduce)>;
@@ -283,8 +350,6 @@ struct ReduceOp {
   static constexpr bool can_accumulate_in_output =
     std::is_convertible<arg_t, out_scalar_t>::value
     && std::is_convertible<out_scalar_t, arg_t>::value;
-
-  static constexpr float acc_buffer_multiplier = (float)sizeof(arg_t) / sizeof(out_scalar_t);
 
   static constexpr int input_vec_size = ReduceConfig::input_vec_size;
 
@@ -448,7 +513,7 @@ struct ReduceOp {
       data -= shift;
       end += shift;
       if(threadIdx.x >= shift && threadIdx.x < align_elements && config.should_reduce_tail()){
-        value = ops.reduce(value, data[threadIdx.x], threadIdx.x - shift);
+        value = ops.reduce(value, c10::load(data + threadIdx.x), threadIdx.x - shift);
       }
       end -= align_elements;
       data += align_elements;
@@ -470,15 +535,11 @@ struct ReduceOp {
       value_list[i] = ident;
     }
 
-    scalar_t values[input_vec_size];
-
-    load_t *values_vector = reinterpret_cast<load_t*>(&values[0]);
-
     while (idx * input_vec_size + input_vec_size - 1 < end) {
-      *values_vector = reinterpret_cast<const load_t*>(data)[idx];
+      const auto values_vec = memory::load_vector<input_vec_size>(data, idx);
       #pragma unroll
       for (index_t i = 0; i < input_vec_size; i++) {
-        value_list[i] = ops.reduce(value_list[i], values[i], shift + idx * input_vec_size + i);
+        value_list[i] = ops.reduce(value_list[i], values_vec.val[i], shift + idx * input_vec_size + i);
       }
       idx += stride;
     }
@@ -488,7 +549,8 @@ struct ReduceOp {
     if (config.should_reduce_tail()) {
       int idx = tail_start + threadIdx.x;
       if (idx < end) {
-        value_list[0] = ops.reduce(value_list[0], data[idx], idx + shift);
+        const auto value = c10::load(data + idx);
+        value_list[0] = ops.reduce(value_list[0], value, idx + shift);
       }
     }
 
@@ -508,7 +570,6 @@ struct ReduceOp {
 
     using arg_vec_t = at::detail::Array<arg_t, output_vec_size>;
     using load_t = at::native::memory::aligned_vector<scalar_t, output_vec_size>;
-    const load_t* data = reinterpret_cast<const load_t*>(data_);
 
     // Multiple accumulators to remove dependency between unrolled loops.
     arg_vec_t value_list[vt0];
@@ -526,7 +587,8 @@ struct ReduceOp {
     while (idx + (vt0 - 1) * stride < end) {
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
-        values[i] = data[calc(idx + i * stride) / output_vec_size];
+        const auto offset = calc(idx + i * stride) / output_vec_size;
+        values[i] = memory::load_vector<output_vec_size>(data_, offset);
       }
       #pragma unroll
       for (index_t i = 0; i < vt0; i++) {
@@ -545,7 +607,8 @@ struct ReduceOp {
       if (idx >= end) {
         break;
       }
-      values[i] = data[calc(idx) / output_vec_size];
+      const auto offset = calc(idx) / output_vec_size;
+      values[i] = memory::load_vector<output_vec_size>(data_, offset);
       idx += stride;
     }
     idx = idx_;
@@ -837,6 +900,41 @@ static void launch_reduce_kernel(const ReduceConfig& config, const R& reduction)
   }
 }
 
+inline void launch_jitted_reduce_kernel(
+    std::mutex &jiterator_mutex,
+    std::array<at::cuda::jit::NvrtcFunction, 3> &fn_cache,
+    const at::cuda::jit::KernelDescriptor &desc,
+    int vt0, const ReduceConfig& config, void *reduction) {
+  dim3 block = config.block();
+  dim3 grid = config.grid();
+
+  int shared_memory = config.shared_memory_size();
+  at::cuda::jit::NvrtcFunction* fn_ptr;
+  switch(config.output_vec_size) {
+  case 4:
+    fn_ptr = &fn_cache[0];
+    break;
+  case 2:
+    fn_ptr = &fn_cache[1];
+    break;
+  default:
+    fn_ptr = &fn_cache[2];
+  }
+  if (!fn_ptr->function) {
+    int max_threads_codegen =
+        max_reduce_threads(desc.f_inputs_type) / config.output_vec_size;
+    auto code = at::cuda::jit::generate_reduction_code(
+        desc, vt0, true, false, config.output_vec_size, max_threads_codegen);
+
+    *fn_ptr = at::cuda::jit::jit_pwise_function(code, "reduction_" + desc.name);
+  }
+  constexpr int kernel_args = 1;
+  void* args[kernel_args];
+  args[0] = reduction;
+  at::cuda::jit::launch_jitted_pwise_function(*fn_ptr, args, grid, block, shared_memory);
+}
+
+
 class AccumulationBuffer {
  public:
   AccumulationBuffer() {}
@@ -874,7 +972,7 @@ class AccumulationBuffer {
 };
 
 template <typename scalar_t>
-int get_output_vec_size(TensorIterator &iter) {
+int get_output_vec_size(const TensorIterator &iter) {
   int vec_size = 4;
   auto update_vec_size = [&vec_size](uint64_t n) {
     while(n % vec_size != 0) {
@@ -898,61 +996,8 @@ int get_output_vec_size(TensorIterator &iter) {
   return vec_size;
 }
 
-template <typename scalar_t, typename out_scalar_t, int vt0=4, typename ops_t, typename ident_t=double>
-inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
-                              AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
-  AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
-
-  using traits = function_traits<decltype(&ops_t::reduce)>;
-  using arg_t = typename traits::template arg<0>::type;
-  static constexpr bool can_accumulate_in_output =
-    std::is_convertible<arg_t, out_scalar_t>::value;
-
-  bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
-  std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
-
-  // The acc_buf_ptr is a shared pointer. It is create at the first entrance and
-  // reused by all recursive function calls.
-  if (acc_buf_ptr == NULL) {
-    // acc_buf_ptr holds buffer used for accumulation among multiple sub_iter
-    // when accumulation in output is not possible.
-    if (!can_accumulate_in_output && !can_use_32bit_indexing) {
-      int64_t output_memory_size = iter.element_size(0);
-      for (int dim = 0; dim < iter.ndim(); dim++) {
-        output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
-      }
-      output_memory_size /= iter.element_size(0); //iter.strides is in bytes
-      owned_buf_ptr.reset(new AccumulationBuffer(sizeof(arg_t),
-                                                 sizeof(out_scalar_t),
-                                                 (char*) iter.data_ptr(0),
-                                                 output_memory_size * sizeof(arg_t)));
-    } else {
-      owned_buf_ptr.reset(new AccumulationBuffer());
-    }
-    acc_buf_ptr = owned_buf_ptr.get();
-  }
-
-  if (!can_use_32bit_indexing) {
-    for (auto& sub_iter : iter.with_32bit_indexing()) {
-      int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
-
-      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident,
-          acc_buf_ptr, sub_iter_base_idx);
-    }
-    return;
-  }
-
-  const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
-  char* out_data = (char*)iter.data_ptr(0);
-  const auto noutputs = iter.noutputs();
-  optional<char*> out_data_extra;
-  if (noutputs > 1) {
-    out_data_extra = (char*)iter.data_ptr(1);
-  } else {
-    out_data_extra = nullopt;
-  }
-  char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
-
+template<typename arg_t, typename scalar_t, int vt0>
+ReduceConfig setReduceConfig(const TensorIterator& iter){
   // Start by assuming that each thread handles a single output and all
   // the inputs for that output.
   int64_t num_outputs = iter.num_output_elements();
@@ -1080,7 +1125,64 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
       config.input_mult[2] = config.split_input(config.ctas_per_output);
     }
   }
+  return config;
+};
 
+template <typename scalar_t, typename out_scalar_t, int vt0=4, typename ops_t, typename ident_t=double>
+inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t ident=0,
+                              AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
+  AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
+
+  using traits = function_traits<decltype(&ops_t::reduce)>;
+  using arg_t = typename traits::template arg<0>::type;
+  static constexpr bool can_accumulate_in_output =
+    std::is_convertible<arg_t, out_scalar_t>::value;
+
+  bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
+  std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
+  // The acc_buf_ptr is a shared pointer. It is create at the first entrance and
+  // reused by all recursive function calls.
+  if (acc_buf_ptr == NULL) {
+    // acc_buf_ptr holds buffer used for accumulation among multiple sub_iter
+    // when accumulation in output is not possible.
+    if (!can_accumulate_in_output && !can_use_32bit_indexing) {
+      int64_t output_memory_size = iter.element_size(0);
+      for (int dim = 0; dim < iter.ndim(); dim++) {
+        output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
+      }
+      output_memory_size /= iter.element_size(0); //iter.strides is in bytes
+      owned_buf_ptr.reset(new AccumulationBuffer(sizeof(arg_t),
+                                                 sizeof(out_scalar_t),
+                                                 (char*) iter.data_ptr(0),
+                                                 output_memory_size * sizeof(arg_t)));
+    } else {
+      owned_buf_ptr.reset(new AccumulationBuffer());
+    }
+    acc_buf_ptr = owned_buf_ptr.get();
+  }
+
+  if (!can_use_32bit_indexing) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
+
+      gpu_reduce_kernel<scalar_t, out_scalar_t, vt0>(sub_iter, ops, ident,
+          acc_buf_ptr, sub_iter_base_idx);
+    }
+    return;
+  }
+
+  const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
+  char* out_data = (char*)iter.data_ptr(0);
+  const auto noutputs = iter.noutputs();
+  optional<char*> out_data_extra;
+  if (noutputs > 1) {
+    out_data_extra = (char*)iter.data_ptr(1);
+  } else {
+    out_data_extra = nullopt;
+  }
+  char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
+
+  ReduceConfig config = setReduceConfig<arg_t, scalar_t, vt0>(iter);
   at::DataPtr buffer;
   at::DataPtr semaphores;
   if (config.should_global_reduce()) {
@@ -1113,6 +1215,111 @@ inline void gpu_reduce_kernel(TensorIterator& iter, const ops_t& ops, ident_t id
   reduce.final_output = iter.is_final_output();
 
   launch_reduce_kernel<mnt_wrapper<scalar_t>::MAX_NUM_THREADS>(config, reduce);
+}
+
+//TODO this is 100 lines of almost-copy-paste, because we have to have different template args for this function
+//try unifying with gpu_reduce_kernel
+template <char const* name, typename scalar_t, typename out_scalar_t, int vt0=4, typename ident_t=double>
+inline void jitted_gpu_reduce_kernel(TensorIterator& iter, const std::string& func, ident_t ident=0,
+                              AccumulationBuffer* acc_buf_ptr=nullptr, int64_t base_idx=0) {
+  AT_ASSERT(iter.numel() > 0 && iter.ntensors() - iter.noutputs() == 1 && iter.noutputs() >= 1);
+
+  //TODO - this will be different for more complicated reductions, but for now reductions using
+  //func_wrapper all have arg_t = opmath
+  using arg_t = at::opmath_type<scalar_t>;
+  static constexpr bool can_accumulate_in_output =
+    std::is_convertible<arg_t, out_scalar_t>::value;
+  static_assert(can_accumulate_in_output == true, "unsupported arg_t for jitted reduction");
+
+  bool can_use_32bit_indexing = iter.can_use_32bit_indexing();
+  std::unique_ptr<AccumulationBuffer> owned_buf_ptr;
+
+  // The acc_buf_ptr is a shared pointer. It is create at the first entrance and
+  // reused by all recursive function calls.
+  if (acc_buf_ptr == NULL) {
+    // acc_buf_ptr holds buffer used for accumulation among multiple sub_iter
+    // when accumulation in output is not possible.
+    if (!can_accumulate_in_output && !can_use_32bit_indexing) {
+      int64_t output_memory_size = iter.element_size(0);
+      for (int dim = 0; dim < iter.ndim(); dim++) {
+        output_memory_size = std::max(output_memory_size, iter.shape()[dim] * iter.strides(0)[dim]);
+      }
+      output_memory_size /= iter.element_size(0); //iter.strides is in bytes
+      owned_buf_ptr.reset(new AccumulationBuffer(sizeof(out_scalar_t), //TODO
+                                                 sizeof(out_scalar_t),
+                                                 (char*) iter.data_ptr(0),
+                                                 output_memory_size * sizeof(out_scalar_t))); //TODO
+    } else {
+      owned_buf_ptr.reset(new AccumulationBuffer());
+    }
+    acc_buf_ptr = owned_buf_ptr.get();
+  }
+
+  if (!can_use_32bit_indexing) {
+    for (auto& sub_iter : iter.with_32bit_indexing()) {
+      int64_t sub_iter_base_idx = sub_iter.view_offsets()[0];
+
+      jitted_gpu_reduce_kernel<name, scalar_t, out_scalar_t, vt0>(sub_iter, func, ident,
+          acc_buf_ptr, sub_iter_base_idx);
+    }
+    return;
+  }
+
+  //TODO - for now we support a single input, we may be able to relax this constraint
+  const char* in_data = (char*)iter.data_ptr(iter.ntensors() - 1);
+  char* out_data = (char*)iter.data_ptr(0);
+  const auto noutputs = iter.noutputs();
+  optional<char*> out_data_extra;
+  if (noutputs > 1) {
+    out_data_extra = (char*)iter.data_ptr(1);
+  } else {
+    out_data_extra = nullopt;
+  }
+  char* acc_data = acc_buf_ptr->get_acc_slice(out_data);
+
+  ReduceConfig config = setReduceConfig<arg_t, scalar_t, vt0>(iter);
+
+  at::DataPtr buffer;
+  at::DataPtr semaphores;
+  if (config.should_global_reduce()) {
+    auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+    buffer = allocator.allocate(config.global_memory_size());
+    semaphores = allocator.allocate(config.semaphore_size());
+
+    auto stream = at::cuda::getCurrentCUDAStream();
+    AT_CUDA_CHECK(cudaMemsetAsync(semaphores.get(), 0, config.semaphore_size(), stream));
+  }
+
+  AT_ASSERT(can_use_32bit_indexing);
+  auto output_calc = make_output_calculator<uint32_t>(iter);
+  auto input_calc = make_input_calculator<uint32_t>(iter);
+  auto reduce = ReduceJitOp<scalar_t, out_scalar_t>(
+      config,
+      input_calc,
+      output_calc,
+      in_data,
+      out_data,
+      out_data_extra,
+      acc_data,
+      buffer.get(),
+      (int*)semaphores.get(),
+      ident,
+      noutputs,
+      base_idx);
+  reduce.accumulate = iter.should_accumulate();
+  reduce.final_output = iter.is_final_output();
+
+  constexpr int nInputs = 1;
+  constexpr int nOutputs = 1;
+  static auto desc = at::cuda::jit::make_kernel_descriptor<
+    out_scalar_t, scalar_t>(name, func, nInputs, nOutputs);
+
+  static std::mutex jiterator_mutex;
+  static std::vector<std::array<at::cuda::jit::NvrtcFunction, 3>> fn_cache(c10::cuda::device_count());
+  auto &cache = fn_cache[iter.device().index()];
+
+  launch_jitted_reduce_kernel(
+      jiterator_mutex, cache, desc, vt0, config, &reduce);
 }
 
 }} // namespace at::native

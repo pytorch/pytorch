@@ -17,6 +17,7 @@
 #include <torch/csrc/jit/mobile/parse_operators.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
 #include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/flatbuffer_serializer_jit.h>
 #include <torch/csrc/jit/serialization/import.h>
 #include <torch/custom_class.h>
 #include <torch/torch.h>
@@ -184,6 +185,42 @@ TEST(LiteInterpreterTest, Tuple) {
   std::vector<torch::jit::IValue> inputs({torch::ones({})});
   auto output = bc.get_method("forward")(inputs);
   AT_ASSERT(output.toTupleRef().elements()[1].toInt() == 2);
+}
+
+TEST(LiteInterpreterTest, AtenFormat) {
+  Module m("m");
+  m.define(R"""(
+  def forward(self, fmt:str="first {} {}", num:str="abc"):
+    x = 2
+    x = x * x
+    return fmt.format(num, x)
+  )""");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs;
+  auto output_bc = bc.get_method("forward")(inputs);
+  auto output_m = m.get_method("forward")(inputs);
+  // std::cout << output_m.toStringRef() << "\n"
+  //           << output_bc.toStringRef() << std::endl;
+  AT_ASSERT(output_m.toStringRef() == output_bc.toStringRef());
+}
+
+TEST(LiteInterpreterTest, PrimDevice) {
+  Module m("m");
+  m.define(R"""(
+  def forward(self, x:torch.Tensor):
+    return x.device
+  )""");
+  std::stringstream ss;
+  m._save_for_mobile(ss);
+  mobile::Module bc = _load_for_mobile(ss);
+  std::vector<torch::jit::IValue> inputs;
+  auto minput = 3.5 * torch::ones({});
+  inputs.emplace_back(minput);
+  auto output_bc = bc.get_method("forward")(inputs);
+  auto output_m = m.get_method("forward")(inputs);
+  AT_ASSERT(output_bc.toDevice().str() == output_m.toDevice().str());
 }
 
 TEST(LiteInterpreterTest, Dict) {
@@ -527,28 +564,42 @@ TEST(LiteInterpreterTest, GetContainTypes) {
   std::stringstream ss;
   m._save_for_mobile(ss, {}, true);
 
-  auto contained_types = _get_mobile_model_contained_types(ss);
-  AT_ASSERT(contained_types.size() >= 0);
+  _get_mobile_model_contained_types(ss);
 }
 
 namespace {
 
 void compareModelOutput(
     c10::ArrayRef<IValue> actual_result_list,
-    const std::vector<Tensor>& expect_result_list) {
+    const std::vector<IValue>& expect_result_list) {
   AT_ASSERT(actual_result_list.size() == expect_result_list.size());
-  AT_ASSERT(actual_result_list[0].toTensor().equal(expect_result_list[0]));
   AT_ASSERT(
-      actual_result_list[1].toTensor().dim() == expect_result_list[1].dim());
-  AT_ASSERT(actual_result_list[2].toTensor().equal(expect_result_list[2]));
-  AT_ASSERT(actual_result_list[3].toTensor().equal(expect_result_list[3]));
+      actual_result_list[0].toTensor().equal(expect_result_list[0].toTensor()));
+  AT_ASSERT(
+      actual_result_list[1].toTensor().dim() ==
+      expect_result_list[1].toTensor().dim());
+  AT_ASSERT(
+      actual_result_list[2].toTensor().equal(expect_result_list[2].toTensor()));
+  AT_ASSERT(
+      actual_result_list[3].toTensor().equal(expect_result_list[3].toTensor()));
+  ASSERT_EQ(
+      actual_result_list[4].toStringRef(), expect_result_list[4].toStringRef());
+  ASSERT_EQ(actual_result_list[5].toBool(), expect_result_list[5].toBool());
+  ASSERT_EQ(actual_result_list[6].toBool(), expect_result_list[6].toBool());
+  ASSERT_EQ(actual_result_list[7].toBool(), expect_result_list[7].toBool());
+  AT_ASSERT(
+      actual_result_list[8].toTensor().equal(expect_result_list[8].toTensor()));
+  ASSERT_EQ(
+      actual_result_list[9].toStringRef(), expect_result_list[9].toStringRef());
+  ASSERT_EQ(actual_result_list[10].toInt(), expect_result_list[10].toInt());
+  ASSERT_EQ(actual_result_list[11].toBool(), expect_result_list[11].toBool());
 }
 
 void runAndCheckTorchScriptModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
-    const std::vector<Tensor>& expect_result_list,
-    const int64_t expect_version) {
+    const std::vector<IValue>& expect_result_list,
+    const uint64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);
 
@@ -564,8 +615,8 @@ void runAndCheckTorchScriptModel(
 void runAndCheckBytecodeModel(
     std::stringstream& input_model_stream,
     const std::vector<IValue>& input_data,
-    const std::vector<Tensor>& expect_result_list,
-    const int64_t expect_version) {
+    const std::vector<IValue>& expect_result_list,
+    const uint64_t expect_version) {
   auto actual_version = _get_model_bytecode_version(input_model_stream);
   AT_ASSERT(actual_version == expect_version);
 
@@ -582,14 +633,15 @@ void runAndCheckBytecodeModel(
 void backportAllVersionCheck(
     std::stringstream& test_model_file_stream,
     std::vector<IValue>& input_data,
-    std::vector<Tensor>& expect_result_list,
-    const int64_t expect_from_version) {
+    std::vector<IValue>& expect_result_list,
+    const uint64_t expect_from_version) {
   auto from_version = _get_model_bytecode_version(test_model_file_stream);
-  AT_ASSERT(from_version == expect_from_version);
+  EXPECT_EQ(from_version, expect_from_version);
+  AT_ASSERT(from_version > 0);
 
   // Backport script_module_v5.ptl to an older version
   constexpr int64_t minimum_to_version = 4;
-  int64_t current_to_version = from_version - 1;
+  auto current_to_version = from_version - 1;
 
   // Verify all candidate to_version work as expected. All backport to version
   // larger than minimum_to_version should success.
@@ -605,12 +657,14 @@ void backportAllVersionCheck(
 
     // Check backport model version
     auto backport_version = _get_model_bytecode_version(oss);
+    backport_version = _get_model_bytecode_version(oss);
     AT_ASSERT(backport_version == current_to_version);
 
     // Load and run the backport model, then compare the result with expect
     // result
     runAndCheckBytecodeModel(
         oss, input_data, expect_result_list, current_to_version);
+    oss.seekg(0, oss.beg);
     runAndCheckTorchScriptModel(
         oss, input_data, expect_result_list, current_to_version);
 
@@ -626,12 +680,16 @@ void backportAllVersionCheck(
 
 #if !defined FB_XPLAT_BUILD
 TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
+  torch::jit::register_flatbuffer_all();
   torch::jit::Module module("m");
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   module.register_parameter("weight", torch::ones({20, 1, 5, 5}), false);
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
   module.register_parameter("bias", torch::ones({20}), false);
   module.define(R"(
+    def fn(self, x:float=1.0):
+      return x
+
     def forward(self, input):
       x1 = torch.zeros(2, 2)
       x2 = torch.empty_like(torch.empty(2, 2))
@@ -641,27 +699,54 @@ TEST(LiteInterpreterTest, BackPortByteCodeModelAllVersions) {
       x = 2 * torch.ones(1)
       h = torch.ones(1)
       torch.add(x, h, out=x)
-      return (x1, x2, x3, x)
-  )");
+      device = torch.ones(1, 1).cpu().device.type
+      is_cuda = x1.is_cuda
+      bool_val = True
+      check_is = [] is None
+      check_is_not = [1] is not None
+      check_not = not bool_val
+      num_to_tensor = torch.tensor([self.fn()])
+      d = {"a": "abc"}
+      check_dict_index = d["a"]
+      check_dim = x1.dim()
+      return (
+        x1, x2, x3, x, device, is_cuda, check_is,
+        check_is_not, num_to_tensor, check_dict_index,
+        check_dim, check_not
+        )
+      )");
 
   torch::jit::Module module_freeze = freeze(module);
 
   std::stringstream input_model_stream;
-  module_freeze._save_for_mobile(input_model_stream);
+  module_freeze._save_for_mobile(
+      input_model_stream,
+      /*extra_files=*/{},
+      /*save_mobile_debug_info=*/false,
+      /*use_flatbuffer=*/true);
   std::vector<IValue> input_data =
       std::vector<IValue>({torch::ones({1, 1, 28, 28})});
-  std::vector<Tensor> expect_result_list;
+  std::vector<IValue> expect_result_list;
   expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float) * 0);
   expect_result_list.emplace_back(at::ones({2, 2}, ScalarType::Float));
   expect_result_list.emplace_back(
       at::ones({1, 20, 24, 24}, ScalarType::Float) * 26);
   expect_result_list.emplace_back(3 * at::ones({1}));
+  // "cpu" False, False, True, tensor(1), "abc", 2, False)
+  expect_result_list.emplace_back(c10::IValue("cpu"));
+  expect_result_list.emplace_back(c10::IValue(false));
+  expect_result_list.emplace_back(c10::IValue(false));
+  expect_result_list.emplace_back(c10::IValue(true));
+  expect_result_list.emplace_back(c10::IValue(at::ones({1})));
+  expect_result_list.emplace_back(c10::IValue("abc"));
+  expect_result_list.emplace_back(c10::IValue(2));
+  expect_result_list.emplace_back(c10::IValue(false));
 
   backportAllVersionCheck(
       input_model_stream,
       input_data,
       expect_result_list,
-      caffe2::serialize::kProducedBytecodeVersion);
+      9); // flatbuffer starts at 9
 }
 #endif // !defined(FB_XPLAT_BUILD)
 
@@ -914,7 +999,6 @@ TEST(LiteInterpreterTest, ExtraFiles) {
   module->_save_for_mobile(oss, extra_files);
 
   std::istringstream iss(oss.str());
-  caffe2::serialize::IStreamAdapter adapter{&iss};
   std::unordered_map<std::string, std::string> loaded_extra_files;
   loaded_extra_files["metadata.json"] = "";
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
@@ -929,7 +1013,7 @@ TEST(LiteInterpreterTest, ExtraFiles) {
       loaded_extra_files[file_name.substr(6)] = "";
     }
   }
-
+  iss.seekg(0, iss.beg);
   torch::jit::_load_for_mobile(iss, torch::kCPU, loaded_extra_files);
   ASSERT_EQ(loaded_extra_files["metadata.json"], "abc");
   ASSERT_EQ(loaded_extra_files["mobile_info.json"], "{\"key\": 23}");
@@ -1096,7 +1180,6 @@ TEST(RunTimeTest, ParseOperator) {
   std::vector<IValue> constants{
       to_tuple({1}),
   };
-  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
   // 2. Parse the function
   std::string function_name("test_function");
   auto function = std::unique_ptr<mobile::Function>(
@@ -1109,7 +1192,6 @@ TEST(RunTimeTest, ParseOperator) {
       function.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operators)).elements(),
-      model_version,
       1,
       function.get());
   const size_t rsize = 5;
@@ -1481,7 +1563,6 @@ TEST(RunTimeTest, RuntimeCall) {
   std::vector<IValue> constantsCall{
       1,
   };
-  int64_t model_version = caffe2::serialize::kProducedBytecodeVersion;
 
   auto foo = std::make_unique<mobile::Function>(c10::QualifiedName("foo"));
   c10::ivalue::TupleElements debug_handles_m_tuple;
@@ -1492,7 +1573,6 @@ TEST(RunTimeTest, RuntimeCall) {
       foo.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operatorsFoo)).elements(),
-      model_version,
       1,
       foo.get());
   parseConstants(
@@ -1509,7 +1589,6 @@ TEST(RunTimeTest, RuntimeCall) {
       call.get());
   parseOperators(
       std::move(*c10::ivalue::Tuple::create(operatorsCall)).elements(),
-      model_version,
       1,
       call.get());
   parseConstants(
@@ -2007,16 +2086,14 @@ TEST(LiteInterpreterUpgraderTest, Upgrader) {
   std::vector<mobile::Function> upgrader_functions;
 
   for (auto& byteCodeFunctionWithOperator : getUpgraderBytecodeList()) {
+    byteCodeFunctionWithOperator.function.initialize_operators(true);
     ASSERT_EQ(
         byteCodeFunctionWithOperator.function.get_code().operators_.size(),
         byteCodeFunctionWithOperator.function.get_code().op_names_.size());
     if (byteCodeFunctionWithOperator.function.get_code().operators_.empty()) {
       for (const auto& op : byteCodeFunctionWithOperator.operators) {
         byteCodeFunctionWithOperator.function.append_operator(
-            op.name,
-            op.overload_name,
-            op.num_specified_args,
-            caffe2::serialize::kMaxSupportedFileFormatVersion);
+            op.name, op.overload_name, op.num_specified_args);
       }
     }
     upgrader_functions.push_back(byteCodeFunctionWithOperator.function);
