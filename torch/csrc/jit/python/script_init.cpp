@@ -3,6 +3,7 @@
 #include <torch/csrc/jit/api/object.h>
 #include <torch/csrc/jit/python/script_init.h>
 
+#include <caffe2/serialize/versions.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/jit/api/module.h>
@@ -11,11 +12,13 @@
 #include <torch/csrc/jit/mobile/code.h>
 #include <torch/csrc/jit/mobile/compatibility/backport.h>
 #include <torch/csrc/jit/mobile/compatibility/model_compatibility.h>
+#include <torch/csrc/jit/mobile/file_format.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/operator_upgraders/upgraders_guard.h>
+#include <torch/csrc/jit/operator_upgraders/utils.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/python_ivalue.h>
@@ -40,7 +43,7 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/logging.h>
-#include <torch/csrc/jit/serialization/export.h>
+#include <torch/csrc/jit/serialization/export_bytecode.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/python_print.h>
 #include <torch/csrc/jit/testing/hooks_for_testing.h>
@@ -56,6 +59,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <torch/csrc/jit/mobile/train/export_data.h>
 #include <chrono>
 #include <cstddef>
 #include <memory>
@@ -444,34 +448,29 @@ static TypePtr inferShapeAndTypeForInput(
     TypePtr input_type,
     Stack::const_iterator& s_iter,
     const Stack::const_iterator& s_iter_end,
-    bool complete);
-
-static TupleTypePtr getTupleTensorType(
-    Stack::const_iterator& s_iter,
-    const Stack::const_iterator& s_iter_end,
-    const TypePtr& tupleType,
     bool complete) {
-  TORCH_INTERNAL_ASSERT(tupleType->kind() == TupleType::Kind);
-  std::vector<TypePtr> types;
-  for (const auto& subType : tupleType->containedTypes()) {
-    TORCH_INTERNAL_ASSERT(s_iter != s_iter_end);
-    types.emplace_back(
-        inferShapeAndTypeForInput(subType, s_iter, s_iter_end, complete));
-  }
-  return TupleType::create(types);
-}
-
-static TypePtr inferShapeAndTypeForInput(
-    TypePtr input_type,
-    Stack::const_iterator& s_iter,
-    const Stack::const_iterator& s_iter_end,
-    bool complete) {
-  if (input_type->kind() == TupleType::Kind) {
-    return getTupleTensorType(s_iter, s_iter_end, input_type, complete);
-  } else if (input_type->kind() == TensorType::Kind) {
+  if (auto tuple_type = input_type->cast<TupleType>()) {
+    std::vector<TypePtr> types;
+    for (const auto& sub_type : tuple_type->containedTypes()) {
+      TORCH_INTERNAL_ASSERT(s_iter != s_iter_end);
+      types.emplace_back(
+          inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete));
+    }
+    return TupleType::create(types);
+  } else if (auto list_type = input_type->cast<ListType>()) {
+    const TypePtr& sub_type = list_type->getElementType();
+    auto elem_type =
+        inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
+    return ListType::create(elem_type);
+  } else if (auto tensor_type = input_type->cast<TensorType>()) {
     auto type = getTensorType(s_iter->toTensor(), complete);
     s_iter++;
     return type;
+  } else if (auto optional_type = input_type->cast<OptionalType>()) {
+    const TypePtr& sub_type = optional_type->getElementType();
+    auto elem_type =
+        inferShapeAndTypeForInput(sub_type, s_iter, s_iter_end, complete);
+    return OptionalType::create(elem_type);
   } else {
     // Primitive type, keep as is.
     s_iter++;
@@ -491,7 +490,6 @@ static void setInputTensorTypes(
     TORCH_INTERNAL_ASSERT(input_values.size() == param_count_list.size());
   }
   for (auto v : input_values) {
-    AT_ASSERT(s_iter != stack.end());
     // Leave packed param types alone. This is needed for downstream passes
     // (like alias analysis) to work properly. This will be unpacked later
     // in unpackQuantizedWeights.
@@ -499,8 +497,12 @@ static void setInputTensorTypes(
       if (auto qualname = named_type->name()) {
         if (getCustomClass(qualname->qualifiedName())) {
           if (param_count_list.empty()) {
+            AT_ASSERT(s_iter != stack.end());
             s_iter++;
           } else {
+            if (param_count_list[list_idx] > 0) {
+              AT_ASSERT(s_iter != stack.end());
+            }
             s_iter += param_count_list[list_idx];
           }
           list_idx++;
@@ -1031,6 +1033,15 @@ void initJitScriptBindings(PyObject* module) {
         return self.old_schema;
       });
 
+  py::class_<UpgraderRange>(m, "_UpgraderRange")
+      .def(py::init<int, int>())
+      .def_property_readonly(
+          "min_version",
+          [](const UpgraderRange& self) { return self.min_version; })
+      .def_property_readonly("max_version", [](const UpgraderRange& self) {
+        return self.max_version;
+      });
+
   object_class.def(
       "__deepcopy__", [](const Object& self, const py::dict& memo) {
         return Object(
@@ -1086,23 +1097,32 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& m,
              const std::string& filename,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
-             bool _save_mobile_debug_info = false) {
-            m._save_for_mobile(filename, _extra_files, _save_mobile_debug_info);
+             bool _save_mobile_debug_info = false,
+             bool _use_flatbuffer = false) {
+            m._save_for_mobile(
+                filename,
+                _extra_files,
+                _save_mobile_debug_info,
+                _use_flatbuffer);
           },
           py::arg("filename"),
           py::arg("_extra_files") = ExtraFilesMap(),
-          py::arg("_save_mobile_debug_info") = false)
+          py::arg("_save_mobile_debug_info") = false,
+          py::arg("_use_flatbuffer") = false)
       .def(
           "_save_to_buffer_for_mobile",
           [](Module& m,
              const ExtraFilesMap& _extra_files = ExtraFilesMap(),
-             bool _save_mobile_debug_info = false) {
+             bool _save_mobile_debug_info = false,
+             bool _use_flatbuffer = false) {
             std::ostringstream buf;
-            m._save_for_mobile(buf, _extra_files, _save_mobile_debug_info);
+            m._save_for_mobile(
+                buf, _extra_files, _save_mobile_debug_info, _use_flatbuffer);
             return py::bytes(buf.str());
           },
           py::arg("_extra_files") = ExtraFilesMap(),
-          py::arg("_save_mobile_debug_info") = false)
+          py::arg("_save_mobile_debug_info") = false,
+          py::arg("_use_flatbuffer") = false)
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "dump",
@@ -1384,7 +1404,12 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_class",
           [](const std::shared_ptr<CompilationUnit>& self,
-             const std::string& name) { return self->get_class(name); });
+             const std::string& name) { return self->get_class(name); })
+      .def(
+          "drop_all_functions",
+          [](const std::shared_ptr<CompilationUnit>& self) {
+            self->drop_all_functions();
+          });
 
   py::class_<StrongFunctionPtr>(m, "ScriptFunction", py::dynamic_attr())
       .def(
@@ -1479,6 +1504,14 @@ void initJitScriptBindings(PyObject* module) {
       .def_property_readonly(
           "name",
           [](const StrongFunctionPtr& self) { return self.function_->name(); })
+      .def(
+          "_set_ignore_amp",
+          [](StrongFunctionPtr& self, bool ignore) {
+            auto fn = self.function_;
+            TORCH_INTERNAL_ASSERT(fn->isGraphFunction());
+            GraphFunction& g_fn = toGraphFunction(*fn);
+            g_fn._set_ignore_amp(ignore);
+          })
       .def_property_readonly(
           "qualified_name",
           [](const StrongFunctionPtr& self) {
@@ -1545,6 +1578,19 @@ void initJitScriptBindings(PyObject* module) {
             return std::make_tuple(pp.str(), consts);
           })
       .def_property_readonly("owner", &Method::owner);
+  m.def("_generate_upgraders_graph", &generate_upgraders_graph);
+  m.def(
+      "_calculate_package_version_based_on_upgraders",
+      &calculate_package_version_based_on_upgraders);
+  m.def("_get_version_calculator_flag", &get_version_calculator_flag);
+  m.def(
+      "_compile_graph_to_code_table",
+      [](const std::string& name, const std::shared_ptr<Graph>& graph) {
+        CompilationOptions options;
+        GraphFunction jitFunc(name, graph, nullptr);
+        auto mobileFunc = convertJitFunctionToMobileFunction(jitFunc, options);
+        return convertMobileFunctionToCodeTable(*mobileFunc, options);
+      });
   m.def(
       "_jit_script_compile",
       [](const std::string& qualname,
@@ -1615,8 +1661,6 @@ void initJitScriptBindings(PyObject* module) {
       py::arg("strict"),
       py::arg("force_outplace"),
       py::arg("argument_names") = std::vector<std::string>());
-
-  m.def("_generate_upgraders_bytecode", &generate_bytecode_list);
 
   m.def(
       "_jit_script_class_compile",
@@ -1735,7 +1779,9 @@ void initJitScriptBindings(PyObject* module) {
   m.def("_test_only_remove_upgraders", &test_only_remove_upgraders);
 
   m.def("merge_type_from_type_comment", &mergeTypesFromTypeComment);
+  m.def("_get_max_operator_version", &getMaxOperatorVersion);
   m.def("_get_operator_version_map", &get_operator_version_map);
+  m.def("_get_upgrader_ranges", &getUpgradersRangeForOp);
   m.def("_test_only_add_entry_to_op_version_map", &test_only_add_entry);
   m.def("_test_only_remove_entry_to_op_version_map", &test_only_remove_entry);
   m.def(
@@ -1854,9 +1900,30 @@ void initJitScriptBindings(PyObject* module) {
     return _get_model_bytecode_version(filename);
   });
   m.def(
+      "_get_model_extra_files",
+      [](const std::string& filename, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        _load_for_mobile(filename, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
+      });
+  m.def(
       "_get_model_bytecode_version_from_buffer", [](const std::string& buffer) {
         std::istringstream in(buffer);
         return _get_model_bytecode_version(in);
+      });
+  m.def(
+      "_get_model_extra_files_from_buffer",
+      [](const std::string& buffer, const py::dict& py_extra_files) {
+        c10::optional<at::Device> optional_device;
+        ExtraFilesMap cpp_extra_files = ExtraFilesMap();
+        std::istringstream in(buffer);
+        _load_for_mobile(in, optional_device, cpp_extra_files);
+        extra_files_to_python(cpp_extra_files, py_extra_files);
+
+        return py_extra_files;
       });
   m.def("_get_mobile_model_contained_types", [](const std::string& filename) {
     return _get_mobile_model_contained_types(filename);
@@ -1867,6 +1934,10 @@ void initJitScriptBindings(PyObject* module) {
         std::istringstream in(buffer);
         return _get_mobile_model_contained_types(in);
       });
+  m.def("_nn_module_to_mobile", [](const Module& module) {
+    CompilationOptions options;
+    return jitModuleToMobile(module, options);
+  });
   py::class_<OperatorInfo>(m, "OperatorInfo")
       .def_readonly("num_schema_args", &OperatorInfo::num_schema_args);
   m.def("_get_model_ops_and_info", [](const std::string& filename) {
@@ -1971,7 +2042,16 @@ void initJitScriptBindings(PyObject* module) {
     setGraphExecutorOptimize(optimize);
   });
 
-  m.def("_get_graph_executor_optimize", &torch::jit::getGraphExecutorOptimize);
+  m.def(
+      "_get_graph_executor_optimize",
+      [](c10::optional<bool> new_setting = c10::nullopt) {
+        bool old_value = getGraphExecutorOptimize();
+        if (new_setting) {
+          setGraphExecutorOptimize(*new_setting);
+        }
+        return old_value;
+      },
+      py::arg("new_settings") = nullptr);
 
   m.def(
       "_enable_mobile_interface_call_export",
@@ -2038,8 +2118,18 @@ void initJitScriptBindings(PyObject* module) {
              const ConcreteModuleTypeBuilder& other) {
             return self.equals(other);
           })
-      .def("set_module_list", [](ConcreteModuleTypeBuilder& self) {
-        self.setIterableModuleKind(IterableModuleKind::LIST);
+      .def(
+          "set_module_list",
+          [](ConcreteModuleTypeBuilder& self) {
+            self.setIterableModuleKind(IterableModuleKind::LIST);
+          })
+      .def(
+          "set_parameter_list",
+          [](ConcreteModuleTypeBuilder& self) {
+            self.setIterableModuleKind(IterableModuleKind::PARAMLIST);
+          })
+      .def("set_parameter_dict", [](ConcreteModuleTypeBuilder& self) {
+        self.setIterableModuleKind(IterableModuleKind::PARAMDICT);
       });
 
   py::class_<ConcreteModuleType, std::shared_ptr<ConcreteModuleType>>(
@@ -2167,6 +2257,10 @@ void initJitScriptBindings(PyObject* module) {
   m.def(
       "_run_emit_module_hook", [](const Module& m) { didFinishEmitModule(m); });
 
+  m.def(
+      "_set_should_use_format_with_string_table",
+      setShouldUseFormatWithStringTable);
+
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<logging::LoggerBase, std::shared_ptr<logging::LoggerBase>>(
       m, "LoggerBase");
@@ -2186,13 +2280,28 @@ void initJitScriptBindings(PyObject* module) {
       logging::LoggerBase,
       std::shared_ptr<logging::NoopLogger>>(m, "NoopLogger")
       .def(py::init<>());
-  m.def(
-      "_check_onnx_proto",
-      [](const std::string& proto_string) { check_onnx_proto(proto_string); },
-      py::arg("proto_string"));
   m.def("_jit_is_script_object", [](const py::object& obj) {
     return py::isinstance<Object>(obj);
   });
+
+  m.def("_get_file_format", [](const std::string& path) {
+    switch (getFileFormat(path)) {
+      case FileFormat::FlatbufferFileFormat:
+        return "flatbuffer";
+      case FileFormat::ZipFileFormat:
+        return "zipfile";
+      default:
+        return "invalid";
+    }
+  });
+
+  m.def(
+      "_save_parameters",
+      [](const std::map<std::string, at::Tensor>& map,
+         const std::string& filename,
+         bool use_flatbuffer = false) {
+        _save_parameters(map, filename, use_flatbuffer);
+      });
 
   initScriptDictBindings(module);
   initScriptListBindings(module);

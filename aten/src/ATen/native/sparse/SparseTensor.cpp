@@ -1,9 +1,10 @@
 // Basic functions on sparse tensors
+#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/ATen.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/Dispatch.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/Layout.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/SparseTensorUtils.h>
@@ -13,6 +14,53 @@
 #include <ATen/native/Copy.h>
 #include <ATen/native/CPUBlas.h>
 #include <c10/util/irange.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/_coalesce.h>
+#include <ATen/ops/_coalesce_native.h>
+#include <ATen/ops/_coalesced_native.h>
+#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/_dimI_native.h>
+#include <ATen/ops/_dimV_native.h>
+#include <ATen/ops/_indices_native.h>
+#include <ATen/ops/_nnz_native.h>
+#include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_native.h>
+#include <ATen/ops/_sparse_mask_helper_native.h>
+#include <ATen/ops/_validate_sparse_coo_tensor_args_native.h>
+#include <ATen/ops/_values_native.h>
+#include <ATen/ops/clone_native.h>
+#include <ATen/ops/coalesce_native.h>
+#include <ATen/ops/copy_native.h>
+#include <ATen/ops/copy_sparse_to_sparse.h>
+#include <ATen/ops/copy_sparse_to_sparse_native.h>
+#include <ATen/ops/dense_dim_native.h>
+#include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like_native.h>
+#include <ATen/ops/empty_native.h>
+#include <ATen/ops/index_select.h>
+#include <ATen/ops/indices_native.h>
+#include <ATen/ops/is_coalesced_native.h>
+#include <ATen/ops/resize_as_sparse.h>
+#include <ATen/ops/resize_as_sparse_native.h>
+#include <ATen/ops/sparse_coo_tensor.h>
+#include <ATen/ops/sparse_coo_tensor_native.h>
+#include <ATen/ops/sparse_dim_native.h>
+#include <ATen/ops/sparse_mask_native.h>
+#include <ATen/ops/sparse_resize_and_clear_native.h>
+#include <ATen/ops/sparse_resize_native.h>
+#include <ATen/ops/to_dense_native.h>
+#include <ATen/ops/to_sparse_native.h>
+#include <ATen/ops/unique_dim.h>
+#include <ATen/ops/values_native.h>
+#include <ATen/ops/zeros.h>
+#endif
 
 namespace at {
 namespace native {
@@ -297,7 +345,7 @@ void _validate_sparse_coo_tensor_args(
     Tensor max_indices =
         std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     Tensor cpu_min_indices, cpu_max_indices;
-    if (indices.is_cuda()) {
+    if (!indices.is_cpu()) {
       cpu_min_indices = min_indices.to(at::DeviceType::CPU);
       cpu_max_indices = max_indices.to(at::DeviceType::CPU);
     } else {
@@ -498,15 +546,6 @@ SparseTensor dense_to_sparse(const Tensor& self, int64_t sparse_dim) {
 
 // NB: Dropped the resizeNd variants
 
-Tensor sparse_to_dense(
-    const SparseTensor& self,
-    c10::optional<ScalarType> dtype) {
-  TORCH_CHECK(
-      !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
-  Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
-  return dst.add_(self);
-}
-
 SparseTensor& copy_sparse_wrapper_(
     Tensor& self,
     const Tensor& src,
@@ -593,7 +632,9 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
   auto indicesBufferAccessor = indicesBuffer.accessor<int64_t, 1>();
 
   int64_t i = -1;
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX(values.scalar_type(), "coalesce", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
+      at::ScalarType::ComplexHalf, at::ScalarType::BFloat16, at::ScalarType::Half, at::ScalarType::Bool,
+      values.scalar_type(), "coalesce", [&] {
     int64_t prev = -1;
     int64_t blockSize = values.stride(0);
     scalar_t* values_ptr = values.data_ptr<scalar_t>();
@@ -606,7 +647,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
             0) { // if values is an empty tensor, there are no elements to copy
           at::native::cpublas::axpy<scalar_t>(
               blockSize,
-              1,
+              static_cast<scalar_t>(1),
               values_ptr + pos * blockSize,
               1,
               newValues_ptr + i * blockSize,
@@ -722,7 +763,7 @@ SparseTensor& sparse_mask_out_cpu(
     // TODO: Re-audit this; it used to be an indexSelect directly into r_values
     at::index_select_out(r_values, t_view, 0, indices);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX(r_values.scalar_type(), "sparse_mask", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(at::ScalarType::Half, r_values.scalar_type(), "sparse_mask", [&] {
       sparse_mask_out_cpu_kernel<scalar_t>(
           r_values, t, r_nnz, sparse_dim, mask_indices);
     });

@@ -38,6 +38,12 @@ endif()
 
 # Enable CUDA language support
 set(CUDAToolkit_ROOT "${CUDA_TOOLKIT_ROOT_DIR}")
+# Pass clang as host compiler, which according to the docs
+# Must be done before CUDA language is enabled, see  mast be done before
+# see https://cmake.org/cmake/help/v3.15/variable/CMAKE_CUDA_HOST_COMPILER.html
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+  set(CMAKE_CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}")
+endif()
 enable_language(CUDA)
 set(CMAKE_CUDA_STANDARD ${CMAKE_CXX_STANDARD})
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
@@ -102,11 +108,7 @@ if(CUDA_FOUND)
 endif()
 
 # Find cuDNN.
-if(CAFFE2_STATIC_LINK_CUDA AND NOT USE_STATIC_CUDNN)
-  message(WARNING "cuDNN will be linked statically because CAFFE2_STATIC_LINK_CUDA is ON. "
-    "Set USE_STATIC_CUDNN to ON to suppress this warning.")
-endif()
-if(CAFFE2_STATIC_LINK_CUDA OR USE_STATIC_CUDNN)
+if(USE_STATIC_CUDNN)
   set(CUDNN_STATIC ON CACHE BOOL "")
 else()
   set(CUDNN_STATIC OFF CACHE BOOL "")
@@ -287,10 +289,7 @@ add_library(caffe2::cublas INTERFACE IMPORTED)
 if(CAFFE2_STATIC_LINK_CUDA AND NOT WIN32)
     set_property(
         TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-        "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a")
-    set_property(
-      TARGET caffe2::cublas APPEND PROPERTY INTERFACE_LINK_LIBRARIES
-      "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublasLt_static.a")
+        ${CUDA_CUBLAS_LIBRARIES})
     # Add explicit dependency to cudart_static to fix
     # libcublasLt_static.a.o): undefined reference to symbol 'cudaStreamWaitEvent'
     # error adding symbols: DSO missing from command line
@@ -322,15 +321,9 @@ if(CAFFE2_USE_CUDNN)
     TARGET caffe2::cudnn-private PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDNN_INCLUDE_PATH})
   if(CUDNN_STATIC AND NOT WIN32)
-    if(USE_WHOLE_CUDNN)
-      set_property(
-        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-        "-Wl,--whole-archive,\"${CUDNN_LIBRARY_PATH}\" -Wl,--no-whole-archive")
-    else()
-      set_property(
-        TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
-        ${CUDNN_LIBRARY_PATH})
-    endif()
+    set_property(
+      TARGET caffe2::cudnn-private PROPERTY INTERFACE_LINK_LIBRARIES
+      ${CUDNN_LIBRARY_PATH})
     set_property(
       TARGET caffe2::cudnn-private APPEND PROPERTY INTERFACE_LINK_LIBRARIES
       "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a" dl)

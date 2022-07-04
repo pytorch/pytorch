@@ -447,7 +447,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         %0 : int[] = prim::Constant[value=[2, 2, 1]]()
         %1 : int = prim::Constant[value=0]()
         %2 : Tensor = aten::t(%b)
-        %3 : Tensor = aten::gelu(%2)
+        %3 : Tensor = aten::relu(%2)
         %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%b, %3, %2)
         return (%4)
 """
@@ -471,7 +471,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         %1 : int = prim::Constant[value=0]()
         %d : Tensor = aten::t(%c)
         %2 : Tensor = aten::t(%b)
-        %3 : Tensor = aten::gelu(%2)
+        %3 : Tensor = aten::relu(%2)
         %4 : (Tensor, Tensor, Tensor[]) = prim::TupleConstruct(%3, %2, %d, %b, %c, %b)
         return (%4)
 """
@@ -483,3 +483,37 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 .check("Tensor = aten::relu") \
                 .check_not("aten::t") \
                 .run(graph)
+
+    def test_has_profiled_info_aliasing_outputs(self):
+        # The expectation is that CallFunction will prevent the final profile node from
+        # getting merged into the DifferentiableGraph, and that create_autodiff_subgraphs
+        # will instead add this to the type for %4.
+        ir = """
+        graph(%a : Tensor):
+            %1 : Tensor = prim::profile[profiled_type=Float(requires_grad=0)](%a)
+            %2 : Tensor = aten::relu(%1)
+            %3 : Tensor = prim::profile[profiled_type=Float(requires_grad=0)](%2)
+            %4 : Tensor = aten::relu(%3)
+            %5 : Tensor = prim::CallFunction(%4)
+            %6 : Tensor = prim::profile[profiled_type=Float(requires_grad=0)](%4)
+            return (%6)
+        """
+
+        graph = torch._C.parse_ir(ir)
+        torch._C._jit_pass_create_autodiff_subgraphs(graph)
+
+        for n in graph.nodes():
+            if n.kind() == "prim::DifferentiableGraph":
+                diff_graph = n.g("Subgraph")
+
+        outputs = list(diff_graph.outputs())
+        self.assertEqual(1, len(outputs))
+        output = outputs[0]
+        self.assertEqual(False, output.requiresGrad())
+
+        FileCheck().check("= prim::DifferentiableGraph") \
+            .check("with prim::DifferentiableGraph") \
+            .check(" = aten::relu") \
+            .check("requires_grad=0") \
+            .check("aten::relu") \
+            .run(graph)

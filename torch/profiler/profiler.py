@@ -9,8 +9,17 @@ from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
+from torch._C._autograd import (
+    _ExperimentalConfig,
+    _add_execution_graph_observer,
+    _remove_execution_graph_observer,
+    _enable_execution_graph_observer,
+    _disable_execution_graph_observer,
+)
 from torch.autograd import ProfilerActivity, kineto_available
 
+__all__ = ['supported_activities', 'ProfilerAction', 'schedule', 'tensorboard_trace_handler', 'profile',
+           'ExecutionGraphObserver']
 
 def supported_activities():
     """
@@ -45,6 +54,9 @@ class _KinetoProfile(object):
             Note that this support exist, at the moment, only for TorchScript models
             and not eager mode models.
 
+        experimental_config (_ExperimentalConfig) : A set of experimental options
+            used by profiler libraries like Kineto. Note, backward compatibility is not guaranteed.
+
     .. note::
         This API is an experimental and subject to change in future.
 
@@ -61,13 +73,15 @@ class _KinetoProfile(object):
             profile_memory: bool = False,
             with_stack: bool = False,
             with_flops: bool = False,
-            with_modules: bool = False):
+            with_modules: bool = False,
+            experimental_config: Optional[_ExperimentalConfig] = None):
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
         self.with_flops = with_flops
         self.profile_memory = profile_memory
         self.with_stack = with_stack
         self.with_modules = with_modules
+        self.experimental_config = experimental_config
         self.profiler: Optional[prof.profile] = None
 
     def start(self):
@@ -87,6 +101,7 @@ class _KinetoProfile(object):
             with_stack=self.with_stack,
             with_modules=self.with_modules,
             use_kineto=True,
+            experimental_config=self.experimental_config,
         )
         self.profiler._prepare_trace()
 
@@ -281,6 +296,9 @@ class profile(_KinetoProfile):
             then aten::add's module hierarchy is A.B
             Note that this support exist, at the moment, only for TorchScript models
             and not eager mode models.
+        experimental_config (_ExperimentalConfig) : A set of experimental options
+            used for Kineto library features. Note, backward compatibility is not guaranteed.
+
         use_cuda (bool):
             .. deprecated:: 1.8.1
                 use ``activities`` instead.
@@ -376,6 +394,7 @@ class profile(_KinetoProfile):
             with_stack: bool = False,
             with_flops: bool = False,
             with_modules: bool = False,
+            experimental_config: Optional[_ExperimentalConfig] = None,
             # deprecated:
             use_cuda: Optional[bool] = None):
 
@@ -394,7 +413,8 @@ class profile(_KinetoProfile):
             profile_memory=profile_memory,
             with_stack=with_stack,
             with_flops=with_flops,
-            with_modules=with_modules
+            with_modules=with_modules,
+            experimental_config=experimental_config,
         )
 
         if schedule:
@@ -473,13 +493,15 @@ class profile(_KinetoProfile):
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         prev_action = self.current_action
+        cur_step = self.step_num
         self.step_num += 1
         self.current_action = self.schedule(self.step_num)
 
         self._transit_action(prev_action, self.current_action)
 
+        prof.kineto_step()
         if self.record_steps:
-            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(self.step_num))
+            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(cur_step))
             self.step_rec_fn.__enter__()
 
     def _trace_ready(self):
@@ -491,3 +513,72 @@ class profile(_KinetoProfile):
         if action_list:
             for action in action_list:
                 action()
+
+
+
+class ExecutionGraphObserver:
+    """Execution Graph Observer
+
+    Each process can have a single ExecutionGraphObserver instance. The observer
+    can be added to record function callbacks via calling register_callback()
+    explicitly. Without calling unregister_callback(), repeated calls to
+    register_callback() will not add additional observers to record function
+    callbacks. Once an ExecutionGraphObserver is created, the start() and stop()
+    methods control when the event data is recorded.
+
+    Deleting or calling unregister_callback() will remove the observer from the
+    record function callbacks, finalize the output file, and will stop
+    incurring any overheads.
+    """
+    def __init__(self):
+        """
+        Initializes the default states.
+        """
+        self._registered = False
+        self._execution_graph_running = False
+
+    def __del__(self):
+        """
+        Calls unregister_callback() to make sure to finalize outputs.
+        """
+        self.unregister_callback()
+
+    def register_callback(self, output_file_path: str):
+        """
+        Adds EG observer to record function callbacks. The the data will be
+        written to output_file_path.
+        """
+        if not self._registered:
+            self._output_file_path = output_file_path
+            self._registered = _add_execution_graph_observer(output_file_path)
+
+    def unregister_callback(self):
+        """
+        Removes EG observer from record function callbacks.
+        """
+        if self._registered:
+            self.stop()
+            _remove_execution_graph_observer()
+            self._registered = False
+
+    def start(self):
+        """
+        Starts to capture.
+        """
+        if self._registered and not self._execution_graph_running:
+            _enable_execution_graph_observer()
+            self._execution_graph_running = True
+
+    def stop(self):
+        """
+        Stops to capture.
+        """
+        if self._execution_graph_running:
+            _disable_execution_graph_observer()
+            self._execution_graph_running = False
+
+    def get_output_file_path(self) -> str:
+        """
+        Returns the output file name.
+        """
+        return self._output_file_path

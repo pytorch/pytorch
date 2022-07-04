@@ -1,10 +1,6 @@
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 #cmake_policy(SET CMP0022 NEW)
 #cmake_policy(SET CMP0023 NEW)
-
-if(CMAKE_GENERATOR STREQUAL "Ninja" AND CMAKE_VERSION VERSION_LESS 3.13)
-  message(FATAL_ERROR "Using the Ninja generator requires CMake version 3.13 or greater")
-endif()
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode.
 # Not setting this sometimes makes XCode C compiler gets detected as "Clang",
@@ -94,30 +90,38 @@ if(APPLE)
   # RPATH stuff
   set(CMAKE_MACOSX_RPATH ON)
   if(NOT IOS)
-    # Determine if we can link against ML Compute
-    set(MLCOMPUTE_FOUND OFF)
+    # Determine if we can link against MPSGraph
+    set(MPS_FOUND OFF)
     execute_process(
-      COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
-      OUTPUT_VARIABLE _macosx_sdk_path
+      COMMAND bash -c "xcrun --sdk macosx --show-sdk-version"
+      RESULT_VARIABLE _exit_code
+      OUTPUT_VARIABLE _macosx_sdk_version
       OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(_exit_code EQUAL 0)
+        set(_MPS_supported_os_version OFF)
+        if(_macosx_sdk_version VERSION_GREATER_EQUAL 12.3)
+            set(_MPS_supported_os_version ON)
+        endif()
+        message(STATUS "sdk version: ${_macosx_sdk_version}, mps supported: ${_MPS_supported_os_version}")
+        execute_process(
+          COMMAND bash -c "xcrun --sdk macosx --show-sdk-path"
+          OUTPUT_VARIABLE _macosx_sdk_path
+          OUTPUT_STRIP_TRAILING_WHITESPACE)
+        set(_SDK_SEARCH_PATH "${_macosx_sdk_path}/System/Library/Frameworks/")
+        set(_FRAMEWORK_SEARCH_PATH "/System/Library/Frameworks/")
 
-    set(_SDK_SEARCH_PATH "${_macosx_sdk_path}/System/Library/Frameworks/")
-    set(_FRAMEWORK_SEARCH_PATH "/System/Library/Frameworks/")
+        find_library(_MPS_fwrk_path_ NAMES MetalPerformanceShadersGraph MetalPerformanceShaders PATHS ${_FRAMEWORK_SEARCH_PATH} NO_DEFAULT_PATH)
+        find_library(_MPS_sdk_path_ NAMES MetalPerformanceShadersGraph MetalPerformanceShaders PATHS ${_SDK_SEARCH_PATH} NO_DEFAULT_PATH)
 
-    find_library(_MLCompute_fwrk_path_ NAMES MLCompute PATHS ${_FRAMEWORK_SEARCH_PATH} NO_DEFAULT_PATH)
-    find_library(_MLCompute_sdk_path_ NAMES MLCompute PATHS ${_SDK_SEARCH_PATH} NO_DEFAULT_PATH)
-
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/mlc)
-      set(_MLC_FOLDER_EXISTS YES)
+        if(_MPS_supported_os_version AND _MPS_fwrk_path_ AND _MPS_sdk_path_)
+          set(MPS_FOUND ON)
+          message(STATUS "MPSGraph framework found")
+        else()
+          message(STATUS "MPSGraph framework not found")
+        endif()
     else()
-      set(_MLC_FOLDER_EXISTS NO)
-    endif()
-
-    if(_MLCompute_fwrk_path_ AND _MLCompute_sdk_path_ AND _MLC_FOLDER_EXISTS)
-      set(MLCOMPUTE_FOUND ON)
-      message(STATUS "ML Compute framework found")
-    else()
-      message(STATUS "ML Compute framework not found")
+      message(STATUS "MPS: unable to get MacOS sdk version")
+      message(STATUS "MPSGraph framework not found")
     endif()
   endif()
 endif()
@@ -189,6 +193,8 @@ option(USE_CUDA "Use CUDA" ON)
 cmake_dependent_option(
     BUILD_SPLIT_CUDA "Split torch_cuda library into torch_cuda_cu and torch_cuda_cpp" OFF
     "USE_CUDA AND NOT CUDA_SEPARABLE_COMPILATION" OFF)
+cmake_dependent_option(
+     BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 option(USE_FAST_NVCC "Use parallel NVCC build" OFF)
 option(USE_ROCM "Use ROCm" ON)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -202,15 +208,11 @@ cmake_dependent_option(
     BUILD_NVFUSER_BENCHMARK "Build C++ binaries for nvfuser benchmarks" ON
     "USE_CUDA;BUILD_TEST" OFF)
 cmake_dependent_option(
-  USE_WHOLE_CUDNN "Use whole-library linking for cuDNN" OFF
-    "USE_STATIC_CUDNN" OFF)
-cmake_dependent_option(
-    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" OFF
+    USE_EXPERIMENTAL_CUDNN_V8_API "Use experimental cuDNN v8 API" ON
     "USE_CUDNN" OFF)
 option(USE_FBGEMM "Use FBGEMM (quantized 8-bit server operators)" ON)
 option(USE_KINETO "Use Kineto profiling library" ON)
-option(USE_BREAKPAD "Use breakpad crash dump library" ON)
-option(USE_CUPTI_SO "Use CUPTI as a shared library" OFF)
+option(USE_CUPTI_SO "Use CUPTI as a shared library" ON)
 option(USE_FAKELOWP "Use FakeLowp operators" OFF)
 option(USE_FFMPEG "Use ffmpeg" OFF)
 option(USE_GFLAGS "Use GFLAGS" OFF)
@@ -224,8 +226,8 @@ option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(
-    USE_MLCOMPUTE "Use ML Compute for macOS build" ON
-    "MLCOMPUTE_FOUND" OFF)
+    USE_MPS "Use MPS for macOS build" ON
+    "MPS_FOUND" OFF)
 cmake_dependent_option(
     USE_NCCL "Use NCCL" ON
     "USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
@@ -273,16 +275,20 @@ if(NOT DEFINED USE_VULKAN)
       "ANDROID" OFF)
 endif()
 
-if(IOS)
-  set(USE_BREAKPAD OFF)
-endif()
-
+option(USE_SLEEF_FOR_ARM_VEC256 "Use sleef for arm" OFF)
 option(USE_SOURCE_DEBUG_ON_MOBILE "Enable " ON)
 option(USE_LITE_INTERPRETER_PROFILER "Enable " ON)
 option(USE_VULKAN_FP16_INFERENCE "Vulkan - Use fp16 inference" OFF)
 option(USE_VULKAN_RELAXED_PRECISION "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 option(USE_VULKAN_SHADERC_RUNTIME "Vulkan - Use runtime shader compilation as opposed to build-time (needs libshaderc)" OFF)
-option(USE_XNNPACK "Use XNNPACK" ON)
+# option USE_XNNPACK: try to enable xnnpack by default.
+set(XNNPACK_MIN_CMAKE_VER 3.12)
+cmake_dependent_option(
+    USE_XNNPACK "Use XNNPACK. Requires cmake >= ${XNNPACK_MIN_CMAKE_VER}." ON
+    "CMAKE_VERSION VERSION_GREATER_EQUAL ${XNNPACK_MIN_CMAKE_VER}" OFF)
+if(NOT USE_XNNPACK AND CMAKE_VERSION VERSION_LESS ${XNNPACK_MIN_CMAKE_VER})
+  message(WARNING "USE_XNNPACK is set to OFF. XNNPACK requires CMake version ${XNNPACK_MIN_CMAKE_VER} or greater.")
+endif()
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
 # Ensure that an MKLDNN build is the default for x86 CPUs
@@ -297,6 +303,7 @@ set(MKLDNN_ENABLE_CONCURRENT_EXEC ${USE_MKLDNN})
 cmake_dependent_option(
     USE_MKLDNN_CBLAS "Use CBLAS in MKLDNN" OFF
     "USE_MKLDNN" OFF)
+option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(
     USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON
@@ -305,12 +312,15 @@ cmake_dependent_option(
     USE_GLOO "Use Gloo. Only available if USE_DISTRIBUTED is on." ON
     "USE_DISTRIBUTED" OFF)
 cmake_dependent_option(
-    USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
+  USE_GLOO_WITH_OPENSSL "Use Gloo with OpenSSL. Only available if USE_GLOO is on." OFF
     "USE_GLOO AND LINUX AND NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     USE_C10D_GLOO "USE C10D GLOO" ON "USE_DISTRIBUTED;USE_GLOO" OFF)
 cmake_dependent_option(
     USE_C10D_NCCL "USE C10D NCCL" ON "USE_DISTRIBUTED;USE_NCCL" OFF)
+cmake_dependent_option(
+    USE_NCCL_WITH_UCC "Enable UCC support for ProcessGroupNCCL. Only available if USE_C10D_NCCL is on." OFF
+    "USE_C10D_NCCL" OFF)
 cmake_dependent_option(
     USE_C10D_MPI "USE C10D MPI" ON "USE_DISTRIBUTED;USE_MPI" OFF)
 cmake_dependent_option(
@@ -329,6 +339,9 @@ cmake_dependent_option(USE_CCACHE "Attempt using CCache to wrap the compilation"
 option(WERROR "Build with -Werror supported by the compiler" OFF)
 option(USE_COREML_DELEGATE "Use the CoreML backend through delegate APIs" OFF)
 option(USE_PER_OPERATOR_HEADERS "Whether ATen should generate separate headers for each operator" ON)
+cmake_dependent_option(
+    BUILD_LAZY_TS_BACKEND "Build the lazy Torchscript backend, not compatible with mobile builds" ON
+    "NOT INTERN_BUILD_MOBILE" OFF)
 
 
 if(USE_CCACHE)
@@ -428,8 +441,14 @@ else()
 endif()
 set(SELECTED_OP_LIST "" CACHE STRING
     "Path to the yaml file that contains the list of operators to include for custom build. Include all operators by default.")
-set(STATIC_DISPATCH_BACKEND "" CACHE STRING
-    "Name of the backend for which static dispatch code is generated, e.g.: CPU.")
+option(
+    STATIC_DISPATCH_BACKEND
+    "Name of the backend for which static dispatch code is generated, e.g.: CPU."
+    "")
+option(USE_LIGHTWEIGHT_DISPATCH "Enable codegen unboxing for ATen ops, need to work with static dispatch in order to work properly." OFF)
+if(USE_LIGHTWEIGHT_DISPATCH AND NOT STATIC_DISPATCH_BACKEND)
+  message(FATAL_ERROR "Need to enable static dispatch after enabling USE_LIGHTWEIGHT_DISPATCH.")
+endif()
 option(
   TRACING_BASED
   "Master flag to build Lite Interpreter with tracing build option"
@@ -537,6 +556,8 @@ endif(NOT MSVC)
 # purpose.
 if(ANDROID OR IOS OR DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
   set(INTERN_BUILD_MOBILE ON)
+  message(WARNING "INTERN_BUILD_MOBILE is on, disabling BUILD_LAZY_TS_BACKEND")
+  set(BUILD_LAZY_TS_BACKEND OFF)
 
   if(DEFINED ENV{BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN})
     # C10_MOBILE is derived from Android/iOS toolchain macros in
@@ -666,6 +687,8 @@ if(USE_FBGEMM AND ((CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" AND CMAKE_SIZEOF_VO
   set(USE_FBGEMM OFF)
 endif()
 
+set(BUILD_ONEDNN_GRAPH OFF)
+
 include(cmake/Dependencies.cmake)
 
 if(USE_CUDA AND (CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 10.2) AND (CMAKE_HOST_SYSTEM_NAME MATCHES "Windows"))
@@ -688,6 +711,10 @@ endif()
 
 if(USE_PYTORCH_QNNPACK)
   string(APPEND CMAKE_CXX_FLAGS " -DUSE_PYTORCH_QNNPACK")
+endif()
+
+if(USE_SLEEF_FOR_ARM_VEC256)
+  string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
 endif()
 
 if(USE_XNNPACK)
@@ -761,17 +788,19 @@ if(NOT MSVC)
   string(APPEND CMAKE_CXX_FLAGS " -Wno-type-limits")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-array-bounds")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-pragmas")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-sign-compare")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-parameter")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-function")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-result")
-  string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-local-typedefs")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-overflow")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-strict-aliasing")
   string(APPEND CMAKE_CXX_FLAGS " -Wno-error=deprecated-declarations")
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-range-loop-analysis")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-pass-failed")
+  endif()
+  if(CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 6.0.0))
+    # Suppress issue: https://gcc.gnu.org/bugzilla/show_bug.cgi?id=43407
+    string(APPEND CMAKE_CXX_FLAGS " -Wno-attributes")
   endif()
   if(CMAKE_COMPILER_IS_GNUCXX AND NOT (CMAKE_CXX_COMPILER_VERSION VERSION_LESS 7.0.0))
     string(APPEND CMAKE_CXX_FLAGS " -Wno-stringop-overflow")
@@ -811,6 +840,7 @@ if(NOT MSVC)
   # These flags are not available in GCC-4.8.5. Set only when using clang.
   # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
+    string(APPEND CMAKE_CXX_FLAGS " -Wconstant-conversion")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-invalid-partial-specialization")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-typedef-redefinition")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unknown-warning-option")
@@ -859,6 +889,9 @@ if(NOT MSVC)
   if(HAS_WERROR_CAST_FUNCTION_TYPE)
     string(APPEND CMAKE_CXX_FLAGS " -Werror=cast-function-type")
   endif()
+  check_cxx_compiler_flag("-Werror=sign-compare" HAS_WERROR_SIGN_COMPARE)
+  # This doesn't work globally so we use the test on specific
+  # target_compile_options
 endif()
 
 if(USE_ASAN)
@@ -913,8 +946,9 @@ if(USE_CPP_CODE_COVERAGE)
 endif()
 
 if(APPLE)
-    if(USE_MLCOMPUTE)
-      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DUSE_MLCOMPUTE -fobjc-arc -framework MLCompute -framework Metal")
+    if(USE_MPS)
+      string(APPEND CMAKE_CXX_FLAGS " -DUSE_MPS -fno-objc-arc")
+      string(APPEND CMAKE_SHARED_LINKER_FLAGS " -weak_framework Foundation -weak_framework MetalPerformanceShaders -weak_framework MetalPerformanceShadersGraph -weak_framework Metal")
     endif()
     string(APPEND CMAKE_CXX_FLAGS " -Wno-unused-private-field")
     string(APPEND CMAKE_CXX_FLAGS " -Wno-missing-braces")

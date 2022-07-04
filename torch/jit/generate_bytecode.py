@@ -1,4 +1,4 @@
-from torch._C import _generate_upgraders_bytecode
+from torch._C import _compile_graph_to_code_table, _generate_upgraders_graph
 from typing import List
 
 def format_bytecode(table):
@@ -16,11 +16,12 @@ def format_bytecode(table):
         formatted_table[identifier] = content
     return formatted_table
 
-def generate_bytecode() -> List:
+def generate_upgraders_bytecode() -> List:
     yaml_content = []
-    upgraders = _generate_upgraders_bytecode()
-    for (upgrader_name, upgrader_bytecode) in upgraders:
-        entry = {upgrader_name: format_bytecode(upgrader_bytecode)}
+    upgraders_graph_map = _generate_upgraders_graph()
+    for upgrader_name, upgrader_graph in upgraders_graph_map.items():
+        bytecode_table = _compile_graph_to_code_table(upgrader_name, upgrader_graph)
+        entry = {upgrader_name: format_bytecode(bytecode_table)}
         yaml_content.append(entry)
     return yaml_content
 

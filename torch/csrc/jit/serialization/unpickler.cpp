@@ -34,7 +34,7 @@ static void restoreAccurateTypeTagsIfPossible(const IValue& root) {
 // of the contained objects and cannot restore the tags.
 void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
   struct Work {
-    TypePtr static_type;
+    TypePtr type;
     IValue value;
   };
   std::vector<Work> to_process = {{type_tag, root}};
@@ -53,7 +53,11 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       }
       scanned.emplace_hint(it, key);
     }
-    switch (w.static_type->kind()) {
+    auto kind = w.type->kind();
+    if (auto dyn = w.type->castRaw<c10::DynamicType>()) {
+      kind = dyn->dynamicKind();
+    }
+    switch (kind) {
       case TensorType::Kind:
       case StorageType::Kind:
       case NumberType::Kind:
@@ -73,6 +77,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case StreamObjType::Kind:
       case QSchemeType::Kind:
       case LayoutType::Kind:
+      case MemoryFormatType::Kind:
       case ScalarTypeType::Kind:
       case RRefType::Kind:
       case AnyType::Kind:
@@ -82,44 +87,33 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
       case AnyEnumType::Kind:
         // no op, there is nothing to tag
         break;
+      case c10::SymIntType::Kind:
+        TORCH_CHECK(!w.value.toSymInt().is_symbolic());
+        // no op, there is nothing to tag
+        break;
       case DynamicType::Kind:
+      case UnionType::Kind:
       case EnumType::Kind:
         // TODO(gmagogsfm): Implement serialization/deserialization of Enum.
         TORCH_INTERNAL_ASSERT(false);
       case TupleType::Kind: {
         auto t = w.value.toTuple();
-        auto ttype = w.static_type->expect<TupleType>();
-        for (size_t i = 0; i < ttype->containedTypes().size(); ++i) {
-          Work elem = {ttype->containedTypes().at(i), t->elements().at(i)};
+        for (size_t i = 0; i < w.type->containedTypeSize(); ++i) {
+          Work elem = {w.type->containedType(i), t->elements().at(i)};
           to_process.emplace_back(std::move(elem));
         }
       } break;
       case FutureType::Kind: {
         auto f = w.value.toFuture();
-        auto t = w.static_type->expect<FutureType>();
         if (f->completed()) {
-          Work elem = {t->getElementType(), f->value()};
+          Work elem = {w.type->containedType(0), f->value()};
           to_process.emplace_back(std::move(elem));
         }
       } break;
       case OptionalType::Kind: {
         if (!w.value.isNone()) {
-          auto t = w.static_type->expect<OptionalType>();
-          Work elem = {t->getElementType(), w.value};
+          Work elem = {w.type->containedType(0), w.value};
           to_process.emplace_back(std::move(elem));
-        }
-      } break;
-      case UnionType::Kind: {
-        auto t = w.static_type->expect<UnionType>();
-        if (t->containedTypes().size() == 2 &&
-            t->canHoldType(*NoneType::get())) {
-          if (!w.value.isNone()) {
-            auto inner = t->containedTypes()[0] != NoneType::get()
-                ? t->containedTypes()[0]
-                : t->containedTypes()[1];
-            Work elem = {inner, w.value};
-            to_process.emplace_back(std::move(elem));
-          }
         }
       } break;
       case ListType::Kind: {
@@ -128,7 +122,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         if (!w.value.isList()) {
           break;
         }
-        auto elem_type = w.static_type->castRaw<ListType>()->getElementType();
+        auto elem_type = w.type->containedType(0);
         auto lst = w.value.toList();
         lst.unsafeSetElementType(elem_type);
         for (const IValue item : lst) {
@@ -137,13 +131,14 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
         }
       } break;
       case DictType::Kind: {
-        auto dt = w.static_type->cast<DictType>();
         auto d = w.value.toGenericDict();
-        d.unsafeSetKeyType(dt->getKeyType());
-        d.unsafeSetValueType(dt->getValueType());
+        auto keyType = w.type->containedType(0);
+        auto valType = w.type->containedType(1);
+        d.unsafeSetKeyType(keyType);
+        d.unsafeSetValueType(valType);
         for (const auto& item : d) {
-          Work kelem = {dt->getKeyType(), item.key()};
-          Work velem = {dt->getValueType(), item.value()};
+          Work kelem = {keyType, item.key()};
+          Work velem = {valType, item.value()};
           to_process.emplace_back(std::move(kelem));
           to_process.emplace_back(std::move(velem));
         }
@@ -510,7 +505,7 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.is_cuda() || device.is_xpu()) {
+      if (device.is_cuda() || device.is_xpu() || device.is_meta()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         AT_ERROR(

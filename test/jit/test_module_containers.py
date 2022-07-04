@@ -663,3 +663,43 @@ class TestModuleContainers(JitTestCase):
 
         # Check that ignored method is still intact.
         self.assertEqual(inp, n.ignored_method(inp))
+
+    def test_parameterlist_script_getitem(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module_list = nn.ModuleList([nn.Linear(1, 1) for _ in range(10)])
+                self.parameter_list = nn.ParameterList([nn.Parameter(torch.zeros(1)) for _ in range(10)])
+
+            def forward(self, x):
+                self.module_list[0]
+                self.parameter_list[0]
+                return x
+
+        self.checkModule(MyModule(), (torch.zeros(1)))
+
+    def test_parameterlist_script_iter(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.module_list = nn.ModuleList([nn.Linear(1, 1) for _ in range(10)])
+                self.parameter_list = nn.ParameterList([nn.Parameter(torch.zeros(1)) for _ in range(10)])
+
+            def forward(self, x):
+                r = x
+                for i, p in enumerate(self.parameter_list):
+                    r = r + p + i
+                return r
+
+        self.checkModule(MyModule(), (torch.zeros(1),))
+
+    def test_parameterdict_script_getitem(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.parameter_dict = nn.ParameterDict({k: nn.Parameter(torch.zeros(1)) for k in ['a', 'b', 'c']})
+
+            def forward(self, x):
+                return self.parameter_dict['a'] * x + self.parameter_dict['b'] * self.parameter_dict['c']
+
+        self.checkModule(MyModule(), (torch.ones(1),))

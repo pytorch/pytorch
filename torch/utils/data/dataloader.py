@@ -5,23 +5,46 @@ functions to be run in multiprocessing. E.g., the data loading worker loop is
 in `./_utils/worker.py`.
 """
 
-import os
-import threading
+import functools
 import itertools
-import warnings
+import logging
+import os
 import queue
+import threading
+import time
+import warnings
+
 from typing import Any, Callable, Iterable, TypeVar, Generic, Sequence, List, Optional, Union
 
 import multiprocessing as python_multiprocessing
 import torch
+import torch.distributed as dist
 import torch.multiprocessing as multiprocessing
+import torch.utils.data.graph_settings
+
 from torch._utils import ExceptionWrapper
 from torch._six import string_classes
 
-from . import IterDataPipe, IterableDataset, Sampler, SequentialSampler, RandomSampler, BatchSampler, Dataset
+from . import (
+    IterDataPipe,
+    MapDataPipe,
+    IterableDataset,
+    Sampler,
+    SequentialSampler,
+    RandomSampler,
+    BatchSampler,
+    Dataset,)
+
+from torch.utils.data.datapipes.datapipe import _IterDataPipeSerializationWrapper, _MapDataPipeSerializationWrapper
+
 from . import _utils
 
-import torch.utils.data.graph_settings
+__all__ = [
+    "DataLoader",
+    "get_worker_info",
+    "default_collate",
+    "default_convert",
+]
 
 T_co = TypeVar('T_co', covariant=True)
 T = TypeVar('T')
@@ -42,6 +65,8 @@ default_collate: _collate_fn_t = _utils.collate.default_collate
 default_convert = _utils.collate.default_convert
 
 get_worker_info = _utils.worker.get_worker_info
+
+logger = logging.getLogger(__name__)
 
 
 class _DatasetKind(object):
@@ -70,6 +95,27 @@ class _InfiniteConstantSampler(Sampler):
     def __iter__(self):
         while True:
             yield None
+
+
+def _get_distributed_settings():
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_world_size(), dist.get_rank()
+    else:
+        return 1, 0
+
+
+def _sharding_worker_init_fn(worker_init_fn, world_size, rank_id, worker_id):
+    global_worker_id = worker_id
+    info = torch.utils.data.get_worker_info()
+    total_workers = info.num_workers
+    datapipe = info.dataset
+    # To distribute elements across distributed process evenly, we should shard data on distributed
+    # processes first then shard on worker processes
+    total_workers *= world_size
+    global_worker_id = global_worker_id * world_size + rank_id
+    torch.utils.data.graph_settings.apply_sharding(datapipe, total_workers, global_worker_id)
+    if worker_init_fn is not None:
+        worker_init_fn(worker_id)
 
 
 class DataLoader(Generic[T_co]):
@@ -103,7 +149,7 @@ class DataLoader(Generic[T_co]):
             mini-batch of Tensor(s).  Used when using batched loading from a
             map-style dataset.
         pin_memory (bool, optional): If ``True``, the data loader will copy Tensors
-            into CUDA pinned memory before returning them.  If your data elements
+            into device/CUDA pinned memory before returning them.  If your data elements
             are a custom type, or your :attr:`collate_fn` returns a batch that is a custom type,
             see the example below.
         drop_last (bool, optional): set to ``True`` to drop the last incomplete batch,
@@ -118,12 +164,14 @@ class DataLoader(Generic[T_co]):
         generator (torch.Generator, optional): If not ``None``, this RNG will be used
             by RandomSampler to generate random indexes and multiprocessing to generate
             `base_seed` for workers. (default: ``None``)
-        prefetch_factor (int, optional, keyword-only arg): Number of samples loaded
+        prefetch_factor (int, optional, keyword-only arg): Number of batches loaded
             in advance by each worker. ``2`` means there will be a total of
-            2 * num_workers samples prefetched across all workers. (default: ``2``)
+            2 * num_workers batches prefetched across all workers. (default: ``2``)
         persistent_workers (bool, optional): If ``True``, the data loader will not shutdown
             the worker processes after a dataset has been consumed once. This allows to
             maintain the workers `Dataset` instances alive. (default: ``False``)
+        pin_memory_device (str, optional): the data loader will copy Tensors
+            into device pinned memory before returning them if pin_memory is set to true.
 
 
     .. warning:: If the ``spawn`` start method is used, :attr:`worker_init_fn`
@@ -159,19 +207,21 @@ class DataLoader(Generic[T_co]):
     drop_last: bool
     timeout: float
     sampler: Union[Sampler, Iterable]
+    pin_memory_device: str
     prefetch_factor: int
     _iterator : Optional['_BaseDataLoaderIter']
     __initialized = False
 
     def __init__(self, dataset: Dataset[T_co], batch_size: Optional[int] = 1,
-                 shuffle: bool = False, sampler: Union[Sampler, Iterable, None] = None,
+                 shuffle: Optional[bool] = None, sampler: Union[Sampler, Iterable, None] = None,
                  batch_sampler: Union[Sampler[Sequence], Iterable[Sequence], None] = None,
                  num_workers: int = 0, collate_fn: Optional[_collate_fn_t] = None,
                  pin_memory: bool = False, drop_last: bool = False,
                  timeout: float = 0, worker_init_fn: Optional[_worker_init_fn_t] = None,
                  multiprocessing_context=None, generator=None,
                  *, prefetch_factor: int = 2,
-                 persistent_workers: bool = False):
+                 persistent_workers: bool = False,
+                 pin_memory_device: str = ""):
         torch._C._log_api_usage_once("python.data_loader")
 
         if num_workers < 0:
@@ -193,9 +243,31 @@ class DataLoader(Generic[T_co]):
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
         self.pin_memory = pin_memory
+        self.pin_memory_device = pin_memory_device
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
         self.multiprocessing_context = multiprocessing_context
+
+        # Adds several forward compatibilities so classic DataLoader can work with DataPipes
+        # 1. _DataPipeSerializationWrapper container makes it easier to serialize without redefining pickler
+        # 2. Additional worker init function will take care of sharding in MP and Distributed
+        if isinstance(self.dataset, IterDataPipe):
+            self.dataset = _IterDataPipeSerializationWrapper(self.dataset)
+            ws, rank = _get_distributed_settings()
+            if num_workers > 0:
+                self.worker_init_fn = functools.partial(
+                    _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
+            else:
+                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
+        elif isinstance(self.dataset, MapDataPipe):
+            self.dataset = _MapDataPipeSerializationWrapper(self.dataset)
+            ws, rank = _get_distributed_settings()
+            if num_workers > 0:
+                self.worker_init_fn = functools.partial(
+                    _sharding_worker_init_fn, self.worker_init_fn, ws, rank)
+            else:
+                torch.utils.data.graph_settings.apply_sharding(self.dataset, ws, rank)
+
 
         # Arg-check dataset related before checking samplers because we want to
         # tell users that iterable-style datasets are incompatible with custom
@@ -229,8 +301,10 @@ class DataLoader(Generic[T_co]):
             # this, and support custom samplers that specify the assignments to
             # specific workers.
             if isinstance(dataset, IterDataPipe):
-                torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
-            elif shuffle is not False:
+                if shuffle is not None:
+                    dataset = torch.utils.data.graph_settings.apply_shuffle_settings(dataset, shuffle=shuffle)
+            # We cannot check `shuffle is not None` here, since previously `shuffle=False` was the default.
+            elif shuffle not in {False, None}:
                 raise ValueError(
                     "DataLoader with IterableDataset: expected unspecified "
                     "shuffle option, but got shuffle={}".format(shuffle))
@@ -246,6 +320,7 @@ class DataLoader(Generic[T_co]):
                     "DataLoader with IterableDataset: expected unspecified "
                     "batch_sampler option, but got batch_sampler={}".format(batch_sampler))
         else:
+            shuffle = bool(shuffle)
             self._dataset_kind = _DatasetKind.Map
 
 
@@ -489,10 +564,49 @@ class DataLoader(Generic[T_co]):
                 self.num_workers,
                 cpuset_checked))
 
+    def _get_shared_seed(self):
+        if isinstance(self.dataset, IterDataPipe):
+            _shared_seed = torch.empty((), dtype=torch.int64).random_(generator=self.generator).item()
+            if dist.is_available() and dist.is_initialized():
+                rank = dist.get_rank()
+                ws = dist.get_world_size()
+                store = dist.distributed_c10d._get_default_store()
+                if rank == 0:
+                    _shared_seed_str = str(_shared_seed)
+                    store.set(_utils.DATAPIPE_SHARED_SEED, _shared_seed_str)
+                    logger.info(f"Shared seed ({_shared_seed_str}) sent to store on rank 0")
+                    # Use 'add' instead of 'get' since for some store implementations 'add'
+                    # doesn't work well with 'get'.
+                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
+                    while _shared_seed_recv_cnt < ws:
+                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
+                        _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 0)
+                    # Reset after all distributed processes have received the shared seed
+                    store.set(_utils.DATAPIPE_SHARED_SEED, "")
+                    _shared_seed_recv_cnt = store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, -ws)
+                    assert _shared_seed_recv_cnt == 0
+                else:
+                    _shared_seed_str = ""
+                    store.wait([_utils.DATAPIPE_SHARED_SEED], _utils.MP_STATUS_CHECK_INTERVAL)
+                    while len(_shared_seed_str) == 0:
+                        time.sleep(_utils.DATAPIPE_SHARED_SEED_CHECK_INTERVAL)
+                        _shared_seed_str = store.get(_utils.DATAPIPE_SHARED_SEED)
+                    logger.info(f"Shared seed ({_shared_seed_str}) received from store on rank {rank}")
+                    store.add(_utils.DATAPIPE_SHARED_SEED_COUNTER, 1)
+                    _shared_seed = int(_shared_seed_str)
+            return _shared_seed
+        else:
+            return None
+
 
 class _BaseDataLoaderIter(object):
     def __init__(self, loader: DataLoader) -> None:
         self._dataset = loader.dataset
+        self._shared_seed = loader._get_shared_seed()
+        if isinstance(self._dataset, IterDataPipe):
+            shared_rng = torch.Generator()
+            shared_rng.manual_seed(self._shared_seed)
+            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
         self._dataset_kind = loader._dataset_kind
         self._IterableDataset_len_called = loader._IterableDataset_len_called
         self._auto_collation = loader._auto_collation
@@ -500,7 +614,20 @@ class _BaseDataLoaderIter(object):
         self._index_sampler = loader._index_sampler
         self._num_workers = loader.num_workers
         self._prefetch_factor = loader.prefetch_factor
-        self._pin_memory = loader.pin_memory and torch.cuda.is_available()
+        # for other backends, pin_memory_device need to set. if not set
+        # default behaviour is CUDA device. if pin_memory_device is selected
+        # and pin_memory is not set, the default behaviour false.
+        if (len(loader.pin_memory_device) == 0):
+            self._pin_memory = loader.pin_memory and torch.cuda.is_available()
+            self._pin_memory_device = None
+        else:
+            if not loader.pin_memory:
+                warn_msg = ("pin memory device is set and pin_memory flag is not used then device pinned memory won't be used"
+                            "please set pin_memory to true, if you need to use the device pin memory")
+                warnings.warn(warn_msg)
+
+            self._pin_memory = loader.pin_memory
+            self._pin_memory_device = loader.pin_memory_device
         self._timeout = loader.timeout
         self._collate_fn = loader.collate_fn
         self._sampler_iter = iter(self._index_sampler)
@@ -516,6 +643,11 @@ class _BaseDataLoaderIter(object):
         self._sampler_iter = iter(self._index_sampler)
         self._num_yielded = 0
         self._IterableDataset_len_called = loader._IterableDataset_len_called
+        self._shared_seed = loader._get_shared_seed()
+        if isinstance(self._dataset, IterDataPipe):
+            shared_rng = torch.Generator()
+            shared_rng.manual_seed(self._shared_seed)
+            self._dataset = torch.utils.data.graph_settings.apply_shuffle_seed(self._dataset, shared_rng)
 
     def _next_index(self):
         return next(self._sampler_iter)  # may raise StopIteration
@@ -526,7 +658,8 @@ class _BaseDataLoaderIter(object):
     def __next__(self) -> Any:
         with torch.autograd.profiler.record_function(self._profile_name):
             if self._sampler_iter is None:
-                self._reset()
+                # TODO(https://github.com/pytorch/pytorch/issues/76750)
+                self._reset()  # type: ignore[call-arg]
             data = self._next_data()
             self._num_yielded += 1
             if self._dataset_kind == _DatasetKind.Iterable and \
@@ -541,8 +674,6 @@ class _BaseDataLoaderIter(object):
                                  "https://pytorch.org/docs/stable/data.html#torch.utils.data.IterableDataset for examples.")
                 warnings.warn(warn_msg)
             return data
-
-    next = __next__  # Python 2 compatibility
 
     def __len__(self) -> int:
         return len(self._index_sampler)
@@ -569,7 +700,7 @@ class _SingleProcessDataLoaderIter(_BaseDataLoaderIter):
         index = self._next_index()  # may raise StopIteration
         data = self._dataset_fetcher.fetch(index)  # may raise StopIteration
         if self._pin_memory:
-            data = _utils.pin_memory.pin_memory(data)
+            data = _utils.pin_memory.pin_memory(data, self._pin_memory_device)
         return data
 
 
@@ -895,7 +1026,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             multiprocessing_context = loader.multiprocessing_context
 
         self._worker_init_fn = loader.worker_init_fn
-        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
         # No certainty which module multiprocessing_context is
         self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
         self._worker_pids_set = False
@@ -916,7 +1046,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
                       self._base_seed, self._worker_init_fn, i, self._num_workers,
-                      self._persistent_workers))
+                      self._persistent_workers, self._shared_seed))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
             #     start a process and pass the arguments over via a pipe.
@@ -937,7 +1067,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 target=_utils.pin_memory._pin_memory_loop,
                 args=(self._worker_result_queue, self._data_queue,
                       torch.cuda.current_device(),
-                      self._pin_memory_thread_done_event))
+                      self._pin_memory_thread_done_event, self._pin_memory_device))
             pin_memory_thread.daemon = True
             pin_memory_thread.start()
             # Similar to workers (see comment above), we only register
@@ -945,6 +1075,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             self._pin_memory_thread = pin_memory_thread
         else:
             self._data_queue = self._worker_result_queue
+
+        # In some rare cases, persistent workers (daemonic processes)
+        # would be terminated before `__del__` of iterator is invoked
+        # when main process exits
+        # It would cause failure when pin_memory_thread tries to read
+        # corrupted data from worker_result_queue
+        # atexit is used to shutdown thread and child processes in the
+        # right sequence before main process exits
+        if self._persistent_workers and self._pin_memory:
+            import atexit
+            for w in self._workers:
+                atexit.register(_MultiProcessingDataLoaderIter._clean_up_worker, w)
 
         # .pid can be None only before process is spawned (not the case, so ignore)
         _utils.signal_handling._set_worker_pids(id(self), tuple(w.pid for w in self._workers))  # type: ignore[misc]
@@ -969,10 +1111,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         # It does not mean that a worker is dead. In case of `_persistent_workers`,
         # the worker will be reset to available in the next epoch.
         self._workers_status = [True for i in range(self._num_workers)]
+        # Reset the worker queue cycle so it resumes next epoch at worker 0
+        self._worker_queue_idx_cycle = itertools.cycle(range(self._num_workers))
         # We resume the prefetching in case it was enabled
         if not first_iter:
             for idx in range(self._num_workers):
-                self._index_queues[idx].put(_utils.worker._ResumeIteration())
+                self._index_queues[idx].put(_utils.worker._ResumeIteration(self._shared_seed))
             resume_iteration_cnt = self._num_workers
             while resume_iteration_cnt > 0:
                 return_idx, return_data = self._get_data()
@@ -1332,6 +1476,15 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                         # here, which we shouldn't, (e.g., pytorch/pytorch#39570),
                         # we kill the worker.
                         w.terminate()
+
+    # staticmethod is used to remove reference to `_MultiProcessingDataLoaderIter`
+    @staticmethod
+    def _clean_up_worker(w):
+        try:
+            w.join(timeout=_utils.MP_STATUS_CHECK_INTERVAL)
+        finally:
+            if w.is_alive():
+                w.terminate()
 
     def __del__(self):
         self._shutdown_workers()

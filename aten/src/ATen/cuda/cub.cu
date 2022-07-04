@@ -57,8 +57,8 @@ AT_INSTANTIATE_SORT_PAIRS(int64_t, 4)
 
 AT_FORALL_SCALAR_TYPES_AND2(Bool, Half, AT_INSTANTIATE_SORT_PAIRS_8)
 
-// BFloat16 is not supported by ROCm's radix sort
-#if !AT_ROCM_ENABLED()
+// BFloat16 Radix sort is supported from ROCm 4.5 onwards
+#if !AT_ROCM_ENABLED() || (AT_ROCM_ENABLED() && ROCM_VERSION >= 40500)
 AT_INSTANTIATE_SORT_PAIRS(c10::BFloat16, 8)
 #endif
 
@@ -145,7 +145,20 @@ void exclusive_sum_in_common_type(const input_t *input, output_t *output, int64_
 
 template void exclusive_sum_in_common_type(const int32_t *input, int32_t *output, int64_t num_items);
 template void exclusive_sum_in_common_type(const int64_t *input, int64_t *output, int64_t num_items);
-template void exclusive_sum_in_common_type(const bool *input, int64_t *output, int64_t num_items);
-template void exclusive_sum_in_common_type(const uint8_t *input, int64_t *output, int64_t num_items);
+
+namespace {
+struct CountMaskOp {
+  __device__ int64_t operator() (const uint8_t &x) const {
+    return x != 0;
+  }
+};
+}
+
+void mask_exclusive_sum(const uint8_t *mask, int64_t *output_idx, int64_t n) {
+  CountMaskOp op{};
+  auto iter = NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<
+      bool, decltype(op), decltype(mask)>(mask, op);
+  exclusive_scan(iter, output_idx, SumOp<int64_t>{}, int64_t{0}, n);
+}
 
 }}}  // namespace at::cuda::cub

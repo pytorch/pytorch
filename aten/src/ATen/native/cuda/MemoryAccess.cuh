@@ -2,12 +2,14 @@
 
 #include <cstdint>
 #include <type_traits>
+#include <c10/core/DynamicCast.h>
 #include <c10/util/Exception.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
 #include <ATen/core/Array.h>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
+#include <ATen/native/cuda/thread_constants.h>
 
 #include <thrust/tuple.h>
 
@@ -94,7 +96,7 @@ struct multi_outputs_store_helper {
 struct LoadWithoutCast {
   template<typename scalar_t>
   __device__ scalar_t load(char *base_ptr, uint32_t offset, int arg) {
-    return *(reinterpret_cast<scalar_t *>(base_ptr) + offset);
+    return c10::load(reinterpret_cast<scalar_t *>(base_ptr) + offset);
   }
 };
 
@@ -106,12 +108,12 @@ struct LoadWithCast {
   array_t dtypes;
   size_array_t element_sizes;
 
-  template<typename array_t_>
-  LoadWithCast(array_t_ dtypes) {
+  LoadWithCast(const TensorIteratorBase& iter) {
+    assert(iter.ninputs() == N);
     #pragma unroll
-    for (int i = 0; i < N; i++) {
-      this->dtypes[i] = dtypes[i];
-      element_sizes[i] = c10::elementSize(dtypes[i]);
+    for (auto i = 0; i < N; ++i) {
+      this->dtypes[i] = iter.dtype(i + iter.noutputs());
+      element_sizes[i] = c10::elementSize(iter.dtype(i + iter.noutputs()));
     }
   }
 
@@ -124,19 +126,32 @@ struct LoadWithCast {
 
 struct StoreWithoutCast {
   template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg = 0) {
     *(reinterpret_cast<scalar_t *>(base_ptr) + offset) = value;
   }
 };
 
+template <int N = 1>
 struct StoreWithCast {
-  at::ScalarType dtype;
-  uint32_t element_size;
-  StoreWithCast(at::ScalarType dtype): dtype(dtype), element_size(c10::elementSize(dtype)) {}
+  using array_t = at::detail::Array<at::ScalarType, std::max<int>(N, 1)>;
+  using size_array_t = at::detail::Array<uint32_t, std::max<int>(N, 1)>;
+
+  array_t dtypes;
+  size_array_t element_sizes;
+
+  StoreWithCast(const TensorIteratorBase& iter) {
+    assert(iter.noutputs() == N);
+    #pragma unroll
+    for (auto i = 0; i < N; ++i) {
+      this->dtypes[i] = iter.dtype(i);
+      element_sizes[i] = c10::elementSize(iter.dtype(i));
+    }
+  }
+
   template<typename scalar_t>
-  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset) {
-    void *ptr = base_ptr + element_size * offset;
-    c10::cast_and_store<scalar_t>(dtype, ptr, value);
+  __device__ void store(scalar_t value, char *base_ptr, uint32_t offset, int arg = 0) {
+    void *ptr = base_ptr + element_sizes[arg] * offset;
+    c10::cast_and_store<scalar_t>(dtypes[arg], ptr, value);
   }
 };
 
@@ -145,6 +160,24 @@ template<typename scalar_t, int vec_size>
 struct alignas(sizeof(scalar_t) * vec_size) aligned_vector {
   scalar_t val[vec_size];
 };
+
+template <int vec_size, typename scalar_t>
+__device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
+  using vec_t = aligned_vector<scalar_t, vec_size>;
+  auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+  return from[offset];
+}
+
+template <int vec_size>
+__device__ aligned_vector<bool, vec_size> load_vector(const bool *base_ptr, uint32_t offset) {
+  // See NOTE [Loading boolean values]
+  auto tmp = load_vector<vec_size>(reinterpret_cast<const uint8_t*>(base_ptr), offset);
+  aligned_vector<bool, vec_size> ret;
+  for (int i = 0; i < vec_size; ++i) {
+    ret.val[i] = bool(tmp.val[i]);
+  }
+  return ret;
+}
 
 namespace policies {
 
@@ -221,13 +254,11 @@ struct vectorized {
 
   template<typename accessor_t, typename scalar_t>
   __device__ inline void load_single_arg(accessor_t to, scalar_t *from) {
-    using vec_t = aligned_vector<scalar_t, vec_size>;
-    vec_t *from_ = reinterpret_cast<vec_t *>(from);
     int thread_idx = threadIdx.x;
     #pragma unroll
     for (int i = 0; i < loop_size; i++) {
       int index = thread_idx + i * num_threads();
-      vec_t v = from_[index];
+      auto v = load_vector<vec_size>(from, index);
       #pragma unroll
       for (int j = 0; j < vec_size; j++) {
         to(vec_size * i + j) = v.val[j];
@@ -348,21 +379,6 @@ inline int can_vectorize_up_to(array_t pointers) {
   // We need to get the type for each argument of `func_t`, this can only
   // be done at compile time.
   detail::static_unroll<can_vectorize_up_to_helper, arity>::with_args(result, pointers, traits());
-  return result;
-}
-
-// jitted version of the above
-// See Note [Jiterator], this relies on the assumptions enumerated there
-template<typename result_type, typename common_type, int arity, typename array_t>
-inline int jitted_can_vectorize_up_to(array_t pointers) {
-  // Deals with output
-  int result = can_vectorize_up_to<result_type>(pointers[0]);
-
-  // Incorporates input(s)
-  for (auto i = decltype(arity){1}; i < (arity + 1); ++i) {
-    result = std::min<int>(result, can_vectorize_up_to<common_type>(pointers[i]));
-  }
-
   return result;
 }
 

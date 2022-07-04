@@ -23,8 +23,8 @@ from torch._C._distributed_c10d import (
     ReduceScatterOptions,
     ScatterOptions,
     Store,
-    _DistributedDebugLevel,
-    _get_debug_mode,
+    DebugLevel,
+    get_debug_level,
 )
 from torch._six import string_classes
 
@@ -129,16 +129,18 @@ class Backend(object):
     @classmethod
     def register_backend(cls, name, func):
         """
-        Registers a new backend.
+        Registers a new backend with the given name and instantiating function.
 
-        This class method is used by 3rd party cpp extension to register new backend.
+        This class method is used by 3rd party ``ProcessGroup`` extension to
+        register new backends.
 
         Args:
-            name (str): Backend name matching with the one in `init_process_group()`.
+            name (str): Backend name of the ``ProcessGroup`` extension. It
+                        should match the one in ``init_process_group()``.
             func (function): Function handler that instantiates the backend.
-                             The function should be implemented in the backend cpp extension
-                             and takes four arguments, including prefix_store, rank,
-                             world_size, and timeout.
+                             The function should be implemented in the backend
+                             extension and takes four arguments, including
+                             ``store``, ``rank``, ``world_size``, and ``timeout``.
 
         .. note:: This support of 3rd party backend is experimental and subject to change.
 
@@ -213,6 +215,16 @@ _default_pg_init_method = None
 _group_count = 0
 
 STORE_BASED_BARRIER_PREFIX = "store_based_barrier_key"
+
+
+def _get_pg_device(group: ProcessGroup):
+    """
+    Returns the device to use with ``group``.
+    This is cuda for NCCL and CPU for everything else
+    """
+    if _check_for_nccl_backend(group):
+        return torch.device("cuda", torch.cuda.current_device())
+    return torch.device("cpu")
 
 
 def _store_based_barrier(rank, store, timeout):
@@ -701,7 +713,7 @@ def _new_process_group_helper(
             pg = ProcessGroupGloo(prefix_store, rank, world_size, timeout=timeout)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
-            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+            if get_debug_level() == DebugLevel.DETAIL:
                 if not _GLOO_AVAILABLE:
                     logger.info(
                         """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
@@ -736,7 +748,7 @@ def _new_process_group_helper(
             pg = ProcessGroupNCCL(prefix_store, rank, world_size, pg_options)
             # In debug mode and if GLOO is available, wrap in a wrapper PG that
             # enables enhanced collective checking for debugability.
-            if _get_debug_mode() == _DistributedDebugLevel.DETAIL:
+            if get_debug_level() == DebugLevel.DETAIL:
                 if not _GLOO_AVAILABLE:
                     logger.info(
                         """TORCH_DISTRIBUTED_DEBUG was set to DETAIL, but
@@ -1051,7 +1063,7 @@ def batch_isend_irecv(p2p_op_list):
     """
     Send or Receive a batch of tensors asynchronously and return a list of requests.
 
-    Process each of the operations in p2p_op_list and return the corresponding
+    Process each of the operations in ``p2p_op_list`` and return the corresponding
     requests. NCCL and Gloo backend are currently supported.
 
     Args:
@@ -1068,7 +1080,7 @@ def batch_isend_irecv(p2p_op_list):
         >>> send_tensor = torch.arange(2) + 2 * rank
         >>> recv_tensor = torch.randn(2)
         >>> send_op = dist.P2POp(dist.isend, send_tensor, (rank + 1)%world_size)
-        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank + 1)%world_size)
+        >>> recv_op = dist.P2POp(dist.irecv, recv_tensor, (rank - 1 + world_size)%world_size)
         >>> reqs = batch_isend_irecv([send_op, recv_op])
         >>> for req in reqs:
         >>>     req.wait()
@@ -1079,6 +1091,12 @@ def batch_isend_irecv(p2p_op_list):
     .. note:: Note that when this API is used with the NCCL PG backend, users must set
         the current GPU device with `torch.cuda.set_device`, otherwise it will
         lead to unexpected hang issues.
+
+        In addition, if this API is the first collective call in the ``group``
+        passed to ``dist.P2POp``, all ranks of the ``group`` must participate in
+        this API call; otherwise, the behavior is undefined. If this API call is
+        not the first collective call in the ``group``, batched P2P operations
+        involving only a subset of ranks of the ``group`` are allowed.
     """
     _check_p2p_op_list(p2p_op_list)
     backend = get_backend(p2p_op_list[0].group)
@@ -1546,28 +1564,31 @@ def all_gather_multigpu(
         work.wait()
 
 
-def _object_to_tensor(obj):
+def _object_to_tensor(obj, device):
     f = io.BytesIO()
     _pickler(f).dump(obj)
     byte_storage = torch.ByteStorage.from_buffer(f.getvalue())  # type: ignore[attr-defined]
     # Do not replace `torch.ByteTensor` or `torch.LongTensor` with torch.tensor and specifying dtype.
     # Otherwise, it will casue 100X slowdown.
     # See: https://github.com/pytorch/pytorch/issues/65696
-    byte_tensor = torch.ByteTensor(byte_storage)
-    local_size = torch.LongTensor([byte_tensor.numel()])
+    byte_tensor = torch.ByteTensor(byte_storage).to(device)
+    local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
     return byte_tensor, local_size
 
 
 def _tensor_to_object(tensor, tensor_size):
+    tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
 
 def _check_for_nccl_backend(group):
     pg = group or _get_default_group()
-    # It is not expected for PG to be wrapped many times, but support it just
-    # in case
-    while isinstance(pg, _ProcessGroupWrapper):
-        pg = pg.wrapped_pg
+    # Gate PG wrapper check on Gloo availability.
+    if _GLOO_AVAILABLE:
+        # It is not expected for PG to be wrapped many times, but support it just
+        # in case
+        while isinstance(pg, _ProcessGroupWrapper):
+            pg = pg.wrapped_pg
 
     return (
         is_nccl_available() and
@@ -1624,16 +1645,9 @@ def all_gather_object(object_list, obj, group=None):
         _warn_not_in_group("all_gather_object")
         return
 
-    input_tensor, local_size = _object_to_tensor(obj)
-    current_device = torch.device("cpu")
-    is_nccl_backend = _check_for_nccl_backend(group)
-    if is_nccl_backend:
-        # See note about using torch.cuda.current_device() here in docstring.
-        # We cannot simply use my_rank since rank == device is not necessarily
-        # true.
-        current_device = torch.device("cuda", torch.cuda.current_device())
-        input_tensor = input_tensor.to(current_device)
-        local_size = local_size.to(current_device)
+    current_device = _get_pg_device(group)
+    input_tensor, local_size = _object_to_tensor(obj, current_device)
+
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
@@ -1690,7 +1704,12 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
         since it does not provide an async_op handle and thus will be a blocking
         call.
 
-    .. note:: Note that this API is not supported when using the NCCL backend.
+    .. note:: For NCCL-based processed groups, internal tensor representations
+        of objects must be moved to the GPU device before communication takes
+        place. In this case, the device used is given by
+        ``torch.cuda.current_device()`` and it is the user's responsiblity to
+        ensure that this is set so that each rank has an individual GPU, via
+        ``torch.cuda.set_device()``.
 
     .. warning::
         :func:`gather_object` uses ``pickle`` module implicitly, which is
@@ -1720,14 +1739,9 @@ def gather_object(obj, object_gather_list=None, dst=0, group=None):
     # Ensure object_gather_list is specified appopriately.
     my_rank = get_rank()
     _validate_output_list_for_rank(my_rank, dst, object_gather_list)
-    input_tensor, local_size = _object_to_tensor(obj)
-    current_device = torch.device("cpu")
-    is_nccl_backend = _check_for_nccl_backend(group)
+    current_device = _get_pg_device(group)
+    input_tensor, local_size = _object_to_tensor(obj, current_device)
 
-    if is_nccl_backend:
-        current_device = torch.device("cuda", torch.cuda.current_device())
-        input_tensor = input_tensor.to(current_device)
-        local_size = local_size.to(current_device)
     # Gather all local sizes. This is so that we can find the max size, and index
     # until the correct size when deserializing the tensors.
     group_size = get_world_size(group=group)
@@ -1826,35 +1840,20 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         _warn_not_in_group("broadcast_object_list")
         return
 
-    my_rank = get_rank()
-    # Serialize object_list elements to tensors on src rank.
-    if my_rank == src:
-        tensor_list, size_list = zip(*[_object_to_tensor(obj) for obj in object_list])
-        object_sizes_tensor = torch.cat(size_list)
-    else:
-        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long)
-
     # Current device selection.
     # To preserve backwards compatibility, ``device`` is default to ``None``
     # in which case we run current logic of device selection, i.e.
     # ``current_device`` is CUDA if backend is NCCL otherwise CPU device. In the
     # case it is not ``None`` we move the size and object tensors to be
     # broadcasted to this device.
-    is_nccl_backend = _check_for_nccl_backend(group)
-    current_device = None
-    if device is not None:
-        if is_nccl_backend and device.type != "cuda":
-            raise ValueError("device type must be cuda for nccl backend")
-        current_device = device
+    current_device = device or _get_pg_device(group)
+    my_rank = get_rank()
+    # Serialize object_list elements to tensors on src rank.
+    if my_rank == src:
+        tensor_list, size_list = zip(*[_object_to_tensor(obj, current_device) for obj in object_list])
+        object_sizes_tensor = torch.cat(size_list)
     else:
-        current_device = torch.device("cpu")
-        if is_nccl_backend:
-            # See note about using torch.cuda.current_device() here in
-            # docstring. We cannot simply use my_rank since rank == device is
-            # not necessarily true.
-            current_device = torch.device("cuda", torch.cuda.current_device())
-    if is_nccl_backend:
-        object_sizes_tensor = object_sizes_tensor.to(current_device)
+        object_sizes_tensor = torch.empty(len(object_list), dtype=torch.long, device=current_device)
 
     # Broadcast object sizes
     broadcast(object_sizes_tensor, src=src, group=group)
@@ -1863,13 +1862,12 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
     if my_rank == src:
         object_tensor = torch.cat(tensor_list)
     else:
-        object_tensor = torch.empty(
+        object_tensor = torch.empty(  # type: ignore[call-overload]
             torch.sum(object_sizes_tensor).item(),  # type: ignore[arg-type]
             dtype=torch.uint8,
+            device=current_device
         )
 
-    if is_nccl_backend:
-        object_tensor = object_tensor.to(current_device)
     broadcast(object_tensor, src=src, group=group)
     # Deserialize objects using their stored sizes.
     offset = 0
@@ -1949,9 +1947,10 @@ def scatter_object_list(
         )
 
     my_rank = get_rank(group)
+    pg_device = _get_pg_device(group)
     if my_rank == src:
         tensor_list, tensor_sizes = zip(
-            *[_object_to_tensor(obj) for obj in scatter_object_input_list]
+            *[_object_to_tensor(obj, pg_device) for obj in scatter_object_input_list]
         )
         tensor_list, tensor_sizes = list(tensor_list), list(tensor_sizes)
 
@@ -1962,11 +1961,11 @@ def scatter_object_list(
         for tensor in tensor_list:
             tensor.resize_(max_tensor_size)
     else:
-        max_tensor_size = torch.tensor([0], dtype=torch.long)
+        max_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
     broadcast(max_tensor_size, src=src, group=group)
 
     # Scatter actual serialized objects
-    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8)
+    output_tensor = torch.empty(max_tensor_size.item(), dtype=torch.uint8, device=pg_device)
     scatter(
         output_tensor,
         scatter_list=None if my_rank != src else tensor_list,
@@ -1975,7 +1974,7 @@ def scatter_object_list(
     )
 
     # Scatter per-object sizes to trim tensors when deserializing back to object
-    obj_tensor_size = torch.tensor([0], dtype=torch.long)
+    obj_tensor_size = torch.tensor([0], dtype=torch.long, device=pg_device)
     scatter(
         obj_tensor_size,
         scatter_list=None if my_rank != src else tensor_sizes,
@@ -3220,6 +3219,6 @@ def new_subgroups_by_enumeration(
             rank_to_ranks_dict[rank] = ranks
             if my_rank == rank:
                 cur_subgroup = subgroup
-                logging.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
+                logger.info("Rank {} is assigned to subgroup {}".format(rank, ranks))
 
     return cur_subgroup, subgroups

@@ -3,6 +3,7 @@ from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
 
+__all__ = ['Embedding', 'EmbeddingBag']
 
 class Embedding(nn.Embedding):
     r"""
@@ -51,9 +52,10 @@ class Embedding(nn.Embedding):
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid qconfig'
-        assert mod.qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, \
+        weight_qscheme = mod.qconfig.weight().qscheme  # type: ignore[union-attr, operator]
+        assert weight_qscheme == torch.per_channel_affine_float_qparams, \
             'Embedding weights requires a qscheme of torch.per_channel_affine_float_qparams Got ' + \
-            str(mod.qconfig.weight().qscheme)
+            str(weight_qscheme)
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(mod.num_embeddings, mod.embedding_dim, mod.padding_idx,
@@ -65,7 +67,7 @@ class Embedding(nn.Embedding):
     def to_float(self):
         embedding_bag = torch.nn.Embedding(self.num_embeddings, self.embedding_dim, self.padding_idx,
                                            self.max_norm, self.norm_type, self.scale_grad_by_freq,
-                                           self.sparse, None, self.device, self.dtype)
+                                           self.sparse, None)
         embedding_bag.weight = torch.nn.Parameter(self.weight.detach())
         embedding_bag.train(self.training)
         return embedding_bag
@@ -120,9 +122,10 @@ class EmbeddingBag(nn.EmbeddingBag):
             cls._FLOAT_MODULE.__name__
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         assert mod.qconfig, 'Input float module must have a valid qconfig'
-        assert mod.qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, \
+        weight_qscheme = mod.qconfig.weight().qscheme  # type: ignore[union-attr, operator]
+        assert weight_qscheme == torch.per_channel_affine_float_qparams, \
             'Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams Got ' + \
-            str(mod.qconfig.weight().qscheme)
+            str(weight_qscheme)
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(mod.num_embeddings, mod.embedding_dim, mod.max_norm, mod.norm_type,
@@ -134,8 +137,7 @@ class EmbeddingBag(nn.EmbeddingBag):
     def to_float(self):
         embedding_bag = torch.nn.EmbeddingBag(self.num_embeddings, self.embedding_dim, self.max_norm,
                                               self.norm_type, self.scale_grad_by_freq, self.mode, self.sparse,
-                                              None, self.include_last_offset, self.padding_idx,
-                                              self.device, self.dtype)
+                                              None, self.include_last_offset, self.padding_idx)
         embedding_bag.weight = torch.nn.Parameter(self.weight.detach())
         embedding_bag.train(self.training)
         return embedding_bag

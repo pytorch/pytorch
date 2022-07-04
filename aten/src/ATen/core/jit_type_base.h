@@ -6,6 +6,8 @@
 
 #include <ATen/core/qualified_name.h>
 #include <ATen/core/type_ptr.h>
+#include <c10/core/SymInt.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
@@ -43,11 +45,13 @@ namespace c10 {
   _(CapsuleType)            \
   _(InterfaceType)          \
   _(QSchemeType)            \
-  _(LayoutType)             \
   _(ScalarTypeType)         \
+  _(LayoutType)             \
+  _(MemoryFormatType)       \
   _(AnyListType)            \
   _(AnyTupleType)           \
   _(AnyClassType)           \
+  _(SymIntType)             \
   _(UnionType)              \
   _(DynamicType)
 
@@ -94,8 +98,9 @@ TORCH_DECLARE_SINGLETON(DeviceObjType);
 TORCH_DECLARE_SINGLETON(StreamObjType);
 TORCH_DECLARE_SINGLETON(CapsuleType);
 TORCH_DECLARE_SINGLETON(PyObjectType);
-TORCH_DECLARE_SINGLETON(LayoutType);
 TORCH_DECLARE_SINGLETON(ScalarTypeType);
+TORCH_DECLARE_SINGLETON(LayoutType);
+TORCH_DECLARE_SINGLETON(MemoryFormatType);
 TORCH_DECLARE_SINGLETON(AnyListType);
 TORCH_DECLARE_SINGLETON(AnyTupleType);
 TORCH_DECLARE_SINGLETON(AnyClassType);
@@ -140,7 +145,7 @@ struct TORCH_API Type {
   protected:
   Type(TypeKind kind) : kind_(kind) {}
 
-  virtual std::string annotation_str_impl(TypePrinter printer) const {
+  virtual std::string annotation_str_impl(TypePrinter /*printer*/) const {
     return str();
   }
   // a == b
@@ -242,7 +247,7 @@ struct TORCH_API Type {
     // nvcc; see comment in destroy() below.
     struct SharedPtrWrapper {
       SharedPtrWrapper(std::shared_ptr<T> &&x)
-          : repr_(x) {}
+          : repr_(std::move(x)) {}
       std::shared_ptr<T> repr_;
     };
     union Repr {
@@ -463,7 +468,7 @@ struct TORCH_API Type {
     return kind_;
   }
 
-  bool isUnionType() const {
+  virtual bool isUnionType() const {
     return false;
   }
 
@@ -558,13 +563,16 @@ struct TORCH_API Type {
   virtual TypePtr containedType(size_t i) const {
     return containedTypes().at(i);
   }
+  virtual size_t containedTypeSize() const {
+    return containedTypes().size();
+  }
   // create a new version of this type, replacing its contained types with
   // contained_types
   TypePtr withContained(std::vector<TypePtr> contained_types);
   // per-type constructor, you only need to override this if the
   // containedTypes() is not empty
   virtual TypePtr createWithContained(
-      std::vector<TypePtr> contained_types) const {
+      std::vector<TypePtr> /*contained_types*/) const {
     AT_ERROR(
         "type with contained types did not overload createWithContained: ",
         str());

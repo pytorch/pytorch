@@ -5,7 +5,7 @@ export TZ=UTC
 tagged_version() {
   # Grabs version from either the env variable CIRCLE_TAG
   # or the pytorch git described version
-  if [[ "$OSTYPE" == "msys" ]]; then
+  if [[ "$OSTYPE" == "msys" &&  -z "${GITHUB_ACTIONS:-}" ]]; then
     GIT_DIR="${workdir}/p/.git"
   else
     GIT_DIR="${workdir}/pytorch/.git"
@@ -13,6 +13,9 @@ tagged_version() {
   GIT_DESCRIBE="git --git-dir ${GIT_DIR} describe --tags --match v[0-9]*.[0-9]*.[0-9]*"
   if [[ -n "${CIRCLE_TAG:-}" ]]; then
     echo "${CIRCLE_TAG}"
+  elif [[ ! -d "${GIT_DIR}" ]]; then
+    echo "Abort, abort! Git dir ${GIT_DIR} does not exists!"
+    kill $$
   elif ${GIT_DESCRIBE} --exact >/dev/null; then
     ${GIT_DESCRIBE}
   else
@@ -20,45 +23,12 @@ tagged_version() {
   fi
 }
 
-# These are only relevant for CircleCI
-# TODO: Remove these later once migrated fully to GHA
-if [[ -z ${IS_GHA:-} ]]; then
-  # We need to write an envfile to persist these variables to following
-  # steps, but the location of the envfile depends on the circleci executor
-  if [[ "$(uname)" == Darwin ]]; then
-    # macos executor (builds and tests)
-    workdir="/Users/distiller/project"
-  elif [[ "$OSTYPE" == "msys" ]]; then
-    # windows executor (builds and tests)
-    workdir="/c/w"
-  elif [[ -d "/home/circleci/project" ]]; then
-    # machine executor (binary tests)
-    workdir="/home/circleci/project"
-  else
-    # docker executor (binary builds)
-    workdir="/"
-  fi
-  envfile="$workdir/env"
-  touch "$envfile"
-  chmod +x "$envfile"
-
-  # Parse the BUILD_ENVIRONMENT to package type, python, and cuda
-  configs=($BUILD_ENVIRONMENT)
-  export PACKAGE_TYPE="${configs[0]}"
-  export DESIRED_PYTHON="${configs[1]}"
-  export DESIRED_CUDA="${configs[2]}"
-  if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
-    export DESIRED_DEVTOOLSET=""
-    export LIBTORCH_CONFIG="${configs[3]:-}"
-    if [[ "$LIBTORCH_CONFIG" == 'debug' ]]; then
-      export DEBUG=1
-    fi
-  else
-    export DESIRED_DEVTOOLSET="${configs[3]:-}"
-  fi
+envfile=${BINARY_ENV_FILE:-/tmp/env}
+if [[ -n "${PYTORCH_ROOT}"  ]]; then
+  workdir=$(dirname "${PYTORCH_ROOT}")
 else
-  envfile=${BINARY_ENV_FILE:-/tmp/env}
-  workdir="/pytorch"
+  # docker executor (binary builds)
+  workdir="/"
 fi
 
 if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
@@ -83,18 +53,13 @@ if [[ ${DESIRED_CUDA} == "cpu" ]]; then
   USE_GOLD_LINKER="ON"
 fi
 
-USE_WHOLE_CUDNN="OFF"
-# Link whole cuDNN for CUDA-11.1 to include fp16 fast kernels
-if [[  "$(uname)" == "Linux" && "${DESIRED_CUDA}" == "cu111" ]]; then
-  USE_WHOLE_CUDNN="ON"
-fi
 
 # Default to nightly, since that's where this normally uploads to
 PIP_UPLOAD_FOLDER='nightly/'
 # We put this here so that OVERRIDE_PACKAGE_VERSION below can read from it
 export DATE="$(date -u +%Y%m%d)"
 #TODO: We should be pulling semver version from the base version.txt
-BASE_BUILD_VERSION="1.11.0.dev$DATE"
+BASE_BUILD_VERSION="1.13.0.dev$DATE"
 # Change BASE_BUILD_VERSION to git tag when on a git tag
 # Use 'git -C' to make doubly sure we're in the correct directory for checking
 # the git tag
@@ -150,14 +115,18 @@ export DESIRED_PYTHON="${DESIRED_PYTHON:-}"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
-export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
-if [[ "${BUILD_FOR_SYSTEM:-}" == "windows" ]]; then
+if [[ "${OSTYPE}" == "msys" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
-  export DEBUG="${DEBUG:-}"
+  if [[ "${LIBTORCH_CONFIG:-}" == 'debug' ]]; then
+    export DEBUG=1
+  fi
+  export DESIRED_DEVTOOLSET=""
+else
+  export DESIRED_DEVTOOLSET="${DESIRED_DEVTOOLSET:-}"
 fi
 
 export DATE="$DATE"
-export NIGHTLIES_DATE_PREAMBLE=1.11.0.dev
+export NIGHTLIES_DATE_PREAMBLE=1.13.0.dev
 export PYTORCH_BUILD_VERSION="$PYTORCH_BUILD_VERSION"
 export PYTORCH_BUILD_NUMBER="$PYTORCH_BUILD_NUMBER"
 export OVERRIDE_PACKAGE_VERSION="$PYTORCH_BUILD_VERSION"
@@ -176,7 +145,6 @@ export DOCKER_IMAGE="$DOCKER_IMAGE"
 
 export USE_GOLD_LINKER="${USE_GOLD_LINKER}"
 export USE_GLOO_WITH_OPENSSL="ON"
-export USE_WHOLE_CUDNN="${USE_WHOLE_CUDNN}"
 # =================== The above code will be executed inside Docker container ===================
 EOL
 
@@ -194,7 +162,7 @@ if [[ "$(uname)" != Darwin ]]; then
 EOL
 fi
 
-if [[ -z "${IS_GHA:-}" ]]; then
+if [[ -z "${GITHUB_ACTIONS:-}" ]]; then
   cat >>"$envfile" <<EOL
   export workdir="$workdir"
   export MAC_PACKAGE_WORK_DIR="$workdir"

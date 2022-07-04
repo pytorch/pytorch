@@ -25,13 +25,15 @@ ignored_attributes = [
     "_version",
     "_parameters",
     "_buffers",
-    "_modules",
-    "_initializing",
+    "_non_persistent_buffers_set",
     "_backward_hooks",
     "_forward_hooks",
     "_forward_pre_hooks",
     "_state_dict_hooks",
     "_load_state_dict_pre_hooks",
+    "_load_state_dict_post_hooks",
+    "_modules",
+    "_initializing",
     "dump_patches",
 ]
 
@@ -129,6 +131,10 @@ def infer_concrete_type_builder(nn_module, share_types=True):
         concrete_type_builder.set_module_dict()
     if isinstance(nn_module, (torch.nn.ModuleList, torch.nn.Sequential)):
         concrete_type_builder.set_module_list()
+    if isinstance(nn_module, (torch.nn.ParameterList)):
+        concrete_type_builder.set_parameter_list()
+    if isinstance(nn_module, (torch.nn.ParameterDict)):
+        concrete_type_builder.set_parameter_dict()
 
     class_annotations = getattr(nn_module, '__annotations__', {})
     if isinstance(nn_module, (torch.ao.quantization.QuantWrapper)):
@@ -265,6 +271,9 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             # Don't re-add anything we already added
             continue
 
+        isoverloadpacket = isinstance(value, torch._ops.OpOverloadPacket)
+        if isoverloadpacket:
+            value = value.op
         # Handle Python function attributes
         if inspect.isfunction(value):
             try:

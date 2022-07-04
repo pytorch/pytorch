@@ -8,6 +8,7 @@
 #include <c10/core/DeviceGuard.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <c10d/comm.hpp>
@@ -18,11 +19,11 @@
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
+#include <torch/csrc/distributed/c10d/Ops.hpp>
 #include <torch/csrc/utils/memory.h>
 
 namespace c10d {
 namespace {
-
 
 constexpr int kUnsetDivFactor = -1;
 
@@ -68,6 +69,22 @@ class CpuTimer : public Timer {
 
 C10_REGISTER_TYPED_CLASS(TimerRegistry, c10::kCPU, CpuTimer);
 
+std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
+  if (result.isPyObject()) {
+    return result.toPyObjectHolder()->extractTensors();
+  }
+  TORCH_INTERNAL_ASSERT(
+      result.isTensor() || result.isTensorList(),
+      "expected the hook result is either a Tensor or a TensorList found ",
+      result.tagKind());
+
+  if (result.isTensor()) {
+    return {result.toTensor()};
+  }
+
+  return result.toTensorVector();
+}
+
 } // namespace
 
 Reducer::Reducer(
@@ -79,7 +96,7 @@ Reducer::Reducer(
     int64_t bucket_bytes_cap,
     bool find_unused_parameters,
     bool gradient_as_bucket_view,
-    std::unordered_map<size_t, std::string> paramNames,
+    std::unordered_map<size_t, std::string> param_names,
     int64_t first_bucket_bytes_cap)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
@@ -98,14 +115,14 @@ Reducer::Reducer(
       div_factor_(kUnsetDivFactor),
       static_graph_(false),
       comm_hook_(nullptr),
-      ddp_debug_level_(parseDistDebugLevel()),
-      param_names_(std::move(paramNames)),
+      ddp_debug_level_(debug_level()),
+      param_names_(std::move(param_names)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(
       params_.size() >= 1, "Expected at least one parameter.");
 
-  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     LOG(INFO) << "Reducer initialized with bucket_bytes_cap: "
               << bucket_bytes_cap_
               << " first_bucket_bytes_cap: " << first_bucket_bytes_cap;
@@ -142,8 +159,7 @@ Reducer::Reducer(
   // This can be reinitialized later after capturing runtime information.
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    initialize_buckets(
-        std::move(bucket_indices), std::move(per_bucket_size_limits));
+    initialize_buckets(std::move(bucket_indices));
   }
 
   // All variables are expected to have their `grad_fn` set to the gradient
@@ -203,8 +219,7 @@ Reducer::Reducer(
               "Reducer tried to register duplicate grad accumulator for variable ",
               variable_index));
 
-      grad_accumulators_[variable_index] =
-          std::move(grad_accumulator);
+      grad_accumulators_[variable_index] = std::move(grad_accumulator);
     }
   }
 
@@ -283,15 +298,13 @@ void Reducer::initialize_local_used_map() {
 
   // Deliberately don't pin the memory even if local_used_map_dev_ will
   // be cuda. See Note [local_used_map_ -> local_used_map_dev copying]
-  local_used_map_ =
-      at::zeros({static_cast<long>(variable_count)}, options);
+  local_used_map_ = at::zeros({static_cast<long>(variable_count)}, options);
 
   // This tensor needs to be on the same device as the replica params because
   // backend such as NCCL may not support CPU tensors, and hence it might not
   // work if we always put it on CPU.
   options = options.device(params_[0].device());
-  local_used_map_dev_ =
-      at::empty({static_cast<long>(variable_count)}, options);
+  local_used_map_dev_ = at::empty({static_cast<long>(variable_count)}, options);
 }
 
 void Reducer::check_grad_layout(
@@ -331,17 +344,16 @@ void Reducer::check_grad_layout(
 }
 
 void Reducer::mark_variable_ready_dense(size_t variable_index) {
-  const auto replica_index = 0;
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
-  auto& replica = bucket.replicas[replica_index];
-  auto& variable = replica.variables[bucket_index.intra_bucket_index];
-  auto& bucket_view = replica.bucket_views_in[bucket_index.intra_bucket_index];
+  auto& variable = bucket.variables[bucket_index.intra_bucket_index];
+  auto& bucket_view = bucket.bucket_views_in[bucket_index.intra_bucket_index];
 
-  // Copy contents of gradient tensor to bucket tensor.
-  // If the gradient is not set, we assume it wasn't computed
-  // as part of the current backwards pass, and zero the part
-  // of the bucket it would otherwise hold.
+  // Copy the contents of the gradient tensor to the corresponding part of the
+  // bucket's flattened gradient tensor.
+  // If the gradient is not set, we assume it wasn't computed as part of the
+  // current backwards pass, and we zero the part of the bucket it would
+  // otherwise hold.
   runGradCallbackForVariable(variable, [&](auto& grad) {
     if (grad.defined()) {
       this->check_grad_layout(grad, bucket_view);
@@ -365,7 +377,7 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
             // themselves in order to compute higher order derivatives. However,
             // DDP will not sync up these gradients currently (see
             // https://github.com/pytorch/pytorch/issues/63812).
-            LOG(WARNING)
+            C10_LOG_EVERY_N(WARNING, 1000)
                 << "Using DistributedDataParallel with create_graph=True "
                 << " is not well-supported. The higher-order gradient will "
                 << " not be synchronized across ranks, and backpropagation "
@@ -400,7 +412,9 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
         REDUCER_CHECK(
             local_used_map_[variable_index].item<int>() == 0,
             logger_,
-            "Encountered gradient which is undefined, but still allreduced by DDP reducer. This indicates a bug in DDP implementation, please report a bug with a repro to PyTorch.");
+            "Encountered gradient which is undefined, but still allreduced by "
+            "DDP reducer. This indicates a bug in DDP implementation, please "
+            "report a bug with a repro to PyTorch.");
       }
       bucket_view.zero_();
     }
@@ -410,11 +424,9 @@ void Reducer::mark_variable_ready_dense(size_t variable_index) {
 }
 
 void Reducer::mark_variable_ready_sparse(size_t variable_index) {
-  const auto replica_index = 0;
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
-  auto& replica = bucket.replicas[replica_index];
-  auto& variable = replica.variables[bucket_index.intra_bucket_index];
+  auto& variable = bucket.variables[bucket_index.intra_bucket_index];
 
   runGradCallbackForVariable(variable, [&](auto& grad) {
     REDUCER_CHECK(
@@ -424,17 +436,16 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
         logger_,
         "Expected variable to have sparse gradient.");
 
-    // Sparse tensors cannot be grouped together with other sparse tensors
-    // in a single reduction operation like we can for dense tensors.
-    // Therefore, the `offsets` and `lengths` vectors in the bucket replica
-    // struct are empty, and there is no pre-existing accumulation tensor.
-    // Directly assign the sparse tensor to the `contents` field.
-    replica.contents = grad;
-    // If no DDP comm hook is registered,
-    // the allreduce only sums up the value, and a separate division is
-    // required.
+    // Sparse tensors cannot be grouped together with other sparse tensors in a
+    // single reduction operation like we can for dense tensors. Therefore, the
+    // `offsets` and `lengths` vectors in the bucket struct are empty, and
+    // there is no pre-existing accumulation tensor.
+    // Directly assign the sparse tensor to the `gradients` field.
+    bucket.gradients = grad;
+    // If no DDP comm hook is registered, the allreduce only sums up the
+    // value, and a separate division is required.
     if (comm_hook_ == nullptr) {
-      replica.contents.div_(div_factor_);
+      bucket.gradients.div_(div_factor_);
     }
     // The grad is modified in place and needs to be written back.
     return true;
@@ -452,11 +463,11 @@ std::vector<c10d::GradBucket> Reducer::get_grad_buckets(
     gradBuckets.emplace_back(
         i,
         buckets_.size(),
-        return_zero_tensors ? at::zeros_like(bucket.replicas[0].contents)
-                            : bucket.replicas[0].contents,
-        bucket.replicas[0].offsets,
-        bucket.replicas[0].lengths,
-        bucket.replicas[0].sizes_vec,
+        return_zero_tensors ? at::zeros_like(bucket.gradients)
+                            : bucket.gradients,
+        bucket.offsets,
+        bucket.lengths,
+        bucket.sizes_vec,
         variables_for_bucket);
   }
   return gradBuckets;
@@ -499,7 +510,10 @@ void Reducer::set_divide_factor() {
     auto& workHandle = forwardPassWorkHandle_.workHandle;
     if (workHandle && !forwardPassWorkHandle_.useStaticWorldSize) {
       workHandle->wait();
-      auto results = workHandle->result();
+      // PyProcessGroup::PyWork doesn't expose value, so fetch it from the
+      // future
+      auto results = extractTensors(workHandle->getFuture()->value());
+
       // Guard against the results being empty
       TORCH_INTERNAL_ASSERT(results.size() > 0);
       at::Tensor& res = results.front();
@@ -683,22 +697,22 @@ void Reducer::all_reduce_local_used_map() {
     local_used_map_dev_.copy_(local_used_map_, true);
   }
   std::vector<at::Tensor> temp_local_used_map_dev_vec_ = {local_used_map_dev_};
-  local_used_work_ = process_group_->allreduce(temp_local_used_map_dev_vec_);
+  local_used_work_ =
+      ops::allreduce(process_group_, temp_local_used_map_dev_vec_);
 }
 
 at::Tensor& Reducer::get_param_from_index(size_t index) {
   const auto& bucket_index = variable_locators_[index];
   auto& bucket = buckets_[bucket_index.bucket_index];
-  auto& replica = bucket.replicas[0];
-  // Cannot simply access variable via replicas_[0][variable_index] since return
-  // value is used in runGradCallbackForVariable which does not accept const
-  // tensors.
-  auto& variable = replica.variables[bucket_index.intra_bucket_index];
+  // Cannot simply access variable via `bucket.variables[variable_index]` since
+  // return value is used in `runGradCallbackForVariable()` which does not
+  // accept const tensors.
+  auto& variable = bucket.variables[bucket_index.intra_bucket_index];
   return variable;
 }
 
 void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
-  // Something is wrong if all variables contained in this bucket replica have
+  // Something is wrong if all variables contained in this bucket have
   // already been marked as ready.
   // We don't expect the same variable to be marked ready twice.
   bool marked_twice =
@@ -710,8 +724,7 @@ void Reducer::checkAndRaiseMarkedTwiceError(size_t index) {
     auto param_name = param_names_.find(index);
     const bool found_param_name = param_name != param_names_.end();
     TORCH_INTERNAL_ASSERT(
-        ddp_debug_level_ == c10d::DistributedDebugLevel::OFF ||
-            found_param_name,
+        ddp_debug_level_ == c10d::DebugLevel::Off || found_param_name,
         "Expected to find parameter name in debug mode.");
     std::string paramInfo = c10::str(
         "Parameter at index ",
@@ -786,7 +799,6 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 
   const auto& bucket_index = variable_locators_[variable_index];
   auto& bucket = buckets_[bucket_index.bucket_index];
-  auto& replica = bucket.replicas[0];
 
   set_divide_factor();
 
@@ -798,16 +810,13 @@ void Reducer::mark_variable_ready(size_t variable_index) {
 
   // TODO(@pietern): Make this work for both CPU/CUDA tensors.
   // When using CPU tensors we don't need to do this.
-  // // Record event so that we can wait for all of them.
-  // auto& event = replica.events[bucket_index.intra_bucket_index];
+  // Record event so that we can wait for all of them.
+  // auto& event = bucket.events[bucket_index.intra_bucket_index];
   // event.record();
 
   // Check if this was the final gradient for this bucket.
-  if (--replica.pending == 0) {
-    // Kick off reduction if all replicas for this bucket are ready.
-    if (--bucket.pending == 0) {
-      mark_bucket_ready(bucket_index.bucket_index);
-    }
+  if (--bucket.pending == 0) {
+    mark_bucket_ready(bucket_index.bucket_index);
   }
 
   // Run finalizer function and kick off reduction for local_used_map once the
@@ -845,31 +854,24 @@ c10::intrusive_ptr<c10::ivalue::Future> Reducer::run_comm_hook(
 }
 
 void Reducer::all_reduce_bucket(Bucket& bucket) {
-  std::vector<at::Tensor> tensors;
-  tensors.reserve(bucket.replicas.size());
-  for (const auto& replica : bucket.replicas) {
-    // TODO(@pietern): Ensure proper synchronization with the CUDA events
-    // that recorded copies into this contents tensor. If these copies are
-    // executed on non-default streams, the current stream for the device
-    // that holds the contents tensor must wait on these events.
-    //
-    // As long as autograd uses the default stream for every device,
-    // these operations are implicitly sequenced, and we don't need to
-    // do any extra synchronization here.
-    //
-    tensors.push_back(replica.contents);
-  }
-
   auto variables_for_bucket = get_variables_for_bucket(next_bucket_, bucket);
+  // TODO(@pietern): Ensure proper synchronization with the CUDA events
+  // that recorded copies into this `gradients` tensor. If these copies are
+  // executed on non-default streams, the current stream for the device
+  // that holds the `gradients` tensor must wait on these events.
+  //
+  // As long as autograd uses the default stream for every device,
+  // these operations are implicitly sequenced, and we don't need to
+  // do any extra synchronization here.
+  const auto& tensor = bucket.gradients;
+
   GradBucket grad_bucket(
       next_bucket_,
       buckets_.size(),
-      tensors[0],
-      // Since we only support single-process single-device
-      // mode, there is always only one replica in the bucket.
-      bucket.replicas[0].offsets,
-      bucket.replicas[0].lengths,
-      bucket.replicas[0].sizes_vec,
+      tensor,
+      bucket.offsets,
+      bucket.lengths,
+      bucket.sizes_vec,
       variables_for_bucket);
   bucket.future_work = run_comm_hook(grad_bucket);
 }
@@ -886,12 +888,11 @@ std::vector<at::Tensor> Reducer::get_variables_for_bucket(
   std::vector<at::Tensor> variables_for_bucket;
   variables_for_bucket.reserve(bucket.variable_indices.size());
   for (const auto& variable_index : bucket.variable_indices) {
-    auto& replica = bucket.replicas[0];
     // Grab bucket index where gradient is located using variable_locators_.
     auto& bucket_index_for_variable = variable_locators_[variable_index];
     // Grab the actual model parameter.
     auto& variable =
-        replica.variables[bucket_index_for_variable.intra_bucket_index];
+        bucket.variables[bucket_index_for_variable.intra_bucket_index];
     variables_for_bucket.emplace_back(variable);
   }
 
@@ -931,7 +932,8 @@ void Reducer::mark_bucket_ready(size_t bucket_index) {
   }
 }
 
-void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
+void Reducer::install_futures(
+    c10::List<c10::intrusive_ptr<c10::ivalue::Future>> futs) {
   // Append instead of overwrite so that this method can be called multiple
   // times in one iteration.
   if (!installed_futures_) {
@@ -942,8 +944,7 @@ void Reducer::install_futures(c10::List<c10::intrusive_ptr<c10::ivalue::Future>>
 }
 
 void Reducer::initialize_buckets(
-    std::vector<std::vector<size_t>> bucket_indices,
-    std::vector<size_t> per_bucket_sizes) {
+    std::vector<std::vector<size_t>> bucket_indices) {
   // If initialize_buckets is called inside DDP constructor, then
   // it does not matter rpc context ptr is nullptr or not, as grad
   // will not be mutated.
@@ -973,10 +974,8 @@ void Reducer::initialize_buckets(
   // Iterate over buckets.
   const auto bucket_count = bucket_indices.size();
   buckets_.reserve(bucket_count);
-  TORCH_INTERNAL_ASSERT(bucket_count == per_bucket_sizes.size());
   for (const auto bucket_index : c10::irange(bucket_count)) {
     Bucket bucket;
-    bucket.bucket_size_limit = per_bucket_sizes[bucket_index];
 
     // TODO(@pietern): Validate indices.
     // Must be non-empty, unique, and unique across buckets.
@@ -988,8 +987,7 @@ void Reducer::initialize_buckets(
     // Variables that expect sparse gradients must have their own bucket.
     if (bucket_indices[bucket_index].size() == 1) {
       const auto variable_index = bucket_indices[bucket_index].front();
-      bucket.expect_sparse_gradient =
-          expect_sparse_gradients_[variable_index];
+      bucket.expect_sparse_gradient = expect_sparse_gradients_[variable_index];
     } else {
       for (const auto variable_index : bucket_indices[bucket_index]) {
         REDUCER_CHECK(
@@ -1000,24 +998,23 @@ void Reducer::initialize_buckets(
       }
     }
 
-    BucketReplica replica;
     if (bucket.expect_sparse_gradient) {
       const auto variable_index = bucket_indices[bucket_index].front();
       const auto& variable = params_[variable_index];
       TORCH_INTERNAL_ASSERT(bucket_indices[bucket_index].size() == 1);
-      replica.variables = {variable};
+      bucket.variables = {variable};
     } else {
       at::TensorOptions options;
       // The start index of the variable in the flattened tensor.
       size_t offset = 0;
 
-      // Reserve enough space for the per-variable fields stored in bucket
-      // replica for efficiency.
+      // Reserve enough space for the per-variable fields stored in the bucket
+      // for efficiency.
       const size_t num_variables = bucket_indices[bucket_index].size();
-      replica.variables.reserve(num_variables);
-      replica.offsets.reserve(num_variables);
-      replica.lengths.reserve(num_variables);
-      replica.sizes_vec.reserve(num_variables);
+      bucket.variables.reserve(num_variables);
+      bucket.offsets.reserve(num_variables);
+      bucket.lengths.reserve(num_variables);
+      bucket.sizes_vec.reserve(num_variables);
 
       // Iterate over bucket variables.
       for (const auto variable_index : bucket_indices[bucket_index]) {
@@ -1043,29 +1040,29 @@ void Reducer::initialize_buckets(
               "All parameters in a bucket must have the same dtype.");
         }
         const auto length = variable.numel();
-        replica.variables.push_back(variable);
-        replica.offsets.push_back(offset);
-        replica.lengths.push_back(length);
-        replica.sizes_vec.push_back(variable.sizes());
+        bucket.variables.push_back(variable);
+        bucket.offsets.push_back(offset);
+        bucket.lengths.push_back(length);
+        bucket.sizes_vec.push_back(variable.sizes());
         offset += length;
       }
 
-      // Allocate bucket contents tensor.
-      replica.contents = at::empty({static_cast<long>(offset)}, options);
+      // Allocate the bucket's flattened `gradients` tensor.
+      bucket.gradients = at::empty({static_cast<long>(offset)}, options);
 
       // Note:  "Gradient Layout Contract"
       //
-      // Here, create views into the contents tensor for each variable's grad.
-      // Views serve as entry points to copy_ each grad's data in/out of the
-      // flat contents tensor.
+      // Here, create views into the `gradients` tensor for each variable's
+      // grad. Views serve as entry points to `copy_()` each grad's data in/out
+      // of the flattened `gradients` tensor.
       //
       // Gradients may have dense memory but non-row-major-contiguous strides
       // (e.g. channels_last or channels_last_3d). For coalesced accesses
       // during copy_s, it's beneficial for each view's layout to match its
       // grad's layout.
       //
-      // Specifically, we expect torch/csrc/autograd/AccumulateGrad.h produces
-      // grads that obey there "Gradient Layout Contract":
+      // Specifically, we expect torch/csrc/autograd/functions/accumulate_grad.h
+      // produces grads that obey the "Gradient Layout Contract":
       //   (1) if variable.is_non_overlapping_and_dense(), the stashed grad's
       //       strides match variable.
       //   (2) else, stashed grad is rowmajor contiguous.
@@ -1091,14 +1088,10 @@ void Reducer::initialize_buckets(
       // Checking just once won't catch if someone messes with
       // param layouts over time, but not messing with params after DDP
       // construction is already a documented constraint.
-      initialize_bucket_views(replica, replica.contents);
+      initialize_bucket_views(bucket);
     }
 
-    // Add bucket replica to enclosing bucket.
-    bucket.replicas.push_back(std::move(replica));
-
     // Map participating variables to this bucket.
-    // This is identical across replicas so we only need to do this once.
     size_t intra_bucket_index = 0;
     for (const auto variable_index : bucket_indices[bucket_index]) {
       TORCH_INTERNAL_ASSERT(
@@ -1114,29 +1107,28 @@ void Reducer::initialize_buckets(
 }
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
-void Reducer::initialize_bucket_views(
-    Reducer::BucketReplica& replica,
-    at::Tensor& contents) {
-  for (const auto i : c10::irange(replica.variables.size())) {
-    auto& v = replica.variables[i];
-    const auto offset = replica.offsets[i];
-    const auto length = replica.lengths[i];
+void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
+  const auto& gradients = bucket.gradients;
+  for (const auto i : c10::irange(bucket.variables.size())) {
+    auto& v = bucket.variables[i];
+    const auto offset = bucket.offsets[i];
+    const auto length = bucket.lengths[i];
     if (v.is_non_overlapping_and_dense()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      replica.bucket_views_in.push_back(
-          contents.as_strided(v.sizes(), v.strides(), offset));
+      bucket.bucket_views_in.push_back(
+          gradients.as_strided(v.sizes(), v.strides(), offset));
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      replica.bucket_views_in.push_back(
-          contents.narrow(0, offset, length).view(v.sizes()));
+      bucket.bucket_views_in.push_back(
+          gradients.narrow(0, offset, length).view(v.sizes()));
     }
     // By default `bucket_views_out` and `bucket_views_in` are
     // essentially the same thing.
-    replica.bucket_views_out = replica.bucket_views_in;
+    bucket.bucket_views_out = bucket.bucket_views_in;
 
     // If gradient_as_bucket_view_ is set as true, then there are two cases to
     // handle: initialize_bucket_views could be called inside initialize_buckets
@@ -1148,7 +1140,7 @@ void Reducer::initialize_bucket_views(
     // bucket_view, because grads should be kept as being undefined for globally
     // unused parameters.
     if (gradient_as_bucket_view_) {
-      auto& bucket_view = replica.bucket_views_in.back();
+      auto& bucket_view = bucket.bucket_views_in.back();
       runGradCallbackForVariable(v, [&](auto& grad) {
         if (grad.defined() && !grad.is_alias_of(bucket_view)) {
           bucket_view.copy_(grad);
@@ -1165,24 +1157,24 @@ void Reducer::initialize_bucket_views(
 
 // (see Note:  "Gradient Layout Contract" in initialize_buckets).
 void Reducer::populate_bucket_views_out(
-    Reducer::BucketReplica& replica,
+    Reducer::Bucket& bucket,
     at::Tensor& tensor) {
-  replica.bucket_views_out.clear();
-  for (const auto i : c10::irange(replica.variables.size())) {
-    const auto& v = replica.variables[i];
-    const auto offset = replica.offsets[i];
-    const auto length = replica.lengths[i];
+  bucket.bucket_views_out.clear();
+  for (const auto i : c10::irange(bucket.variables.size())) {
+    const auto& v = bucket.variables[i];
+    const auto offset = bucket.offsets[i];
+    const auto length = bucket.lengths[i];
     if (v.is_non_overlapping_and_dense()) {
       // If the param's memory is dense, match its layout, anticipating
       // the autograd engine (AccumulateGrad) will also create gradients
       // matching its layout.
-      replica.bucket_views_out.push_back(
+      bucket.bucket_views_out.push_back(
           tensor.as_strided(v.sizes(), v.strides(), offset));
     } else {
       // Fall back to a C-style contiguous view, again anticipating
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
-      replica.bucket_views_out.push_back(
+      bucket.bucket_views_out.push_back(
           tensor.narrow(0, offset, length).view(v.sizes()));
     }
   }
@@ -1203,10 +1195,7 @@ void Reducer::reset_bucket_counting() {
   num_buckets_ready_ = 0;
 
   for (auto& bucket : buckets_) {
-    for (auto& replica : bucket.replicas) {
-      replica.pending = replica.variables.size();
-    }
-    bucket.pending = bucket.replicas.size();
+    bucket.pending = bucket.variables.size();
   }
 
   if (static_graph_) {
@@ -1256,7 +1245,7 @@ void Reducer::search_unused_parameters(
     // If the accumulator function is present in the graph, we know
     // a gradient will be computed for the corresponding parameter.
     if (seen.count(it.first) == 0) {
-      if (ddp_debug_level_ == c10d::DistributedDebugLevel::DETAIL) {
+      if (ddp_debug_level_ == c10d::DebugLevel::Detail) {
         const auto param_info = param_names_.find(it.second);
         TORCH_INTERNAL_ASSERT(
             param_info != param_names_.end(),
@@ -1335,16 +1324,16 @@ void Reducer::prepare_for_backward(
 
 void Reducer::copy_bucket_to_grad(
     at::Tensor& variable,
-    Reducer::BucketReplica& replica,
+    Reducer::Bucket& bucket,
     size_t intra_bucket_index,
     bool global_unused) {
-  const auto& bucket_view = replica.bucket_views_out[intra_bucket_index];
+  const auto& bucket_view = bucket.bucket_views_out[intra_bucket_index];
   runGradCallbackForVariable(variable, [&](auto& grad) {
     // If a parameter is globally unused, we keep its grad untouched.
     if (!global_unused) {
       if (!grad.defined()) {
         // Creates grad according to the "Gradient Layout Contract"
-        // (see torch/csrc/grad/AccumulateGrad.h)
+        // (see torch/csrc/autograd/functions/accumulate_grad.h)
         grad =
             torch::autograd::utils::clone_obey_contract(bucket_view, variable);
       } else {
@@ -1383,10 +1372,8 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
-  size_t replica_index = 0;
-  auto& replica = bucket.replicas[replica_index];
-  for (const auto intra_bucket_index : c10::irange(replica.variables.size())) {
-    auto& variable = replica.variables[intra_bucket_index];
+  for (const auto intra_bucket_index : c10::irange(bucket.variables.size())) {
+    auto& variable = bucket.variables[intra_bucket_index];
 
     bool global_unused = false;
     // See Note [Skip allreducing local_used_map_dev]
@@ -1411,8 +1398,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // the point as below where we wait for the reduction work, make D2H
       // copy, and update global_unused with the real global consensus, i.e.
       // local_used_map_reduced_ is true.
-      global_unused =
-          local_used_map_[variable_index].item<int>() == 0;
+      global_unused = local_used_map_[variable_index].item<int>() == 0;
       if (global_unused && !local_used_map_reduced_) {
         // Wait for local_used_map reduction to complete.
         local_used_work_->wait();
@@ -1420,8 +1406,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         // Blocking copy, if local_used_map_dev_ is cuda
         local_used_map_.copy_(local_used_map_dev_);
 
-        global_unused =
-            local_used_map_[variable_index].item<int>() == 0;
+        global_unused = local_used_map_[variable_index].item<int>() == 0;
         local_used_map_reduced_ = true;
       }
     }
@@ -1430,15 +1415,13 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       RECORD_FUNCTION(
           "torch.distributed.ddp.reducer::copy_bucket_to_grad",
           std::vector<c10::IValue>({variable}));
-      copy_bucket_to_grad(variable, replica, intra_bucket_index, global_unused);
+      copy_bucket_to_grad(variable, bucket, intra_bucket_index, global_unused);
     } else {
-      const auto& bucket_view_out =
-          replica.bucket_views_out[intra_bucket_index];
-      auto& bucket_view_in = replica.bucket_views_in[intra_bucket_index];
-      // If communication_hook is registered, bucket_view_out stores
-      // allreduced results in a newly allocated tensor, copy bucket_view_out
-      // back to bucket_view_in that referring to replica.content tensor and
-      // grad.
+      const auto& bucket_view_out = bucket.bucket_views_out[intra_bucket_index];
+      auto& bucket_view_in = bucket.bucket_views_in[intra_bucket_index];
+      // If a communication hook is registered, then `bucket_view_out` stores
+      // the allreduced results in a newly allocated tensor, so we copy
+      // `bucket_view_out` back to `bucket_view_in` for this gradient.
       if (!bucket_view_in.is_alias_of(bucket_view_out)) {
         bucket_view_in.copy_(bucket_view_out);
       }
@@ -1480,7 +1463,8 @@ void Reducer::finalize_backward() {
   TORCH_INTERNAL_ASSERT(require_finalize_);
   require_finalize_ = false;
 
-  // Wait for asynchronous reduction to complete and unflatten contents.
+  // Wait for asynchronous reduction to complete, and unflatten the bucket's
+  // flattened `gradients` tensor.
   for (auto& bucket : buckets_) {
     // See Note [DDP Communication Hook]
     TORCH_INTERNAL_ASSERT(
@@ -1491,13 +1475,12 @@ void Reducer::finalize_backward() {
     auto future_result = comm_hook_ == nullptr
         ? detail::parseCppCommHookResult(bucket.future_work->value())
         : comm_hook_->parseHookResult(bucket.future_work->value());
-    auto& replica = bucket.replicas[0];
     if (bucket.expect_sparse_gradient) {
-      replica.contents.copy_(future_result);
+      bucket.gradients.copy_(future_result);
     } else {
       // Reinitialize only `bucket_views_out` with the future_result by
       // following the same logic in `initialize_buckets`.
-      populate_bucket_views_out(replica, future_result);
+      populate_bucket_views_out(bucket, future_result);
     }
 
     // Unset allreduce division factor, as it may change in next backwards pass
@@ -1513,8 +1496,8 @@ void Reducer::finalize_backward() {
   }
 
   if (installed_futures_ != c10::nullopt) {
-      c10::collectAll(*installed_futures_)->wait();
-      installed_futures_ = c10::nullopt;
+    c10::collectAll(*installed_futures_)->wait();
+    installed_futures_ = c10::nullopt;
   }
 
   // See Note [Skip allreducing local_used_maps_dev]
@@ -1606,7 +1589,7 @@ void Reducer::sync_bucket_indices(
   auto indices_tensor_device = at::empty({total_size + 1}, options);
   indices_tensor_device.copy_(indices_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> indices_tensor_list = {indices_tensor_device};
-  process_group_->broadcast(indices_tensor_list)->wait();
+  ops::broadcast(process_group_, indices_tensor_list)->wait();
   indices_tensor.copy_(indices_tensor_list.front(), /*non_blocking=*/false);
 
   // Update num_buckets after receiving it from rank 0
@@ -1625,7 +1608,7 @@ void Reducer::sync_bucket_indices(
   bucket_sizes_tensor_device.copy_(bucket_sizes_tensor, /*non_blocking=*/true);
   std::vector<at::Tensor> bucket_sizes_tensor_list = {
       bucket_sizes_tensor_device};
-  process_group_->broadcast(bucket_sizes_tensor_list)->wait();
+  ops::broadcast(process_group_, bucket_sizes_tensor_list)->wait();
   bucket_sizes_tensor.copy_(
       bucket_sizes_tensor_list.front(), /*non_blocking=*/false);
 
@@ -1682,10 +1665,10 @@ bool Reducer::rebuild_buckets() {
 
   if (ddp_set_last_bucket_as_small) {
     // Reverse so that first_bucket_bytes_cap_ (smaller bucket) becomes the last
-    // bucket. We cannot simply pass in {bucket_bytes_cap_, first_bucket_bytes_cap}
-    // as the bucket order as we would immediately advance to the 2nd element
-    // after the first bucket, whereas we only want the last bucket to have
-    // a smaller size.
+    // bucket. We cannot simply pass in {bucket_bytes_cap_,
+    // first_bucket_bytes_cap} as the bucket order as we would immediately
+    // advance to the 2nd element after the first bucket, whereas we only want
+    // the last bucket to have a smaller size.
     std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
     std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
   }
@@ -1704,13 +1687,12 @@ bool Reducer::rebuild_buckets() {
     std::reverse(per_bucket_size_limits.begin(), per_bucket_size_limits.end());
   }
 
-  if (ddp_debug_level_ != c10d::DistributedDebugLevel::OFF) {
+  if (ddp_debug_level_ != c10d::DebugLevel::Off) {
     TORCH_INTERNAL_ASSERT(
         rebuilt_bucket_indices.size() == per_bucket_size_limits.size())
     LOG(INFO) << rebuilt_bucket_indices.size()
               << " buckets rebuilt with size limits: "
-              << c10::Join(", ", per_bucket_size_limits)
-              << " bytes.";
+              << c10::Join(", ", per_bucket_size_limits) << " bytes.";
   }
 
   // For rebuilt bucket indices, it needs to be synced across all ranks.
@@ -1722,8 +1704,7 @@ bool Reducer::rebuild_buckets() {
   rebuilt_params_.clear();
   rebuilt_param_indices_.clear();
 
-  initialize_buckets(
-      std::move(rebuilt_bucket_indices), std::move(per_bucket_size_limits));
+  initialize_buckets(std::move(rebuilt_bucket_indices));
 
   return true;
 }
@@ -1829,7 +1810,7 @@ void Reducer::ensure_prior_reduction_finished() {
         ": ",
         unmarked_param_indices);
 
-    if (ddp_debug_level_ == DistributedDebugLevel::OFF) {
+    if (ddp_debug_level_ == DebugLevel::Off) {
       // Without debug mode, log unmarked_param_indices, as well as
       // recommendation to use debug mode to print parameter names.
       kBaseErrorMsg += unmarked_param_indices_info;
@@ -1928,7 +1909,7 @@ namespace {
 // composite key of a tensor's type identifier and its device.
 struct BucketKey {
   BucketKey(c10::ScalarType type, c10::Device device)
-      : type(std::move(type)), device(std::move(device)) {}
+      : type(type), device(device) {}
 
   const c10::ScalarType type;
   const c10::Device device;
@@ -1998,8 +1979,8 @@ compute_bucket_assignment_by_size(
     // be grouped together with other gradients and gets its own bucket.
     if (!expect_sparse_gradient.empty() &&
         expect_sparse_gradient[tensor_index]) {
-          result.emplace_back(std::vector<size_t>({tensor_index}), kNoSizeLimit);
-          continue;
+      result.emplace_back(std::vector<size_t>({tensor_index}), kNoSizeLimit);
+      continue;
     }
 
     auto key = BucketKey(tensor.scalar_type(), tensor.device());
@@ -2064,19 +2045,61 @@ compute_bucket_assignment_by_size(
   bucket_indices.reserve(result.size());
   std::vector<size_t> per_bucket_size_limits;
   per_bucket_size_limits.reserve(result.size());
-  for (const auto & bucket_indices_with_size : result) {
+  for (const auto& bucket_indices_with_size : result) {
     bucket_indices.emplace_back(std::get<0>(bucket_indices_with_size));
     per_bucket_size_limits.emplace_back(std::get<1>(bucket_indices_with_size));
   }
   return std::make_tuple(bucket_indices, per_bucket_size_limits);
 }
 
-// Verifies corresponding params in the model replica have the same sizes/strides
-// across processes.
+// Verifies corresponding params in the model replica have the same
+// sizes/strides across processes.
 void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
     const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
+  // First verify number of parameters to avoid inconsistent inputs into
+  // broadcast which can cause a crash.
+  // See https://github.com/pytorch/pytorch/issues/73547
+
+  at::TensorOptions param_size_options;
+  param_size_options = param_size_options.dtype(at::kLong);
+  param_size_options = param_size_options.device(params[0].device());
+  // Note: Not using tensor building API because of
+  // https://github.com/pytorch/pytorch/issues/74114
+  at::Tensor param_size_tensor =
+      at::tensor({static_cast<int64_t>(params.size())}, param_size_options);
+
+  // Allgather and verify parameter size.
+  std::vector<std::vector<at::Tensor>> param_size_output_tensors;
+  param_size_output_tensors.emplace_back(std::vector<at::Tensor>{});
+  auto world_size = process_group->getSize();
+  for (size_t i = 0; i < world_size; ++i) {
+    param_size_output_tensors.front().emplace_back(
+        at::empty_like(param_size_tensor));
+  }
+
+  std::vector<at::Tensor> param_size_vec{param_size_tensor};
+  ops::allgather(process_group, param_size_output_tensors, param_size_vec)
+      ->wait();
+  auto result_size_tensors = param_size_output_tensors.front();
+  for (size_t i = 0; i < world_size; ++i) {
+    auto param_size_for_rank = result_size_tensors[i][0].item<int>();
+    TORCH_CHECK(
+        param_size_for_rank == params.size(),
+        c10::str(
+            "DDP expects same model across all ranks, but Rank ",
+            process_group->getRank(),
+            " has ",
+            params.size(),
+            " params, while rank ",
+            i,
+            " has inconsistent ",
+            param_size_for_rank,
+            " params."));
+  }
+
+  // Continue with parameter shape verification.
   size_t i = 0;
   for (const auto& t : params) {
     i += 2 * t.dim();
@@ -2100,7 +2123,7 @@ void verify_params_across_processes(
 
   auto metadata_dev = metadata.clone().to(params[0].device());
   std::vector<at::Tensor> vec{metadata_dev};
-  process_group->broadcast(vec)->wait();
+  ops::broadcast(process_group, vec)->wait();
 
   // Technically, process 0 doesn't need to double-check metadata, because it
   // was the source.  But no harm keeping work aligned.
@@ -2110,25 +2133,30 @@ void verify_params_across_processes(
   i = 0;
   for (const auto p : c10::irange(params.size())) {
     const auto& t = params[p];
-    // I'd like to include which process we are in the message,
-    // but ProcessGroup::getRank is not public!
     for (const auto& sz : t.sizes()) {
-      auto msg = c10::str("params[", p, "] in this process",
-                        " with sizes ",
-                        t.sizes(),
-                        " appears not to match sizes of the same param in process 0.");
+      auto msg = c10::str(
+          "[",
+          process_group->getRank(),
+          "]: params[",
+          p,
+          "] in this process",
+          " with sizes ",
+          t.sizes(),
+          " appears not to match sizes of the same param in process 0.");
       if (logger.has_value()) {
         REDUCER_CHECK(sz == control_accessor[i++], logger.value(), msg)
       } else {
         TORCH_CHECK(sz == control_accessor[i++], msg)
       }
-
     }
     for (const auto& str : t.strides()) {
-      auto msg = c10::str("params[", p, "] in this process",
-                        " with sizes ",
-                        t.sizes(),
-                        " appears not to match strides of the same param in process 0.");
+      auto msg = c10::str(
+          "params[",
+          p,
+          "] in this process",
+          " with sizes ",
+          t.sizes(),
+          " appears not to match strides of the same param in process 0.");
       if (logger.has_value()) {
         REDUCER_CHECK(str == control_accessor[i++], logger.value(), msg)
       } else {

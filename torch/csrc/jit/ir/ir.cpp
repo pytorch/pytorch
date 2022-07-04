@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <locale>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -508,6 +509,7 @@ void Node::lint() const {
       break;
     case prim::FusionGroup:
     case prim::CudaFusionGroup:
+    case prim::oneDNNFusionGroup:
       checkSameDevice(this);
       // TODO: Typecheck the parameters
       g(attr::Subgraph)->lint();
@@ -890,6 +892,13 @@ Value* Value::setDebugName(const std::string& name) {
     std::string replacement_name;
     do {
       std::stringstream ss;
+#ifndef _WIN32
+      // Protect 12345 integer from becoming "1,2345" if some other process sets
+      // global locale For more details see
+      // https://github.com/pytorch/pytorch/issues/79583#issuecomment-1161260061
+      static std::locale c_locale("C");
+      ss.imbue(c_locale);
+#endif
       ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while (names.count(replacement_name) > 0);
@@ -2285,10 +2294,7 @@ const Symbol ProfileOp::Kind = ::c10::prim::profile;
 const Symbol ProfileIValueOp::Kind = ::c10::prim::profile_ivalue;
 
 OperatorSet::OperatorSet(std::initializer_list<const char*> sig_literals) {
-  for (const char* sig : sig_literals) {
-    auto op = getOperatorForLiteral(sig);
-    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
-  }
+  insert(sig_literals);
 }
 
 std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
@@ -2298,6 +2304,13 @@ std::vector<std::shared_ptr<Operator>> OperatorSet::getOps() const {
     result.insert(result.end(), ops_for_symbol.begin(), ops_for_symbol.end());
   }
   return result;
+}
+
+void OperatorSet::insert(std::initializer_list<const char*> sig_literals) {
+  for (const char* sig : sig_literals) {
+    auto op = getOperatorForLiteral(sig);
+    ops[Symbol::fromQualString(op->schema().name())].push_back(op);
+  }
 }
 
 bool Node::isMemberOf(const OperatorSet& os) const {

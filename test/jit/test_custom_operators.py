@@ -50,10 +50,6 @@ class TestCustomOperators(JitTestCase):
         output = torch.ops._test.leaky_relu(torch.tensor([-1.0, 1.0]))
         self.assertEqual(output, torch.tensor([-0.01, 1]))
 
-    def test_only_kwargs(self):
-        output = torch.ops._test.leaky_relu(self=torch.tensor(-1.0))
-        self.assertEqual(output, torch.tensor(-0.01))
-
     def test_passing_too_many_args(self):
         with self.assertRaisesRegexWithHighlight(
             RuntimeError,
@@ -77,14 +73,6 @@ class TestCustomOperators(JitTestCase):
             ""
         ):
             torch.ops.aten.type_as(torch.ones(5, 5))
-
-    def test_passing_an_argument_both_as_positional_and_kwarg(self):
-        with self.assertRaisesRegexWithHighlight(
-            RuntimeError,
-            "Argument 'self' specified both as positional and keyword argument",
-            ""
-        ):
-            torch.ops._test.leaky_relu(torch.ones(5), self=torch.ones(5))
 
     def test_passing_unknown_kwargs(self):
         with self.assertRaisesRegexWithHighlight(
@@ -135,3 +123,8 @@ graph(%x.1 : Tensor):
 
     def test_generic_list(self):
         self.assertEqual(torch.ops._test.get_first([['hello']]), 'hello')
+
+    # https://github.com/pytorch/pytorch/issues/80508
+    def test_where_no_scalar(self):
+        x = torch.rand(1, 3, 224, 224)
+        torch.ops.aten.where(x > 0.5, -1.5, 1.5)  # does not raise

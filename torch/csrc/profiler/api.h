@@ -25,13 +25,25 @@ enum class C10_API_ENUM ProfilerState {
   NVTX, // only emit NVTX markers
   KINETO, // use libkineto
   KINETO_GPU_FALLBACK, // use CUDA events when CUPTI is not available
+  KINETO_ONDEMAND, // run the profiler in on-demand mode
   NUM_PROFILER_STATES, // must be the last one
 };
 
-enum class C10_API_ENUM ActiveProfilerType {
-  NONE = 0,
-  LEGACY,
-  KINETO
+enum class C10_API_ENUM ActiveProfilerType { NONE = 0, LEGACY, KINETO, NVTX };
+
+struct TORCH_API ExperimentalConfig {
+  explicit ExperimentalConfig(
+      std::vector<std::string> profiler_metrics = {},
+      bool profiler_measure_per_kernel = false)
+      : profiler_metrics(std::move(profiler_metrics)),
+        profiler_measure_per_kernel(profiler_measure_per_kernel) {}
+  ~ExperimentalConfig() = default;
+  std::vector<std::string> profiler_metrics;
+  bool profiler_measure_per_kernel = false;
+
+  bool hasOptions() const {
+    return profiler_metrics.size() > 0;
+  }
 };
 
 struct TORCH_API ProfilerConfig {
@@ -41,8 +53,10 @@ struct TORCH_API ProfilerConfig {
       bool profile_memory = false,
       bool with_stack = false,
       bool with_flops = false,
-      bool with_modules = false)
+      bool with_modules = false,
+      ExperimentalConfig experimental_config = ExperimentalConfig())
       : state(state),
+        experimental_config(experimental_config),
         report_input_shapes(report_input_shapes),
         profile_memory(profile_memory),
         with_stack(with_stack),
@@ -50,6 +64,7 @@ struct TORCH_API ProfilerConfig {
         with_modules(with_modules) {}
   ~ProfilerConfig() = default;
   ProfilerState state;
+  ExperimentalConfig experimental_config;
   bool report_input_shapes;
   bool profile_memory;
   bool with_stack;
@@ -69,6 +84,11 @@ struct TORCH_API ProfilerThreadLocalStateBase
   explicit ProfilerThreadLocalStateBase(const ProfilerConfig& config)
       : c10::MemoryReportingInfoBase(), config_(config) {}
   ~ProfilerThreadLocalStateBase() override = default;
+
+  static ProfilerThreadLocalStateBase* getTLS() {
+    return static_cast<ProfilerThreadLocalStateBase*>(
+        c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PROFILER_STATE));
+  }
 
   const ProfilerConfig& config() const {
     return config_;
@@ -143,10 +163,10 @@ namespace torch {
 namespace autograd {
 namespace profiler {
 using torch::profiler::impl::ActivityType;
-using torch::profiler::impl::ProfilerConfig;
-using torch::profiler::impl::ProfilerState;
-using torch::profiler::impl::profilerEnabled;
 using torch::profiler::impl::getProfilerConfig;
+using torch::profiler::impl::ProfilerConfig;
+using torch::profiler::impl::profilerEnabled;
+using torch::profiler::impl::ProfilerState;
 } // namespace profiler
 } // namespace autograd
 } // namespace torch

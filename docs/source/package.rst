@@ -1,3 +1,6 @@
+.. automodule:: torch.package
+.. py:module:: torch.package.analyze
+
 .. currentmodule:: torch.package
 
 torch.package
@@ -13,7 +16,7 @@ will help you learn more about ``torch.package`` and how to use it.
 
 .. warning::
 
-    This module depends on the ``pickle`` module which is is not secure. Only unpackage data you trust.
+    This module depends on the ``pickle`` module which is not secure. Only unpackage data you trust.
 
     It is possible to construct malicious pickle data which will **execute arbitrary code during unpickling**.
     Never unpackage data that could have come from an untrusted source, or that could have been tampered with.
@@ -90,7 +93,7 @@ work for exploring the contents. Some common ways to interact with ZIP files:
 
 Use the ``file_structure()`` API
 """"""""""""""""""""""""""""""""
-:class:`PackageImporter` and :class:`PackageExporter` provide a ``file_structure()`` method, which will return a printable
+:class:`PackageImporter` provides a ``file_structure()`` method, which will return a printable
 and queryable ``Folder`` object. The ``Folder`` object is a simple directory structure that you can use to explore the
 current contents of a ``torch.package``.
 
@@ -102,10 +105,10 @@ use the glob-style ``include`` and ``exclude`` filtering arguments.
 
     with PackageExporter('my_package.pt') as pe:
         pe.save_pickle('models', 'model_1.pkl', mod)
-        # can limit printed items with include/exclude args
-        print(pe.file_structure(include=["**/utils.py", "**/*.pkl"], exclude="**/*.storages"))
 
     importer = PackageImporter('my_package.pt')
+    # can limit printed items with include/exclude args
+    print(importer.file_structure(include=["**/utils.py", "**/*.pkl"], exclude="**/*.storages"))
     print(importer.file_structure()) # will print out all files
 
 
@@ -143,8 +146,8 @@ You can also query ``Folder`` objects with the ``has_file()`` method.
 
 ::
 
-    exporter_file_structure = exporter.file_structure()
-    found: bool = exporter_file_structure.has_file("package_a/subpackage.py")
+    importer_file_structure = importer.file_structure()
+    found: bool = importer_file_structure.has_file("package_a/subpackage.py")
 
 See why a given module was included as a dependency?
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -266,9 +269,9 @@ Steps:
         # save as normal, no extra work necessary
         pe.save_pickle('foo_collection', 'foo1.pkl', foo_1)
         pe.save_pickle('foo_collection', 'foo2.pkl', foo_2)
-        print(pe.file_structure())
 
     pi = PackageImporter('foo_package.pt')
+    print(pi.file_structure())
     imported_foo = pi.load_pickle('foo_collection', 'foo1.pkl')
     print(f"foo_1 string: '{imported_foo.my_string}'")
     print(f"foo_1 export time: {imported_foo.time_exported}")
@@ -376,7 +379,7 @@ API for accessing resources from inside a package.
 ::
 
     with PackageExporter(f) as exporter:
-        # saves text to one/a.txt in the archive
+        # saves text to my_resource/a.txt in the archive
         exporter.save_text("my_resource", "a.txt", "hello world!")
         # saves the tensor to my_pickle/obj.pkl
         exporter.save_pickle("my_pickle", "obj.pkl", torch.ones(2, 2))

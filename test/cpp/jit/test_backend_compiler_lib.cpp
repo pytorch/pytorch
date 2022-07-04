@@ -2,7 +2,10 @@
 #include <c10/core/TensorImpl.h>
 #include <torch/csrc/jit/backends/backend.h>
 #include <torch/csrc/jit/backends/backend_exception.h>
+
+#ifndef NO_PROFILING
 #include <torch/csrc/jit/mobile/profiler_edge.h>
+#endif
 
 namespace torch {
 namespace jit {
@@ -72,7 +75,12 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     return true;
   }
 
-  // Since the actual compilation is done AOT,
+  // Since the actual compilation is done AOT for this backend, compile just
+  // forwards everything along. In a non toy setup this could grab information
+  // from that runtime that might be relevant to execute, such as build flags
+  // the resolution of the devices camera, or basically any runtime specific
+  // information that wouldnt be available server side where preprocess is
+  // called.
   c10::impl::GenericDict compile(
       c10::IValue processed,
       c10::impl::GenericDict method_compile_spec) override {
@@ -86,8 +94,14 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     return c10::impl::toGenericDict(handles);
   }
 
+  // Function that actually executes the model in the backend. Here there is
+  // nothing to dispatch to, so the backend is implemented locally within
+  // execute and it only supports add, subtract, and constant. In a non toy
+  // backend you can imagine how this function could be used to actually
+  // dispatch the inputs to the relevant backend/device.
   c10::impl::GenericList execute(
-      c10::IValue handle,
+      c10::IValue
+          handle, // example: [('prim::Constant#1', 14), ('aten::add', 15)]
       c10::impl::GenericList inputs) override {
     TORCH_INTERNAL_ASSERT(inputs.size() == 2);
     c10::IValue val0 = inputs[0];
@@ -98,23 +112,25 @@ class BackendWithCompiler : public PyTorchBackendInterface {
     op_runtimes_us.reserve(handle.toList().size());
 
     c10::List<at::Tensor> output_list;
+#ifndef NO_PROFILING
     auto start_us = torch::profiler::impl::getTime() / 1000;
+#endif
     for (const auto& token : handle.toList()) {
       IValue val = token;
       auto instruction = val.toTupleRef().elements()[0].toStringRef();
       auto debug_handle = val.toTupleRef().elements()[1].toInt();
-      double const_val = 1.0;
+#ifndef NO_PROFILING
       auto start_time_us = torch::profiler::impl::getTime() / 1000;
+#endif
       try {
         if (instruction.rfind("prim::Constant", 0) == 0) {
+          // 15 is the length of 'prim::Constant#' the constant val comes after
           TORCH_CHECK(
               instruction.size() > 15,
               "Constant value is expected in ",
               instruction);
           // NOLINTNEXTLINE(cppcoreguidelines-avoid-magic-numbers)
           auto sub = instruction.substr(15);
-          // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-          const_val = stod(sub);
         } else if (instruction == "aten::add" || instruction == "aten::sub") {
           TORCH_CHECK(x.sizes() == h.sizes());
           if (x.dim() > 1 || (x.dim() == 1 && x.size(0) > 1)) {
@@ -129,6 +145,15 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           auto x_ptr = float_data_ptr(x);
           auto h_ptr = float_data_ptr(h);
           auto y_ptr = float_data_ptr(y);
+#ifndef NO_PROFILING
+          RECORD_BACKEND_MEMORY_EVENT_TO_EDGE_PROFILER(
+              x_ptr,
+              x.numel() * sizeof(float),
+              x.numel() * sizeof(float),
+              x.numel() * sizeof(float) + y.numel() * sizeof(float) +
+                  h.numel() * sizeof(float),
+              c10::Device(c10::kCPU));
+#endif
           if (instruction == "aten::add") {
             y_ptr[0] = x_ptr[0] + h_ptr[0];
           } else {
@@ -146,10 +171,13 @@ class BackendWithCompiler : public PyTorchBackendInterface {
       } catch (c10::Error& e) {
         TORCH_DELEGATED_BACKEND_THROW(false, e.what(), debug_handle);
       }
+#ifndef NO_PROFILING
       auto end_time_us = torch::profiler::impl::getTime() / 1000;
       auto duration = end_time_us - start_time_us;
       op_runtimes_us.emplace_back(duration, debug_handle, instruction);
+#endif
     }
+#ifndef NO_PROFILING
     for (const auto& tup : op_runtimes_us) {
       RECORD_BACKEND_EVENT_TO_EDGE_PROFILER(
           start_us,
@@ -159,6 +187,7 @@ class BackendWithCompiler : public PyTorchBackendInterface {
           "test_backend");
       start_us = start_us + std::get<0>(tup);
     }
+#endif
     return c10::impl::toList(output_list);
   }
 };

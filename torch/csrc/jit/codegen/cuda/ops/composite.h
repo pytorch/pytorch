@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/Export.h>
+#include <c10/macros/Export.h>
 
 #include <torch/csrc/jit/codegen/cuda/ir_interface_nodes.h>
 #include <torch/csrc/jit/codegen/cuda/type.h>
@@ -31,8 +31,6 @@ TORCH_CUDA_CU_API TensorView* dropout_backward(
     TensorView* mask,
     Val* scale);
 
-TORCH_CUDA_CU_API Val* softplus(Val* x, Val* beta, Val* threshold);
-
 struct LstmResult {
   TensorView* cell = nullptr;
   TensorView* hidden = nullptr;
@@ -45,14 +43,17 @@ TORCH_CUDA_CU_API LstmResult lstm(
     TensorView* cell_x,
     TensorView* out_x);
 
-TORCH_CUDA_CU_API Val* fast_gelu(Val* x);
-TORCH_CUDA_CU_API Val* fast_gelu_backward(Val* dy, Val* x);
-TORCH_CUDA_CU_API Val* gelu_backward(Val* dy, Val* x);
-
-TORCH_CUDA_CU_API TensorView* view(
+TORCH_CUDA_CU_API TensorView* softplus(
     TensorView* x,
-    const std::vector<int64_t>& x_sizes,
-    const std::vector<int64_t>& new_sizes);
+    Val* beta,
+    Val* threshold);
+TORCH_CUDA_CU_API TensorView* gelu(TensorView* x);
+TORCH_CUDA_CU_API TensorView* gelu_backward(TensorView* dy, TensorView* x);
+TORCH_CUDA_CU_API TensorView* tanh_gelu(TensorView* x);
+TORCH_CUDA_CU_API TensorView* tanh_gelu_backward(TensorView* dy, TensorView* x);
+TORCH_CUDA_CU_API TensorView* tanh_backward(TensorView* dy, TensorView* tanh_x);
+
+TORCH_CUDA_CU_API TensorView* view_as_real(TensorView* x);
 
 } // namespace cuda
 } // namespace fuser

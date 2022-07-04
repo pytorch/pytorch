@@ -141,7 +141,7 @@ def _batch_trace_XXT(bmat):
     return flat_trace.reshape(bmat.shape[:-2])
 
 
-def kl_divergence(p, q):
+def kl_divergence(p: Distribution, q: Distribution) -> torch.Tensor:
     r"""
     Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
 
@@ -166,7 +166,8 @@ def kl_divergence(p, q):
         fun = _dispatch_kl(type(p), type(q))
         _KL_MEMOIZE[type(p), type(q)] = fun
     if fun is NotImplemented:
-        raise NotImplementedError
+        raise NotImplementedError("No KL(p || q) is implemented for p type {} and q type {}"
+                                  .format(p.__class__.__name__, q.__class__.__name__))
     return fun(p, q)
 
 
@@ -179,10 +180,10 @@ def kl_divergence(p, q):
 
 @register_kl(Bernoulli, Bernoulli)
 def _kl_bernoulli_bernoulli(p, q):
-    t1 = p.probs * (p.probs / q.probs).log()
+    t1 = p.probs * (torch.nn.functional.softplus(-q.logits) - torch.nn.functional.softplus(-p.logits))
     t1[q.probs == 0] = inf
     t1[p.probs == 0] = 0
-    t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
+    t2 = (1 - p.probs) * (torch.nn.functional.softplus(q.logits) - torch.nn.functional.softplus(p.logits))
     t2[q.probs == 1] = inf
     t2[p.probs == 1] = 0
     return t1 + t2
@@ -812,3 +813,14 @@ def _kl_cauchy_cauchy(p, q):
     t1 = ((p.scale + q.scale).pow(2) + (p.loc - q.loc).pow(2)).log()
     t2 = (4 * p.scale * q.scale).log()
     return t1 - t2
+
+def _add_kl_info():
+    """Appends a list of implemented KL functions to the doc for kl_divergence."""
+    rows = ["KL divergence is currently implemented for the following distribution pairs:"]
+    for p, q in sorted(_KL_REGISTRY,
+                       key=lambda p_q: (p_q[0].__name__, p_q[1].__name__)):
+        rows.append("* :class:`~torch.distributions.{}` and :class:`~torch.distributions.{}`"
+                    .format(p.__name__, q.__name__))
+    kl_info = '\n\t'.join(rows)
+    if kl_divergence.__doc__:
+        kl_divergence.__doc__ += kl_info  # type: ignore[operator]

@@ -2,10 +2,10 @@
 
 #include <ATen/core/symbol.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/codegen/cuda/interface.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/cuda_graph_fuser.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
@@ -113,22 +113,57 @@ ProfileIValueOp* ProfilingRecord::createProfileIValueNode(
   return pn;
 }
 
-void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
+namespace {
+bool isOptionalTensorType(const TypePtr& type) {
+  if (type->kind() != c10::TypeKind::OptionalType) {
+    return false;
+  }
+  const auto& kind = type->expectRef<OptionalType>().getElementType()->kind();
+  return kind == c10::TypeKind::TensorType;
+}
+} // namespace
+
+// Inserts profiling nodes.
+//
+// The prim::profile node profiles Tensor and Optional[Tensor].
+//
+// It stores two fields:
+// 1. attr::seen_none, an integer, which is initially 0 and is set to 1 if the
+// profiled value is ever `None`
+// 2. attr::profiled_type, which is the most specific Tensor type that matches
+// all the non-null inputs observed during profiling.
+void ProfilingRecord::insertShapeProfile(
+    Node* n,
+    size_t offset,
+    const TypePtr& input_type) {
   Value* i = n->input(offset);
   auto pn = createProfileNode(nullptr, {i});
   auto pno = pn->addOutput();
   pn->ty_(attr::profiled_type, TensorType::get());
-  pno->setType(TensorType::get());
+  pn->i_(attr::seen_none, 0);
+  if (isOptionalTensorType(input_type)) {
+    pno->setType(OptionalType::create(TensorType::get()));
+  } else if (input_type->kind() == c10::TypeKind::TensorType) {
+    pno->setType(TensorType::get());
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false,
+        "Trying to profile an unsupported type (neither Tensor or Optional[Tensor]): ",
+        input_type->str());
+  }
   std::function<void(Stack&)> shape_profiler = [this, pn, pno](Stack& stack) {
     int64_t frame_id = 0;
     pop(stack, frame_id);
     IValue v;
     pop(stack, v);
 
+    TensorTypePtr new_tensor_type = nullptr;
     if (v.isTensor()) {
       auto& t = v.toTensor();
-      auto new_tensor_type = tensorTypeInCurrentExecutionContext(t);
+      new_tensor_type = tensorTypeInCurrentExecutionContext(t);
+    }
 
+    if (v.isTensor() || v.isNone()) {
       std::lock_guard<std::mutex> lock(this->mutex_);
       if (profiling_count_ > 0) {
         GRAPH_DEBUG(
@@ -139,21 +174,26 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
             " with ",
             *new_tensor_type);
 
-        if (pn->hasRun()) {
-          const auto& existing_tensor_type =
-              pn->ty(attr::profiled_type)->expectRef<TensorType>();
-          GRAPH_DEBUG(
-              "Existing type for %",
-              pno->debugName(),
-              ": ",
-              existing_tensor_type);
-          auto merged_type = new_tensor_type->merge(existing_tensor_type);
-          GRAPH_DEBUG(
-              "Merged type for %", pno->debugName(), ": ", *merged_type);
-          pn->ty_(attr::profiled_type, std::move(merged_type));
-        } else {
-          pn->setHasRun(true);
-          pn->ty_(attr::profiled_type, std::move(new_tensor_type));
+        if (new_tensor_type != nullptr) {
+          if (pn->hasSeenTensor()) {
+            const auto& existing_tensor_type =
+                pn->ty(attr::profiled_type)->expectRef<TensorType>();
+            GRAPH_DEBUG(
+                "Existing type for %",
+                pno->debugName(),
+                ": ",
+                existing_tensor_type);
+            auto merged_type = new_tensor_type->merge(existing_tensor_type);
+            GRAPH_DEBUG(
+                "Merged type for %", pno->debugName(), ": ", *merged_type);
+            pn->ty_(attr::profiled_type, std::move(merged_type));
+          } else {
+            pn->setHasSeenTensor(true);
+            pn->ty_(attr::profiled_type, std::move(new_tensor_type));
+          }
+        }
+        if (v.isNone()) {
+          pn->i_(attr::seen_none, 1);
         }
       }
     }
@@ -169,7 +209,7 @@ void ProfilingRecord::insertShapeProfile(Node* n, size_t offset) {
 bool needsProfiledInputs(Node* n) {
   if (tensorexpr::isSupported(n) ||
 #ifndef C10_MOBILE
-      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::profileNode(n))
+      (fuser::cuda::isEnabled() && fuser::cuda::profileNode(n))
 #else
       false
 #endif
@@ -206,7 +246,7 @@ bool needsProfiledInputs(Node* n) {
 bool needsProfiledOutput(Node* n) {
   if (tensorexpr::isSupported(n) ||
 #ifndef C10_MOBILE
-      (RegisterCudaFuseGraph::isRegistered() && fuser::cuda::profileNode(n))
+      (fuser::cuda::isEnabled() && fuser::cuda::profileNode(n))
 #else
       false
 #endif
@@ -241,9 +281,11 @@ void ProfilingRecord::instrumentBlock(Block* block) {
     auto n = *it;
     for (const auto offset : c10::irange(n->inputs().size())) {
       auto i = n->input(offset);
-      if (i->type()->kind() == c10::TypeKind::TensorType &&
-          (needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
-        insertShapeProfile(n, offset);
+      if ((needsProfiledInputs(n) || needsProfiledOutput(i->node()))) {
+        if (i->type()->kind() == c10::TypeKind::TensorType ||
+            isOptionalTensorType(i->type())) {
+          insertShapeProfile(n, offset, i->type());
+        }
       }
     }
 
@@ -260,8 +302,9 @@ void ProfilingRecord::instrumentBlock(Block* block) {
   for (size_t offset = 0; offset < block->return_node()->inputs().size();
        offset++) {
     auto i = block->return_node()->input(offset);
-    if (i->type()->isSubtypeOf(*TensorType::get())) {
-      insertShapeProfile(block->return_node(), offset);
+    if (i->type()->isSubtypeOf(*TensorType::get()) ||
+        isOptionalTensorType(i->type())) {
+      insertShapeProfile(block->return_node(), offset, i->type());
     }
   }
 }

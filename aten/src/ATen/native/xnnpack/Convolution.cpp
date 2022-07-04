@@ -27,7 +27,7 @@ namespace {
 // TODO: Decouple and improve error handling and messages.
 bool available(
     const Tensor& weight,
-    const c10::optional<IntArrayRef> bias_sizes_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,
@@ -36,7 +36,7 @@ bool available(
     const float output_min,
     const float output_max) {
          // XNNPACK
-  return xnnpack::internal::available() &&
+  return xnnpack::available() &&
          // Weight
          (4 == weight.ndimension()) &&
          (weight.size(Layout::Filter::height) > 0) &&
@@ -144,7 +144,7 @@ const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
      weight_nhwc.sizes(),
      weight_nhwc.options().dtype(),
      MemoryFormat::ChannelsLast,
-     weight_nhwc.names());
+     weight_nhwc.opt_names());
 
   float* out_ptr = reordered.data_ptr<float>();
   float* in_ptr = weight_nhwc.data_ptr<float>();
@@ -189,7 +189,7 @@ ContextConv2D create(
   TORCH_CHECK(
       available(
           weight_nhwc,
-          (bias.has_value() && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
+          (bias.has_value() && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt,
           padding_expanded,
           stride_expanded,
           dilation_expanded,
@@ -308,7 +308,7 @@ Tensor run(
         context.groups_),
       padded_input_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast,
-      padded_input_nhwc.names());
+      padded_input_nhwc.opt_names());
   } else {
     output = mobile::empty_with_tail_padding(
       conv_output_size(
@@ -319,7 +319,7 @@ Tensor run(
           context.dilation_),
       padded_input_nhwc.options().dtype(),
       MemoryFormat::ChannelsLast,
-      padded_input_nhwc.names());
+      padded_input_nhwc.opt_names());
   }
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -433,7 +433,7 @@ unpack_prepacked_sizes_conv2d(const IValue& ivalue) {
   const auto& bias = std::get<1>(tuple);
   return IValue(std::make_tuple(
       std::get<0>(tuple).sizes(),
-      (bias && bias->defined()) ? c10::optional<IntArrayRef>(bias->sizes()) : c10::nullopt,
+      (bias && bias->defined()) ? at::OptionalIntArrayRef(bias->sizes()) : c10::nullopt,
       std::get<2>(tuple),
       std::get<3>(tuple),
       std::get<4>(tuple),
@@ -452,7 +452,7 @@ Tensor conv2d_transpose_clamp_run(
 bool use_convolution2d(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<IntArrayRef> bias_sizes_opt,
+    const at::OptionalIntArrayRef bias_sizes_opt,
     const IntArrayRef padding,
     const IntArrayRef stride,
     const IntArrayRef dilation,

@@ -1,6 +1,8 @@
 import torch
 import torch.nn.quantized.functional
 
+__all__ = ['Dropout']
+
 class Dropout(torch.nn.Dropout):
     r"""This is the quantized equivalent of :class:`~torch.nn.Dropout`.
         And this is a placeholder to enable models where fp32 tensors
@@ -19,4 +21,8 @@ class Dropout(torch.nn.Dropout):
 
     @classmethod
     def from_float(cls, mod):
+        return cls(mod.p, mod.inplace)
+
+    @classmethod
+    def from_reference(cls, mod, scale, zero_point):
         return cls(mod.p, mod.inplace)

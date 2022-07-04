@@ -6,8 +6,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/adaption.h>
 
-${static_dispatch_extra_headers}
-
 namespace at {
 
 namespace redispatch {

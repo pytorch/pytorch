@@ -1,8 +1,11 @@
 #include <c10/util/StringUtil.h>
 #include <c10d/Utils.hpp>
+#include <c10d/debug.h>
 #include <c10d/logger.hpp>
 #include <fmt/format.h>
 #include <string>
+
+#include <c10/util/CallOnce.h>
 
 #ifdef USE_C10D_GLOO
 #include <c10d/ProcessGroupGloo.hpp>
@@ -21,7 +24,7 @@ std::ostream& operator<<(std::ostream& output, const Logger& logger) {
   auto& ddp_logging_data = (*logger.ddp_logging_data_);
 
   std::string loggerInfo = fmt::format(
-      "[Rank {} / {}] [iteration {}] Training {} unused_parameter_size={} \n "
+      "[Rank {} / {}] [before iteration {}] Training {} unused_parameter_size={} \n "
       "Avg forward compute time: {} \n Avg backward compute time: {} \n"
       "Avg backward comm. time: {} \n Avg backward comm/comp overlap time: {}",
       ddp_logging_data.ints_map["rank"],
@@ -51,10 +54,10 @@ Logger::Logger(std::shared_ptr<c10d::Reducer> reducer) {
   ddp_logging_data_ = std::make_unique<at::DDPLoggingData>();
 }
 
-std::once_flag log_graph_static_flag;
+c10::once_flag log_graph_static_flag;
 
 void Logger::log_if_graph_static(bool is_static) {
-  std::call_once(log_graph_static_flag, [this, is_static]() {
+  c10::call_once(log_graph_static_flag, [this, is_static]() {
     ddp_logging_data_->ints_map["can_set_static_graph"] = is_static;
     // It is useful to report the iteration that training finished at.
     ddp_logging_data_->ints_map["iteration"] = reducer_->num_iterations_;
@@ -88,12 +91,12 @@ void Logger::set_env_variables() {
     ddp_logging_data_->strs_map["gloo_device_transport"] =
         parse_env("GLOO_DEVICE_TRANSPORT");
 
-    #ifdef USE_C10D_GLOO
+#ifdef USE_C10D_GLOO
     auto gloo_pg =
         static_cast<c10d::ProcessGroupGloo*>(reducer_->process_group_.get());
     auto n_threads = gloo_pg->getNumThreads();
     ddp_logging_data_->ints_map["gloo_num_threads"] = n_threads;
-    #endif
+#endif
   }
 }
 
@@ -124,25 +127,17 @@ std::vector<std::vector<size_t>> Logger::get_per_bucket_variable_indices() {
   return per_bucket_variable_indices;
 }
 
-std::vector<int> Logger::get_bucket_sizes() {
-  std::vector<int> bucket_sizes;
+std::vector<int64_t> Logger::get_bucket_sizes() {
+  std::vector<int64_t> bucket_sizes;
   for (const auto& bucket : reducer_->buckets_) {
-    const auto& variables = bucket.replicas[0].variables;
-    int bucket_size = 0;
+    const auto& variables = bucket.variables;
+    int64_t bucket_size = 0;
     for (const auto& v : variables) {
       bucket_size += v.numel() * v.element_size();
     }
     bucket_sizes.push_back(bucket_size);
   }
   return bucket_sizes;
-}
-
-std::vector<int> Logger::get_bucket_size_limits() {
-  std::vector<int> bucket_size_limits;
-  for (const auto& bucket : reducer_->buckets_) {
-    bucket_size_limits.push_back(bucket.bucket_size_limit);
-  }
-  return bucket_size_limits;
 }
 
 // Communication hook. Empty string if not set, in which case it will not be
@@ -167,9 +162,13 @@ void Logger::set_construction_data_and_log(
     const std::vector<int>& device_ids,
     int output_device,
     bool broadcast_buffers,
-    bool has_sync_bn) {
+    bool has_sync_bn,
+    bool static_graph) {
   // No lock is needed, as it will be called in DistributedDataParallel
   // constructor.
+  if (static_graph) {
+    set_static_graph();
+  }
   ddp_logging_data_->strs_map["module_name"] = module_name;
   ddp_logging_data_->ints_map["world_size"] =
       reducer_->process_group_->getSize();
@@ -185,9 +184,6 @@ void Logger::set_construction_data_and_log(
   // A list of bucket sizes (Bytes) calculated during construction time
   ddp_logging_data_->strs_map["bucket_sizes"] =
       c10::Join(", ", get_bucket_sizes());
-  // A list of bucket size limits (bytes) specified during construction time
-  ddp_logging_data_->strs_map["initial_bucket_size_limits"] =
-      c10::Join(", ", get_bucket_size_limits());
   set_env_variables();
 
   // DistributedDataParallel constructor input parameters
@@ -203,7 +199,7 @@ void Logger::set_construction_data_and_log(
   ddp_logging_data_->strs_map["backend_name"] =
       reducer_->process_group_->getBackendName();
 
-  if (parseDistDebugLevel() != DistributedDebugLevel::OFF) {
+  if (debug_level() != DebugLevel::Off) {
     std::string initInfo = fmt::format(
         "[Rank {}]: DDP Initialized with: \n",
         ddp_logging_data_->ints_map["rank"]);
@@ -238,7 +234,8 @@ void Logger::calculate_avg_time(
     Timer::Event start_event,
     Timer::Event end_event) {
   TORCH_CHECK(num_iterations_stats_recorded_ > 0);
-  c10::optional<int64_t> maybe_time_duration = timer.measureDifference(start_event, end_event);
+  c10::optional<int64_t> maybe_time_duration =
+      timer.measureDifference(start_event, end_event);
   if (!maybe_time_duration.has_value()) {
     return;
   }
@@ -294,8 +291,6 @@ void Logger::set_runtime_stats_and_log() {
         reducer_->has_rebuilt_bucket_;
     ddp_logging_data_->strs_map["rebuilt_bucket_sizes"] =
         c10::Join(", ", get_bucket_sizes());
-    ddp_logging_data_->strs_map["rebuilt_bucket_size_limits"] =
-        c10::Join(", ", get_bucket_size_limits());
     // Log per-bucket variable indices
     std::vector<std::string> per_bucket_variable_indices;
     auto indices = get_per_bucket_variable_indices();
@@ -304,7 +299,7 @@ void Logger::set_runtime_stats_and_log() {
       per_bucket_variable_indices.push_back(c10::Join(" ", bucket_indices));
     }
     ddp_logging_data_->strs_map["rebuilt_per_bucket_param_indices"] =
-      c10::Join(", ", per_bucket_variable_indices);
+        c10::Join(", ", per_bucket_variable_indices);
   }
   // Log gradient ready order
   if (!reducer_->grad_ready_order_indices_.empty()) {
@@ -320,8 +315,14 @@ void Logger::set_runtime_stats_and_log() {
   // Cuda time stats are only collected for single device modules.
   if (reducer_->params_[0].is_cuda() && reducer_->is_multi_device_module_) {
     TORCH_WARN_ONCE(
-      "Cuda time stats are not collected for multi-device modules."
-    );
+        "Cuda time stats are not collected for multi-device modules.");
+    return;
+  }
+  if (!reducer_->params_[0].is_cuda() && !reducer_->params_[0].is_cpu()) {
+    TORCH_WARN_ONCE(
+        "Time stats are currently only collected for CPU and CUDA devices. "
+        "Please refer to CpuTimer or CudaTimer for how to register timer "
+        "for other device type.");
     return;
   }
   TORCH_INTERNAL_ASSERT(reducer_->timer_);
@@ -351,33 +352,28 @@ void Logger::set_runtime_stats_and_log() {
       Timer::Event::kBackwardComputeEnd);
 
   set_event_time(
-    ddp_logging_data_->ints_map["forward_compute_time_start"],
-    *reducer_->timer_,
-    Timer::Event::kForwardStart
-  );
+      ddp_logging_data_->ints_map["forward_compute_time_start"],
+      *reducer_->timer_,
+      Timer::Event::kForwardStart);
   set_event_time(
-    ddp_logging_data_->ints_map["backward_compute_time_start"],
-    *reducer_->timer_,
-    Timer::Event::kBackwardComputeStart
-  );
+      ddp_logging_data_->ints_map["backward_compute_time_start"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardComputeStart);
   set_event_time(
-    ddp_logging_data_->ints_map["backward_comm_time_start"],
-    *reducer_->timer_,
-    Timer::Event::kBackwardCommStart
-  );
+      ddp_logging_data_->ints_map["backward_comm_time_start"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardCommStart);
   set_event_time(
-    ddp_logging_data_->ints_map["backward_compute_time_end"],
-    *reducer_->timer_,
-    Timer::Event::kBackwardComputeEnd
-  );
+      ddp_logging_data_->ints_map["backward_compute_time_end"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardComputeEnd);
   set_event_time(
-    ddp_logging_data_->ints_map["backward_comm_time_end"],
-    *reducer_->timer_,
-    Timer::Event::kBackwardCommEnd
-  );
+      ddp_logging_data_->ints_map["backward_comm_time_end"],
+      *reducer_->timer_,
+      Timer::Event::kBackwardCommEnd);
 
   // Log runtime stats to stderr if TORCH_DISTRIBUTED_DEBUG=DETAIL is enabled.
-  if (parseDistDebugLevel() == DistributedDebugLevel::DETAIL) {
+  if (debug_level() == DebugLevel::Detail) {
     LOG(INFO) << *this;
   }
 

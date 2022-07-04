@@ -12,6 +12,7 @@ from . import (
     optimizer_overlap_hooks as optimizer_overlap,
 )
 
+__all__ = ['DDPCommHookType', 'register_ddp_comm_hook']
 
 def _ddp_comm_hook_wrapper(comm_hook, model, state):
     model.register_comm_hook(state, comm_hook)
@@ -22,7 +23,7 @@ def _powerSGD_comm_hook_wrapper(
     model,
     state,
     matrix_approximation_rank,
-    start_powerSGD_iter,
+    start_powerSGD_iter=1_000,
 ):
     """
     To be consistent with the wrappers of other DDP comm hooks, the input state only needs to be a process group,

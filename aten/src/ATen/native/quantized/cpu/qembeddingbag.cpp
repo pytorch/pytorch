@@ -1,5 +1,5 @@
 #include <ATen/ATen.h>
-#include <ATen/native/quantized/cpu/embedding_packed_params.h>
+#include <ATen/native/quantized/cpu/EmbeddingPackedParams.h>
 #include <ATen/native/quantized/cpu/fbgemm_utils.h>
 #include <ATen/native/quantized/cpu/qembeddingbag.h>
 #include <torch/library.h>
@@ -10,6 +10,8 @@
 
 #include <ATen/Parallel.h>
 #include <c10/util/irange.h>
+
+#include <array>
 
 int register_embedding_params();
 
@@ -149,7 +151,7 @@ void fbgemm_spmdm_report_error_(
     int64_t N,
     const OffsetType* offsets,
     const IndexType* indices) {
-  for (int m = 0; m < output_size; ++m) {
+  for (const auto m : c10::irange(output_size)) {
     for (OffsetType i = offsets[m]; i < offsets[m + 1]; ++i) {
       TORCH_CHECK(i < index_size);
       IndexType idx = indices[i];
@@ -227,14 +229,23 @@ at::Tensor& embedding_bag_nbit_impl(
     offsets_include_last_val[M] = indices.numel();
     offsets_data = offsets_include_last_val.data();
   }
-  std::vector<int64_t> shape;
-  if(indices.dim() == 2 && is_embedding_op) {
-    const auto indices_sizes = indices.sizes();
-    shape = {indices_sizes[0], indices_sizes[1], D};
-  } else {
-    shape = {output_size, D};
+  {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<int64_t, 3> shape_arr;
+    c10::IntArrayRef shape;
+    if(indices.dim() == 2 && is_embedding_op) {
+      const auto indices_sizes = indices.sizes();
+      shape_arr[0] = indices_sizes[0];
+      shape_arr[1] = indices_sizes[1];
+      shape_arr[2] = D;
+      shape = shape_arr;
+    } else {
+      shape_arr[0] = output_size;
+      shape_arr[1] = D;
+      shape = c10::IntArrayRef(&shape_arr[0], 2);
+    }
+    at::native::resize_(output, shape, c10::nullopt);
   }
-  at::native::resize_(output, shape, c10::nullopt);
 #ifdef USE_FBGEMM
   const auto indices_data = indices.data_ptr<IndexType>();
   const auto weight_data = weight.data_ptr<uint8_t>();
@@ -388,14 +399,23 @@ at::Tensor& embedding_bag_byte_impl(
     offsets_include_last_val[M] = indices.numel();
     offsets_data = offsets_include_last_val.data();
   }
-  std::vector<int64_t> shape;
-  if (indices.dim() == 2 && is_embedding_op) {
-    const auto indices_sizes = indices.sizes();
-    shape = {indices_sizes[0], indices_sizes[1], D};
-  } else {
-    shape = {output_size, D};
+  {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
+    std::array<int64_t, 3> shape_arr;
+    c10::IntArrayRef shape;
+    if (indices.dim() == 2 && is_embedding_op) {
+      const auto indices_sizes = indices.sizes();
+      shape_arr[0] = indices_sizes[0];
+      shape_arr[1] = indices_sizes[1];
+      shape_arr[2] = D;
+      shape = shape_arr;
+    } else {
+      shape_arr[0] = output_size;
+      shape_arr[1] = D;
+      shape = c10::IntArrayRef(&shape_arr[0], 2);
+    }
+    at::native::resize_(output, shape, c10::nullopt);
   }
-  at::native::resize_(output, shape, c10::nullopt);
 #ifdef USE_FBGEMM
   const int64_t N = weight_sizes[0];
   const auto weight_data = weight.data_ptr<uint8_t>();
@@ -405,7 +425,7 @@ at::Tensor& embedding_bag_byte_impl(
 
   if (!pruned_weights || fallback_to_no_sparse) {
     auto kernel_i8 =
-        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType>(
+        fbgemm::GenerateEmbeddingSpMDM<uint8_t, IndexType, OffsetType, /*OutType=*/float, /*TRHEAD_LOCAL=*/true>(
             /*block_size=*/D,
             /*has_weight=*/per_sample_weights_.has_value(),
             /*normalize_by_lengths=*/false,
@@ -959,6 +979,7 @@ class QEmbeddingBag final {
           false);
     } else {
       TORCH_INTERNAL_ASSERT(
+          false,
           "Currently only support 8-bit embedding_bag quantization");
     }
   }
@@ -995,6 +1016,7 @@ class QEmbedding final {
           true);
     } else {
       TORCH_INTERNAL_ASSERT(
+          false,
           "Currently only support 8-bit embedding quantization");
     }
     return output;
