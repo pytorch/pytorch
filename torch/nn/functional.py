@@ -4229,6 +4229,11 @@ def affine_grid(theta: Tensor, size: List[int], align_corners: Optional[bool] = 
         This function is often used in conjunction with :func:`grid_sample`
         to build `Spatial Transformer Networks`_ .
 
+    .. note::
+        Only valid entries for the affine matrix are used to create the affine grid.
+        Possible valid entries are described here:
+        https://people.cs.clemson.edu/~dhouse/courses/401/notes/affines-matrices.pdf.
+
     Args:
         theta (Tensor): input batch of affine matrices with shape
             (:math:`N \times 2 \times 3`) for 2D or
