@@ -21369,6 +21369,14 @@ python_ref_db = [
         op=lambda self, condition, other: refs.where(condition, self, other),
         supports_nvfuser=False,
     ),
+    #
+    # Test-related functions
+    #
+    PythonRefInfo(
+        "_refs.allclose",
+        torch_opinfo_name="allclose",
+        supports_nvfuser=False,
+    ),
 ]
 
 # Common operator groupings
