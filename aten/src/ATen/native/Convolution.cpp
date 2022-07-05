@@ -243,9 +243,59 @@ auto ConvParams::use_miopen(const at::Tensor& input, const at::Tensor& weight, b
          ;
 }
 
+bool mkldnn_conv_contiguous_check(const at::Tensor& input) {
+  if (input.is_mkldnn()) {
+    return true;
+  }
+  auto input_dim = input.dim();
+  bool is_cont = input.is_contiguous(at::MemoryFormat::Contiguous);
+  bool is_channels_last = (input_dim == 4)
+      ? input.is_contiguous(at::MemoryFormat::ChannelsLast)
+      : input.is_contiguous(at::MemoryFormat::ChannelsLast3d);
+  if (!(is_cont || is_channels_last)) {
+    return true;
+  }
+
+  auto dims = input.sizes();
+  auto strides = input.strides();
+  if (input_dim == 4) {
+    const auto n = 0, c = 1, h = 2, w = 3;
+    if ((is_channels_last &&
+         !(strides[n] == dims[h] * dims[w] * dims[c] &&
+           strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
+           strides[c] == 1)) &&
+        (is_cont &&
+         !(strides[n] == dims[c] * dims[h] * dims[w] &&
+           strides[c] == dims[h] * dims[w] && strides[h] == dims[w] &&
+           strides[w] == 1))) {
+      return false;
+    }
+  } else {
+    const auto n = 0, c = 1, d = 2, h = 3, w = 4;
+    if ((is_channels_last &&
+         !(strides[n] == dims[d] * dims[h] * dims[w] * dims[c] &&
+           strides[d] == dims[h] * dims[w] * dims[c] &&
+           strides[h] == dims[w] * dims[c] && strides[w] == dims[c] &&
+           strides[c] == 1)) &&
+        (is_cont &&
+         !(strides[n] == dims[c] * dims[d] * dims[h] * dims[w] &&
+           strides[c] == dims[d] * dims[h] * dims[w] &&
+           strides[d] == dims[h] * dims[w] && strides[h] == dims[w] &&
+           strides[w] == 1))) {
+      return false;
+    }
+  }
+  return true;
+}
+
 auto ConvParams::use_mkldnn(const at::Tensor& input, const at::Tensor& weight) const -> bool {
 #if AT_MKLDNN_ENABLED()
   if (!at::globalContext().userEnabledMkldnn()) {
+    return false;
+  }
+  if (!mkldnn_conv_contiguous_check(
+          input)) { // check whether current ATen input is contiguous based on
+                    // oneDNN requirements.
     return false;
   }
   if (input.device().is_cpu() && input.scalar_type() == kBFloat16 && mkldnn_bf16_device_check()) {
