@@ -5,10 +5,15 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <c10/util/Exception.h>
+#include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
+#include <ATen/native/Fill.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/TensorIndexing.h>
+#include <ATen/native/TypeProperties.h>
+#include <c10/core/QScheme.h>
+#include <ATen/TensorSubclassLikeUtils.h>
 
 namespace at {
 namespace meta {
@@ -29,8 +34,113 @@ const OptionalScalarRef max) {
   if (!min && !max) {
     TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
   }
+  //Manual type promotion, since scalars have to participate in it
+  ScalarType result_type = self.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  //Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    at::native::ResultTypeState state = {};
+    state = at::native::update_result_type_state(self, state);
 
-  build_borrowing_unary_op(maybe_get_output(), self);
+    if (min) {
+      state = at::native::update_result_type_state(min.get(), state);
+    }
+    if (max) {
+      state = at::native::update_result_type_state(max.get(), state);
+    }
+    result_type = at::native::result_type(state);
+    //disallow type promoting inplace op
+    TORCH_CHECK((result_type == self.scalar_type()) ||
+       (!(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
+  }
+  //make sure scalars weren't complex
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  build_unary_op(maybe_get_output(), self.to(result_type));
+}
+
+TORCH_META_FUNC2(clamp, Tensor) (
+const Tensor& self,
+const OptionalTensorRef min,
+const OptionalTensorRef max) {
+  TORCH_CHECK(min || max, "torch.clamp: At least one of 'min' or 'max' must not be None");
+  TORCH_CHECK(!isComplexType(self.scalar_type()), "clamp is not supported for complex types");
+  #define CLAMP_CONFIG()                    \
+    TensorIteratorConfig()                  \
+      .set_check_mem_overlap(true)          \
+      .add_output(maybe_get_output())       \
+      .add_input(self)                      \
+      .promote_inputs_to_common_dtype(true) \
+      .cast_common_dtype_to_outputs(true)   \
+      .enforce_safe_casting_to_output(true)
+
+  if (min && max) {
+    build(CLAMP_CONFIG().add_input(*min).add_input(*max));
+  } else if (min) {
+    build(CLAMP_CONFIG().add_input(*min));
+  } else if (max) {
+    build(CLAMP_CONFIG().add_input(*max));
+  }
+}
+
+
+TORCH_META_FUNC(clamp_max) (
+  const Tensor& self,
+  const Scalar& max
+) {
+  //we could wrap max into tensor and send to tensor overload,
+  //but relu is implemented via clamp_min, so for perf an uniformity reasons
+  //do a faster but correct thing
+  ScalarType result_type = self.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  TORCH_CHECK(!max.isComplex(), "clamp is not supported for complex types");
+  //Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    auto result_type = at::native::result_type(self, max);
+    TORCH_CHECK((result_type == self.scalar_type()) ||
+       (!(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
+    build_unary_op(maybe_get_output(), self.to(result_type));
+  } else {
+    build_borrowing_unary_op(maybe_get_output(), self);
+  }
+}
+
+TORCH_META_FUNC2(clamp_max, Tensor) (
+  const Tensor& self,
+  const Tensor& max
+) {
+  build_borrowing_binary_op(maybe_get_output(), self, max);
+}
+
+
+TORCH_META_FUNC(clamp_min) (
+  const Tensor& self,
+  const Scalar& min
+) {
+  ScalarType result_type = self.scalar_type();
+  TORCH_CHECK(!isComplexType(result_type), "clamp is not supported for complex types");
+  TORCH_CHECK(!min.isComplex(), "clamp is not supported for complex types");
+  //Floating is the highest supported
+  if (!isFloatingType(result_type)) {
+    auto result_type = at::native::result_type(self, min);
+    TORCH_CHECK((result_type == self.scalar_type() ||
+       !(maybe_get_output().defined()) || !(maybe_get_output().is_same(self))),
+       "result type ", result_type, " can't be cast to the desired output type ",
+       self.dtype());
+    build_unary_op(maybe_get_output(), self.to(result_type));
+  } else {
+    build_borrowing_unary_op(maybe_get_output(), self);
+  }
+}
+
+TORCH_META_FUNC2(clamp_min, Tensor) (
+  const Tensor& self,
+  const Tensor& min
+) {
+  build_borrowing_binary_op(maybe_get_output(), self, min);
 }
 
 TORCH_META_FUNC2(isin, Tensor_Tensor) (
@@ -38,7 +148,7 @@ TORCH_META_FUNC2(isin, Tensor_Tensor) (
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
-  set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, elements.sizes(), {}, TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC2(isin, Tensor_Scalar) (
@@ -46,7 +156,7 @@ TORCH_META_FUNC2(isin, Tensor_Scalar) (
 ) {
   check_for_unsupported_isin_dtype(elements.scalar_type());
   check_for_unsupported_isin_dtype(test_elements.type());
-  set_output(elements.sizes(), TensorOptions(elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, elements.sizes(), {}, TensorOptions(elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC2(isin, Scalar_Tensor) (
@@ -54,7 +164,7 @@ TORCH_META_FUNC2(isin, Scalar_Tensor) (
 ) {
   check_for_unsupported_isin_dtype(elements.type());
   check_for_unsupported_isin_dtype(test_elements.scalar_type());
-  set_output({0}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
+  set_output_raw_strided(0, {0}, {}, TensorOptions(test_elements.device()).dtype(ScalarType::Bool));
 }
 
 TORCH_META_FUNC(isposinf) (const Tensor& self) {
@@ -105,8 +215,6 @@ DEFINE_DISPATCH(isposinf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-glob
 DEFINE_DISPATCH(isneginf_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(mode_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_min_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
-DEFINE_DISPATCH(clamp_max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_min_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(clamp_max_scalar_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -143,7 +251,16 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
   // Computes equality closeness
   Tensor close = self == other;
   if (equal_nan && (self.is_floating_point() || self.is_complex())) {
+    // For CompositeCompliance, if `other` is a CCT and `self` is a regular Tensor,
+    // then we can't perform inplace op into `self` with `other`.
+    // NOTE: Inplacing into `close` is fine because it is generated from
+    // out-of-place with args `self` and `other`. So if either of them is
+    // a CCT then `close` will also be a `CCT`.
+    if (isTensorSubclassLike(other)) {
+      close.__ior__(self.isnan().bitwise_and(other.isnan()));
+    } else {
       close.__ior__(self.isnan().__iand__(other.isnan()));
+    }
   }
 
   // In case of zero tolerances the closeness inequality degenerates to an equality check.
@@ -220,7 +337,7 @@ Tensor isfinite(const Tensor& self) {
 
   // Note: a complex value is finite iff both parts are finite
   if (self.is_complex()) {
-    return at::isfinite(self.abs());
+    return at::isfinite(at::real(self)).__iand__(at::isfinite(at::imag(self)));
   }
 
   return AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16, self.scalar_type(), "isfinite", [&]() {
@@ -231,47 +348,6 @@ Tensor isfinite(const Tensor& self) {
 void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(native::is_nonzero(self), "Expected Tensor with single nonzero value, but got zero");
 }
-
-namespace {
-
-// DO NOT USE THIS -- it's just an implementation detail of wrapped_scalar tensor below.
-at::Tensor scalar_to_tensor_default_dtype(
-    const Scalar& s,
-    const Device device = at::kCPU) {
-  if (s.isFloatingPoint()) {
-    return at::scalar_tensor(
-        s, at::device(device).dtype(at::get_default_dtype()));
-  } else if (s.isBoolean()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kBool));
-  } else if (s.isComplex()) {
-    return at::scalar_tensor(
-        s, at::device(device).dtype(at::get_default_complex_dtype()));
-  } else {
-    TORCH_INTERNAL_ASSERT(s.isIntegral(false));
-    return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
-  }
-}
-
-// TLDR: Don't call `wrapped_scalar_tensor_default_dtype` -- this function is only necessary to support the partial
-// type-promotion that torch.where supports.  Once torch.where fully supports type promotion, we
-// won't need this function.
-//
-// Longer explanation:
-// `wrapped_scalar_tensor_default_dtype` is a bit of a hack because torch.where doesn't support type promotion, but
-// does support `torch.where(tensor, scalar1, scalar2)` with default scalar types.  The trickiness is we
-// usually convert double scalars to doubles, and `set_wrapped_number` defines type promotion priority
-// as being below tensor types rather than as the default dtype (perhaps we should?).  This wouldn't matter
-// if we just supported type normal type promotion on torch.where, however.
-Tensor wrapped_scalar_tensor_default_dtype(
-    const Scalar& scalar,
-    Device device) {
-  at::Tensor tensor;
-  tensor = scalar_to_tensor_default_dtype(scalar, device);
-  tensor.unsafeGetTensorImpl()->set_wrapped_number(true);
-  return tensor;
-}
-
-} // anonymous namespace
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
@@ -324,8 +400,15 @@ static void isin_sorting(
 }
 
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
-  TORCH_CHECK(self.dtype() == other.dtype(), "expected scalar type ", self.dtype(), " but found ", other.dtype());
-
+  Tensor self_, other_;
+  if (self.dtype() != other.dtype()) {
+    auto result_type = at::native::result_type(self, other);
+    self_ = self.to(result_type);
+    other_ = other.to(result_type);
+  } else {
+    self_ = self;
+    other_ = other;
+  }
   if (condition.scalar_type() == ScalarType::Byte) {
   TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
   } else {
@@ -336,31 +419,38 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
     .check_all_same_dtype(false)
     .add_output(out)
     .add_input(cond_bool)
-    .add_input(self)
-    .add_input(other)
+    .add_input(self_)
+    .add_input(other_)
     .build();
   where_kernel(iter.device_type(), iter);
   return out;
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
-  Tensor ret = at::empty({0}, self.options());
+  auto result_type = at::native::result_type(self, other);
+  Tensor ret = at::empty({0}, self.options().dtype(result_type));
   at::native::where_self_out(condition, self, other, ret);
   return ret;
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Tensor& other) {
-  return at::where(condition, wrapped_scalar_tensor(self, other.device()), other);
+  auto result_type = at::native::result_type(other, self);
+  auto self_converted = at::scalar_tensor(self, other.options().dtype(result_type));
+  auto other_converted = other.to(result_type);
+  return at::where(condition, self_converted, other_converted);
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Scalar& other) {
-  return at::where(condition, self, wrapped_scalar_tensor(other, self.device()));
+  auto result_type = at::native::result_type(self, other);
+  auto other_converted = at::scalar_tensor(other, self.options().dtype(result_type));
+  auto self_converted = self.to(result_type);
+  return at::where(condition, self_converted, other_converted);
 }
 
 Tensor where(const Tensor& condition, const Scalar& self, const Scalar& other) {
-  const auto device = condition.device();
-  const Tensor& other_t = wrapped_scalar_tensor_default_dtype(other, device);
-  const Tensor& self_t = wrapped_scalar_tensor_default_dtype(self, device);
+  auto result_type = at::native::result_type(self, other);
+  const Tensor& other_t = at::scalar_tensor(other, condition.options().dtype(result_type));
+  const Tensor& self_t = at::scalar_tensor(self, condition.options().dtype(result_type));
   return at::where(condition, self_t, other_t);
 }
 
@@ -453,6 +543,8 @@ TORCH_IMPL_FUNC(min_out)
 }
 
 std::tuple<Tensor, Tensor> qmax(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(self.qscheme() == at::kPerTensorAffine, "Max operator for quantized tensors only works for per tensor quantized tensors. "
+  "Please open an issue on https://github.com/pytorch/pytorch/issues if you need per channel quantized tensor support.");
   Tensor max_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor max = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
   at::max_outf(self.int_repr(), dim, keepdim, max, max_indices);
@@ -462,6 +554,8 @@ std::tuple<Tensor, Tensor> qmax(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 std::tuple<Tensor, Tensor> qmin(const Tensor& self, int64_t dim, bool keepdim) {
+  TORCH_CHECK(self.qscheme() == at::kPerTensorAffine, "Min operator for quantized tensors only works for per tensor quantized tensors. "
+  "Please open an issue on https://github.com/pytorch/pytorch/issues if you need per channel quantized tensor support.");
   Tensor min_indices = at::empty({0}, self.options().dtype(kLong));
   Tensor min = at::empty({0}, self.options().dtype(toUnderlying(self.scalar_type())));
   at::min_outf(self.int_repr(), dim, keepdim, min, min_indices);
@@ -481,10 +575,15 @@ TORCH_IMPL_FUNC(clamp_out)
  const Tensor& /*self*/,
  const OptionalScalarRef min,
  const OptionalScalarRef max,
- const Tensor& /*result*/) {
+ const Tensor& result) {
   using at::native::detail::ClampLimits;
   if (min && max) {
-    clamp_scalar_stub(device_type(), *this, min.get(), max.get());
+    if (min.get().toDouble() != min.get().toDouble() ||
+        max.get().toDouble() != max.get().toDouble()) {
+      at::fill_(const_cast<Tensor&>(result), std::numeric_limits<double>::quiet_NaN());
+    } else {
+      clamp_scalar_stub(device_type(), *this, min.get(), max.get());
+    }
   } else if (max) {
     clamp_max_scalar_stub(device_type(), *this, max.get());
   } else if (min) {
@@ -492,112 +591,47 @@ TORCH_IMPL_FUNC(clamp_out)
   }
 }
 
-Tensor& clamp_out(const Tensor& self, const c10::optional<Tensor>& min,
-                  const c10::optional<Tensor>& max, Tensor& result) {
+TORCH_IMPL_FUNC(clamp_Tensor_out)
+(const Tensor& self, const OptionalTensorRef min,
+                  const OptionalTensorRef max, const Tensor&) {
   if (min && max) {
-    TORCH_CHECK(self.layout() == Layout::Strided,
-                "torch.clamp only supports strided layout, got: ", self.layout());
-    auto iter = TensorIteratorConfig()
-                .set_check_mem_overlap(true)
-                .add_output(result)
-                .add_input(self)
-                .add_input(*min)
-                .add_input(*max)
-                .promote_inputs_to_common_dtype(true)
-                .cast_common_dtype_to_outputs(true)
-                .enforce_safe_casting_to_output(true)
-                .build();
-    clamp_stub(iter.device_type(), iter);
-  } else if (max) {
-    at::clamp_max_outf(self, *max, result);
+    clamp_stub(device_type(), *this);
   } else if (min) {
-    at::clamp_min_outf(self, *min, result);
-  } else {
-    TORCH_CHECK(false, "torch.clamp: At least one of 'min' or 'max' must not be None");
+    maximum_stub(device_type(), *this);
+  } else if (max) {
+    minimum_stub(device_type(), *this);
   }
-  return result;
 }
 
-Tensor clamp(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_outf(self, min, max, result);
+TORCH_IMPL_FUNC(clamp_max_out)
+(const Tensor& self, const Scalar& max, const Tensor& result) {
+  if (max.toDouble() != max.toDouble()) {
+//TODO this is not great, building TI again is expensive, but I can't use
+//fill_stub because fill is not structured
+//this is a corner case anyway
+    at::fill_(const_cast<Tensor&>(result), wrapped_scalar_tensor(max));
+  } else {
+    clamp_max_scalar_stub(device_type(), *this, max);
+  }
 }
 
-Tensor clamp(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_outf(self, min, max, result);
+TORCH_IMPL_FUNC(clamp_max_Tensor_out)
+(const Tensor& self, const Tensor& max, const Tensor& result) {
+  minimum_stub(device_type(), *this);
 }
 
-Tensor& clamp_(Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
-  return at::clamp_outf(self, min, max, self);
+TORCH_IMPL_FUNC(clamp_min_out)
+(const Tensor& self, const Scalar& min, const Tensor& result) {
+  if (min.toDouble() != min.toDouble()) {
+    at::fill_(const_cast<Tensor&>(result), min);
+  } else {
+    clamp_min_scalar_stub(device_type(), *this, min);
+  }
 }
 
-Tensor& clamp_(Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
-  return at::clamp_outf(self, min, max, self);
-}
-
-Tensor& clamp_max_out(const Tensor& self, const Scalar& max, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_max_scalar_stub(iter.device_type(), iter, max);
-  return result;
-}
-
-Tensor& clamp_max_out(const Tensor& self, const Tensor& max, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "torch.clamp only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::borrowing_binary_op(result, self, max);
-  clamp_max_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor clamp_max(const Tensor& self, const Scalar& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_outf(self, max, result);
-}
-
-Tensor clamp_max(const Tensor& self, const Tensor& max) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_max_outf(self, max, result);
-}
-
-Tensor& clamp_max_(Tensor& self, const Scalar& max) {
-  return at::clamp_max_outf(self, max, self);
-}
-
-Tensor& clamp_max_(Tensor& self, const Tensor& max) {
-  return at::clamp_max_outf(self, max, self);
-}
-
-Tensor& clamp_min_out(const Tensor& self, const Scalar& min, Tensor& result) {
-  auto iter = TensorIterator::unary_op(result, self);
-  clamp_min_scalar_stub(iter.device_type(), iter, min);
-  return result;
-}
-
-Tensor& clamp_min_out(const Tensor& self, const Tensor& min, Tensor& result) {
-  TORCH_CHECK(self.layout() == Layout::Strided,
-              "torch.clamp only supports strided layout, got: ", self.layout());
-  auto iter = TensorIterator::borrowing_binary_op(result, self, min);
-  clamp_min_stub(iter.device_type(), iter);
-  return result;
-}
-
-Tensor clamp_min(const Tensor& self, const Scalar& min) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_outf(self, min, result);
-}
-
-Tensor clamp_min(const Tensor& self, const Tensor& min) {
-  Tensor result = at::empty({0}, self.options());
-  return at::clamp_min_outf(self, min, result);
-}
-
-Tensor& clamp_min_(Tensor& self, const Scalar& min) {
-  return at::clamp_min_outf(self, min, self);
-}
-
-Tensor& clamp_min_(Tensor& self, const Tensor& min) {
-  return at::clamp_min_outf(self, min, self);
+TORCH_IMPL_FUNC(clamp_min_Tensor_out)
+(const Tensor& self, const Tensor& min, const Tensor& result) {
+  maximum_stub(device_type(), *this);
 }
 
 // Implements the "clip" alias for clamp

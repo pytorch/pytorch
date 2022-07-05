@@ -91,15 +91,18 @@ def default_collate(batch):
         `batch_size` or `batch_sampler` is defined in :class:`~torch.utils.data.DataLoader`.
 
         Here is the general input type (based on the type of the element within the batch) to output type mapping:
-        * :class:`torch.Tensor` -> :class:`torch.Tensor` (with an added outer dimension batch size)
-        * NumPy Arrays -> :class:`torch.Tensor`
-        * `float` -> :class:`torch.Tensor`
-        * `int` -> :class:`torch.Tensor`
-        * `str` -> `str` (unchanged)
-        * `bytes` -> `bytes` (unchanged)
-        * `Mapping[K, V_i]` -> `Mapping[K, default_collate([V_1, V_2, ...])]`
-        * `NamedTuple[V1_i, V2_i, ...]` -> `NamedTuple[default_collate([V1_1, V1_2, ...]), default_collate([V2_1, V2_2, ...]), ...]`
-        * `Sequence[V1_i, V2_i, ...]` -> `Sequence[default_collate([V1_1, V1_2, ...]), default_collate([V2_1, V2_2, ...]), ...]`
+
+            * :class:`torch.Tensor` -> :class:`torch.Tensor` (with an added outer dimension batch size)
+            * NumPy Arrays -> :class:`torch.Tensor`
+            * `float` -> :class:`torch.Tensor`
+            * `int` -> :class:`torch.Tensor`
+            * `str` -> `str` (unchanged)
+            * `bytes` -> `bytes` (unchanged)
+            * `Mapping[K, V_i]` -> `Mapping[K, default_collate([V_1, V_2, ...])]`
+            * `NamedTuple[V1_i, V2_i, ...]` -> `NamedTuple[default_collate([V1_1, V1_2, ...]),
+              default_collate([V2_1, V2_2, ...]), ...]`
+            * `Sequence[V1_i, V2_i, ...]` -> `Sequence[default_collate([V1_1, V1_2, ...]),
+              default_collate([V2_1, V2_2, ...]), ...]`
 
         Args:
             batch: a single batch to be collated
@@ -133,7 +136,7 @@ def default_collate(batch):
             # If we're in a background process, concatenate directly into a
             # shared memory tensor to avoid an extra copy
             numel = sum(x.numel() for x in batch)
-            storage = elem.storage()._new_shared(numel)
+            storage = elem.storage()._new_shared(numel, device=elem.device)
             out = elem.new(storage).resize_(len(batch), *list(elem.size()))
         return torch.stack(batch, 0, out=out)
     elif elem_type.__module__ == 'numpy' and elem_type.__name__ != 'str_' \

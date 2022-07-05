@@ -10,6 +10,7 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/CUDAFunctions.h>
 #else
 #include <ATen/ops/index_cuda_dispatch.h>
 #include <ATen/ops/empty.h>

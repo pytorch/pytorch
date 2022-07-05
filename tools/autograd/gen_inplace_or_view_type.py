@@ -81,6 +81,8 @@ VIEW_FUNCTIONS = {
     "values": "self",
     "crow_indices": "self",
     "col_indices": "self",
+    "ccol_indices": "self",
+    "row_indices": "self",
     # sparse_coo ctor output should really be views of both indices and values,
     # but we only supports making as view of a single variable, and indices is
     # discrete anyways.
@@ -444,7 +446,9 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
     f = fn.func
     inplace_view_body: List[str] = []
 
-    dispatcher_sig = DispatcherSignature.from_schema(f.func, structured_type_override=f.part_of_structured_group)
+    dispatcher_sig = DispatcherSignature.from_schema(
+        f.func, structured_type_override=f.part_of_structured_group
+    )
     dispatcher_exprs = dispatcher_sig.exprs()
 
     # code-generated ADInplaceOrView kernels plumb and recompute dispatch keys directly through the kernel for performance.
@@ -487,22 +491,18 @@ def emit_inplace_or_view_body(fn: NativeFunctionWithDifferentiabilityInfo) -> Li
 
 @with_native_function
 def gen_formals(f: NativeFunction) -> str:
-
     def argument_cpp_type(a: Argument) -> str:
         return cpp.argument_type(
             a,
             binds="__placeholder__",
-            structured_type_override=f.part_of_structured_group
+            structured_type_override=f.part_of_structured_group,
         ).cpp_type()
 
     return ", ".join(
         # code-generated autograd kernels plumb and recompute dispatch keys directly through the kernel for performance.
         # See Note [Plumbing Keys Through The Dispatcher] for details.
         ["c10::DispatchKeySet ks"]
-        + [
-            f'{argument_cpp_type(a)} {a.name}'
-            for a in f.func.schema_order_arguments()
-        ]
+        + [f"{argument_cpp_type(a)} {a.name}" for a in f.func.schema_order_arguments()]
     )
 
 

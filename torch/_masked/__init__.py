@@ -25,6 +25,7 @@ __all__ = []
 # to docstrings of reduction/normalization functions via
 # _apply_docstring_templates decorator.
 
+
 def _apply_docstring_templates(func):
     """Decorator that applies docstring templates to function docstring
     and returns the function instance.
@@ -161,14 +162,18 @@ Example::
         # be removed in the final documentation string.
         sum=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         prod=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        cumsum=(('dim__as_int',), ('dtype=None', 'mask=None')),
+        cumprod=(('dim__as_int',), ('dtype=None', 'mask=None')),
         amin=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         amax=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         argmin=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         argmax=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         mean=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
+        median=(('dim__as_int',), ('keepdim=False', 'dtype=None', 'mask=None')),
         norm=(('ord', 'dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         var=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
         std=(('dim', 'unbiased'), ('keepdim=False', 'dtype=None', 'mask=None')),
+        logsumexp=(('dim',), ('keepdim=False', 'dtype=None', 'mask=None')),
         softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         log_softmax=(('dim__as_int',), ('dtype=None', 'mask=None')),
         softmin=(('dim__as_int',), ('dtype=None', 'mask=None')),
@@ -222,7 +227,15 @@ defined as ``exp(-x[i])/sum(exp(-x))``.''',
         normalize='''\
 Let ``x`` be a sequence of unmasked elements of one-dimensional slice
 of the :attr:`input` tensor. Normalize of i-th element in ``x`` is
-defined as ``x[i]/max(norm(x, p), eps)``.''')
+defined as ``x[i]/max(norm(x, p), eps)``.''',
+        cumsum='''\
+Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+defined as ``sum(x[:i])``.''',
+        cumprod='''\
+Let ``x`` be a sequence of unmasked elements of one-dimensional slice
+of the :attr:`input` tensor. Cumsum of i-th element in ``x`` is
+defined as ``prod(x[:i])``.''')
 
     reduction_names = dict(
         sum='sum',
@@ -232,15 +245,19 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         argmax='argmax',
         argmin='argmin',
         mean='mean',
+        median='median',
         norm='norm',
         var='variance',
-        std='standard_deviation')
+        std='standard_deviation',
+        logsumexp='logsumexp')
 
     normalization_names = dict(
         softmax='softmax',
         log_softmax='log_softmax',
         softmin='softmin',
-        normalize='normalize')
+        normalize='normalize',
+        cumsum='cumulative_sum',
+        cumprod='cumulative_prod')
 
     operation_names = dict()
     operation_names.update(reduction_names)
@@ -256,6 +273,9 @@ defined as ``x[i]/max(norm(x, p), eps)``.''')
         example_input = example_input.to(dtype=torch.float32)
     elif func.__name__ in {'var', 'std'}:
         example_args = (example_dim, False)
+    elif func.__name__ == 'median':
+        example_args = (example_dim,)
+        example_input = example_input.to(dtype=torch.float32)
     else:
         example_args = (example_dim,)
 
@@ -345,11 +365,11 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
     dtype: DType = input.dtype
     device = input.device
     op_name = op_name.rsplit('.', 1)[-1]  # lstrip module name when present
-    if op_name == 'sum':
+    if op_name in {'sum', 'cumsum'}:
         return torch.tensor(0, dtype=dtype, device=device)
-    elif op_name == 'prod':
+    elif op_name in {'prod', 'cumprod'}:
         return torch.tensor(1, dtype=dtype, device=device)
-    elif op_name in {'amax', 'argmax'}:
+    elif op_name in {'amax', 'argmax', 'logsumexp'}:
         if torch.is_floating_point(input):
             return torch.tensor(-torch.inf, dtype=dtype, device=device)
         elif torch.is_signed(input) or dtype == torch.uint8:
@@ -372,6 +392,11 @@ def _reduction_identity(op_name: str, input: Tensor, *args):
             assert torch.is_floating_point(input), input.dtype
             return torch.tensor(torch.inf, dtype=dtype, device=device)
         return torch.tensor(0, dtype=dtype, device=device)
+    elif op_name == 'median':
+        # We use NaN for now because the implementation is currently using torch.nanmedian
+        # and NaN is the identity for that function since it gets ignored
+        dtype = input.dtype if torch.is_floating_point(input) else torch.float
+        return torch.tensor(torch.nan, dtype=dtype, device=device)
     elif op_name in {'var', 'std'}:
         return None
     raise NotImplementedError(f'identity of {op_name} on {dtype} input')
@@ -512,6 +537,160 @@ def _sparse_coo_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor
     return result.coalesce()
 
 
+def _sparse_coo_scatter_reduction_helper(op,
+                                         mask_input: Tensor,
+                                         dims: Tuple[int, ...],
+                                         keepdim: bool,
+                                         dtype: Optional[DType] = None) -> Tensor:
+    reduce = op.__name__
+    valid_reductions = ['sum', 'prod', 'amax', 'amin']
+    if reduce not in valid_reductions:
+        raise ValueError(f"op must be one of {' '.join(valid_reductions)}, but got {reduce} instead")
+
+    output_dtype = dtype
+    values, indices = mask_input._values(), mask_input._indices()
+    input_dims = mask_input.dim()
+    num_sparse_dims = mask_input.sparse_dim()
+    reduced_sparse_dims = []
+    retained_sparse_dims = []
+    reduced_dense_dims = []
+
+    # promote dtype if specified
+    if values.dtype != output_dtype:
+        values = values.to(output_dtype)
+
+    if keepdim:
+        output_shape = tuple(1 if i in dims else si for (i, si) in enumerate(mask_input.shape))
+    else:
+        output_shape = tuple(si for (i, si) in enumerate(mask_input.shape) if i not in dims)
+
+    for d in dims:
+        if (d >= input_dims):
+            continue
+
+        if d < num_sparse_dims:
+            reduced_sparse_dims.append(d)
+        else:
+            reduced_dense_dims.append(d + 1 - num_sparse_dims)
+
+    # Reduce dense dimensions
+    if len(reduced_dense_dims) > 0:
+        if reduce == "sum":
+            new_values = values
+            new_values = op(new_values, dim=reduced_dense_dims, keepdim=bool(keepdim))
+        else:
+            # FIXME: Implement reductions for dense dimensions for ops with non-zero reduction identities
+            return NotImplemented
+    else:
+        new_values = values.clone()
+
+    # Reduce sparse dimensions
+    if len(reduced_sparse_dims) == num_sparse_dims:
+        if reduce in {'amax', 'amin'} and new_values.size(0) == 0:
+            # IndexError: amax(): Expected reduction dim 0 to have non-zero size.
+            # sum()/prod() return the reduction identity when dim has size 0 but amax()/amin() do not
+            # See https://github.com/pytorch/pytorch/issues/61901
+            new_values = _reduction_identity(reduce, new_values)
+        else:
+            new_values = op(new_values, dim=0)
+        if (keepdim):
+            for _ in range(num_sparse_dims):
+                new_values = new_values.unsqueeze(0)
+        return new_values.to(dtype=output_dtype).to_sparse()
+    else:
+        new_indices = indices.clone()
+        if keepdim:
+            # zero out reduced sparse dimensions if keepdim = True
+            # ensures that the call to torch.unique folds duplicated indices together while preserving the dimension
+            new_indices[reduced_sparse_dims, :] = 0
+        else:
+            # remove reduced sparse dimensions if keepdim = False
+            if (len(reduced_sparse_dims) > 0):
+                retained_sparse_dims = [i for i in range(num_sparse_dims) if i not in set(reduced_sparse_dims)]
+                new_indices = new_indices.index_select(0, torch.tensor(retained_sparse_dims).to(mask_input.device))
+
+    # Use scatter_reduce to reduce items in the new_values tensor that correspond to the same indices in new_indices
+    if (new_indices.numel() > 0):
+        # lexsort indices and get index tensor for scatter reduction
+        new_indices, inverse_indices = torch.unique(new_indices, return_inverse=True, dim=1)
+        out_shape = list(new_values.shape)
+        out_shape[0] = new_indices.shape[1]
+        for _ in range(new_values.ndim - 1):
+            inverse_indices = inverse_indices.unsqueeze(-1)
+        scatter_indices = inverse_indices.expand(new_values.shape)
+        # FIXME: temporary workaround for issue with bfloat16/float16 remove when acctype is implemented for scatter_reduce
+        if output_dtype in {torch.bfloat16, torch.float16}:
+            new_values = new_values.to(torch.float)
+            out = new_values.new_empty(out_shape)
+            new_values = out.scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False)
+            new_values = new_values.to(dtype=output_dtype)
+        else:
+            out = new_values.new_empty(out_shape)
+            new_values = out.scatter_reduce_(0, scatter_indices, new_values, reduce=reduce, include_self=False)
+
+    return torch.sparse_coo_tensor(new_indices, new_values, output_shape, dtype=output_dtype, device=mask_input.device)
+
+def _sparse_csr_segment_reduction_helper(op,
+                                         mask_input: Tensor,
+                                         dims: Tuple[int, ...],
+                                         keepdim: bool,
+                                         dtype: Optional[DType] = None) -> Tensor:
+    # Currently, while sparse CSR is always 2D with no dense dimensions keepdim must be True
+    # FIXME: when dense dimensions are implemented for CSR tensors
+    assert keepdim, "reduction operations on CSR tensors with keepdim=False is unsupported"
+    reduce = op.__name__
+    valid_reductions = ['sum', 'prod', 'mean', 'amax', 'amin']
+    if reduce not in valid_reductions:
+        raise ValueError(f"op must be one of {' '.join(valid_reductions)}, but got {reduce} instead")
+    device = mask_input.device
+    output_dtype = dtype
+    values, crow_indices, col_indices = mask_input.values(), mask_input.crow_indices(), mask_input.col_indices()
+
+    # promote dtype if specified
+    if values.dtype != output_dtype:
+        values = values.to(output_dtype)
+
+    if len(dims) == 0:
+        return mask_input
+    if len(dims) == 1:
+        if (dims[0] == 0):
+            new_col_indices, scatter_indices = torch.unique(col_indices, return_inverse=True)
+            new_nnz = new_col_indices.shape[0]
+            new_crow_indices = torch.tensor([0, new_nnz])
+            new_values = values.new_empty(new_col_indices.shape)
+            new_values.scatter_reduce_(0, scatter_indices, values, reduce, include_self=False)
+            new_shape = [1, mask_input.size(1)]
+        else:
+            assert dims[0] == 1, "Sparse CSR tensors are 2D and only support reduction along dim 0 or 1."
+            # all intervals new_crow_indices[i] - new_crow_indices[i-1] are 1
+            # except for where crow_indices[i] == crow_indices[i-1] where the interval remains as 0
+            new_crow_indices = torch.cat((crow_indices.new_zeros(1), torch.cumsum(torch.diff(crow_indices) != 0, 0)), 0)
+            new_nnz = new_crow_indices[-1]
+            new_col_indices = col_indices.new_zeros(new_nnz)
+            # segment_reduce takes 'max'/'min' rather than 'amax'/'amin', changing this would be BC-breaking
+            if reduce in ['amax', 'amin']:
+                reduce = reduce[1:]
+            new_values = torch.segment_reduce(values, reduce, offsets=crow_indices)
+            new_shape = [mask_input.size(0), 1]
+    else:
+        assert len(dims) == 2
+        nnz = min(1, values.numel())
+        if (nnz == 1):
+            op_kwargs = {'keepdim' : True, 'dtype' : output_dtype}
+            # amax and amin do not support dtype kwarg
+            if reduce in ['amax', 'amin']:
+                del op_kwargs['dtype']
+            new_values = op(values, 0, **op_kwargs)
+        else:
+            new_values = torch.empty(0, dtype=output_dtype)
+        new_col_indices = col_indices.new_zeros(nnz)
+        new_crow_indices = torch.tensor([0, nnz])
+        new_shape = [1, nnz]
+
+    return torch.sparse_csr_tensor(
+        new_crow_indices, new_col_indices, new_values, new_shape, dtype=output_dtype, device=device)
+
+
 def _sparse_csr_where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
     """Sparse variant of torch.where. Supports sparse CSR tensors.
     """
@@ -645,8 +824,9 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
     """Return output mask of masked operation applied to given arguments.
     """
     if callable(op):
-        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin', 'argmax', 'argmin', 'mean', 'norm', 'var', 'std'}
-        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize'}
+        is_reduction = op.__name__ in {'sum', 'prod', 'amax', 'amin',
+                                       'argmax', 'argmin', 'mean', 'median', 'norm', 'var', 'std', 'logsumexp'}
+        is_normalization = op.__name__ in {'softmax', 'log_softmax', 'softmin', 'normalize', 'cumsum', 'cumprod'}
         if is_reduction:
             if op.__name__ == 'norm':
                 if args:
@@ -686,44 +866,28 @@ def sum(input: Tensor,
         mask: Optional[Tensor] = None) -> Tensor:
     # __doc__ is generated by _apply_docstring_templates decorator
     if dtype is None:
-        dtype = input.dtype
+        # promote integer types to int64 when output dtype is not specified
+        if input.layout == torch.sparse_csr:
+            if input.dtype in {torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32}:
+                # csr.to(dtype=torch.int64) is not implemented, so
+                # using coo.to on input to ensure the promoted dtype
+                input = input.to_sparse_coo().to(dtype=torch.int64).to_sparse_csr()
+            else:
+                dtype = input.dtype
+        else:
+            dtype = input.dtype
+            if input.dtype in {torch.uint8, torch.bool, torch.int8, torch.int16, torch.int32}:
+                dtype = torch.int64
     dim_ = _canonical_dim(dim, input.ndim)
-
     mask_input = _combine_input_and_mask(sum, input, mask)
     if input.layout == torch.strided:
         return torch.sum(mask_input, dim_, bool(keepdim), dtype=dtype)
-
     elif input.layout == torch.sparse_coo:
-        if mask_input.ndim == 0:
-            # Workaround https://github.com/pytorch/pytorch/issues/65400
-            dim_ = ()
-
-        result = torch.sparse.sum(mask_input, dim=list(dim_), dtype=dtype)
-        if result.dtype != dtype:
-            # https://github.com/pytorch/pytorch/issues/65392
-            # https://github.com/pytorch/pytorch/pull/66153
-            result = result.to(dtype)
-
-        if result.ndim == 0 and result.layout == torch.strided:
-            result = result.to_sparse()
-
-        if keepdim and mask_input.ndim > 0:
-            # torch.sparse.sum does not support keepdim argument, so,
-            # here we restore the squeezed dimensions
-            if mask_input.dense_dim() > 0:
-                raise NotImplementedError('torch._masked.sum on hybrid COO sparse tensor')
-            indices = result._indices().new_zeros((mask_input.ndim, result._nnz()))
-            original_dims = tuple(i for i in range(mask_input.ndim) if i not in dim_)
-            indices[original_dims, ] = result._indices()
-            shape = tuple((1 if i in dim_ else mask_input.shape[i]) for i in range(mask_input.ndim))
-            result = torch.sparse_coo_tensor(indices, result._values(), shape, dtype=result.dtype, device=result.device)
-
-        return result
-
+        return _sparse_coo_scatter_reduction_helper(torch.sum, mask_input, dim_, bool(keepdim), dtype)
     elif input.layout == torch.sparse_csr:
         return torch._sparse_csr_sum(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
     else:
-        raise ValueError(f'masked sum expects strided, sparse_coo, or sparse_csr tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked sum expects strided, sparse_coo or sparse_csr tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -752,11 +916,15 @@ def prod(input: Tensor,
     if input.layout == torch.strided:
         # Workaround https://github.com/pytorch/pytorch/issues/56586
         result = mask_input
+        result = result.to(dtype=dtype)
         for d in reversed(dim_):
             result = result.prod(dim=d, keepdim=bool(keepdim))
-        if dtype is not None:
-            result = result.to(dtype=dtype)
         return result
+    elif input.layout == torch.sparse_coo:
+        if mask is None:
+            # See comment in the sparse_csr branch, the same issue arises for sparse_coo tensors
+            raise ValueError('masked prod expects explicit mask for sparse_coo tensor input')
+        return _sparse_coo_scatter_reduction_helper(torch.prod, mask_input, dim_, bool(keepdim), dtype)
     elif input.layout == torch.sparse_csr:
         if mask is None:
             # mask is None corresponds to all-True mask. The
@@ -772,7 +940,39 @@ def prod(input: Tensor,
             raise ValueError('masked prod expects explicit mask for sparse_csr tensor input')
         return torch._sparse_csr_prod(mask_input, dim=list(dim_), keepdim=bool(keepdim), dtype=dtype)
     else:
-        raise ValueError(f'masked prod expects strided or sparse_csr tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked prod expects strided, sparse_coo or sparse_csr tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def cumsum(input: Tensor,
+           dim: int,
+           *,
+           dtype: Optional[DType] = None,
+           mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
+    mask_input = _combine_input_and_mask(sum, input, mask)
+    if input.layout == torch.strided:
+        return torch.cumsum(mask_input, dim_, dtype=dtype).to(dtype=dtype)
+    else:
+        raise ValueError(f'masked cumsum expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def cumprod(input: Tensor,
+            dim: int,
+            *,
+            dtype: Optional[DType] = None,
+            mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
+    mask_input = _combine_input_and_mask(prod, input, mask)
+    if input.layout == torch.strided:
+        return torch.cumprod(mask_input, dim_, dtype=dtype).to(dtype=dtype)
+    else:
+        raise ValueError(f'masked cumprod expects strided tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -794,12 +994,23 @@ def amax(input: Tensor,
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
+
     mask_input = _combine_input_and_mask(amax, input, mask)
+    dim_ = _canonical_dim(dim, mask_input.ndim)
     if input.layout == torch.strided:
-        dim_ = _canonical_dim(dim, mask_input.ndim)
         return torch.amax(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
+    elif input.layout == torch.sparse_coo:
+        if mask is None:
+            # See comment in the sparse_csr branch of prod, a similar issue arises here
+            # where unspecified elements along a dimension may need to be reduced with the result
+            raise ValueError('masked amax expects explicit mask for sparse_coo tensor input')
+        return _sparse_coo_scatter_reduction_helper(torch.amax, mask_input, dim_, bool(keepdim), dtype)
+    elif input.layout == torch.sparse_csr:
+        if mask is None:
+            raise ValueError('masked amax expects explicit mask for sparse_csr tensor input')
+        return _sparse_csr_segment_reduction_helper(torch.amax, mask_input, dim_, bool(keepdim), dtype)
     else:
-        raise ValueError(f'masked amax expects strided tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked amax expects strided, sparse_coo or sparse_csr tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -821,12 +1032,23 @@ def amin(input: Tensor,
 {reduction_example}"""
     if dtype is None:
         dtype = input.dtype
+
     mask_input = _combine_input_and_mask(amin, input, mask)
+    dim_ = _canonical_dim(dim, mask_input.ndim)
     if input.layout == torch.strided:
-        dim_ = _canonical_dim(dim, mask_input.ndim)
         return torch.amin(mask_input, dim_, bool(keepdim)).to(dtype=dtype)
+    elif input.layout == torch.sparse_coo:
+        if mask is None:
+            # See comment in the sparse_csr branch of prod, a similar issue arises here
+            # where unspecified elements along a dimension may need to be reduced with the result
+            raise ValueError('masked amax expects explicit mask for sparse_coo tensor input')
+        return _sparse_coo_scatter_reduction_helper(torch.amin, mask_input, dim_, bool(keepdim), dtype)
+    elif input.layout == torch.sparse_csr:
+        if mask is None:
+            raise ValueError('masked amin expects explicit mask for sparse_csr tensor input')
+        return _sparse_csr_segment_reduction_helper(torch.amin, mask_input, dim_, bool(keepdim), dtype)
     else:
-        raise ValueError(f'masked amin expects strided tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked amin expects strided, sparse_coo or sparse_csr tensor (got {input.layout} tensor)')
 
 
 @_apply_docstring_templates
@@ -907,8 +1129,89 @@ elements, have ``nan`` values.
             count = sum(inmask.new_ones(input.shape, dtype=torch.int64), dim, keepdim=keepdim, mask=inmask)
             total = sum(input, dim, keepdim=keepdim, dtype=dtype, mask=inmask)
         return total / count
+    elif input.layout == torch.sparse_csr:
+        mask_input = _combine_input_and_mask(mean, input, mask)
+        dim_ = _canonical_dim(dim, mask_input.ndim)
+        if mask is None:
+            raise ValueError('masked mean expects explicit mask for sparse_csr tensor input')
+        return _sparse_csr_segment_reduction_helper(torch.mean, mask_input, dim_, bool(keepdim), dtype)
     else:
-        raise ValueError(f'masked sum expects strided tensor (got {input.layout} tensor)')
+        raise ValueError(f'masked mean expects strided or sparse_csr tensor (got {input.layout} tensor)')
+
+
+
+@_apply_docstring_templates
+def median(input: Tensor,
+           dim: int = -1,
+           *,
+           keepdim: bool = False,
+           dtype: Optional[DType] = None,
+           mask: Optional[Tensor] = None) -> Tensor:
+
+    """\
+{reduction_signature}
+{reduction_descr}
+By definition, the identity value of a median operation is the median
+value of the tensor. If all elements of the input tensor along given
+dimension(s) :attr:`dim` are masked-out, the identity value of the
+median is undefined.  Due to this ambiguity, the elements of output
+tensor with strided layout, that correspond to fully masked-out
+elements, have ``nan`` values.
+{reduction_args}
+{reduction_example}"""
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)[0]
+    is_float = torch.is_floating_point(input)
+    if not is_float:
+        input = input.to(dtype=torch.float)
+    mask_input = _combine_input_and_mask(median, input, mask)
+    if input.layout == torch.strided:
+        output = torch.nanmedian(mask_input, dim_, keepdim).values
+        if is_float:
+            return output
+        elif not is_float and not torch.isnan(output).any():
+            return output.to(dtype=dtype)
+        else:
+            raise ValueError("masked median expects no fully masked out rows if dtype is not floating point")
+    else:
+        raise ValueError(f'masked median expects strided tensor (got {input.layout} tensor)')
+
+
+@_apply_docstring_templates
+def logsumexp(input: Tensor,
+              dim: DimOrDims = None,
+              *,
+              keepdim: bool = False,
+              dtype: Optional[DType] = None,
+              mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    dim_ = _canonical_dim(dim, input.ndim)
+    mask_input = _combine_input_and_mask(logsumexp, input, mask)
+    if input.layout == torch.strided:
+        return torch.logsumexp(mask_input, dim_, keepdim=keepdim).to(dtype=dtype)
+    else:
+        raise ValueError(f'masked logsumexp expects strided tensor (got {input.layout} tensor)')
+
+
+# TODO: Add docstring; currently they're only set up for reductions and normalizations
+# @_apply_docstring_templates
+def logaddexp(input: Tensor,
+              other: Tensor,
+              *,
+              dtype: Optional[DType] = None,
+              input_mask: Optional[Tensor] = None,
+              other_mask: Optional[Tensor] = None) -> Tensor:
+    if dtype is None:
+        dtype = input.dtype
+    if input.layout == torch.strided and other.layout == torch.strided:
+        mask_input = _combine_input_and_mask(logsumexp, input, input_mask)
+        mask_other = _combine_input_and_mask(logsumexp, other, other_mask)
+        return torch.logaddexp(mask_input, mask_other).to(dtype=dtype)
+    else:
+        raise ValueError(
+            f'masked logaddexp expects strided tensors (got {input.layout} tensor for input, {other.layout} for other)')
 
 
 @_apply_docstring_templates

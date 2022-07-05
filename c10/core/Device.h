@@ -106,9 +106,34 @@ struct C10_API Device final {
     return type_ == DeviceType::IPU;
   }
 
+  /// Return true if the device is of XLA type.
+  bool is_xla() const noexcept {
+    return type_ == DeviceType::XLA;
+  }
+
   /// Return true if the device is of HPU type.
   bool is_hpu() const noexcept {
     return type_ == DeviceType::HPU;
+  }
+
+  /// Return true if the device is of Lazy type.
+  bool is_lazy() const noexcept {
+    return type_ == DeviceType::Lazy;
+  }
+
+  /// Return true if the device is of Vulkan type.
+  bool is_vulkan() const noexcept {
+    return type_ == DeviceType::Vulkan;
+  }
+
+  /// Return true if the device is of Metal type.
+  bool is_metal() const noexcept {
+    return type_ == DeviceType::Metal;
+  }
+
+  /// Return true if the device is of ORT type.
+  bool is_ort() const noexcept {
+    return type_ == DeviceType::ORT;
   }
 
   /// Return true if the device is of META type.

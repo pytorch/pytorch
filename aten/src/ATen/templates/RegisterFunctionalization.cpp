@@ -24,6 +24,47 @@ namespace at {
 namespace functionalization {
 
 
+inline Tensor to_meta(const Tensor& t) {
+    return at::native::empty_strided_meta(t.sizes(), t.strides(),
+/*dtype=*/c10::make_optional(t.scalar_type()), /*layout=*/c10::make_optional(t.layout()),
+/*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
+}
+
+inline c10::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
+  if (t.has_value()) {
+    return c10::make_optional<Tensor>(to_meta(*t));
+  }
+  return c10::nullopt;
+}
+
+inline std::vector<Tensor> to_meta(at::ITensorListRef t_list) {
+  std::vector<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto& tensor : t_list) {
+    outputs.push_back(to_meta(tensor));
+  }
+  return outputs;
+}
+
+inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
+  c10::List<Tensor> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto i : c10::irange(t_list.size())) {
+    outputs.push_back(to_meta(t_list[i]));
+  }
+  return outputs;
+}
+
+inline c10::List<c10::optional<Tensor>> to_meta(const c10::List<c10::optional<Tensor>>& t_list) {
+  c10::List<c10::optional<Tensor>> outputs;
+  outputs.reserve(t_list.size());
+  for (const auto i : c10::irange(t_list.size())) {
+    outputs.push_back(to_meta(t_list[i]));
+  }
+  return outputs;
+}
+
+
 ${func_definitions}
 
 }  // namespace functionalization

@@ -182,7 +182,7 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
 
   // join() and sync() would be deprecated -
   // https://github.com/pytorch/pytorch/issues/27647
-  void join(bool shutdown = false) override;
+  void join(bool shutdown = false, float timeout = 0) override;
   void sync() override{};
   void startImpl() override;
   void shutdownImpl() override;

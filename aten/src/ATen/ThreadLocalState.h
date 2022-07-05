@@ -7,10 +7,10 @@
 #include <c10/util/Exception.h>
 #include <c10/util/ThreadLocalDebugInfo.h>
 
-#include <ATen/record_function.h>
 #include <ATen/FuncTorchTLS.h>
-#include <ATen/core/PythonModeTLS.h>
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/core/TorchDispatchModeTLS.h>
+#include <ATen/record_function.h>
 
 namespace at {
 
@@ -54,8 +54,8 @@ class TORCH_API ThreadLocalState {
   // TLS for AutogradModes
   AutogradState autograd_tls_;
 
-  // TLS for enable_python_mode (__torch_dispatch__)
-  std::shared_ptr<SafePyObject> python_mode_state_;
+  // TLS for enable_torch_dispatch_mode
+  std::shared_ptr<SafePyObject> torch_dispatch_mode_state_;
 
   // TLS for __torch_function__ (mode and disable_torch_function)
   at::impl::PythonTorchFunctionTLS python_torch_function_state_;

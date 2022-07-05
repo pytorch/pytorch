@@ -4,11 +4,12 @@ load("@rules_proto//proto:defs.bzl", "proto_library")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_proto_library", "cc_test")
 load("//third_party:substitution.bzl", "header_template_rule")
 load("//:tools/bazel.bzl", "rules")
-load("//:tools/build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
 load("//tools/rules:cu.bzl", "cu_library")
 load("//tools/config:defs.bzl", "if_cuda")
-load("//:aten.bzl", "intern_build_aten_ops", "generate_aten", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
-load(":build.bzl", "define_targets")
+load("//:aten.bzl", "intern_build_aten_ops", "generate_aten")
+load(":build.bzl", "define_targets", "GENERATED_AUTOGRAD_CPP", "GENERATED_AUTOGRAD_PYTHON")
+load(":build_variables.bzl", "jit_core_sources", "libtorch_core_sources", "libtorch_cuda_sources", "libtorch_distributed_sources", "libtorch_extra_sources", "libtorch_nvfuser_generated_headers", "libtorch_nvfuser_runtime_sources", "libtorch_python_core_sources", "torch_cpp_srcs", "lazy_tensor_ts_sources")
+load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_sources", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_generated_cuda_sources")
 
 define_targets(rules = rules)
 
@@ -47,12 +48,15 @@ generated_cpu_cpp = [
     "aten/src/ATen/RegisterZeroTensor.cpp",
     "aten/src/ATen/RegisterCompositeImplicitAutograd.cpp",
     "aten/src/ATen/RegisterCompositeExplicitAutograd.cpp",
+    "aten/src/ATen/RegisterCompositeExplicitAutogradNonFunctional.cpp",
     "aten/src/ATen/RegisterMeta.cpp",
     "aten/src/ATen/RegisterSchema.cpp",
     "aten/src/ATen/CPUFunctions.h",
     "aten/src/ATen/CPUFunctions_inl.h",
     "aten/src/ATen/CompositeExplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeExplicitAutogradFunctions_inl.h",
+    "aten/src/ATen/CompositeExplicitAutogradNonFunctionalFunctions.h",
+    "aten/src/ATen/CompositeExplicitAutogradNonFunctionalFunctions_inl.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions.h",
     "aten/src/ATen/CompositeImplicitAutogradFunctions_inl.h",
     "aten/src/ATen/CompositeViewCopyKernels.cpp",
@@ -73,6 +77,7 @@ generated_cpu_cpp = [
     "aten/src/ATen/NativeMetaFunctions.h",
     "aten/src/ATen/RegistrationDeclarations.h",
     "aten/src/ATen/core/aten_interned_strings.h",
+    "aten/src/ATen/core/enum_tag.h",
     "aten/src/ATen/core/TensorBody.h",
     "aten/src/ATen/core/TensorMethods.cpp",
     "aten/src/ATen/core/ATenOpList.cpp",
@@ -102,80 +107,10 @@ generate_aten(
     generator = "//torchgen:gen",
 )
 
-libtorch_cpp_generated_sources = [
-        "torch/csrc/autograd/generated/VariableType.h",
-        "torch/csrc/autograd/generated/VariableType_0.cpp",
-        "torch/csrc/autograd/generated/VariableType_1.cpp",
-        "torch/csrc/autograd/generated/VariableType_2.cpp",
-        "torch/csrc/autograd/generated/VariableType_3.cpp",
-        "torch/csrc/autograd/generated/VariableType_4.cpp",
-        # "torch/csrc/autograd/generated/VariableTypeEverything.cpp",
-        "torch/csrc/autograd/generated/TraceType_0.cpp",
-        "torch/csrc/autograd/generated/TraceType_1.cpp",
-        "torch/csrc/autograd/generated/TraceType_2.cpp",
-        "torch/csrc/autograd/generated/TraceType_3.cpp",
-        "torch/csrc/autograd/generated/TraceType_4.cpp",
-        # "torch/csrc/autograd/generated/TraceTypeEverything.cpp",
-        "torch/csrc/autograd/generated/ADInplaceOrViewType_0.cpp",
-        "torch/csrc/autograd/generated/ADInplaceOrViewType_1.cpp",
-        # "torch/csrc/autograd/generated/ADInplaceOrViewTypeEverything.cpp",
-        "torch/csrc/autograd/generated/Functions.h",
-        "torch/csrc/autograd/generated/Functions.cpp",
-        "torch/csrc/autograd/generated/variable_factories.h",
-        "torch/csrc/lazy/generated/LazyIr.h",
-        "torch/csrc/lazy/generated/LazyNativeFunctions.h",
-        "torch/csrc/lazy/generated/LazyNativeFunctions.cpp",
-        "torch/csrc/lazy/generated/RegisterAutogradLazy.cpp",
-        "torch/csrc/lazy/generated/RegisterLazy.cpp",
-]
-
-libtorch_python_generated_sources = [
-        "torch/csrc/autograd/generated/python_functions.h",
-        "torch/csrc/autograd/generated/python_functions_0.cpp",
-        "torch/csrc/autograd/generated/python_functions_1.cpp",
-        "torch/csrc/autograd/generated/python_functions_2.cpp",
-        "torch/csrc/autograd/generated/python_functions_3.cpp",
-        "torch/csrc/autograd/generated/python_functions_4.cpp",
-        "torch/csrc/autograd/generated/python_variable_methods.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions_0.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions_1.cpp",
-        "torch/csrc/autograd/generated/python_torch_functions_2.cpp",
-        "torch/csrc/autograd/generated/python_nn_functions.cpp",
-        "torch/csrc/autograd/generated/python_fft_functions.cpp",
-        "torch/csrc/autograd/generated/python_linalg_functions.cpp",
-        "torch/csrc/autograd/generated/python_sparse_functions.cpp",
-        "torch/csrc/autograd/generated/python_special_functions.cpp",
-        "torch/csrc/autograd/generated/python_return_types.cpp",
-]
-
-genrule(
-    name = "all_generated_code",
-    srcs = [
-        "aten/src/ATen/native/native_functions.yaml",
-        "aten/src/ATen/native/tags.yaml",
-        "aten/src/ATen/native/ts_native_functions.yaml",
-        "torch/csrc/lazy/core/shape_inference.h",
-        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
-        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
-        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
-        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
-        "aten/src/ATen/templates/LazyIr.h",
-    ],
-    outs = libtorch_cpp_generated_sources + libtorch_python_generated_sources,
-    cmd = "$(location //tools/setup_helpers:generate_code) --install_dir `dirname $(location torch/csrc/autograd/generated/variable_factories.h)`/../.. --native-functions-path $(location aten/src/ATen/native/native_functions.yaml) --tags-path $(location aten/src/ATen/native/tags.yaml) --gen_lazy_ts_backend",
-    tools = ["//tools/setup_helpers:generate_code"],
-)
-
 filegroup(
     name = "cpp_generated_code",
-    data = [":all_generated_code"],
-    srcs = libtorch_cpp_generated_sources,
-)
-
-filegroup(
-    name = "python_generated_code",
-    data = [":all_generated_code"],
-    srcs = libtorch_python_generated_sources,
+    data = [":generate-code"],
+    srcs = GENERATED_AUTOGRAD_CPP,
 )
 
 exports_files(
@@ -283,10 +218,10 @@ filegroup(
             "aten/src/ATen/native/cudnn/*.cpp",
             "aten/src/ATen/native/miopen/*.cpp",
             "aten/src/ATen/native/nested/cuda/*.cpp",
+            "aten/src/ATen/native/quantized/cuda/*.cpp",
             "aten/src/ATen/native/quantized/cudnn/*.cpp",
             "aten/src/ATen/native/sparse/cuda/*.cpp",
             "aten/src/ATen/native/transformers/cuda/*.cpp",
-            "aten/src/THC/*.cpp",
         ],
     ),
 )
@@ -352,9 +287,7 @@ cc_library(
         "aten/src/**/*.hpp",
         "aten/src/ATen/cuda/**/*.cuh",
         "aten/src/ATen/native/**/*.cuh",
-        "aten/src/TH/**/*.cpp",
         "aten/src/THC/*.cuh",
-        "aten/src/THC/generic/*.cu",
     ],
     ) + [
         ":aten_src_ATen_config",
@@ -1424,7 +1357,7 @@ cc_library(
     includes = [
         "caffe2/contrib/aten",
         "caffe2/core/nomnigraph/include",
-        "third_party/miniz-2.0.8",
+        "third_party/miniz-2.1.0",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -1491,7 +1424,7 @@ cc_library(
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
         ":caffe2_protos",
-        "//third_party/miniz-2.0.8:miniz",
+        "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
         "@fbgemm//:fbgemm_src_headers",
@@ -1665,7 +1598,7 @@ cc_library(
             "torch/csrc/autograd/generated/variable_factories.h",
             "torch/csrc/autograd/generated/Functions.h",
         ] + torch_cuda_headers,
-    ) + [":cpp_generated_code", ":version_h"],
+    ) + GENERATED_AUTOGRAD_CPP + [":version_h"],
     includes = [
         "torch/csrc",
         "torch/csrc/api/include",
@@ -1710,10 +1643,10 @@ cc_library(
             "torch/csrc/cuda/nccl.cpp",
             "torch/csrc/distributed/c10d/quantization/quantization_gpu.cu",
         ],
-    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources +[
-        ":cpp_generated_code",
+    )) + libtorch_core_sources + libtorch_distributed_sources + torch_cpp_srcs + libtorch_extra_sources + jit_core_sources + lazy_tensor_ts_sources + GENERATED_AUTOGRAD_CPP + [
         "torch/csrc/jit/serialization/flatbuffer_serializer.cpp",
-        "torch/csrc/jit/mobile/flatbuffer_loader.cpp"
+        "torch/csrc/jit/mobile/flatbuffer_loader.cpp",
+        "torch/csrc/jit/serialization/flatbuffer_serializer_jit.cpp",
     ],
     copts = TORCH_COPTS,
     defines = [
@@ -1744,7 +1677,10 @@ cc_library(
         "**/*.h",
         "**/*.cuh",
     ]) + [
-        ":cpp_generated_code",
+        # We need the filegroup here because the raw list causes Bazel
+        # to see duplicate files. It knows how to deduplicate with the
+        # filegroup.
+        ":cpp_generated_code"
     ],
     includes = [
         "torch/csrc/api/include",
@@ -1760,7 +1696,7 @@ cc_library(
 
 cc_library(
     name = "torch_python",
-    srcs = libtorch_python_core_sources + [":python_generated_code"],
+    srcs = libtorch_python_core_sources + GENERATED_AUTOGRAD_PYTHON,
     deps = [
         ":torch",
         ":shm",
@@ -1919,3 +1855,26 @@ test_suite(
         "//c10/test:tests",
     ],
 )
+
+# An internal genrule that we are converging with refers to these file
+# as if they are from this package, so we alias them for
+# compatibility.
+
+[
+    alias(
+        name = paths.basename(path),
+        actual = path,
+    )
+    for path in [
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.cpp",
+        "aten/src/ATen/templates/DispatchKeyNativeFunctions.h",
+        "aten/src/ATen/templates/LazyIr.h",
+        "aten/src/ATen/templates/LazyNonNativeIr.h",
+        "aten/src/ATen/templates/RegisterDispatchKey.cpp",
+        "aten/src/ATen/native/native_functions.yaml",
+        "aten/src/ATen/native/tags.yaml",
+        "aten/src/ATen/native/ts_native_functions.yaml",
+        "torch/csrc/lazy/core/shape_inference.h",
+        "torch/csrc/lazy/ts_backend/ts_native_functions.cpp",
+    ]
+]

@@ -183,7 +183,7 @@ Tensor expand_batching_rule(const Tensor& self, IntArrayRef size, bool implicit)
 }
 
 Tensor expand_batching_rule_symint(const Tensor& self, SymIntArrayRef psize, bool implicit) {
-  return expand_batching_rule(self, expectIntArrayRef(psize), implicit);
+  return expand_batching_rule(self, asIntArrayRefSlow(psize), implicit);
 }
 
 

@@ -2,8 +2,10 @@
 
 #include <c10/core/Backend.h>
 #include <c10/core/InferenceMode.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/core/WrapDimMinimal.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
 
@@ -67,8 +69,9 @@ void TensorImpl::_set_fw_grad(
   autograd_meta_->set_fw_grad(new_grad, self, level, is_inplace_op);
 }
 
-// some compiler does not generate the destructor correctly
-TensorImpl::~TensorImpl() = default;
+TensorImpl::~TensorImpl() {
+  destroy_pyobj_if_needed();
+}
 
 TensorImpl::TensorImpl(
     Storage&& storage,
@@ -181,16 +184,6 @@ TensorImpl::TensorImpl(
   // Caffe2 operators create Storages with default devices.
 }
 
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-IntArrayRef TensorImpl::sizes() const {
-  return sizes_and_strides_.sizes_arrayref();
-}
-#endif
-
-IntArrayRef TensorImpl::strides() const {
-  return sizes_and_strides_.strides_arrayref();
-}
-
 void TensorImpl::HandleResize() {
   // If needed, we will free the data. the next mutable_data() call
   // will create the data storage.
@@ -219,9 +212,10 @@ bool TensorImpl::compute_contiguous() const {
     return is_contiguous;
   int64_t z = 1;
   for (int64_t d = dim() - 1; d >= 0; d--) {
-    const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+    const auto size_d =
+        sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
     if (size_d != 1) {
-      if (sizes_and_strides_.stride_at_unchecked(d) == z) {
+      if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() == z) {
         z *= size_d;
       } else {
         is_contiguous = false;
@@ -239,9 +233,11 @@ bool TensorImpl::compute_channels_last_contiguous_2d() const {
     case 4: {
       int64_t expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d =
+            sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() !=
+              expected) {
             return false;
           }
           expected *= size_d;
@@ -265,9 +261,11 @@ bool TensorImpl::compute_channels_last_contiguous_3d() const {
     case 5: {
       int64_t expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
-        const auto size_d = sizes_and_strides_.size_at_unchecked(d);
+        const auto size_d =
+            sizes_and_strides_.size_at_unchecked(d).as_int_unchecked();
         if (size_d != 1) {
-          if (sizes_and_strides_.stride_at_unchecked(d) != expected) {
+          if (sizes_and_strides_.stride_at_unchecked(d).as_int_unchecked() !=
+              expected) {
             return false;
           }
           expected *= size_d;
@@ -314,7 +312,7 @@ bool TensorImpl::compute_non_overlapping_and_dense() const {
     return sizes_and_strides_.stride_at_unchecked(a) <
         sizes_and_strides_.stride_at_unchecked(b);
   });
-  auto require_stride = 1;
+  SymInt require_stride = 1;
   for (const auto i : c10::irange(dim())) {
     const auto size_perm_i = sizes_and_strides_.size_at_unchecked(perm[i]);
     if (size_perm_i < 2) {
@@ -333,6 +331,10 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
+  destroy_pyobj_if_needed();
+}
+
+void TensorImpl::destroy_pyobj_if_needed() {
   if (owns_pyobj()) {
     TORCH_INTERNAL_ASSERT(pyobj_interpreter_ != nullptr);
     TORCH_INTERNAL_ASSERT(pyobj_ != nullptr);
@@ -349,22 +351,6 @@ void TensorImpl::release_resources() {
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-int64_t TensorImpl::dim() const {
-  return sizes_and_strides_.size();
-}
-#endif
-
-int64_t TensorImpl::size(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return sizes_and_strides_.size_at_unchecked(d);
-}
-
-int64_t TensorImpl::stride(int64_t d) const {
-  d = at::maybe_wrap_dim(d, dim(), false);
-  return sizes_and_strides_.stride_at_unchecked(d);
-}
-
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
 bool TensorImpl::has_storage() const {
   return storage_;
 }
@@ -375,44 +361,76 @@ void TensorImpl::throw_storage_access_error() const {
       false, "Cannot access storage of ", tensorimpl_type_name());
 }
 
-bool TensorImpl::is_contiguous_nondefault_policy_impl(
-    at::MemoryFormat memory_format) const {
-  if (has_contiguity_ ==
-      static_cast<uint8_t>(CustomizableMethodPolicy::ContiguityNotSupported)) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "Tensors of type ",
-        tensorimpl_type_name(),
-        " do not have is_contiguous");
-  } else {
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        has_contiguity_ ==
-        static_cast<uint8_t>(CustomizableMethodPolicy::CustomBehavior));
-    return is_contiguous_custom(memory_format);
+impl::PyInterpreter* TensorImpl::load_pyobj_interpreter() const {
+  auto interpreter = pyobj_interpreter_.load(std::memory_order_acquire);
+  if (interpreter) {
+    return interpreter;
   }
+  TORCH_CHECK(
+      false,
+      "cannot access PyObject for Tensor on interpreter ",
+      pyobj_interpreter_.load()->name());
 }
 
 bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
-  TORCH_INTERNAL_ASSERT(
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->is_contiguous(this);
+  }
+  TORCH_CHECK(
       false,
-      "TensorImpl::is_contiguous_custom should never be called; did you "
-      "set_has_contiguity_policy and forget to override is_contiguous_custom?");
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have is_contiguous");
 }
 
-IntArrayRef TensorImpl::sizes_nondefault_policy_impl() const {
-  if (sizes_customization_policy_ ==
-      static_cast<uint8_t>(CustomizableMethodPolicy::NotSupported)) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "Tensors of type ",
-        tensorimpl_type_name(),
-        " do not have sizes");
-  } else {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false,
-        "custom behavior for sizes() is not supported; please add it or file "
-        "an issue.")
+IntArrayRef TensorImpl::sizes_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->sizes(this);
   }
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have sizes");
+}
+
+c10::SymIntArrayRef TensorImpl::sym_sizes_custom() const {
+  if (C10_UNLIKELY(is_python_dispatch())) {
+    return load_pyobj_interpreter()->sym_sizes(this);
+  }
+
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have sym sizes");
+}
+
+c10::Device TensorImpl::device_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->device(this);
+  }
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have device");
+}
+
+IntArrayRef TensorImpl::strides_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->strides(this);
+  }
+  TORCH_CHECK(
+      false,
+      "Tensors of type ",
+      tensorimpl_type_name(),
+      " do not have strides");
+}
+int64_t TensorImpl::dim_custom() const {
+  if (is_python_dispatch()) {
+    return load_pyobj_interpreter()->dim(this);
+  }
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have dim");
+}
+int64_t TensorImpl::numel_custom() const {
+  TORCH_CHECK(
+      false, "Tensors of type ", tensorimpl_type_name(), " do not have numel");
 }
 
 static void deletePlacementDeleteContext(void* ptr) {
@@ -522,23 +540,25 @@ c10::intrusive_ptr<TensorImpl> TensorImpl::shallow_copy_and_detach(
       std::move(version_counter), allow_tensor_metadata_change);
 }
 
-void TensorImpl::copy_tensor_metadata_except_version_counter(
+// This function copies all of the metadata from the src tensor except for:
+// - key_set_
+// - storage_
+// - storage_access_should_throw_
+// - sizes_strides_policy_
+// - version_counter_
+// - allow_tensor_metadata_change_
+// The idea is that if we have a "wrapper tensor" (like in functionalization),
+// all of the above are properties that the wrapper will want to customize,
+// while everything else should be mirrored between the wrapper and the inner
+// tensor.
+void TensorImpl::copy_generic_tensor_metadata(
     const TensorImpl* src_impl,
-    TensorImpl* dest_impl,
-    bool allow_tensor_metadata_change) {
-  dest_impl->storage_ = src_impl->storage_;
+    TensorImpl* dest_impl) {
   dest_impl->sizes_and_strides_ = src_impl->sizes_and_strides_;
   dest_impl->storage_offset_ = src_impl->storage_offset_;
   dest_impl->data_type_ = src_impl->data_type_;
   dest_impl->device_opt_ = src_impl->device_opt_;
-  // Copying tensor metadata doesn't change the PyObject (maybe
-  // it should), which means that we have to preserve whatever the
-  // original Python keyset was (as it's associated with the PyObject
-  // being a tensor subclass or not)
-  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
-      (dest_impl->key_set_ & c10::python_ks);
   dest_impl->is_contiguous_ = src_impl->is_contiguous_;
-  dest_impl->has_contiguity_ = src_impl->has_contiguity_;
   dest_impl->is_channels_last_contiguous_ =
       src_impl->is_channels_last_contiguous_;
   dest_impl->is_channels_last_3d_contiguous_ =
@@ -549,14 +569,30 @@ void TensorImpl::copy_tensor_metadata_except_version_counter(
       src_impl->is_non_overlapping_and_dense_;
   dest_impl->is_wrapped_number_ = src_impl->is_wrapped_number_;
   dest_impl->reserved_ = src_impl->reserved_;
-  dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
-  dest_impl->sizes_customization_policy_ =
-      src_impl->sizes_customization_policy_;
-  dest_impl->storage_access_should_throw_ =
-      src_impl->storage_access_should_throw_;
   if (src_impl->named_tensor_meta_ != nullptr) {
     dest_impl->named_tensor_meta_ = src_impl->named_tensor_meta_->clone();
   }
+  dest_impl->sizes_strides_policy_ = src_impl->sizes_strides_policy_;
+}
+
+void TensorImpl::copy_tensor_metadata_except_version_counter(
+    const TensorImpl* src_impl,
+    TensorImpl* dest_impl,
+    bool allow_tensor_metadata_change) {
+  // First call the generic copy function
+  copy_generic_tensor_metadata(src_impl, dest_impl);
+  // Then copy everything else (see the comment at copy_generic_tensor_metadata
+  // for the list of metadata that it does not directly copy).
+  dest_impl->storage_ = src_impl->storage_;
+  // Copying tensor metadata doesn't change the PyObject (maybe
+  // it should), which means that we have to preserve whatever the
+  // original Python keyset was (as it's associated with the PyObject
+  // being a tensor subclass or not)
+  dest_impl->key_set_ = (src_impl->key_set_ - c10::python_ks) |
+      (dest_impl->key_set_ & c10::python_ks);
+  dest_impl->set_allow_tensor_metadata_change(allow_tensor_metadata_change);
+  dest_impl->storage_access_should_throw_ =
+      src_impl->storage_access_should_throw_;
 }
 
 void TensorImpl::copy_tensor_metadata(
@@ -584,6 +620,209 @@ void TensorImpl::copy_tensor_metadata(
   if (!dest_impl->is_inference()) {
     dest_impl->set_version_counter(std::move(version_counter));
   }
+}
+
+// Legacy Caffe2 operations
+
+void TensorImpl::Extend(int64_t num, float growthPct) {
+  TORCH_CHECK(sizes_and_strides_.size() >= 1u);
+  TORCH_CHECK(num >= 0, "`num` must be non-negative for Extend");
+  TORCH_CHECK(
+      is_contiguous_,
+      "Right now Extend is only supported for contiguous Tensor.");
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "Extend() called on tensor with symbolic shape")
+
+  using SizesVector = SmallVector<int64_t, 5>;
+  IntArrayRef sizes_and_strides =
+      asIntArrayRefUnchecked(sizes_and_strides_.sizes_arrayref());
+  SizesVector newDims(sizes_and_strides.begin(), sizes_and_strides.end());
+  newDims[0] += num;
+  if (!storage_.data()) {
+    Resize(newDims);
+    return;
+  }
+  const auto newNumel = c10::multiply_integers(newDims.begin(), newDims.end());
+  if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
+    sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(newDims));
+    numel_ = newNumel;
+    return;
+  }
+  SizesVector newCapacity(sizes_and_strides.begin(), sizes_and_strides.end());
+  newCapacity[0] = std::max(
+      newDims[0],
+      static_cast<int64_t>(std::ceil(
+          sizes_and_strides_.size_at_unchecked(0).as_int_unchecked() *
+          (1 + growthPct / 100))));
+  auto oldData = std::move(storage_.data_ptr());
+  auto oldSize = numel_;
+  Resize(newCapacity);
+  auto* newData = raw_mutable_data(data_type_);
+  if (data_type_.copy()) {
+    TORCH_CHECK(
+        device_type() == DeviceType::CPU, "non-POD types work only on CPU");
+    data_type_.copy()(oldData.get(), newData, oldSize);
+  } else {
+    // The following copy uses the current (thread local) stream for copying
+    // and also takes the GPU id from the device() field passed in.
+    //
+    // TODO: Potentially more enforcements are necessary to avoid accidental
+    // switch to sync copy if the currently set device is wrong.
+    //
+    // Specifically, we might need to switch to a different context device
+    // here explicitly to avoid relying on user synchronizing things
+    // properly.
+    CopyBytes(
+        oldSize * itemsize(),
+        oldData.get(),
+        device(),
+        newData,
+        device(),
+        true); // non-blocking
+  }
+  reserved_ = true;
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(newDims));
+  numel_ = newNumel;
+}
+
+void TensorImpl::ReserveSpace(int64_t outer_dim) {
+  TORCH_CHECK(
+      is_contiguous_,
+      "Right now ReserveSpace is only supported for contiguous Tensor.");
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "ReserveSpace() called on tensor with symbolic shape")
+
+  TORCH_CHECK(storage_.unique(), "Can't call ReserveSpace on shared storage.");
+  // TODO: eliminate newCapacity.
+  IntArrayRef sizes_and_strides =
+      asIntArrayRefUnchecked(sizes_and_strides_.sizes_arrayref());
+  SmallVector<int64_t, 5> newCapacity(
+      sizes_and_strides.begin(), sizes_and_strides.end());
+  newCapacity[0] = outer_dim;
+  auto newNumel = c10::multiply_integers(newCapacity);
+  if (newNumel * data_type_.itemsize() <= storage_.nbytes()) {
+    return;
+  }
+  // Old data is discarded
+  storage_.data_ptr().clear();
+  auto oldSize = numel_;
+  SmallVector<int64_t, 5> oldDims(
+      sizes_and_strides.begin(), sizes_and_strides.end());
+  Resize(newCapacity);
+  // Allocate new memory but don't copy over the data
+  raw_mutable_data(data_type_);
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(oldDims));
+  numel_ = oldSize;
+  reserved_ = true;
+}
+
+void TensorImpl::Reshape(const std::vector<int64_t>& dims) {
+  TORCH_CHECK(
+      is_contiguous_,
+      "Right now Reshape is only supported for contiguous Tensor.");
+  TORCH_CHECK(
+      !has_symbolic_sizes_strides_,
+      "Reshape() called on tensor with symbolic shape")
+
+  int64_t new_size = 1;
+  for (auto d : dims) {
+    TORCH_CHECK(d >= 0);
+    new_size *= d;
+  }
+  TORCH_CHECK(
+      new_size == numel_,
+      "New size and old size are not equal. You cannot use Reshape, "
+      "but should use Resize."
+      // TODO(jiayq): remove the following warning after pending diffs
+      // stabilize.
+      " The old caffe2 mixes Reshape and Resize but this behavior has "
+      "been changed. If you find this error, most likely you will need "
+      "to change corresponding code from Reshape to Resize.");
+  sizes_and_strides_.set_sizes(SymIntArrayRef::fromIntArrayRef(dims));
+  empty_tensor_restride(MemoryFormat::Contiguous);
+}
+
+void TensorImpl::FreeMemory() {
+  // We'll detach from the old Storage and create a new one
+  if (storage_.use_count() != 1 || !storage_.resizable() ||
+      !storage_.allocator()) {
+    storage_ = Storage::create_legacy(storage_.device());
+  } else {
+    storage_.reset_legacy();
+  }
+  storage_offset_ = 0;
+}
+
+void TensorImpl::ShareData(const TensorImpl& src) {
+  // Right now, we are assuming the device_type are the same, since it is
+  // inherently the same in the non-templatized code. We should probably add
+  // an assert here which might affect perf a little bit.
+  TORCH_CHECK(
+      src.numel_ == numel_,
+      "Size mismatch - did you call reshape before sharing the data?");
+  // It is possible that the source tensor hasn't called mutable_data() yet,
+  // in which case ShareData() doesn't make much sense since we don't really
+  // know what to share yet.
+  // TODO: Add the assert after all uninitialized states are eliminated
+  // TORCH_CHECK(src.dtype_initialized(),
+  //            "Source tensor don't have a data type (did you call
+  //            mutable_data<T> on the tensor?)");
+  if (!src.dtype_initialized()) {
+    C10_LOG_EVERY_MS(WARNING, 1000)
+        << "Source tensor don't have a data type (did you call mutable_data<T> on the tensor?)";
+  }
+  TORCH_CHECK(
+      src.storage_initialized(),
+      "Source tensor has no content and has size > 0");
+  // Finally, do sharing.
+  /* Since we create new Storage whenever we need to change data_type/nbytes
+   * this still keeps the original semantics
+   */
+  storage_ = src.storage();
+  data_type_ = src.dtype();
+  device_opt_ = src.device_opt();
+  storage_offset_ = src.storage_offset();
+}
+
+void TensorImpl::ShareExternalPointer(
+    DataPtr&& data_ptr,
+    const caffe2::TypeMeta data_type,
+    size_t size_bytes) {
+  TORCH_CHECK(
+      data_type != ScalarType::Undefined,
+      "To share with a raw external pointer you need to pass in an "
+      "initialized data_type(TypeMeta).");
+  if (!size_bytes) {
+    size_bytes = numel_ * data_type.itemsize();
+  }
+  if (storage_.unique()) {
+    storage_.UniqueStorageShareExternalPointer(std::move(data_ptr), size_bytes);
+    data_type_ = data_type;
+    device_opt_ = storage_.device();
+    storage_offset_ = 0;
+  } else {
+    // Create a new Storage
+    storage_ = Storage(
+        Storage::use_byte_size_t(),
+        size_bytes,
+        std::move(data_ptr),
+        /*allocator=*/nullptr,
+        /*resizable=*/false);
+    data_type_ = data_type;
+    device_opt_ = storage_.device();
+    storage_offset_ = 0;
+  }
+}
+
+void TensorImpl::set_sym_sizes_and_strides(
+    c10::SymIntArrayRef sizes,
+    c10::SymIntArrayRef strides) {
+  has_symbolic_sizes_strides_ = true;
+  sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::CustomSizes);
+  sizes_and_strides_.set_sizes(sizes);
+  sizes_and_strides_.set_strides(strides);
 }
 
 namespace impl {

@@ -1,11 +1,9 @@
-import csv
 import json
 import os
 import subprocess
 
 from tools.stats.s3_stat_parser import (
     get_previous_reports_for_branch,
-    get_previous_reports_for_pr,
     Report,
     Version2Report,
     HAVE_BOTO3,
@@ -23,15 +21,7 @@ class JobTimeJSON(TypedDict):
 
 
 def _get_stripped_CI_job() -> str:
-    """E.g. convert 'pytorch_windows_vs2019_py36_cuda10.1_build' to 'pytorch_windows_vs2019_py36_cuda10.1'."""
-    job = os.environ.get("JOB_BASE_NAME", "").rstrip("0123456789")
-    if job.endswith("_slow_test"):
-        job = job[: len(job) - len("_slow_test")]
-    elif job.endswith("_test") or job.endswith("-test"):
-        job = job[: len(job) - len("_test")]
-    elif job.endswith("_build") or job.endswith("-build"):
-        job = job[: len(job) - len("_build")]
-    return job
+    return os.environ.get("BUILD_ENVIRONMENT", "")
 
 
 def _get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
@@ -117,7 +107,7 @@ def _pull_job_times_from_S3() -> Dict[str, float]:
         s3_reports = []
 
     if len(s3_reports) == 0:
-        print("Gathered no reports from S3. Please proceed without them.")
+        print("::warning:: Gathered no reports from S3. Please proceed without them.")
         return dict()
 
     return _calculate_job_times(s3_reports)
@@ -158,29 +148,6 @@ def _query_past_job_times(test_times_file: Optional[str] = None) -> Dict[str, fl
     return job_times
 
 
-def _query_failure_test_module(reports: List[Tuple["Report", str]]) -> List[str]:
-    test_modules: List[str] = []
-    if len(reports) == 0 or len(reports[0]) == 0:
-        return test_modules
-    report = reports[0][0]
-    v_report = cast(Version2Report, report)
-    assert (
-        "format_version" in v_report.keys() and v_report.get("format_version") == 2
-    ), "S3 format currently handled is version 2 only"
-    files: Dict[str, Any] = v_report["files"]
-    for fname, file in files.items():
-        contains_failure = any(
-            any(
-                case["status"] == "errored" or case["status"] == "failed"
-                for _, case in suite["cases"].items()
-            )
-            for _, suite in file["suites"].items()
-        )
-        if contains_failure:
-            test_modules.append(fname)
-    return test_modules
-
-
 def _query_changed_test_files() -> List[str]:
     default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'master')}"
     cmd = ["git", "diff", "--name-only", default_branch, "HEAD"]
@@ -206,7 +173,9 @@ def get_shard_based_on_S3(
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
-        print("Gathered no stats from S3. Proceeding with default sharding plan.")
+        print(
+            "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
+        )
         return tests[which_shard - 1 :: num_shards]
 
     shards = calculate_shards(num_shards, tests, jobs_to_times)
@@ -222,7 +191,7 @@ def get_slow_tests_based_on_S3(
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
-        print("Gathered no stats from S3. No new slow tests calculated.")
+        print("::warning:: Gathered no stats from S3. No new slow tests calculated.")
         return []
 
     slow_tests: List[str] = []
@@ -233,56 +202,9 @@ def get_slow_tests_based_on_S3(
     return slow_tests
 
 
-def get_specified_test_cases(filename: str, tests: List[str]) -> Dict[str, List[str]]:
-    """Get test cases from a specified test case file. Usually exported manually or through CI system."""
-    if not os.path.exists(filename):
-        print(
-            f"Could not find specified tests file: {filename}. Proceeding with default behavior."
-        )
-        return dict()
-
-    # The below encoding is utf-8-sig because utf-8 doesn't properly handle the byte-order-mark character
-    with open(filename, mode="r", encoding="utf-8-sig") as csv_file:
-        csv_reader = csv.DictReader(csv_file)
-        line_count = 0
-        specified_test_case_dict: Dict[str, List[str]] = dict()
-        for row in csv_reader:
-            line_count += 1
-            if line_count == 1:
-                if "test_filename" not in row or "test_case_name" not in row:
-                    print(
-                        "Data is missing necessary columns for test specification. Proceeding with default behavior."
-                    )
-                    return dict()
-            test_filename = row["test_filename"]
-            test_case_name = row["test_case_name"]
-            if test_filename not in tests:
-                print(
-                    f"Specified test_filename {test_filename} not found in TESTS. Skipping."
-                )
-                continue
-            if test_filename not in specified_test_case_dict:
-                specified_test_case_dict[test_filename] = []
-            specified_test_case_dict[test_filename].append(test_case_name)
-        print(f"Processed {line_count} test cases.")
-        return specified_test_case_dict
-
-
-def get_reordered_tests(tests: List[str], is_reordering_by_pr: bool) -> List[str]:
+def get_reordered_tests(tests: List[str]) -> List[str]:
     """Get the reordered test filename list based on github PR history or git changed file."""
-    prioritized_tests = []
-    # Try using historic stats from PR.
-    if is_reordering_by_pr and HAVE_BOTO3:
-        pr_number = os.environ.get("PR_NUMBER", os.environ.get("CIRCLE_PR_NUMBER", ""))
-        if len(pr_number):
-            ci_job_prefix = _get_stripped_CI_job()
-            s3_reports: List[Tuple["Report", str]] = get_previous_reports_for_pr(
-                pr_number, ci_job_prefix
-            )
-            prioritized_tests = _query_failure_test_module(s3_reports)
-            print("Prioritized test from previous CI info.")
-
-    # Using file changes priority if no stats found from previous PR.
+    prioritized_tests: List[str] = []
     if len(prioritized_tests) == 0:
         try:
             changed_files = _query_changed_test_files()

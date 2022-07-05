@@ -1940,7 +1940,7 @@ inline ivalue::Tuple& IValue::toTupleRef() const {
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
-    : tag(Tag::Tuple), is_intrusive_ptr(true) {
+    : tag(Tag::Tuple) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 template <
@@ -1968,14 +1968,14 @@ inline IValue::IValue(std::tuple<Args...>&& t)
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::ConstantString> v)
-    : tag(Tag::String), is_intrusive_ptr(true) {
+    : tag(Tag::String) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 inline IValue::IValue(std::string v)
     : IValue(ivalue::ConstantString::create(std::move(v))) {}
 
 inline IValue::IValue(c10::impl::GenericList v)
-    : tag(Tag::GenericList), is_intrusive_ptr(true) {
+    : tag(Tag::GenericList) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.impl_.release());
 }
 
@@ -2036,7 +2036,7 @@ inline IValue::IValue(c10::IListRef<T> v) : IValue() {
 }
 
 inline IValue::IValue(c10::impl::GenericDict v)
-    : tag(Tag::GenericDict), is_intrusive_ptr(true) {
+    : tag(Tag::GenericDict) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.impl_.release());
 }
 template <class Key, class Value>
@@ -2063,17 +2063,17 @@ inline IValue::IValue(c10::optional<T> v) : IValue() {
 inline IValue::IValue(c10::nullopt_t) : IValue() {}
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Object> v)
-    : tag(Tag::Object), is_intrusive_ptr(true) {
+    : tag(Tag::Object) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::PyObjectHolder> v)
-    : tag(Tag::PyObject), is_intrusive_ptr(true) {
+    : tag(Tag::PyObject) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::EnumHolder> v)
-    : tag(Tag::Enum), is_intrusive_ptr(true) {
+    : tag(Tag::Enum) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
@@ -2081,7 +2081,6 @@ inline IValue IValue::make_capsule(
     intrusive_ptr<torch::CustomClassHolder> blob) {
   IValue iv;
   iv.tag = Tag::Capsule;
-  iv.is_intrusive_ptr = true;
   iv.payload.u.as_intrusive_ptr = null_to_undefined_tensor(blob.release());
   return iv;
 }
@@ -2104,27 +2103,26 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) {
   ivalue_obj->setSlot(0, IValue::make_capsule(std::move(custom_class)));
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(ivalue_obj.release());
   tag = Tag::Object;
-  is_intrusive_ptr = true;
 }
 
 inline IValue::IValue(c10::intrusive_ptr<ivalue::Future> v)
-    : tag(Tag::Future), is_intrusive_ptr(true) {
+    : tag(Tag::Future) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<c10::RRefInterface> v)
-    : tag(Tag::RRef), is_intrusive_ptr(true) {
+    : tag(Tag::RRef) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 inline IValue::IValue(c10::intrusive_ptr<at::Quantizer> v)
-    : tag(Tag::Quantizer), is_intrusive_ptr(true) {
+    : tag(Tag::Quantizer) {
   payload.u.as_intrusive_ptr = null_to_undefined_tensor(v.release());
 }
 
 template <typename T>
 inline IValue::IValue(c10::complex<T> c)
-    : tag(Tag::ComplexDouble), is_intrusive_ptr(true) {
+    : tag(Tag::ComplexDouble) {
   auto v = c10::make_intrusive<ivalue::ComplexHolder>(c);
   payload.u.as_intrusive_ptr = v.release();
 }
@@ -2195,7 +2193,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   // Str) return value equality
   // 2. If it is a tensor type, we need to take undefined tensor into account
   // 3. Undefined_tensor is None and vice versa should be true
-  // 4. If it is a reference type (i.e. is_intrusive_ptr), then is True when
+  // 4. If it is a reference type (i.e. isIntrusivePtr()), then is True when
   // the pointed-to object is the same.
   // 5. False for all other comparisons.
   if (this->isNone() && rhs.isNone()) {
@@ -2220,7 +2218,7 @@ inline bool IValue::isSameIdentity(const IValue& rhs) const {
   } else {
     // for objects holding in IValue, do shallow compare on pointer address to
     // testify the identity
-    return this->is_intrusive_ptr && rhs.is_intrusive_ptr &&
+    return this->isIntrusivePtr() && rhs.isIntrusivePtr() &&
         this->payload.u.as_intrusive_ptr == rhs.payload.u.as_intrusive_ptr;
   }
 }
@@ -2266,7 +2264,7 @@ struct MaybeOwnedTraits<IValue> {
     if (from.isTensor()) {
       return IValue(MaybeOwnedTraits<at::Tensor>::createBorrow(from.toTensor()));
     } else {
-      return IValue(from.payload, from.tag, from.is_intrusive_ptr);
+      return IValue(from.payload, from.tag);
     }
   }
 
@@ -2277,7 +2275,7 @@ struct MaybeOwnedTraits<IValue> {
     } else if (rhs.isTensor()) {
       lhs = IValue(MaybeOwnedTraits<at::Tensor>::createBorrow(rhs.toTensor()));
     } else {
-      lhs = IValue(rhs.payload, rhs.tag, rhs.is_intrusive_ptr);
+      lhs = IValue(rhs.payload, rhs.tag);
     }
   }
 

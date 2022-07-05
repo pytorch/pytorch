@@ -3,6 +3,7 @@ from torch import Tensor
 from .optimizer import Optimizer, required
 from typing import List, Optional
 
+__all__ = ['SGD', 'sgd']
 
 class SGD(Optimizer):
     r"""Implements stochastic gradient descent (optionally with momentum).
@@ -25,7 +26,7 @@ class SGD(Optimizer):
             &\hspace{10mm}\textbf{else}                                                          \\
             &\hspace{15mm} \textbf{b}_t \leftarrow g_t                                           \\
             &\hspace{10mm}\textbf{if} \: \textit{nesterov}                                       \\
-            &\hspace{15mm} g_t \leftarrow g_{t-1} + \mu \textbf{b}_t                             \\
+            &\hspace{15mm} g_t \leftarrow g_{t} + \mu \textbf{b}_t                             \\
             &\hspace{10mm}\textbf{else}                                                   \\[-1.ex]
             &\hspace{15mm} g_t  \leftarrow  \textbf{b}_t                                         \\
             &\hspace{5mm}\textbf{if} \: \textit{maximize}                                          \\
@@ -257,7 +258,7 @@ def _multi_tensor_sgd(params: List[Tensor],
         return
 
     if has_sparse_grad is None:
-        has_sparse_grad = any([grad.is_sparse for grad in grads])
+        has_sparse_grad = any(grad.is_sparse for grad in grads)
 
     if weight_decay != 0:
         grads = torch._foreach_add(grads, params, alpha=weight_decay)
