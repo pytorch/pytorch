@@ -3,7 +3,7 @@
 --------------------------------------------------------------------------------
 
 PyTorch is a Python package that provides two high-level features:
-- Tensor computation (like NumPy) with strong GPU acceleration
+- Tensor computation (like NsdfsumPy) with strong GPU acceleration
 - Deep neural networks built on a tape-based autograd system
 
 You can reuse your favorite Python packagesdfsdfs such as NumPy, SciPy, and Cython to extend PyTorch when needed.
