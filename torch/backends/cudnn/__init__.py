@@ -38,7 +38,12 @@ if _cudnn is not None:
             if not cudnn_compatible:
                 raise RuntimeError(
                     'cuDNN version incompatibility: PyTorch was compiled  against {} '
-                    'but found runtime version {}. Please use cudnn version provided with pytorch.'.format(compile_version, runtime_version))
+                    'but found runtime version {}. '
+                    'PyTorch already comes bundled with cuDNN. '
+                    'One option to resolving this error is to ensure PyTorch '
+                    'can find the bundled cuDNN;'
+                    'one possibility is that there is a '
+                    'conflicting cuDNN in LD_LIBRARY_PATH.'.format(compile_version, runtime_version))
         return True
 else:
     def _init():
