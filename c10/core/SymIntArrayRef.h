@@ -15,7 +15,6 @@
 #include <c10/core/SymInt.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 
 #include <array>
 #include <initializer_list>
@@ -190,8 +189,6 @@ class SymIntArrayRef final {
 
 TORCH_API at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar);
 TORCH_API at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar);
-TORCH_API c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(
-    c10::SymIntArrayRef ar);
 
 std::ostream& operator<<(std::ostream& out, const c10::SymIntArrayRef& list);
 

@@ -102,9 +102,9 @@ def override_test_values(arg_map: Dict[str, str], op_name: str, index: int) -> N
         return
     if op_name == "take_along_dim":
         if index == 0:
-            arg_map["indices"] = "at::argsort(self0, 1, true)"
+            arg_map["indices"] = "at::argsort(self0, 1)"
         else:
-            arg_map["indices"] = "at::argsort(self1, 1, true)"
+            arg_map["indices"] = "at::argsort(self1, 1)"
         return
     if op_name == "masked_select":
         if index == 0:

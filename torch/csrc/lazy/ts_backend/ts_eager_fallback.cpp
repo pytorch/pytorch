@@ -337,11 +337,7 @@ void ts_eager_fallback(
             } else {
               dev_str << "<none>";
             }
-            // We should never hit this for a view op,
-            // because LazyTensor should provide a lowering for the
-            // corresponding view_copy operator. The functionalization pass will
-            // take care of calling the view_copy operator intead of the view.
-            TORCH_CHECK(
+            TORCH_WARN(
                 false,
                 "The operator ",
                 op.schema().operator_name(),

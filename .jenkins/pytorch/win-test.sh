@@ -65,7 +65,7 @@ run_tests() {
     done
 
     "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
-    if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
+    if [[ ( -z "${JOB_BASE_NAME}" || "${JOB_BASE_NAME}" == *-test ) && $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_backend.bat
         "$SCRIPT_HELPERS_DIR"/test_libtorch.bat

@@ -53,10 +53,6 @@ Node* createONNXUnsqueeze(
     Value* input,
     int axis,
     int opset_version);
-Node* createONNXConstant(
-    Graph* graph,
-    Node* n_to_insert_before,
-    at::Tensor value);
 
 bool isValidToTransformToONNXConcatNode(Node* lc_node);
 

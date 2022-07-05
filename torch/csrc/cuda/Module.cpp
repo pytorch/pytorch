@@ -11,7 +11,6 @@
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/python_nccl.h>
 #endif
-#include <c10/util/CallOnce.h>
 #include <c10/util/irange.h>
 
 #include <torch/csrc/CudaIPCTypes.h>
@@ -42,7 +41,7 @@ static bool in_bad_fork = false; // True for children forked after cuda init
 // Called in the forked child if cuda has already been initialized
 static void forked_child() {
   in_bad_fork = true;
-  torch::utils::set_requires_cuda_init(false);
+  torch::utils::set_run_yet_variable_to_false();
 }
 #endif
 
@@ -51,8 +50,8 @@ static void forked_child() {
 // has some working functions (e.g. device_count) but cannot fully initialize.
 static void poison_fork() {
 #ifndef WIN32
-  static c10::once_flag flag;
-  c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
+  static std::once_flag flag;
+  std::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
 #endif
 }
 

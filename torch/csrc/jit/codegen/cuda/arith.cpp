@@ -686,7 +686,7 @@ TensorView* binaryOp(
   }                                                                     \
   TensorView* op_name(Val* v1, TensorView* v2) {                        \
     return binaryOp(                                                    \
-        BinaryOpType::op_type, v1, v2, TypePromotion::float_op_config); \
+        BinaryOpType::op_type, v2, v2, TypePromotion::float_op_config); \
   }                                                                     \
   TensorView* op_name(TensorView* v1, TensorView* v2) {                 \
     return binaryOp(                                                    \
@@ -1438,14 +1438,13 @@ Val* where(Val* c, Val* v1, Val* v2) {
       "Condition should be of DataType Bool, not ",
       c->getDataType().value());
 
-  std::vector<Val*> operands = {v1, v2};
-  auto common_dtype = computeTypes(TypePromotion::default_op_config, operands);
-  auto cast_values = promoteValues(operands, common_dtype);
+  auto cast_values = promoteValues(TypePromotion::default_op_config, {v1, v2});
   v1 = cast_values[0];
   v2 = cast_values[1];
 
   TORCH_CHECK(c->getDataType().value() == DataType::Bool);
-  auto out_dtype = common_dtype;
+  auto out_dtype =
+      promote_type(v1->getDataType().value(), v2->getDataType().value());
   auto out_vtype =
       promote_type(v1->getValType().value(), v2->getValType().value());
   auto vals = maybeBroadcast({c, v1, v2});

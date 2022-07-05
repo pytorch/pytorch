@@ -7,7 +7,6 @@ on:
       - master
       - main
       - release/*
-      - landchecks/*
   workflow_dispatch:
 
 jobs:

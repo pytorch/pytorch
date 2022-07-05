@@ -5,7 +5,6 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
-__all__ = ['Exponential']
 
 class Exponential(ExponentialFamily):
     r"""

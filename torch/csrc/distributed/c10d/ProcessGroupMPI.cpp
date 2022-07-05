@@ -221,7 +221,7 @@ void ProcessGroupMPI::AsyncWork::populateException() {
 int ProcessGroupMPI::mpiThreadSupport_ = 0;
 std::mutex ProcessGroupMPI::pgGlobalMutex_;
 // We only want to initialize once
-c10::once_flag ProcessGroupMPI::onceFlagInitMPI;
+std::once_flag ProcessGroupMPI::onceFlagInitMPI;
 
 void ProcessGroupMPI::mpiExit() {
   std::unique_lock<std::mutex> globalLock(pgGlobalMutex_);
@@ -230,7 +230,7 @@ void ProcessGroupMPI::mpiExit() {
 
 void ProcessGroupMPI::initMPIOnce() {
   // Initialize MPI environment
-  c10::call_once(onceFlagInitMPI, []() {
+  std::call_once(onceFlagInitMPI, []() {
     MPI_CHECK(MPI_Init_thread(
         nullptr, nullptr, MPI_THREAD_SERIALIZED, &mpiThreadSupport_));
     if (mpiThreadSupport_ < MPI_THREAD_SERIALIZED) {

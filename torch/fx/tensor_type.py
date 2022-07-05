@@ -28,6 +28,7 @@ class TensorType:
 
     @staticmethod
     def __class_getitem__(*args):
+        assert isinstance(args[0], tuple)
         return TensorType(args[0])
 
 

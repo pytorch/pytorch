@@ -6,7 +6,7 @@ from torch._prims.utils import (
     check,
     elementwise_dtypes,
 )
-from torch._prims.wrappers import out_wrapper
+from torch._prims.wrappers import out_wrapper_multi, out_wrapper
 
 from typing import List, Optional
 
@@ -45,7 +45,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
 @torch.library.impl(meta_lib, "_fft_c2r.out")
 @torch.library.impl(meta_lib, "_fft_c2r")
-@out_wrapper()
+@out_wrapper
 def meta_fft_c2r(self, dim, normalization, lastdim):
     assert self.dtype.is_complex
     output_sizes = list(self.size())
@@ -113,9 +113,6 @@ def checkUplo(uplo: str):
     ), f"Expected UPLO argument to be 'L' or 'U', but got {uplo}"
 
 
-# Keeping this meta impl around, but we don't want to register it directly to the meta key
-# because `aten::linalg_eigh` is composite.
-# `_linalg_eigh` is implemented internally as a structured kernel, so we have meta support.
 def meta_linalg_eigh(self, uplo="L"):
     squareCheckInputs(self, "linalg_eigh")
     checkUplo(uplo)
@@ -323,9 +320,34 @@ def meta_index_Tensor(self, indices):
     return self.new_empty(before_shape + replacement_shape + after_shape)
 
 
+@out_wrapper_multi("L", "info")
+def meta_linalg_cholesky_ex(input, upper=False, check_errors=False):
+    check(
+        input.ndim >= 2,
+        lambda: f"expected matrix or batch of matrices, but got {input.ndim}-D tensor",
+    )
+    check(
+        utils.is_float_dtype(input.dtype) or utils.is_complex_dtype(input.dtype),
+        lambda: f"expected float or complex tensor, but got {input.dtype}",
+    )
+    check(
+        input.size(-1) == input.size(-2),
+        lambda: f"expected square matrix but got {input.shape}",
+    )
+    L = input.new_empty(input.size())
+    L.transpose_(-2, -1)
+    info_sizes = input.size()[:-2]
+    info = input.new_empty(info_sizes, dtype=torch.int)
+    return L, info
+
+
+torch.library.impl(meta_lib, "linalg_cholesky_ex")(meta_linalg_cholesky_ex)
+torch.library.impl(meta_lib, "linalg_cholesky_ex.L")(meta_linalg_cholesky_ex)
+
+
 @torch.library.impl(meta_lib, "addbmm")
 @torch.library.impl(meta_lib, "addbmm.out")
-@out_wrapper()
+@out_wrapper
 def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     dim1 = batch1.size(1)
     dim2 = batch2.size(2)
@@ -481,7 +503,7 @@ def meta_embedding_bag(
 
 @torch.library.impl(meta_lib, "diag")
 @torch.library.impl(meta_lib, "diag.out")
-@out_wrapper()
+@out_wrapper
 def meta_diag(self, dim=0):
     check(self.dim() in (1, 2), lambda: "matrix or a vector expected")
     if self.dim() == 1:
@@ -521,7 +543,7 @@ def _get_reduction_dtype(input, dtype, promote_int_to_long=True):
 
 @torch.library.impl(meta_lib, "nansum")
 @torch.library.impl(meta_lib, "nansum.out")
-@out_wrapper()
+@out_wrapper
 def meta_nansum(input, dims=None, keepdim=False, *, dtype=None):
     output_dtype = _get_reduction_dtype(input, dtype, promote_int_to_long=True)
     dims = utils.reduction_dims(input.shape, dims)
@@ -539,7 +561,7 @@ def meta_nanmedian(input):
 
 @torch.library.impl(meta_lib, "nanmedian.dim_values")
 @torch.library.impl(meta_lib, "nanmedian.dim")
-@out_wrapper("values", "indices")
+@out_wrapper_multi("values", "indices")
 def meta_nanmedian_dim(input, dim=-1, keepdim=False):
     dim = utils.reduction_dims(input.shape, (dim,))
     output_shape = _compute_reduction_shape(input, dim, keepdim)
@@ -561,10 +583,3 @@ def meta_remainder_scalar(scalar, other):
 @torch.library.impl(meta_lib, "logical_not_")
 def meta_logical_not_(self):
     return self
-
-
-# We must also trigger meta registrations from PrimTorch ref
-# decompositions
-import torch._refs
-import torch._refs.nn.functional
-import torch._refs.special

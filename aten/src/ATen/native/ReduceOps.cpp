@@ -670,12 +670,12 @@ template<typename T1, typename T2, typename Operation>
 void cummax_cummin_helper(const T1* self_data, T1* values_data, T2* indices_data,
           int self_dim_size, int self_stride, int values_stride, int indices_stride) {
       Operation op;
-      T1 out = c10::load(self_data);
+      T1 out = self_data[0];
       int idx = 0;
       for (const auto i : c10::irange(self_dim_size)) {
-        T1 curr_elem = c10::load(&self_data[i*self_stride]);
+        T1 curr_elem = self_data[i*self_stride];
         if(isnan_(curr_elem) || (!isnan_(out) && op(curr_elem, out))) {
-            out = curr_elem;
+            out = self_data[i*self_stride];
             idx = i;
         }
         values_data[i*values_stride] = out;
@@ -1261,7 +1261,7 @@ Tensor nanmean(
       self.scalar_type());
   const auto factor =
       at::native::isnan(self.detach()).logical_not_().sum(dim, keepdim);
-  return at::nansum(self, dim, keepdim, opt_dtype).div(factor);
+  return at::nansum(self, dim, keepdim, opt_dtype).div_(factor);
 }
 
 static Tensor squeeze_multiple(const Tensor& self, IntArrayRef dims) {

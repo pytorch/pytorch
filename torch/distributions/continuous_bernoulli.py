@@ -7,7 +7,6 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
 from torch.nn.functional import binary_cross_entropy_with_logits
 
-__all__ = ['ContinuousBernoulli']
 
 class ContinuousBernoulli(ExponentialFamily):
     r"""

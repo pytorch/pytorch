@@ -17,23 +17,9 @@ graph {
     }
   }
   node {
-    output: "onnx::ConstantOfShape_10"
-    name: "Constant_1"
-    op_type: "Constant"
-    attribute {
-      name: "value"
-      t {
-        dims: 1
-        data_type: 7
-        raw_data: "\003\000\000\000\000\000\000\000"
-      }
-      type: TENSOR
-    }
-  }
-  node {
     input: "onnx::ConstantOfShape_10"
     output: "onnx::Mul_3"
-    name: "ConstantOfShape_2"
+    name: "ConstantOfShape_1"
     op_type: "ConstantOfShape"
     attribute {
       name: "value"
@@ -47,7 +33,7 @@ graph {
   }
   node {
     output: "onnx::Mul_4"
-    name: "Constant_3"
+    name: "Constant_2"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -62,12 +48,12 @@ graph {
     input: "onnx::Mul_3"
     input: "onnx::Mul_4"
     output: "onnx::Equal_5"
-    name: "Mul_4"
+    name: "Mul_3"
     op_type: "Mul"
   }
   node {
     output: "onnx::Equal_6"
-    name: "Constant_5"
+    name: "Constant_4"
     op_type: "Constant"
     attribute {
       name: "value"
@@ -83,7 +69,7 @@ graph {
     input: "onnx::Equal_6"
     input: "onnx::Equal_5"
     output: "onnx::Where_7"
-    name: "Equal_6"
+    name: "Equal_5"
     op_type: "Equal"
   }
   node {
@@ -91,17 +77,23 @@ graph {
     input: "onnx::Mul_3"
     input: "onnx::Where_1"
     output: "onnx::Expand_8"
-    name: "Where_7"
+    name: "Where_6"
     op_type: "Where"
   }
   node {
     input: "onnx::Expand_0"
     input: "onnx::Expand_8"
     output: "9"
-    name: "Expand_8"
+    name: "Expand_7"
     op_type: "Expand"
   }
   name: "torch_jit"
+  initializer {
+    dims: 1
+    data_type: 7
+    name: "onnx::ConstantOfShape_10"
+    raw_data: "\003\000\000\000\000\000\000\000"
+  }
   input {
     name: "onnx::Expand_0"
     type {

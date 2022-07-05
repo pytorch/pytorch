@@ -7,7 +7,6 @@ import torch
 from torch.nn import Module
 from torch.optim.lr_scheduler import _LRScheduler
 
-__all__ = ['AveragedModel', 'update_bn', 'SWALR']
 
 class AveragedModel(Module):
     r"""Implements averaged model for Stochastic Weight Averaging (SWA).

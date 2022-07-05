@@ -316,11 +316,7 @@ def convert_standalone_module(
         produce a reference model or a fbgemm/qnnpack model
       - backend_config_dict: backend configuration of the target backend of quantization
     """
-    # TODO: remove is_reference flag
-    if is_reference:
-        convert_fn = torch.ao.quantization.quantize_fx.convert_to_reference
-    else:
-        convert_fn = torch.ao.quantization.quantize_fx.convert_fx  # type: ignore[attr-defined]
+    convert = torch.ao.quantization.quantize_fx.convert_fx  # type: ignore[attr-defined]
     # We know that observed standalone module is a GraphModule since
     # it's produced by us
     observed_standalone_module : GraphModule = modules[str(node.target)]  # type: ignore[assignment]
@@ -353,8 +349,10 @@ def convert_standalone_module(
 
     # TODO: allow convert_custom_config to override backend_config_dict
     # for standalone module
-    quantized_standalone_module = convert_fn(
+    # TODO: think about how to handle `is_reference` here
+    quantized_standalone_module = convert(
         observed_standalone_module,
+        is_reference=is_reference,
         backend_config_dict=backend_config_dict)
     parent_name, name = _parent_name(node.target)
     # update the modules dict

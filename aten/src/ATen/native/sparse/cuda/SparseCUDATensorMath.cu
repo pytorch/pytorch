@@ -495,7 +495,7 @@ SparseTensor& mul_out_sparse_cuda(const SparseTensor& t_, const SparseTensor& sr
 
   Tensor r_values_ = new_values_with_size_of(t_values_, max_nnz).zero_();
 
-  int64_t valueSize = std::max<int64_t>(1, t_values_.stride(0));
+  int64_t valueSize = t_values_.stride(0);
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
   dim3 grid;
   int curDevice = -1;

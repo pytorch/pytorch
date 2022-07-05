@@ -1,25 +1,13 @@
 #include <c10/core/SymIntArrayRef.h>
-#include <c10/util/Optional.h>
 #include <iostream>
 
 namespace c10 {
 
 at::IntArrayRef asIntArrayRefSlow(c10::SymIntArrayRef ar) {
-  auto r = asIntArrayRefSlowOpt(ar);
-  TORCH_CHECK(
-      r.has_value(),
-      "SymIntArrayRef expected to contain only concrete integers");
-  return *r;
-}
-
-c10::optional<at::IntArrayRef> asIntArrayRefSlowOpt(c10::SymIntArrayRef ar) {
   for (c10::SymInt sci : ar) {
-    if (sci.is_symbolic()) {
-      return c10::nullopt;
-    }
+    TORCH_CHECK(!sci.is_symbolic());
   }
-
-  return {asIntArrayRefUnchecked(ar)};
+  return asIntArrayRefUnchecked(ar);
 }
 
 at::IntArrayRef asIntArrayRefUnchecked(c10::SymIntArrayRef ar) {

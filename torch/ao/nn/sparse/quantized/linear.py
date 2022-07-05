@@ -3,8 +3,6 @@ from typing import Optional
 import torch
 from torch.nn.quantized.modules.utils import _quantize_weight, hide_packed_params_repr
 
-__all__ = ['LinearPackedParams', 'Linear']
-
 # TODO (zaf): Inherit from `quantized.LinearPackedParams` (T83294430)
 class LinearPackedParams(torch.nn.Module):
     _version = 1

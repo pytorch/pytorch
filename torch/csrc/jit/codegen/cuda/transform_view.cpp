@@ -462,9 +462,6 @@ class AnalyzeViewTransformation {
   //! 2) MergeAdjacentSingletonAxes class merges or reduces any
   //!    adjacent singleton dimensions.
   class MergeAxesInterface {
-   public:
-    virtual ~MergeAxesInterface() = default;
-
    protected:
     // See addMergeTransform for "is_index_merge_rhs" and
     // "is_last_axis_rfactor" descriptions
@@ -550,8 +547,6 @@ class AnalyzeViewTransformation {
       mtsa.handle(false /* is_index_merge_rhs */, is_last_axis_rfactor);
     }
 
-    virtual ~MergeThenSplitAxes() = default;
-
    private:
     MergeThenSplitAxes(
         AnalyzeViewTransformation* avt,
@@ -598,8 +593,6 @@ class AnalyzeViewTransformation {
       masa.handle(
           true /* is_index_merge_rhs */, true /* is_last_axis_rfactor */);
     }
-
-    virtual ~MergeAdjacentSingletonAxes() = default;
 
    private:
     MergeAdjacentSingletonAxes(

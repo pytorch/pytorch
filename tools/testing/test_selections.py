@@ -21,7 +21,15 @@ class JobTimeJSON(TypedDict):
 
 
 def _get_stripped_CI_job() -> str:
-    return os.environ.get("BUILD_ENVIRONMENT", "")
+    """E.g. convert 'pytorch_windows_vs2019_py36_cuda10.1_build' to 'pytorch_windows_vs2019_py36_cuda10.1'."""
+    job = os.environ.get("JOB_BASE_NAME", "").rstrip("0123456789")
+    if job.endswith("_slow_test"):
+        job = job[: len(job) - len("_slow_test")]
+    elif job.endswith("_test") or job.endswith("-test"):
+        job = job[: len(job) - len("_test")]
+    elif job.endswith("_build") or job.endswith("-build"):
+        job = job[: len(job) - len("_build")]
+    return job
 
 
 def _get_job_times_json(job_times: Dict[str, float]) -> JobTimeJSON:
@@ -107,7 +115,7 @@ def _pull_job_times_from_S3() -> Dict[str, float]:
         s3_reports = []
 
     if len(s3_reports) == 0:
-        print("::warning:: Gathered no reports from S3. Please proceed without them.")
+        print("Gathered no reports from S3. Please proceed without them.")
         return dict()
 
     return _calculate_job_times(s3_reports)
@@ -173,9 +181,7 @@ def get_shard_based_on_S3(
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
-        print(
-            "::warning:: Gathered no stats from S3. Proceeding with default sharding plan."
-        )
+        print("Gathered no stats from S3. Proceeding with default sharding plan.")
         return tests[which_shard - 1 :: num_shards]
 
     shards = calculate_shards(num_shards, tests, jobs_to_times)
@@ -191,7 +197,7 @@ def get_slow_tests_based_on_S3(
 
     # Got no stats from S3, returning early to save runtime
     if len(jobs_to_times) == 0:
-        print("::warning:: Gathered no stats from S3. No new slow tests calculated.")
+        print("Gathered no stats from S3. No new slow tests calculated.")
         return []
 
     slow_tests: List[str] = []

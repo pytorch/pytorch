@@ -7,7 +7,6 @@ from torch.distributions.transforms import AbsTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
 
-__all__ = ['HalfNormal']
 
 class HalfNormal(TransformedDistribution):
     r"""
