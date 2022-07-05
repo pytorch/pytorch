@@ -368,7 +368,7 @@ class TestAutoWrap(TestCase):
         model = FSDP(seq, process_group=self.process_group, auto_wrap_policy=always_wrap_policy)
         TestFSDPWrap.NestedSequentialModel.verify_model_all_wrapped(self, model)
 
-    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(torch.cuda.device_count() < 2, "Requires at least 2 GPUs")
     def test_transformer_auto_wrap_policy(self):
         """Tests the ``transformer_auto_wrap_policy``."""
         auto_wrap_policy = functools.partial(
