@@ -872,8 +872,9 @@ class FSDPTest(MultiProcessTestCase):
             fsdp_init_mode (FSDPInitMode): The mode to initialize the
                 FSDP-wrapped model. This should not be ``NO_FSDP``.
             ref_init_fn (Optional[Callable]): A callable to invoke that wraps a
-                non-wrapped model to construct the reference model. If
-                ``None``, then the callable defaults to the DDP constructor.
+                non-wrapped model to construct the reference model, where this
+                wrapper should provide data parallel semantics. If ``None``,
+                then the callable defaults to the DDP constructor.
         """
         assert fsdp_init_mode != FSDPInitMode.NO_FSDP, "Expects an FSDP init mode that wraps with FSDP"
         if init_kwargs is None:
@@ -928,8 +929,9 @@ class FSDPTest(MultiProcessTestCase):
         except Exception as e:
             raise ValueError(f"Initializing {model_class} raised error {str(e)}")
         if not isinstance(fsdp_model, FSDP):
-            # Enforce that we wrap with top-level FSDP since some test models
-            # may not do so in their `init()` method
+            # Enforce that we wrap with top-level FSDP since we are comparing
+            # assuming a data parallel reference and some test models may not
+            # do so in their `init()` method
             fsdp_model = FSDP(fsdp_model, self.process_group, **fsdp_kwargs)
         if use_pure_fp16:
             # Change the model parameter dtype after FSDP initialization
