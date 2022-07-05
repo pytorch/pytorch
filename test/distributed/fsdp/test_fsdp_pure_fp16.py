@@ -2,27 +2,21 @@
 
 import sys
 
-import torch
 from torch import distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, CPUOffload
-from torch.nn.parallel import DistributedDataParallel
-from torch.optim import SGD
+from torch.distributed.fsdp import CPUOffload
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     CUDAInitMode,
     FSDPInitMode,
     FSDPTest,
     NestedWrappedModule,
-    get_full_params,
-    DeterministicModel,
 )
 from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
     instantiate_parametrized_tests,
     parametrize,
-    TEST_WITH_DEV_DBG_ASAN,
     run_tests,
 )
-
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
