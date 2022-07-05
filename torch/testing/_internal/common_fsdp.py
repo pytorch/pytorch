@@ -1,13 +1,15 @@
 # Owner(s): ["oncall: distributed"]
 
 import functools
+import itertools
 import sys
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from contextlib import suppress
 from copy import deepcopy
 from enum import Enum, auto
 from math import inf
-from typing import Any, Callable, Dict, Optional, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 from unittest import mock
 
 import torch
@@ -22,7 +24,11 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
     TrainingState_,
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from torch.distributed.fsdp.wrap import always_wrap_policy, transformer_auto_wrap_policy, wrap
+from torch.distributed.fsdp.wrap import (
+    always_wrap_policy,
+    transformer_auto_wrap_policy,
+    wrap,
+)
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
@@ -81,6 +87,7 @@ class FSDPTestModel(nn.Module, ABC):
     ) -> nn.Module:
         """Initializes an instance of this model."""
         ...
+
 
 
 def _assert_module_states(
@@ -709,6 +716,34 @@ class FSDPTest(MultiProcessTestCase):
 
     def _check_forward_prefetch(self, fsdp_model, forward_prefetch):
         self.assertEqual(forward_prefetch, fsdp_model.forward_prefetch)
+
+    def run_subtests(
+        self,
+        subtest_config: OrderedDict,
+        test_fn: Callable,
+        *test_args,
+        **test_kwargs: Any,
+    ):
+        """
+        Runs a test function given by ``test_fn`` as a subtest according to the
+        configurations specified by ``subtest_config``. This amortizes the
+        costly setup overhead (including process spawn and initializing the
+        process group) over the subtests.
+
+        Args:
+            subtest_config (OrderedDict[str, List[Any]]): A mapping from
+                subtest keyword argument to a list of its possible values.
+            test_fn (Callable): A callable that runs the actual test.
+            test_args: Positional arguments to pass to ``test_fn``.
+            test_kwargs: Keyword arguments to pass to ``test_fn``.
+        """
+        for values in itertools.product(*subtest_config.values()):
+            subtest_kwargs = {
+                kwarg: value for kwarg, value in zip(subtest_config.keys(), values)
+            }
+            with self.subTest(**subtest_kwargs):
+                test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+            dist.barrier()
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe):

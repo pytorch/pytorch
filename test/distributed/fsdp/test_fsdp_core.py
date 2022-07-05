@@ -3,7 +3,8 @@
 import functools
 import itertools
 import sys
-from typing import Optional
+from collections import OrderedDict
+from typing import Callable, List, Optional
 from unittest import mock
 
 import torch
@@ -45,22 +46,13 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-params = "cpu_offload,backward_prefetch,forward_prefetch,sharding_strategy"
+params = "cpu_offload,sharding_strategy"
 cpu_offload_config = [CPUOffload(offload_params=True), CPUOffload(offload_params=False)]
-backward_prefetch_config = [BackwardPrefetch.BACKWARD_PRE, BackwardPrefetch.BACKWARD_POST, None]
-forward_prefetch_config = ["forward_prefetch", "no_forward_prefetch"]
-sharding_strategy_config = [ShardingStrategy.SHARD_GRAD_OP, None, ShardingStrategy.NO_SHARD]
-configs = list(itertools.product(cpu_offload_config,
-                                 backward_prefetch_config,
-                                 forward_prefetch_config,
-                                 sharding_strategy_config))
+sharding_strategy_config = [None, ShardingStrategy.SHARD_GRAD_OP, ShardingStrategy.NO_SHARD]
+configs = list(itertools.product(cpu_offload_config, sharding_strategy_config))
 test_name_mapping = {
     str(CPUOffload(offload_params=True)): "offload_true",
     str(CPUOffload(offload_params=False)): "offload_false",
-    str(BackwardPrefetch.BACKWARD_PRE): "backward_prefetch_pre",
-    str(BackwardPrefetch.BACKWARD_POST): "backward_prefetch_post",
-    "forward_prefetch": "forward_prefetch",
-    "no_forward_prefetch": "no_forward_prefetch",
     str(ShardingStrategy.SHARD_GRAD_OP): "shard_grad_op",
     str(ShardingStrategy.NO_SHARD): "no_shard",
 }
@@ -74,7 +66,7 @@ class TestParityWithDDP(FSDPTest):
     PyTorch DDP vs. FullyShardedDataParallel.
     """
 
-    def _get_init_modes_for_test(self, cpu_offload):
+    def _get_cuda_init_modes(self, cpu_offload: CPUOffload) -> List[CUDAInitMode]:
         modes = [
             CUDAInitMode.CUDA_AFTER,
             CUDAInitMode.CUDA_BEFORE
@@ -88,122 +80,105 @@ class TestParityWithDDP(FSDPTest):
 
         return modes
 
+    def _configure_subtests(self, cpu_offload: CPUOffload) -> Callable:
+        """Partially applies a subtest configuration that subtests CUDA
+        initialization modes and prefetching settings together."""
+        subtest_config = OrderedDict()
+        subtest_config["cuda_init_mode"] = self._get_cuda_init_modes(cpu_offload)
+        subtest_config["forward_prefetch"] = [True, False]
+        subtest_config["backward_prefetch"] = [
+            None,
+            BackwardPrefetch.BACKWARD_PRE,
+            BackwardPrefetch.BACKWARD_POST,
+        ]
+        return functools.partial(self.run_subtests, subtest_config)
+
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_nested_wrapped_model(
         self,
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
-        forward_prefetch: str,
         sharding_strategy: Optional[ShardingStrategy],
     ):
-        forward_prefetch = (forward_prefetch == "forward_prefetch")
-        init_modes = self._get_init_modes_for_test(cpu_offload)
-        for cuda_init_mode in init_modes:
-            with self.subTest(cuda_init_mode=cuda_init_mode):
-                self._test_fsdp_parity(
-                    NestedWrappedModule,
-                    FSDPInitMode.RECURSIVE,
-                    cuda_init_mode=cuda_init_mode,
-                    cpu_offload=cpu_offload,
-                    backward_prefetch=backward_prefetch,
-                    forward_prefetch=forward_prefetch,
-                    sharding_strategy=sharding_strategy,
-                )
+        run_subtests = self._configure_subtests(cpu_offload)
+        run_subtests(
+            self._test_fsdp_parity,
+            NestedWrappedModule,
+            FSDPInitMode.RECURSIVE,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+        )
 
     @skip_if_lt_x_gpu(2)
-    @parametrize("cpu_offload", cpu_offload_config)
-    @parametrize("sharding_strategy", sharding_strategy_config)
-    @parametrize("mixed_precision", [True])
+    @parametrize(params, configs, subtest_name)
     def test_nested_wrapped_model_single_iteration_mixed_precision(
         self,
         cpu_offload: CPUOffload,
         sharding_strategy: Optional[ShardingStrategy],
-        mixed_precision: bool,
     ):
-        init_modes = self._get_init_modes_for_test(cpu_offload)
         mixed_precision = MixedPrecision(
             param_dtype=torch.float16,
             buffer_dtype=torch.float16,
             reduce_dtype=torch.float16,
-        ) if mixed_precision else None
-        for cuda_init_mode in init_modes:
-            with self.subTest(cuda_init_mode=cuda_init_mode):
-                self._test_fsdp_parity(
-                    NestedWrappedModule,
-                    FSDPInitMode.RECURSIVE,
-                    # Only run one step for comparison, as usually grad scaler
-                    # is needed to avoid NaN after first step.
-                    num_iters=1,
-                    cuda_init_mode=cuda_init_mode,
-                    cpu_offload=cpu_offload,
-                    sharding_strategy=sharding_strategy,
-                    mixed_precision=mixed_precision,
-                )
+        )
+        run_subtests = self._configure_subtests(cpu_offload)
+        run_subtests(
+            self._test_fsdp_parity,
+            NestedWrappedModule,
+            FSDPInitMode.RECURSIVE,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+            num_iters=1,
+            mixed_precision=mixed_precision,
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     # TODO (awgu): 2.0 fails tests
     # @parametrize("norm_type", [2.0, None])
     @parametrize("norm_type", [None])
-    def test_nested_all_wrapped_model(
+    def test_nested_always_wrap_model(
         self,
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
-        forward_prefetch: str,
         sharding_strategy: Optional[ShardingStrategy],
         norm_type: Optional[float],
     ):
-        forward_prefetch = (forward_prefetch == "forward_prefetch")
-        init_modes = self._get_init_modes_for_test(cpu_offload)
-        for cuda_init_mode in init_modes:
-            with self.subTest(cuda_init_mode=cuda_init_mode):
-                self._test_fsdp_parity(
-                    AlwaysWrapNestedWrappedModule,
-                    FSDPInitMode.RECURSIVE,
-                    cuda_init_mode=cuda_init_mode,
-                    cpu_offload=cpu_offload,
-                    backward_prefetch=backward_prefetch,
-                    forward_prefetch=forward_prefetch,
-                    sharding_strategy=sharding_strategy,
-                    norm_type=norm_type,
-                )
+        run_subtests = self._configure_subtests(cpu_offload)
+        run_subtests(
+            self._test_fsdp_parity,
+            AlwaysWrapNestedWrappedModule,
+            FSDPInitMode.RECURSIVE,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+            norm_type=norm_type,
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     # TODO (awgu): 2.0 fails tests
     # @parametrize("norm_type", [2.0, None])
     @parametrize("norm_type", [None])
-    def test_transformer_parameterized(
+    def test_transformer(
         self,
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[ShardingStrategy],
-        forward_prefetch: str,
         sharding_strategy: Optional[ShardingStrategy],
         norm_type: Optional[float],
     ):
-        forward_prefetch = (forward_prefetch == "forward_prefetch")
-        init_modes = self._get_init_modes_for_test(cpu_offload)
-        for cuda_init_mode in init_modes:
-            with self.subTest(cuda_init_mode=cuda_init_mode):
-                self._test_fsdp_parity(
-                    TransformerWithSharedParams,
-                    FSDPInitMode.RECURSIVE,
-                    cuda_init_mode=cuda_init_mode,
-                    cpu_offload=cpu_offload,
-                    backward_prefetch=backward_prefetch,
-                    forward_prefetch=forward_prefetch,
-                    norm_type=norm_type,
-                    sharding_strategy=sharding_strategy,
-                )
+        run_subtests = self._configure_subtests(cpu_offload)
+        run_subtests(
+            self._test_fsdp_parity,
+            TransformerWithSharedParams,
+            FSDPInitMode.RECURSIVE,
+            cpu_offload=cpu_offload,
+            norm_type=norm_type,
+            sharding_strategy=sharding_strategy,
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_delayed_optim_step(
         self,
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
-        forward_prefetch: str,
         sharding_strategy: Optional[ShardingStrategy],
     ):
         """Tests the FSDP forward, backward, and optimizer step runtime by
@@ -211,48 +186,36 @@ class TestParityWithDDP(FSDPTest):
         the optimizer step to exercise the internal CUDA stream usage in that
         the forward pass all-gathers do not start until after the optimizer
         step completes."""
-        forward_prefetch = (forward_prefetch == "forward_prefetch")
-        init_modes = self._get_init_modes_for_test(cpu_offload)
-        for cuda_init_mode in init_modes:
-            with self.subTest(cuda_init_mode=cuda_init_mode):
-                self._test_fsdp_parity(
-                    NestedWrappedModuleWithDelay,
-                    FSDPInitMode.RECURSIVE,
-                    cuda_init_mode=cuda_init_mode,
-                    cpu_offload=cpu_offload,
-                    backward_prefetch=backward_prefetch,
-                    forward_prefetch=forward_prefetch,
-                    sharding_strategy=sharding_strategy,
-                    init_kwargs={"delay_after_loss_ms": 250},
-                )
+        run_subtests = self._configure_subtests(cpu_offload)
+        run_subtests(
+            self._test_fsdp_parity,
+            NestedWrappedModuleWithDelay,
+            FSDPInitMode.RECURSIVE,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+            init_kwargs={"delay_after_loss_ms": 250},
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_delayed_reduce_scatter(
         self,
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
-        forward_prefetch: str,
         sharding_strategy: Optional[ShardingStrategy],
     ):
         """Tests the FSDP forward, backward, and optimizer step runtime by
         using a model with a long CUDA delay before the gradient reduce-scatter
         to exercise the internal CUDA stream usage in that the backward pass
         waits for those reductions to finish."""
-        forward_prefetch = (forward_prefetch == "forward_prefetch")
-        init_modes = self._get_init_modes_for_test(cpu_offload)
-        for cuda_init_mode in init_modes:
-            with self.subTest(cuda_init_mode=cuda_init_mode):
-                self._test_fsdp_parity(
-                    NestedWrappedModuleWithDelay,
-                    FSDPInitMode.RECURSIVE,
-                    cuda_init_mode=cuda_init_mode,
-                    cpu_offload=cpu_offload,
-                    backward_prefetch=backward_prefetch,
-                    forward_prefetch=forward_prefetch,
-                    sharding_strategy=sharding_strategy,
-                    init_kwargs={"delay_before_reduction_ms": 250}
-                )
+        run_subtests = self._configure_subtests(cpu_offload)
+        run_subtests(
+            self._test_fsdp_parity,
+            NestedWrappedModuleWithDelay,
+            FSDPInitMode.RECURSIVE,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+            init_kwargs={"delay_before_reduction_ms": 250},
+        )
 
     def _dummy_ddp_fn(self, model):
         # `MixtureOfExperts`` implements custom gradient reduction logic, so
@@ -267,46 +230,37 @@ class TestParityWithDDP(FSDPTest):
     def test_mixture_of_experts(
         self,
         cpu_offload: CPUOffload,
-        backward_prefetch: Optional[BackwardPrefetch],
-        forward_prefetch: str,
         sharding_strategy: Optional[ShardingStrategy],
         norm_type: Optional[float],
     ):
-        forward_prefetch = (forward_prefetch == "forward_prefetch")
-        init_modes = self._get_init_modes_for_test(cpu_offload)
-        for cuda_init_mode in init_modes:
-            with self.subTest(cuda_init_mode=cuda_init_mode):
-                self._test_fsdp_parity(
-                    MixtureOfExperts,
-                    FSDPInitMode.RECURSIVE,
-                    ref_init_fn=self._dummy_ddp_fn,
-                    cuda_init_mode=cuda_init_mode,
-                    cpu_offload=cpu_offload,
-                    backward_prefetch=backward_prefetch,
-                    forward_prefetch=forward_prefetch,
-                    norm_type=norm_type,
-                    sharding_strategy=sharding_strategy,
-                )
+        run_subtests = self._configure_subtests(cpu_offload)
+        run_subtests(
+            self._test_fsdp_parity,
+            MixtureOfExperts,
+            FSDPInitMode.RECURSIVE,
+            ref_init_fn=self._dummy_ddp_fn,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+            norm_type=norm_type,
+        )
 
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_mixture_of_experts_with_delay_before_free(
-            self, cpu_offload, backward_prefetch, forward_prefetch, sharding_strategy):
-        forward_prefetch = (forward_prefetch == "forward_prefetch")
-        init_modes = self._get_init_modes_for_test(cpu_offload)
-        for cuda_init_mode in init_modes:
-            with self.subTest(cuda_init_mode=cuda_init_mode):
-                self._test_fsdp_parity(
-                    MixtureOfExperts,
-                    FSDPInitMode.RECURSIVE,
-                    ref_init_fn=self._dummy_ddp_fn,
-                    cuda_init_mode=cuda_init_mode,
-                    cpu_offload=cpu_offload,
-                    backward_prefetch=backward_prefetch,
-                    forward_prefetch=forward_prefetch,
-                    sharding_strategy=sharding_strategy,
-                    init_kwargs={"delay_before_free_ms": 250}
-                )
+        self,
+        cpu_offload: CPUOffload,
+        sharding_strategy: Optional[ShardingStrategy],
+    ):
+        run_subtests = self._configure_subtests(cpu_offload)
+        run_subtests(
+            self._test_fsdp_parity,
+            MixtureOfExperts,
+            FSDPInitMode.RECURSIVE,
+            ref_init_fn=self._dummy_ddp_fn,
+            cpu_offload=cpu_offload,
+            sharding_strategy=sharding_strategy,
+            init_kwargs={"delay_before_free_ms": 250}
+        )
 
 
 class TestParamInit(FSDPTest):
