@@ -511,11 +511,11 @@ bool isFunctionalTensorIListRef(c10::IListRef<T> list, F&& should_skip) {
 }
 
 bool isFunctionalTensor(ITensorListRef list) {
-  return isFunctionalTensorIListRef(list, [](const auto& t) { return t.defined(); });
+  return isFunctionalTensorIListRef(list, [](const auto& t) { return !t.defined(); });
 }
 
 bool isFunctionalTensor(IOptTensorListRef list) {
-  return isFunctionalTensorIListRef(list, [](const auto& t) { return t.has_value(); });
+  return isFunctionalTensorIListRef(list, [](const auto& t) { return !t.has_value(); });
 }
 
 Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta, int64_t out_idx) {
