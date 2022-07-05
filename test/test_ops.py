@@ -1569,6 +1569,8 @@ class TestRefsOpsInfo(TestCase):
         '_refs.scalar_tensor',  # missing "layout"
         '_refs.zeros',  # missing "layout"
         '_refs.zeros_like',  # missing "layout"
+        # other
+        '_refs.as_strided',  # _prims._as_strided_meta: "reduce() of empty sequence with no initial value"
         # not sure
         '_refs.copy_to',
         '_refs.clone',
