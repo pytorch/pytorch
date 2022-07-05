@@ -78,6 +78,10 @@ else()
   endif()
 endif()
 
+if (@USE_ROCM@)
+  include("${CMAKE_CURRENT_LIST_DIR}/public/LoadHIP.cmake")
+endif()
+
 if(@USE_CUDA@)
   # The file public/cuda.cmake exclusively uses CAFFE2_USE_*.
   # If Caffe2 was compiled with the libraries below, they must
