@@ -278,6 +278,12 @@ class TestPythonRegistration(TestCase):
 
         test_helper("CONSERVATIVE")
 
+    def test_error_for_unsupported_ns_or_kind(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Unsupported kind"):
+            my_lib1 = Library("myns", "BLA")
+
+        with self.assertRaisesRegex(ValueError, "reserved namespace"):
+            my_lib1 = Library("prim", "DEF")
 
 class TestPythonDispatch(TestCase):
     def test_basic(self) -> None:
