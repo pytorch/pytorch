@@ -9432,6 +9432,13 @@ TEST_F(NVFuserTest, FusionPersistentSoftmaxLocalSmem_CUDA) {
   const int64_t dimx = 1024;
   const int64_t dimy = 16384;
 
+  auto properties = at::cuda::getDeviceProperties(0);
+  // Require 70KB of smem to run test
+  const size_t required_smem_size = 70 << 10;
+  if (properties->sharedMemPerBlockOptin < required_smem_size) {
+    GTEST_SKIP() << "not enough shared memory space on device to run test";
+  }
+
   auto options = at::TensorOptions().dtype(at::kFloat).device(at::kCUDA, 0);
   at::Tensor aten_input = at::randn({dimx, dimy}, options);
   at::Tensor aten_static_in = aten_input.narrow(1, 0, static_size);
@@ -9630,6 +9637,13 @@ TEST_F(NVFuserTest, FusionPersistentNormLocalShared_CUDA) {
   torch::jit::fuser::cuda::FusionExecutor fe;
   fe.compileFusion(&fusion, aten_inputs);
   fe.runFusion(aten_inputs, {cg_static_out, cg_dynamic_out});
+
+  auto properties = at::cuda::getDeviceProperties(0);
+  // Require 70KB of smem to run test
+  const size_t required_smem_size = 70 << 10;
+  if (properties->sharedMemPerBlockOptin < required_smem_size) {
+    GTEST_SKIP() << "not enough shared memory space on device to run test";
+  }
 
   auto at_mu = at::mean(aten_input.to(at::kDouble), -1).unsqueeze(1);
   auto at_var = at::var(aten_input.to(at::kDouble), -1, false).unsqueeze(1);
