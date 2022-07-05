@@ -1869,59 +1869,6 @@ Tensor infinitely_differentiable_logit_backward(
   }
 }
 
-Tensor kl_div_double_backward_grad_output(
-    const Tensor& grad,
-    const Tensor& input,
-    const Tensor& target,
-    int64_t reduction,
-    bool log_target) {
-  auto result =
-      kl_div_backward(grad, input, target, at::Reduction::None, log_target);
-  if (reduction == at::Reduction::Mean) {
-    return result.mean();
-  } else if (reduction == at::Reduction::Sum) {
-    return result.sum();
-  }
-  return result;
-}
-
-// Compute derivatives for targets.
-Tensor kl_div_target_backward(
-    Tensor grad_output,
-    Tensor self,
-    Tensor target,
-    int64_t reduction,
-    bool log_target) {
-  Tensor grad_target;
-  if (!log_target) {
-    if (!areAnyTensorSubclassLike({self, target}) &&
-        !grad_output._is_zerotensor()) {
-      grad_target = grad_output.mul(target.log().add_(1).sub_(self))
-                        .masked_fill_(target == 0, 0.);
-    } else {
-      grad_target = grad_output.mul(target.log().add(1).sub(self))
-                        .masked_fill(target == 0, 0.);
-    }
-  } else {
-    if (!areAnyTensorSubclassLike({self, target})) {
-      grad_target =
-          grad_output.mul(target.add(1).sub_(self).mul_(target.exp()));
-    } else {
-      grad_target = grad_output.mul(target.add(1).sub(self).mul_(target.exp()));
-    }
-  }
-
-  if (reduction == at::Reduction::Mean) {
-    if (!grad_target._is_zerotensor()) {
-      grad_target.div_(target.numel());
-    } else {
-      grad_target.div(target.numel());
-    }
-  }
-
-  return grad_target;
-}
-
 Tensor binary_cross_entropy_target_backward(
     const Tensor& grad,
     const Tensor& self,
@@ -4049,7 +3996,8 @@ Tensor linalg_det_backward(
   // The gradient G is the matrix solving
   // A.mH G = det(A).conj() * grad * I
   auto d_diag = grad * det.conj();
-  auto d = at::diag_embed(d_diag.unsqueeze(-1).expand(pivots.sizes()));
+  // Optimisation, Make it F-transposed as it's what lu_solve expects
+  auto d = at::diag_embed(d_diag.unsqueeze(-1).expand_as(pivots)).mT();
 
   if (!at::GradMode::is_enabled()) {
     // The formula is given by the solution of AX = det.conj() * det * I when A
@@ -4059,8 +4007,14 @@ Tensor linalg_det_backward(
     auto eps = at::native::_get_epsilon(c10::toRealValueType(LU.scalar_type()));
     auto LU_ =
         LU + at::diag_embed(at::where(LU.diagonal(0, -2, -1) == 0., eps, 0.));
-    return at::linalg_lu_solve(LU_, pivots, d, /*left=*/true, /*adjoint=*/true);
+    auto use_A_T = A.is_contiguous() && !A.is_complex();
+    return at::linalg_lu_solve(
+        LU_, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
+    // If we want to compute further gradients, we need to recompute the LU
+    // decomposition so that autograd computes the correct gradients wrt to A
+    // (cf. solve_backward)
+
     // TODO When the user wants higher derivatives, the trick above just does
     // not cut it The proper way of doing this is doing `auto mask = det == 0.;`
     // and then if any determinant is zero, use an SVD decomposition to compute
@@ -4086,147 +4040,88 @@ Tensor linalg_det_backward(
   }
 }
 
-Tensor logdet_backward(
-    const Tensor& grad,
-    const Tensor& self,
-    const Tensor& logdet) {
-  auto singular_case_backward = [&](const Tensor& grad,
-                                    const Tensor& self) -> Tensor {
-    Tensor u, sigma, vh;
-    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
-    // logdet = \sum log(sigma)
-    auto gsigma = grad.unsqueeze(-1).div(sigma);
-    return svd_backward({}, gsigma, {}, u, sigma, vh);
-  };
-
-  auto nonsingular_case_backward = [&](const Tensor& grad,
-                                       const Tensor& self) -> Tensor {
-    return unsqueeze_multiple(grad, {-1, -2}, self.dim()) * self.inverse().mT();
-  };
-
-  if (self.dim() == 2) {
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-    if (logdet.item<double>() != -INFINITY) {
-      return nonsingular_case_backward(grad, self);
-    } else {
-      return singular_case_backward(grad, self);
-    }
+std::tuple<Tensor, Tensor> slogdet_jvp(
+    const Tensor& LU,
+    const Tensor& pivots,
+    const Tensor& dA,
+    const Tensor& sign,
+    const bool use_A_T) {
+  // No need to handle the singular case separately as we do in det since
+  // this function is not differentiable on singular matrices
+  auto trAinvE = at::linalg_lu_solve(LU, pivots, dA, /*left*/ true, use_A_T)
+                     .diagonal(0, -2, -1)
+                     .sum(-1);
+  if (LU.is_complex()) {
+    auto i = c10::complex<double>{0.0, 1.0};
+    return std::make_tuple(at::imag(trAinvE) * (i * sign), at::real(trAinvE));
   } else {
-    auto finite_logdet_indices =
-        at::native::toListOfOptionalTensors(at::where(logdet != -INFINITY));
-    c10::optional<Tensor> first_finite_logdet_index = finite_logdet_indices[0];
-
-    if (first_finite_logdet_index->size(0) ==
-        logdet.numel()) { // all log determinants are finite (non-singular)
-      return nonsingular_case_backward(grad, self);
-    }
-
-    auto neginf_logdet_indices =
-        at::native::toListOfOptionalTensors(at::where(logdet == -INFINITY));
-    c10::optional<Tensor> first_neginf_logdet_index = neginf_logdet_indices[0];
-
-    if (first_neginf_logdet_index->size(0) ==
-        logdet.numel()) { // all log determinants are -inf (singular)
-      return singular_case_backward(grad, self);
-    }
-
-    Tensor grad_logdet = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-    // invertible case
-    grad_logdet.index_put_(
-        /*indices=*/finite_logdet_indices,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*value=*/
-        nonsingular_case_backward(
-            grad.index(finite_logdet_indices),
-            self.index(finite_logdet_indices)));
-
-    // non-invertible case, uses SVD
-    grad_logdet.index_put_(
-        /*indices=*/neginf_logdet_indices,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*value=*/
-        singular_case_backward(
-            grad.index(neginf_logdet_indices),
-            self.index(neginf_logdet_indices)));
-
-    return grad_logdet;
+    return std::make_tuple(
+        at::_efficientzerotensor(sign.sizes(), sign.options()), trAinvE);
   }
 }
 
 Tensor slogdet_backward(
+    const Tensor& grad_sign,
     const Tensor& grad_logabsdet,
-    const Tensor& self,
+    const Tensor& A,
     const Tensor& signdet,
-    const Tensor& logabsdet) {
-  auto singular_case_backward = [&](const Tensor& grad_logabsdet,
-                                    const Tensor& self) -> Tensor {
-    Tensor u, sigma, vh;
-    std::tie(u, sigma, vh) = at::linalg_svd(self, false);
-    Tensor v = vh.mH();
-    // sigma has all non-negative entries (also with at least one zero entry)
-    // so logabsdet = \sum log(abs(sigma))
-    // but det = 0, so backward logabsdet = \sum log(sigma)
-    auto gsigma = grad_logabsdet.unsqueeze(-1).div(sigma);
-    return svd_backward({}, gsigma, {}, u, sigma, vh);
-  };
+    const Tensor& LU,
+    const Tensor& pivots) {
+  // We compute the complex case, as the real case follows from it
+  // Forward AD
+  // d (logabsdet)_A(E) = Re(tr(A^{-1}E))
+  // d (signdet)_A(E) = sgn * Im(tr(A^{-1}E)) * i
+  // So
+  // d (logabsdet)*_A(g) = gA^{-H}
+  // Now, to compute the adjoint of d(signdet), note that
+  // Re(z * Im(w)) = Re(-Re(z)iw)
+  // So, let g \in C,
+  // <g, d(signdet)_A(E)> = Re(g.conj() * sgn * i * Im(A^{-1}E))
+  //                      = Re(Re(g.conj() * sgn * i) * -i * A^{-1}E)
+  //                      = Re(Im(g.conj() * sgn) * i * A^{-1}E)
+  //                      = <Im(g.conj() * sgn) * -i * A^{-H}, E>
+  // As such,
+  // (d slogabs)*_A(g_sign, g_abs) = (g_abs - g_sign.conj() * sgn) * A^{-H}
 
-  auto nonsingular_case_backward = [&](const Tensor& grad_logabsdet,
-                                       const Tensor& self) -> Tensor {
-    // TODO: replace self.inverse with linalg_inverse
-    return unsqueeze_multiple(grad_logabsdet, {-1, -2}, self.dim()) *
-        self.inverse().mH();
-  };
+  if (!grad_sign.defined() && !grad_logabsdet.defined()) {
+    return {};
+  }
 
-  if (self.dim() == 2) {
-    bool is_singular = self.is_complex() ? signdet.abs().item<double>() == 0
-                                         : signdet.item<double>() == 0;
-    if (is_singular) {
-      return singular_case_backward(grad_logabsdet, self);
+  auto is_complex = A.is_complex();
+
+  // In the real case grad_sign is always zero
+  if (!is_complex && !grad_logabsdet.defined()) {
+    return {};
+  }
+
+  auto g = grad_logabsdet;
+  if (is_complex) {
+    if (grad_sign.defined()) {
+      auto i = c10::complex<double>{0.0, 1.0};
+      if (g.defined()) {
+        g = g - i * at::imag(grad_sign.conj() * signdet);
+      } else {
+        g = -i * at::imag(grad_sign.conj() * signdet);
+      }
     } else {
-      return nonsingular_case_backward(grad_logabsdet, self);
+      // Cast to complex explicitly
+      g = g.to(A.scalar_type());
     }
+  }
+
+  // No need to handle the singular case separately here (as we do in det)
+  // since this function is not differentiable on singular matrices
+  // Optimisation, Make it F-transposed as it's what lu_solve expects
+  auto d = at::diag_embed(g.unsqueeze(-1).expand_as(pivots)).mT();
+  if (!at::GradMode::is_enabled()) {
+    auto use_A_T = A.is_contiguous() && !A.is_complex();
+    return at::linalg_lu_solve(
+        LU, pivots, d, /*left=*/true, /*adjoint=*/!use_A_T);
   } else {
-    auto nonzero_signdet_indices = at::native::toListOfOptionalTensors(
-        self.is_complex() ? at::where(signdet.abs()) : at::where(signdet));
-    c10::optional<Tensor> first_nonzero_signdet_index =
-        nonzero_signdet_indices[0];
-
-    if (first_nonzero_signdet_index->size(0) ==
-        logabsdet.numel()) { // all log determinants are finite (non-singular)
-      return nonsingular_case_backward(grad_logabsdet, self);
-    }
-
-    auto zero_signdet_indices =
-        at::native::toListOfOptionalTensors(at::where(signdet == 0));
-    c10::optional<Tensor> first_zero_signdet_index = zero_signdet_indices[0];
-
-    if (first_zero_signdet_index->size(0) ==
-        logabsdet.numel()) { // all log determinants are -inf (singular)
-      return singular_case_backward(grad_logabsdet, self);
-    }
-
-    Tensor grad_slogdet = at::empty_like(self, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-
-    // invertible case
-    grad_slogdet.index_put_(
-        /*indices=*/nonzero_signdet_indices,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*value=*/
-        nonsingular_case_backward(
-            grad_logabsdet.index(nonzero_signdet_indices),
-            self.index(nonzero_signdet_indices)));
-
-    // non-invertible case, uses SVD
-    grad_slogdet.index_put_(
-        /*indices=*/zero_signdet_indices,
-        // NOLINTNEXTLINE(bugprone-argument-comment)
-        /*value=*/
-        singular_case_backward(
-            grad_logabsdet.index(zero_signdet_indices),
-            self.index(zero_signdet_indices)));
-
-    return grad_slogdet;
+    // If we want to compute further gradients, we need to recompute the LU
+    // decomposition so that autograd computes the correct gradients wrt to A
+    // (cf. solve_backward)
+    return at::linalg_solve(A.mH(), d);
   }
 }
 
