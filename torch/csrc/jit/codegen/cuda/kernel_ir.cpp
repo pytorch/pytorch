@@ -475,6 +475,7 @@ GroupedGridReduction::GroupedGridReduction(
     Allocate* sync_buffer,
     Val* entrance_index,
     Val* entrances,
+    Val* buffer_stride,
     bool is_allreduce)
     : GroupedReductionOp(
           passkey,
@@ -487,7 +488,8 @@ GroupedGridReduction::GroupedGridReduction(
       reduction_buffers_(std::move(reduction_buffers)),
       sync_buffer_(sync_buffer),
       entrance_index_(entrance_index),
-      entrances_(entrances) {
+      entrances_(entrances),
+      buffer_stride_(buffer_stride) {
   TORCH_INTERNAL_ASSERT(
       passkey.ir_container_->isA<kir::Kernel>(),
       "IR type only valid for Kernel container.");

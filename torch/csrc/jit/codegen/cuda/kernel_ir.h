@@ -587,6 +587,7 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
       Allocate* sync_buffer,
       Val* entrance_index,
       Val* entrances,
+      Val* buffer_stride,
       bool is_allreduce = false);
 
   const std::vector<Allocate*>& reduction_buffers() const {
@@ -611,6 +612,10 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
     return entrances_;
   }
 
+  Val* buffer_stride() const {
+    return buffer_stride_;
+  }
+
   const ParallelTypeBitmap& threadPredicate() const {
     return thread_predicate_;
   }
@@ -628,6 +633,8 @@ class TORCH_CUDA_CU_API GroupedGridReduction final : public GroupedReductionOp {
   ParallelTypeBitmap thread_predicate_;
   Val* entrance_index_ = nullptr;
   Val* entrances_ = nullptr;
+  // Stride of reduction buffers
+  Val* buffer_stride_ = nullptr;
 };
 
 //! Grid broadcast operation

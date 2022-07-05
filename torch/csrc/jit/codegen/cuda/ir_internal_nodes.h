@@ -204,7 +204,9 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
 
   GroupedReductionOp(const GroupedReductionOp* src, IrCloner* ir_cloner);
 
-  size_t numReductions() const {
+  //! Number of expressions grouped horizontally. It does not reflect
+  //! iteration grouping.
+  size_t numExprs() const {
     return reduction_op_types_.size();
   }
 
@@ -231,7 +233,9 @@ class TORCH_CUDA_CU_API GroupedReductionOp : public Expr {
   bool sameAs(const Statement* other) const override;
 
  private:
+  //! Reduction ops of grouped reductions
   const std::vector<BinaryOpType> reduction_op_types_;
+  //! Initial values of grouped reductions
   const std::vector<Val*> init_vals_;
   //! True if using the fused reduction kernel
   bool is_allreduce_ = false;

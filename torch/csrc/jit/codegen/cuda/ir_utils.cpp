@@ -767,7 +767,7 @@ Val* getReductionInitValOf(TensorView* tv) {
     init = rop->init();
   } else if (auto grop = dynamic_cast<GroupedReductionOp*>(def)) {
     int output_idx = -1;
-    for (const auto i : c10::irange(grop->numReductions())) {
+    for (const auto i : c10::irange(grop->numExprs())) {
       if (tv == grop->output(i)) {
         output_idx = static_cast<int>(i);
         break;

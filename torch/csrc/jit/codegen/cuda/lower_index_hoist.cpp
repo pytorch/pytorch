@@ -229,12 +229,13 @@ std::pair<Val*, bool> CommonIndexMap::insert(
     const std::vector<kir::ForLoop*>& loops,
     Val* index) {
   if (index->definition() == nullptr) {
-    // Only expression is eligible to hoist
+    // Only defined val is eligible to hoist
     return {index, false};
   }
 
   const CommonIndexKey key(
       indexed_consumer_id, consumer_td, ref_td, ref_index_map, loops);
+
   return tryInsertNewIndex(key, index);
 }
 
@@ -246,7 +247,7 @@ std::pair<Val*, bool> CommonIndexMap::insert(
     const std::vector<kir::ForLoop*>& loops,
     Val* index) {
   if (index->definition() == nullptr) {
-    // Only expression is eligible to hoist
+    // Only defined val is eligible to hoist
     return {index, false};
   }
 
@@ -261,6 +262,15 @@ std::pair<Val*, bool> CommonIndexMap::tryInsertNewIndex(
     Val* index) {
   Val* hoisted_index = nullptr;
   bool new_index_inserted = false;
+
+  // Hoisting is not possible if any of used loops is grouped.
+  if (std::any_of(
+          key.usedLoops().begin(), key.usedLoops().end(), [](const auto loop) {
+            return loop->iter_domain()->getParallelType() ==
+                ParallelType::Group;
+          })) {
+    return {index, false};
+  }
 
   // If already mapped, return the previously mapped index
   auto it = common_index_map_.find(key);

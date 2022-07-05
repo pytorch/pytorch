@@ -404,7 +404,7 @@ void IrPrinter::handle(const ReductionOp* rop) {
 void IrPrinter::handle(const GroupedReductionOp* grouped_rop) {
   indent() << "Grouped reduction(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(grouped_rop->numReductions())) {
+  for (const auto i : c10::irange(grouped_rop->numExprs())) {
     indent() << grouped_rop->output(i) << " = reduction( "
              << grouped_rop->input(i)
              << ", op = " << grouped_rop->getReductionOpType(i)
@@ -666,7 +666,7 @@ void IrPrinter::handle(const kir::GridReduction* node) {
 void IrPrinter::handle(const kir::GroupedGridReduction* node) {
   indent() << "Grouped grid reduction(\n";
   ++indent_size_;
-  for (const auto i : c10::irange(node->numReductions())) {
+  for (const auto i : c10::irange(node->numExprs())) {
     indent();
     handle(node->output(i));
     os_ << " = "
@@ -691,7 +691,7 @@ void IrPrinter::handle(const kir::GroupedGridReduction* node) {
     os_ << "nullptr";
   }
   os_ << "\n";
-  for (const auto i : c10::irange(node->numReductions())) {
+  for (const auto i : c10::irange(node->numExprs())) {
     indent() << kTab << ".reduction_buffer=";
     handle(node->reduction_buffers().at(i)->buffer());
     os_ << "\n";

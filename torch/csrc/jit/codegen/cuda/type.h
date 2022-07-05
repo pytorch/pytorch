@@ -253,6 +253,7 @@ enum class ParallelType {
   Unroll,
   Unswitch,
   Mma,
+  Group,
   Serial
 };
 
@@ -384,6 +385,10 @@ enum class LaunchConfigType {
 };
 
 const char* const kMagicZeroName = "nvfuser_zero";
+
+//! Maximum number of reductions that can be grouped together. The
+//! limit can be increased by extending struct Tuple define in tuple.cu.
+static constexpr int kMaxNumGroupedReductions = 8;
 
 } // namespace cuda
 } // namespace fuser

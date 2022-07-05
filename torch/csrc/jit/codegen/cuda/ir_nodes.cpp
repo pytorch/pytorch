@@ -460,7 +460,7 @@ bool GroupedReductionOp::sameAs(const Statement* other) const {
     return false;
   }
 
-  for (const auto i : c10::irange(numReductions())) {
+  for (const auto i : c10::irange(numExprs())) {
     if (!initVal(i)->sameAs(grouped_rop->initVal(i))) {
       return false;
     }
@@ -1300,15 +1300,23 @@ void IterDomain::parallelize(ParallelType t) {
     return;
   }
 
-  if (t == ParallelType::Unroll || isParallelTypeVectorize(t)) {
+  if (t == ParallelType::Unroll || isParallelTypeVectorize(t) ||
+      t == ParallelType::Group) {
     TORCH_CHECK(
         start()->isZeroInt() && extent()->isConstScalar(),
-        "Vectorization, unrolling, and unswitching are only supported with start = 0 and extent as a const int, but got ",
+        "Vectorization, unrolling, unswitching and grouping are only supported with start = 0 and extent as a const int, but got ",
         "a start of ",
         start(),
         " and extent ",
         extent(),
         " .");
+  }
+
+  if (t == ParallelType::Group) {
+    TORCH_CHECK(
+        getIterType() == IterType::Iteration,
+        "Grouping IterDomain of non Iteration type is not allowed. ",
+        getIterType());
   }
 
   if (isMmaSwizzled()) {

@@ -677,6 +677,8 @@ static const char* parallel_type2string(ParallelType t) {
       return "US";
     case ParallelType::Mma:
       return "MMA";
+    case ParallelType::Group:
+      return "G";
     case ParallelType::Serial:
       return "S";
     default:

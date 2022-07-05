@@ -64,13 +64,13 @@ std::vector<IterDomain*> iterDomainInputsOfOrderedAs(
     const std::vector<IterDomain*>& order);
 
 // Returns if Val is a TensorView or TensorIndex
-bool isTV(const Val* const);
+TORCH_CUDA_CU_API bool isTV(const Val* const);
 
 // Returns if Expr is a TensorView or TensorIndex Expr.
 TORCH_CUDA_CU_API bool isTvOp(const Expr*);
 
 // Returns the first output of Expr that is a TensorView
-TensorView* getTvOutput(const Expr*);
+TORCH_CUDA_CU_API TensorView* getTvOutput(const Expr*);
 
 // Returns if Expr is a reduction op
 TORCH_CUDA_CU_API bool isReductionOp(const Expr*);
