@@ -162,7 +162,7 @@ class TestShardedGradScalerParityWithDDP(FSDPTest):
                 cpu_offload=cpu_offload,
                 sharding_strategy=sharding_strategy,
                 mixed_precision=mp,
-                use_sharded_grad_scaler=True,
+                enable_sharded_grad_scaler=True,
             )
 
 
