@@ -36,7 +36,7 @@ from test_pytorch_common import (
     skipIfUnsupportedOpsetVersion,
     skipScriptTest,
     skipTraceTest,
-    skipForAllOpsetVersions
+    skipForAllOpsetVersions,
 )
 from torchvision import ops
 from torchvision.models.detection.image_list import ImageList
