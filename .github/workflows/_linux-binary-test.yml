@@ -89,28 +89,30 @@ jobs:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
         run: |
-          echo "PYTORCH_ROOT=/pytorch >> "${GITHUB_ENV}"
-          echo "BUILDER_ROOT=/builder >> "${GITHUB_ENV}"
-          echo "PACKAGE_TYPE=${{ inputs.PACKAGE_TYPE }} >> "${GITHUB_ENV}"
+          {
+            echo "PYTORCH_ROOT=env.PYTORCH_ROOT"
+            echo "BUILDER_ROOT=env.BUILDER_ROOT"
+            echo "PACKAGE_TYPE=env.PACKAGE_TYPE"
 
-          echo "DESIRED_CUDA=${{ inputs.DESIRED_CUDA }} >> "${GITHUB_ENV}"
-          echo "GPU_ARCH_VERSION=${{ inputs.GPU_ARCH_VERSION }} >> "${GITHUB_ENV}"
-          echo "GPU_ARCH_TYPE=${{ inputs.GPU_ARCH_TYPE }} >> "${GITHUB_ENV}"
-          echo "DOCKER_IMAGE=${{ inputs.DOCKER_IMAGE }} >> "${GITHUB_ENV}"
-          echo "SKIP_ALL_TESTS=1 >> "${GITHUB_ENV}"
-          echo "LIBTORCH_CONFIG=${{ inputs.LIBTORCH_CONFIG }} >> "${GITHUB_ENV}"
-          echo "LIBTORCH_VARIANT=${{ inputs.LIBTORCH_VARIANT }} >> "${GITHUB_ENV}"
-          echo "DESIRED_DEVTOOLSET=${{ inputs.DESIRED_DEVTOOLSET }} >> "${GITHUB_ENV}"
-          echo "DESIRED_PYTHON=${{ inputs.DESIRED_PYTHON }} >> "${GITHUB_ENV}"
+            echo "DESIRED_CUDA=env.DESIRED_CUDA"
+            echo "GPU_ARCH_VERSION=env.GPU_ARCH_VERSION"
+            echo "GPU_ARCH_TYPE=env.GPU_ARCH_TYPE"
+            echo "DOCKER_IMAGE=env.DOCKER_IMAGE"
+            echo "SKIP_ALL_TESTS=env.SKIP_ALL_TESTS"
+            echo "LIBTORCH_CONFIG=env.LIBTORCH_CONFIG"
+            echo "LIBTORCH_VARIANT=env.LIBTORCH_VARIANT"
+            echo "DESIRED_DEVTOOLSET=env.DESIRED_DEVTOOLSET"
+            echo "DESIRED_PYTHON=env.DESIRED_PYTHON"
 
-          echo "ALPINE_IMAGE="308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine" >> "${GITHUB_ENV}"
-          echo "ANACONDA_USER=pytorch >> "${GITHUB_ENV}"
-          echo "AWS_DEFAULT_REGION=us-east-1 >> "${GITHUB_ENV}"
-          echo "BINARY_ENV_FILE=/tmp/env >> "${GITHUB_ENV}"
-          echo "BUILD_ENVIRONMENT=${{ inputs.build_environment }} >> "${GITHUB_ENV}"
-          echo "PR_NUMBER=${{ github.event.pull_request.number }} >> "${GITHUB_ENV}"
-          echo "PYTORCH_FINAL_PACKAGE_DIR=/artifacts >> "${GITHUB_ENV}"
-          echo "SHA1=${{ github.event.pull_request.head.sha || github.sha }} >> "${GITHUB_ENV}"
+            echo "ALPINE_IMAGE=env.ALPINE_IMAGE"
+            echo "ANACONDA_USER=env.ANACONDA_USER"
+            echo "AWS_DEFAULT_REGION=env.AWS_DEFAULT_REGION"
+            echo "BINARY_ENV_FILE=env.BINARY_ENV_FILE"
+            echo "BUILD_ENVIRONMENT=env.BUILD_ENVIRONMENT"
+            echo "PR_NUMBER=env.PR_NUMBER"
+            echo "PYTORCH_FINAL_PACKAGE_DIR=env.PYTORCH_FINAL_PACKAGE_DIR"
+            echo "SHA1=env.SHA1"
+          } >> "${GITHUB_ENV}"
       # Setup the environment for non-ROCm builds
       - name: Checkout PyTorch
         if: ${{ inputs.GPU_ARCH_TYPE != 'rocm' }}
