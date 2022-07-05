@@ -294,8 +294,6 @@ class TransformerWithSharedParams(FSDPTestModel):
         if fsdp_init_mode == FSDPInitMode.NO_FSDP:
             return TransformerWithSharedParams(group, cuda_init_mode, add_bn, deterministic)
         elif fsdp_init_mode == FSDPInitMode.RECURSIVE:
-            if "cpu_offload" in fsdp_kwargs and fsdp_kwargs["cpu_offload"].offload_params:
-                assert cuda_init_mode == CUDAInitMode.CUDA_NEVER, f"{cuda_init_mode}"
             # Default to the `transformer_auto_wrap_policy()`
             if "auto_wrap_policy" not in fsdp_kwargs:
                 auto_wrap_policy = functools.partial(
