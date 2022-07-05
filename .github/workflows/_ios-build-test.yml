@@ -44,7 +44,6 @@ jobs:
     runs-on: macos-10.15
     timeout-minutes: 240
     env:
-      JOB_BASE_NAME: ${{ inputs.build-environment }}-build
       IOS_CERT_KEY_2022: ${{ secrets.IOS_CERT_KEY_2022 }}
       IOS_CERT_SECRET: ${{ secrets.IOS_CERT_SECRET }}
       IOS_DEV_TEAM_ID: ${{ secrets.IOS_DEV_TEAM_ID }}
@@ -108,6 +107,7 @@ jobs:
           cd ios/TestApp
           # install fastlane
           sudo gem install bundler && bundle install
+          bundle update fastlane
           # install certificates
           echo "${IOS_CERT_KEY_2022}" >> cert.txt
           base64 --decode cert.txt -o Certificates.p12
@@ -172,13 +172,13 @@ jobs:
             ruby setup.rb
           fi
           cd "${GITHUB_WORKSPACE}/ios/TestApp"
-          instruments -s -devices
+          # instruments -s -devices
           if [ "${BUILD_LITE_INTERPRETER}" == 1 ]; then
             if [ "${USE_COREML_DELEGATE}" == 1 ]; then
-              fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
+              bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testCoreML
             else
-              fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
+              bundle exec fastlane scan --skip_testing TestAppTests/TestAppTests/testCoreML
             fi
           else
-            fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
+            bundle exec fastlane scan --only_testing TestAppTests/TestAppTests/testFullJIT
           fi
