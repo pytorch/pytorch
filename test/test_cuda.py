@@ -3856,7 +3856,7 @@ torch.cuda.synchronize()
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
         for Class, foreach, amsgrad in product(OptClasses, (False, True), (False, True)):
             cases.append((Class, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad}))
-            if Class == torch.optim.Adam and fused:
+            if Class == torch.optim.Adam and foreach:
                 cases.append((Class, {"lr": 0.1, "betas": (0.8, 0.7), "fused": foreach, "amsgrad": amsgrad}))
 
         steps_warmup = 3
