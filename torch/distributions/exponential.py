@@ -5,6 +5,7 @@ from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
+__all__ = ['Exponential']
 
 class Exponential(ExponentialFamily):
     r"""
@@ -27,6 +28,10 @@ class Exponential(ExponentialFamily):
     @property
     def mean(self):
         return self.rate.reciprocal()
+
+    @property
+    def mode(self):
+        return torch.zeros_like(self.rate)
 
     @property
     def stddev(self):

@@ -20,8 +20,8 @@ from torch.testing._internal.common_device_type import (
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
     onlyCUDA, skipCPUIf, dtypesIfCUDA, skipMeta, get_all_device_types)
 from torch.testing._internal.common_dtype import (
-    all_types_and_complex_and, get_all_math_dtypes, all_types_and, floating_and_complex_types,
-    floating_types, floating_and_complex_types_and, integral_types_and
+    all_types_and_complex_and, all_types_and, floating_and_complex_types,
+    floating_types, floating_and_complex_types_and, integral_types_and, get_all_dtypes
 )
 from torch.testing._creation import float_to_corresponding_complex_type_map
 
@@ -149,7 +149,7 @@ class TestTensorCreation(TestCase):
                 exact_dtype=False)
 
     def test_cat_all_dtypes_and_devices(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.chalf):
             x = torch.tensor([[1, 2], [3, 4]], dtype=dt, device=device)
 
             expected1 = torch.tensor([[1, 2], [3, 4], [1, 2], [3, 4]], dtype=dt, device=device)
@@ -159,7 +159,7 @@ class TestTensorCreation(TestCase):
             self.assertEqual(torch.cat((x, x), 1), expected2)
 
     def test_fill_all_dtypes_and_devices(self, device):
-        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
+        for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.chalf):
             for x in [torch.tensor((10, 10), dtype=dt, device=device),
                       torch.empty(10000, dtype=dt, device=device)]:  # large tensor
                 numel = x.numel()
@@ -1968,11 +1968,12 @@ class TestTensorCreation(TestCase):
         torch_device = torch.device(device)
         device_type = torch_device.type
 
+        dtypes = get_all_dtypes(include_half=False, include_bfloat16=False, include_complex32=True)
         if device_type == 'cpu':
-            do_test_empty_full(self, get_all_math_dtypes('cpu'), torch.strided, torch_device)
+            do_test_empty_full(self, dtypes, torch.strided, torch_device)
         if device_type == 'cuda':
-            do_test_empty_full(self, get_all_math_dtypes('cpu'), torch.strided, None)
-            do_test_empty_full(self, get_all_math_dtypes('cpu'), torch.strided, torch_device)
+            do_test_empty_full(self, dtypes, torch.strided, None)
+            do_test_empty_full(self, dtypes, torch.strided, torch_device)
 
     # TODO: this test should be updated
     @suppress_warnings
@@ -2061,6 +2062,10 @@ class TestTensorCreation(TestCase):
         expected = torch.tensor([[0., 0.], [0., 0.]], device=device, dtype=torch.complex64)
         self.assertEqual(complexTensor, expected)
 
+        complexHalfTensor = torch.zeros(2, 2, device=device, dtype=torch.complex32)
+        expected = torch.tensor([[0., 0.], [0., 0.]], device=device, dtype=torch.complex32)
+        self.assertEqual(complexHalfTensor, expected)
+
     # TODO: this test should be updated
     def test_zeros_out(self, device):
         shape = (3, 4)
@@ -2092,6 +2097,10 @@ class TestTensorCreation(TestCase):
         res1 = torch.ones(1, 2, device=device, dtype=torch.bool)
         expected = torch.tensor([[True, True]], device=device, dtype=torch.bool)
         self.assertEqual(res1, expected)
+
+        # test chalf
+        self.assertEqual(torch.ones(100, 100, device=device, dtype=torch.chalf),
+                         torch.ones(100, 100, device=device, dtype=torch.cfloat), exact_dtype=False)
 
     # TODO: this test should be updated
     @onlyCPU
@@ -2855,7 +2864,7 @@ class TestTensorCreation(TestCase):
         shapes = [(5, 0, 1), (0,), (0, 0, 1, 0, 2, 0, 0)]
 
         for shape in shapes:
-            for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16):
+            for dt in all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.chalf):
 
                 self.assertEqual(shape, torch.zeros(shape, device=device, dtype=dt).shape)
                 self.assertEqual(shape, torch.zeros_like(torch.zeros(shape, device=device, dtype=dt)).shape)
@@ -2876,7 +2885,8 @@ class TestTensorCreation(TestCase):
                     self.assertEqual(shape, torch.randint(6, shape, device=device, dtype=dt).shape)
                     self.assertEqual(shape, torch.randint_like(torch.zeros(shape, device=device, dtype=dt), 6).shape)
 
-                if dt not in {torch.double, torch.float, torch.half, torch.bfloat16, torch.complex64, torch.complex128}:
+                if dt not in {torch.double, torch.float, torch.half, torch.bfloat16,
+                              torch.complex32, torch.complex64, torch.complex128}:
                     self.assertRaises(RuntimeError, lambda: torch.rand(shape, device=device, dtype=dt).shape)
 
                 if dt == torch.double or dt == torch.float or dt.is_complex:
@@ -3485,7 +3495,7 @@ class TestRandomTensorCreation(TestCase):
             self.assertTrue((res1 >= 0).all().item())
 
     @dtypes(torch.half, torch.float, torch.bfloat16, torch.double,
-            torch.complex64, torch.complex128)
+            torch.complex32, torch.complex64, torch.complex128)
     def test_randn(self, device, dtype):
         SIZE = 100
         for size in [0, SIZE]:
@@ -3496,7 +3506,7 @@ class TestRandomTensorCreation(TestCase):
             torch.randn(size, size, out=res2)
             self.assertEqual(res1, res2)
 
-    @dtypes(torch.float, torch.double, torch.complex64, torch.complex128)
+    @dtypes(torch.float, torch.double, torch.complex32, torch.complex64, torch.complex128)
     def test_rand(self, device, dtype):
         SIZE = 100
         for size in [0, SIZE]:
@@ -3520,8 +3530,12 @@ class TestRandomTensorCreation(TestCase):
         for n in (5, 100, 50000, 100000):
             # Ensure both integer and floating-point numbers are tested. Half follows an execution path that is
             # different from others on CUDA.
-            for dtype in (torch.long, torch.half, torch.float):
+            for dtype in (torch.long, torch.half, torch.float, torch.bfloat16):
                 if n > 2049 and dtype == torch.half:  # Large n for torch.half will raise an exception, do not test here.
+                    continue
+                if dtype == torch.bfloat16 and device != 'cpu':
+                    continue
+                if n > 256 and dtype == torch.bfloat16:
                     continue
                 with torch.random.fork_rng(devices=rng_device):
                     res1 = torch.randperm(n, dtype=dtype, device=device)

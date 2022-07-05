@@ -8,7 +8,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
-#include <ATen/native/EmbeddingBag.h>
 #include <ATen/native/Fill.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/Resize.h>
@@ -604,6 +603,65 @@ REGISTER_OPERATOR_FUNCTOR(aten::addmm, aten_addmm, [](Node* n) -> SROperator {
   };
 });
 
+#ifdef FBCODE_CAFFE2
+// Disable externally to avoid MSVC errors in open-source CI
+
+REGISTER_OPERATOR_FUNCTOR(
+    static_runtime::clamp_nan_to_num,
+    static_runtime_clamp_nan_to_num,
+    [](Node* n) -> SROperator {
+      auto clamp_min_ival_opt = toIValue(n->input(1));
+      auto clamp_max_ival_opt = toIValue(n->input(2));
+      TORCH_CHECK(
+          clamp_min_ival_opt.has_value() && clamp_max_ival_opt.has_value());
+
+      auto clamp_min_opt = clamp_min_ival_opt->toOptional<at::Scalar>();
+      auto clamp_max_opt = clamp_max_ival_opt->toOptional<at::Scalar>();
+      TORCH_CHECK(clamp_min_opt.has_value() && clamp_max_opt.has_value());
+
+      return [te = createClampNanToNum(),
+              clamp_min = clamp_min_opt->to<float>(),
+              clamp_max =
+                  clamp_max_opt->to<float>()](ProcessedNode* p_node) mutable {
+        const auto& in0_t = p_node->Input(0).toTensor();
+        if (p_node->Output(0).isNone()) {
+          p_node->Output(0) = create_empty_from(in0_t);
+        }
+        auto& out_t = p_node->Output(0).toTensor();
+        fastResizeToZero(out_t);
+        auto in3_s = p_node->Input(3).toOptional<double>();
+
+        if (!te || !te->checkInput<float>(in0_t)) {
+          at::cpu::nan_to_num_out(
+              out_t,
+              at::cpu::clamp(in0_t, clamp_min, clamp_max),
+              in3_s,
+              c10::nullopt,
+              c10::nullopt);
+          return;
+        }
+        at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
+
+        auto output_size = in0_t.numel();
+
+        // This might be UB if in3_s is absurdly large, but most implementations
+        // just turn it into `inf` in that case. The PyTorch core nan_to_num
+        // kernel just static_cast()s the limits to the destination type, so
+        // we'll ignore overflow issues here as well.
+        auto nan = in3_s.has_value() ? static_cast<float>(*in3_s) : 0.f;
+
+        te->call(
+            {out_t.data_ptr(),
+             in0_t.data_ptr(),
+             &clamp_min,
+             &clamp_max,
+             &nan,
+             &output_size});
+      };
+    });
+
+#endif
+
 REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::clamp(Tensor self, Scalar? min=None, Scalar? max=None) -> Tensor"))) {
@@ -623,9 +681,9 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
       at::native::resize_(out_t, in0_t.sizes(), c10::nullopt);
       auto output_size = in0_t.numel();
       auto min = in1_s.has_value() ? in1_s->toFloat()
-                                   : std::numeric_limits<float>::lowest();
+                                   : -std::numeric_limits<float>::infinity();
       auto max = in2_s.has_value() ? in2_s->toFloat()
-                                   : std::numeric_limits<float>::max();
+                                   : std::numeric_limits<float>::infinity();
       te->call({out_t.data_ptr(), in0_t.data_ptr(), &min, &max, &output_size});
     };
   }
@@ -640,7 +698,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::clamp, aten_clamp, [](Node* n) -> SROperator {
       fastResizeToZero(out_t);
       auto in1_t = p_node->Input(1).toOptional<at::Tensor>();
       auto in2_t = p_node->Input(2).toOptional<at::Tensor>();
-      at::native::clamp_out(in0_t, in1_t, in2_t, out_t);
+      at::cpu::clamp_out(out_t, in0_t, in1_t, in2_t);
     };
   }
   LogAndDumpSchema(n);
@@ -991,12 +1049,11 @@ REGISTER_OPERATOR_FUNCTOR(aten::logit, aten_logit, [](Node* n) -> SROperator {
   };
 });
 
-// TODO(T98923825): Uncomment this once the bug in this gets fixed.
-/*
 REGISTER_OPERATOR_FUNCTOR(aten::clone, aten_clone, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
-          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) ->
-Tensor"))) { LogAndDumpSchema(n); return nullptr;
+          "aten::clone(Tensor self, *, MemoryFormat? memory_format=None) ->Tensor"))) {
+    LogAndDumpSchema(n);
+    return nullptr;
   }
   return [](ProcessedNode* p_node) {
     const auto& src = p_node->Input(0).toTensor();
@@ -1004,10 +1061,20 @@ Tensor"))) { LogAndDumpSchema(n); return nullptr;
         p_node->Input(1).toOptional<c10::MemoryFormat>();
     auto memory_format =
         optional_memory_format.value_or(c10::MemoryFormat::Preserve);
-
+    /*
+      disable out_variant of clone for case with stride = 0 and
+      memory formats other than preserve. Perform dynamic allocation
+      instead of memory reuse for simpler implementation. We could,
+      in principle, figure out copy of strides.
+    */
+    if ((at::has_internal_overlap(src.unsafeGetTensorImpl()) ==
+         at::MemOverlap::Yes) ||
+        (memory_format != c10::MemoryFormat::Preserve)) {
+      p_node->Output(0) = at::native::clone(src, memory_format);
+      return;
+    }
     if (p_node->Output(0).isNone()) {
-      if (memory_format == c10::MemoryFormat::Preserve &&
-          src.is_non_overlapping_and_dense()) {
+      if (src.is_non_overlapping_and_dense()) {
         // Copy all strides
         p_node->Output(0) =
             at::empty_strided(src.sizes(), src.strides(), src.options());
@@ -1022,7 +1089,6 @@ Tensor"))) { LogAndDumpSchema(n); return nullptr;
     at::native::copy_(out_t, src, false);
   };
 });
-*/
 
 REGISTER_OPERATOR_FUNCTOR(
     quantized::embedding_bag_byte_rowwise_offsets,
@@ -1161,12 +1227,12 @@ REGISTER_OPERATOR_FUNCTOR(aten::index, aten_index, [](Node* n) -> SROperator {
     const auto in1_l =
         at::native::toListOfOptionalTensors(p_node->Input(1).toListRef());
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::native::index(in0_t, in1_l);
+      p_node->Output(0) = at::cpu::index(in0_t, in1_l);
       return;
     }
     auto& out_t = p_node->Output(0).toTensor();
     fastResizeToZero(out_t);
-    at::native::index_out(out_t, in0_t, in1_l);
+    at::cpu::index_out(out_t, in0_t, in1_l);
   };
 });
 
@@ -1644,137 +1710,42 @@ REGISTER_OPERATOR_FUNCTOR(aten::sum, aten_sum, [](Node* n) -> SROperator {
   return nullptr;
 });
 
-namespace {
-void prepare_embedding_bag(ProcessedNode* p_node, bool use_max_indices) {
-  const auto& weight = p_node->Input(0).toTensor();
-  const auto& indices = p_node->Input(1).toTensor();
-  const auto& offsets = p_node->Input(2).toTensor();
-  auto scale_grad_by_freq = p_node->Input(3).toBool();
-  auto mode = p_node->Input(4).to<int64_t>();
-  auto sparse = p_node->Input(5).toBool();
-  auto per_sample_weights = p_node->Input(6).toOptional<at::Tensor>();
-  auto include_last_offset = p_node->Input(7).toBool();
-  c10::optional<int64_t> padding_idx;
-  if (p_node->num_inputs() == 9) {
-    if (p_node->Input(8).isNone()) {
-      padding_idx = c10::nullopt;
-    } else {
-      padding_idx = p_node->Input(8).toInt();
-    }
-  }
-
-  at::native::check_arguments(
-      weight, indices, offsets, mode, per_sample_weights, include_last_offset);
-
-  std::ignore = scale_grad_by_freq;
-  std::ignore = sparse;
-
-  if (p_node->Output(0).isNone()) {
-    p_node->Output(0) = at::empty(
-        {include_last_offset ? offsets.sizes()[0] - 1 : offsets.sizes()[0],
-         weight.sizes()[1]},
-        weight.options());
-  } else {
-    at::native::resize_(
-        p_node->Output(0).toTensor(),
-        {include_last_offset ? offsets.sizes()[0] - 1 : offsets.sizes()[0],
-         weight.sizes()[1]},
-        c10::nullopt);
-  }
-  at::Tensor& output = p_node->Output(0).toTensor();
-
-  if (p_node->Output(1).isNone()) {
-    p_node->Output(1) = at::empty({0}, offsets.options());
-  }
-  at::Tensor& offset2bag = p_node->Output(1).toTensor();
-  at::native::make_offset2bag_out(
-      offset2bag,
-      output,
-      weight,
-      indices,
-      offsets,
-      mode,
-      per_sample_weights,
-      padding_idx.value_or(-1));
-
-  if (p_node->Output(2).isNone()) {
-    p_node->Output(2) = at::empty(offsets.sizes(), offsets.options());
-  }
-  at::Tensor& bag_size = p_node->Output(2).toTensor();
-  at::native::make_bag_size_out(
-      bag_size, offsets, indices, mode, include_last_offset, false);
-
-  if (use_max_indices) {
-    if (p_node->Output(3).isNone()) {
-      p_node->Output(3) = at::empty(bag_size.sizes(), offsets.options());
-    }
-    at::Tensor& max_indices = p_node->Output(3).toTensor();
-    at::native::make_max_indices_out(
-        max_indices,
-        weight,
-        indices,
-        offsets,
-        bag_size,
-        mode,
-        include_last_offset);
-
-    at::native::_embedding_bag_cpu_impl_out(
-        output,
-        offset2bag,
-        bag_size,
-        &max_indices,
-        weight,
-        indices,
-        offsets,
-        mode,
-        per_sample_weights,
-        include_last_offset,
-        padding_idx.value_or(-1));
-  } else {
-    at::native::_embedding_bag_cpu_impl_out(
-        output,
-        offset2bag,
-        bag_size,
-        nullptr,
-        weight,
-        indices,
-        offsets,
-        mode,
-        per_sample_weights,
-        include_last_offset,
-        padding_idx.value_or(-1));
-  }
-}
-} // namespace
-
-REGISTER_OPERATOR_FUNCTOR(aten::embedding_bag, aten_embedding_bag, [](Node* n) -> SROperator {
-  if (!n->matches(torch::schema(
-          "aten::embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor, Tensor)")) &&
-      !n->matches(torch::schema(
-          "aten::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor, Tensor)"))) {
-    LogAndDumpSchema(n);
-    return nullptr;
-  }
-  return [](ProcessedNode* p_node) {
-    prepare_embedding_bag(p_node, /*use_max_indices*/ true);
-  };
-});
-
-REGISTER_OPERATOR_FUNCTOR(
-    static_runtime::embedding_bag,
-    static_runtime_embedding_bag,
-    [](Node* n) -> SROperator {
-      if (!n->matches(torch::schema(
-              "static_runtime::embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq=False, int mode=0, bool sparse=False, Tensor? per_sample_weights=None, bool include_last_offset=False) -> (Tensor, Tensor, Tensor)")) &&
-          !n->matches(torch::schema(
-              "static_runtime::embedding_bag.padding_idx(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int mode, bool sparse, Tensor? per_sample_weights, bool include_last_offset, int? padding_idx) -> (Tensor, Tensor, Tensor)"))) {
-        LogAndDumpSchema(n);
-        return nullptr;
+REGISTER_OPERATOR_FUNCTOR(aten::mean, aten_mean, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::mean.dim(Tensor self, int[1] dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto dim = p_node->Input(1).toDimVector();
+      const bool keepdim = p_node->Input(2).toBool();
+      const auto dtype = p_node->Input(3).toOptional<at::ScalarType>();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(
+            self, dtype.value_or(self.dtype().toScalarType()));
       }
-      return [](ProcessedNode* p_node) {
-        prepare_embedding_bag(p_node, /*use_max_indices*/ false);
-      };
-    });
+      auto& output = p_node->Output(0).toTensor();
+      fastResizeToZero(output);
+      at::cpu::mean_out(output, self, dim, keepdim, dtype);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "aten::mean(Tensor self, *, ScalarType? dtype=None) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto dtype = p_node->Input(1).toOptional<at::ScalarType>();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(
+            self, dtype.value_or(self.dtype().toScalarType()));
+      }
+      auto& output = p_node->Output(0).toTensor();
+      fastResizeToZero(output);
+      at::cpu::mean_out(output, self, /*dim=*/{}, /*keepdim=*/false, dtype);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
+});
 
 REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
@@ -1793,6 +1764,61 @@ REGISTER_OPERATOR_FUNCTOR(aten::repeat, aten_repeat, [](Node* n) -> SROperator {
     at::Tensor& output = p_node->Output(0).toTensor();
     at::native::repeat_out(output, self, repeats);
   };
+});
+
+REGISTER_OPERATOR_FUNCTOR(aten::max, aten_max, [](Node* n) -> SROperator {
+  if (n->matches(torch::schema(
+          "aten::max.other(Tensor self, Tensor other) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto& other = p_node->Input(1).toTensor();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = at::native::max(self, other);
+        return;
+      }
+      auto& out = p_node->Output(0).toTensor();
+      fastResizeToZero(out);
+      at::native::max_out(self, other, out);
+    };
+  }
+
+  if (n->matches(torch::schema(
+          "aten::max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      auto dim = p_node->Input(1).toInt();
+      const auto keepdim = p_node->Input(2).toBool();
+
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(self);
+      }
+
+      if (p_node->Output(1).isNone()) {
+        p_node->Output(1) = create_empty_from(self, at::kLong);
+      }
+
+      auto& values = p_node->Output(0).toTensor();
+      auto& indices = p_node->Output(1).toTensor();
+      fastResizeToZero(values);
+      fastResizeToZero(indices);
+      at::cpu::max_out(values, indices, self, dim, keepdim);
+    };
+  }
+
+  if (n->matches(torch::schema("aten::max(Tensor self) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = create_empty_from(self);
+      }
+      auto& value = p_node->Output(0).toTensor();
+      fastResizeToZero(value);
+      at::cpu::amax_out(value, self);
+    };
+  }
+
+  LogAndDumpSchema(n);
+  return nullptr;
 });
 
 REGISTER_OPERATOR_FUNCTOR(aten::sign, aten_sign, [](Node* n) -> SROperator {
@@ -1824,7 +1850,8 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
     LogAndDumpSchema(n);
     return nullptr;
   }
-  return [](ProcessedNode* p_node) {
+
+  return [te = createDiv()](ProcessedNode* p_node) {
     const auto& in0_t = p_node->Input(0).toTensor();
     c10::optional<c10::string_view> rounding_mode = c10::nullopt;
     if (p_node->num_inputs() > 2) {
@@ -1835,12 +1862,37 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
         : at::native::wrapped_scalar_tensor(p_node->Input(1).toScalar());
 
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::div(in0_t, in1_t, rounding_mode);
-      return;
+      p_node->Output(0) = create_empty_from(in0_t);
     }
     auto& out_t = p_node->Output(0).toTensor();
-    fastResizeToZero(out_t);
-    at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
+
+    if (in0_t.sizes() == in1_t.sizes() &&
+        in0_t.scalar_type() == in1_t.scalar_type() &&
+        in0_t.strides() == in1_t.strides() && in0_t.is_contiguous() &&
+        in0_t.scalar_type() == at::kFloat) {
+      int64_t dim = in0_t.numel();
+      int i_rounding_mode = 0;
+      if (rounding_mode && !rounding_mode.value().empty()) {
+        const char peek_rounding_mode = rounding_mode.value().at(0);
+        if (peek_rounding_mode == 't') {
+          // trunc after div
+          i_rounding_mode = 1;
+        } else if (peek_rounding_mode == 'f') {
+          // floor after div
+          i_rounding_mode = 2;
+        }
+      }
+      at::native::resize_(out_t, in0_t.sizes());
+      te->call(
+          {out_t.data_ptr(),
+           in0_t.data_ptr(),
+           in1_t.data_ptr(),
+           &i_rounding_mode,
+           &dim});
+    } else {
+      fastResizeToZero(out_t);
+      at::cpu::div_out(out_t, in0_t, in1_t, rounding_mode);
+    }
   };
 });
 
@@ -2616,12 +2668,6 @@ void signed_log1p_out(at::Tensor& out, const at::Tensor& input) {
   });
 }
 
-at::Tensor signed_log1p(const at::Tensor& input) {
-  auto out = create_empty_from(input);
-  signed_log1p_out(out, input);
-  return out;
-}
-
 } // namespace
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
@@ -2731,6 +2777,23 @@ REGISTER_OPERATOR_FUNCTOR(
       }
       LogAndDumpSchema(n);
       return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    quantized::embedding_bag_byte_unpack,
+    quantized_embedding_bag_byte_unpack,
+    [](Node*) -> SROperator {
+      return [](ProcessedNode* pnode) {
+        auto& weight = pnode->Input(0).toTensor();
+        if (pnode->Output(0).isNone()) {
+          pnode->Output(0) = at::empty(
+              {},
+              weight.options().dtype(at::kFloat),
+              weight.suggest_memory_format());
+        }
+        auto& out = pnode->Output(0).toTensor();
+        at::native::qembeddingbag_byte_unpack_out(out, weight);
+      };
     });
 
 } // namespace jit

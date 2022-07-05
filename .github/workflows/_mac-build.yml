@@ -29,10 +29,6 @@ on:
         required: true
         description: Secret for S3 bucket for macOS sccache.
 
-env:
-  IN_CI: 1 # TODO delete in favor of GITHUB_ACTIONS
-  IS_GHA: 1 # TODO delete in favor of GITHUB_ACTIONS
-
 # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
 defaults:
   run:
@@ -44,12 +40,10 @@ jobs:
     if: github.repository_owner == 'pytorch'
     runs-on: ${{ inputs.runner-type }}
     env:
-      JOB_BASE_NAME: ${{ inputs.build-environment }}
       # For sccache access (only on non-forked PRs)
       AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
       BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
-      COMPACT_JOB_NAME: ${{ inputs.build-environment }}
     steps:
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
@@ -69,6 +63,7 @@ jobs:
           auto-update-conda: true
           python-version: 3.8
           activate-environment: build
+          miniconda-version: 4.7.12
 
       - name: Install macOS homebrew dependencies
         run: |
@@ -82,7 +77,16 @@ jobs:
           sudo chmod +x /usr/local/bin/sccache
           echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build
+        env:
+          OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
         run: |
           echo "CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname "$(which conda)")/../"}" >> "${GITHUB_ENV}"
           .jenkins/pytorch/macos-build.sh
@@ -90,7 +94,7 @@ jobs:
       - name: Archive artifacts into zip
         if: inputs.build-generates-artifacts
         run: |
-          zip -1 -r artifacts.zip dist/
+          zip -1 -r artifacts.zip dist/ build/.ninja_log build/compile_commands.json
 
       - name: Store PyTorch Build Artifacts on GHA
         uses: actions/upload-artifact@v2
@@ -100,3 +104,13 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
+
+      - name: Upload sccache stats to GHA
+        uses: actions/upload-artifact@v2
+        # Only if sccache is installed, see above
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        with:
+          name: sccache-stats-${{ inputs.build-environment }}-runattempt${{ github.run_attempt }}-${{ steps.get-job-id.outputs.job-id }}
+          retention-days: 14
+          if-no-files-found: warn
+          path: sccache-stats-*.json

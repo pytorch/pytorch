@@ -4,6 +4,7 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property
 
+__all__ = ['Categorical']
 
 class Categorical(Distribution):
     r"""
@@ -100,6 +101,10 @@ class Categorical(Distribution):
     @property
     def mean(self):
         return torch.full(self._extended_shape(), nan, dtype=self.probs.dtype, device=self.probs.device)
+
+    @property
+    def mode(self):
+        return self.probs.argmax(axis=-1)
 
     @property
     def variance(self):

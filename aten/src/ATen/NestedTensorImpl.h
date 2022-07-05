@@ -1,11 +1,11 @@
 #pragma once
+#include <ATen/MemoryOverlap.h>
 #include <ATen/Tensor.h>
+#include <c10/core/MemoryFormat.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
-#include <c10/util/irange.h>
-#include <ATen/MemoryOverlap.h>
-#include <c10/core/MemoryFormat.h>
 #include <c10/util/Metaprogramming.h>
+#include <c10/util/irange.h>
 
 namespace at {
 namespace native {
@@ -13,24 +13,25 @@ namespace native {
 struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
   explicit NestedTensorImpl(at::Tensor buffer, at::Tensor nested_size_tensor);
 
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  int64_t numel() const override {
-    TORCH_CHECK(
-        false, "numel is disabled. These methods are not virtual in fbcode.");
-  }
-#endif
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  bool is_contiguous(at::MemoryFormat memory_format) const override {
-    TORCH_CHECK(
-        false,
-        "is_contiguous is disabled. These methods are not virtual in fbcode.");
-  }
-#endif
+  // Note: in current implementation,
+  // empty nested tensor = no underlying tensor
+  // nesting empty tensors is not considered empty nested tensor
+  // both cases have `buffer_.numel() = 0`, though
+  // TODO: for now, we use `nested_size_tensor_.dim()`
+  // to determine whether a nested tensor is empty
+  // when empty, `nested_size_tensor_.dim() = 0`
+  // otherwise `nested_size_tensor_.dim() = 2`
+  // maybe there is a better indicator for emptiness?
+
   // TODO: don't expose private implementation details like this; in
   // particular, resizing this tensor will mess up our dim() and
   // callers cannot fix it.
   const Tensor& get_nested_size_tensor() const {
     return nested_size_tensor_;
+  }
+  // TODO: don't expose private implementation details like this
+  const Tensor& get_nested_stride_tensor() const {
+    return nested_stride_tensor_;
   }
   // Returns nullopt if the ith dimension is irregular. The ith dimension
   // of a NestedTensor is regular if the unbound tensors match in
@@ -42,22 +43,16 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
     }
     return opt_sizes_[d];
   }
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  IntArrayRef sizes() const override {
+
+  int64_t size(int64_t d) const {
+    c10::optional<int64_t> optional_size = this->opt_size(d);
     TORCH_CHECK(
-        false,
-        "Internal error: NestedTensorImpl doesn't support sizes. Please file an issue on https://github.com/pytorch/nestedtensor");
-    return IntArrayRef();
+        optional_size.has_value(),
+        "Given dimension ",
+        d,
+        " is irregular and does not have a size.");
+    return *optional_size;
   }
-#endif
-#ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
-  IntArrayRef strides() const override {
-    TORCH_CHECK(
-        false,
-        "Internal error: NestedTensorImpl doesn't support strides. Please file an issue on https://github.com/pytorch/nestedtensor");
-    return IntArrayRef();
-  }
-#endif
 
   const at::Tensor& get_buffer() const {
     return buffer_;
@@ -66,39 +61,55 @@ struct TORCH_API NestedTensorImpl : public c10::TensorImpl {
  protected:
   const char* tensorimpl_type_name() const override;
 
+  // TODO: numel_custom and is_contiguous_custom can be profitably overridden
+  // with real implementations
+  int64_t numel_custom() const override;
+  bool is_contiguous_custom(MemoryFormat) const override;
+  int64_t size_custom(int64_t d) const override {
+    return this->size(d);
+  }
+  IntArrayRef sizes_custom() const override;
+  c10::SymIntArrayRef sym_sizes_custom() const override;
+  c10::SymIntArrayRef sym_sizes() const override;
+  IntArrayRef strides_custom() const override;
+
+  // this one is real
+  int64_t dim_custom() const override;
+
  private:
   // Must be called after any changes to our dim() to sync the state
   // to TensorImpl.
   void refresh_dim();
 
   at::Tensor buffer_;
-  const at::Tensor nested_size_tensor_;
+  const at::Tensor nested_size_tensor_, nested_stride_tensor_;
   // NOTE: -1 here means the size is missing
   std::vector<int64_t> opt_sizes_;
 };
 
-inline NestedTensorImpl* get_nested_tensor_impl_or_null(const at::Tensor& tensor) {
+inline NestedTensorImpl* get_nested_tensor_impl_or_null(
+    const at::Tensor& tensor) {
   if (tensor.is_nested()) {
     return static_cast<NestedTensorImpl*>(tensor.unsafeGetTensorImpl());
   }
   return nullptr;
 }
 
-inline NestedTensorImpl* get_nested_tensor_impl(
-    const at::Tensor& tensor) {
+inline NestedTensorImpl* get_nested_tensor_impl(const at::Tensor& tensor) {
   TORCH_CHECK(
-      tensor.is_nested(),
-      "get_nested_tensor_impl requires a NestedTensor.");
-  return static_cast<NestedTensorImpl*>(
-      tensor.unsafeGetTensorImpl());
+      tensor.is_nested(), "get_nested_tensor_impl requires a NestedTensor.");
+  return static_cast<NestedTensorImpl*>(tensor.unsafeGetTensorImpl());
 }
-
 
 // TODO: real implementation once we support strides.
 inline bool nested_tensor_impl_is_contiguous(
     const NestedTensorImpl* nt,
     at::MemoryFormat memory_format = MemoryFormat::Contiguous) {
   return memory_format == MemoryFormat::Contiguous;
+}
+
+inline const at::Tensor& get_nested_size_tensor(const at::Tensor& tensor) {
+  return get_nested_tensor_impl(tensor)->get_nested_size_tensor();
 }
 
 } // namespace native

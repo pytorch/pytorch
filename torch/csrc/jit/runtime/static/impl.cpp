@@ -107,6 +107,20 @@ bool canEnableStaticRuntime(const std::shared_ptr<torch::jit::Graph>& graph) {
   return can_support;
 }
 
+namespace {
+
+// CustomClass extending torch::CustomClassHolder can be typecasted
+// to IValue StaticRuntimeMetadata is created so that we can attach
+// SR metadata to IR's prim::fork nodes. These CustomClass needs to be
+// registered first in order to be used as IValue.below is an
+// UNUSED VARIABLE but NEEDED to invoke the class_ constructor necessary
+// for class registration.
+auto sr_metadata_registerer = torch::class_<StaticRuntimeMetadata>(
+    "StaticRuntime",
+    "StaticRuntimeMetadata");
+
+} // namespace
+
 std::string dumpValueSet(
     const FastSet<const Value*>& value_set,
     const char* set_name) {
@@ -153,13 +167,16 @@ void OptimizeGraph(
         graph,
         fromQualString("fb::sigrid_transforms_torch_bind"),
         fromQualString("fb::variadic_sigrid_transforms_torch_bind"));
+    // These fused ops only have out variants - we can't do the fusion when
+    // out variants are disabled.
     FuseSignLog1P(graph);
+    FuseClampNaNToNum(graph);
 
-    // TODO: we can avoid this guard by moving operations
-    // to exposed folders.
 #ifdef FBCODE_CAFFE2
     if (opts.use_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithCopy(graph);
+    } else {
+      ReplacePermuteWithCopy(graph);
     }
     if (opts.use_maybe_copy_variants && !opts.enable_tensorexpr_fusion) {
       ReplaceWithMaybeCopy(graph);
@@ -177,7 +194,6 @@ void OptimizeGraph(
       graph, /* custom_ops */ {fromQualString("fb::scale_gradient")});
   AddIfThenElseOp(graph);
   UseSplitAndSqueeze(graph);
-  QuantizedLinearReluFusion(graph);
   GRAPH_DUMP("Final graph after optimizations: ", graph);
 }
 
@@ -511,6 +527,10 @@ StaticModule::StaticModule(
       graph_(std::move(graph_and_module.first)),
       module_(std::move(graph_and_module.second)),
       num_inputs_(graph_->inputs().size()) {
+  sr_metadata_ = c10::make_intrusive<jit::StaticRuntimeMetadata>(opts_);
+  // recursively attach metadata to prim::fork nodes
+  attachNodeMetadata(graph_->block());
+
   // check opt flags
   if (opts.manage_output_tensors) {
     TORCH_CHECK(
@@ -618,6 +638,17 @@ size_t StaticModule::prepareBlockInfo(
 
   block_infos_.at(block).set_output_indices(std::move(output_indices));
   return cur_idx - start_idx;
+}
+
+void StaticModule::attachNodeMetadata(Block* block) {
+  for (auto* node : block->nodes()) {
+    if (node->kind() == prim::fork) {
+      node->ival_(getStaticRuntimeMetadataSymbol(), IValue(sr_metadata_));
+    }
+    for (auto* sub_block : node->blocks()) {
+      attachNodeMetadata(sub_block);
+    }
+  }
 }
 
 void StaticModule::prepareFunctionsAndConstants(
@@ -811,6 +842,7 @@ BlockRunner::BlockRunner(
     const StaticModule& sm,
     IValue* values,
     Block* block,
+    torch::jit::TaskLauncher* launcher,
     bool is_root_block)
     : static_module_(sm),
       block_info_(static_module_.block_info(block)),
@@ -833,19 +865,22 @@ BlockRunner::BlockRunner(
 
   for (auto& pnode : nodes_) {
     auto* node = pnode.node();
+
+    // attach the async taskLauncher to processedNodes
+    pnode.set_metadata(launcher);
     auto blocks = node->blocks();
     const auto num_blocks = blocks.size();
     if (num_blocks == 0) {
       continue;
     }
     DCHECK(node->kind() == prim::If || node->kind() == prim::Loop);
-    auto block_runners = std::make_unique<std::vector<BlockRunner>>();
-    block_runners->reserve(num_blocks);
+    std::vector<BlockRunner> block_runners;
+    block_runners.reserve(num_blocks);
 
     for (auto* b : blocks) {
-      block_runners->emplace_back(sm, values_, b);
+      block_runners.emplace_back(sm, values_, b, launcher);
     }
-    pnode.set_block_runners(std::move(block_runners));
+    pnode.set_metadata(std::move(block_runners));
   }
 }
 
@@ -1199,9 +1234,9 @@ c10::IValue BlockRunner::run_impl_record_functions(
     IValueList&& args,
     const KeywordArgs& kwargs) {
   auto step_callbacks =
-      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_MODEL);
-  if (!step_callbacks.empty()) {
-    at::RecordFunction guard(std::move(step_callbacks));
+      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     guard.needsInputs()
         ? guard.before(
@@ -1211,6 +1246,52 @@ c10::IValue BlockRunner::run_impl_record_functions(
     return run_impl(std::forward<IValueList>(args), kwargs);
   }
   return run_impl(std::forward<IValueList>(args), kwargs);
+}
+
+template <typename IValueList>
+c10::intrusive_ptr<c10::ivalue::Future> BlockRunner::run_impl_async(
+    IValueList&& args,
+    const KeywordArgs& kwargs) {
+  // run the graph inline in the caller thread. Async ops will be
+  // executed on taskLauncher attached to the metadata of ProcessedNodes
+  c10::IValue output = run_impl(args, kwargs);
+
+  // If the output is of type future, return it
+  if (output.isFuture()) {
+    return output.toFuture();
+  }
+
+  // wrap the output into future, mark completed and return it
+  TypePtr return_type;
+  if (block_info_.num_outputs() > 1) {
+    return_type = TupleType::create(
+        fmap(outputs(), [](const IValue* v) { return v->type(); }));
+  } else {
+    return_type = outputs().at(0)->type();
+  }
+  c10::intrusive_ptr<Future> future = c10::make_intrusive<Future>(return_type);
+  future->markCompleted(output);
+  return future;
+}
+
+template <typename IValueList>
+c10::intrusive_ptr<c10::ivalue::Future> BlockRunner::
+    run_impl_record_functions_async(
+        IValueList&& args,
+        const KeywordArgs& kwargs) {
+  auto step_callbacks =
+      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_MODEL);
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
+    guard.needsInputs()
+        ? guard.before(
+              "forward", c10::ArrayRef<const IValue>(args.data(), args.size()))
+        : guard.before("forward");
+
+    return run_impl_async(std::forward<IValueList>(args), kwargs);
+  }
+  return run_impl_async(std::forward<IValueList>(args), kwargs);
 }
 
 c10::IValue BlockRunner::operator()(
@@ -1230,6 +1311,26 @@ c10::IValue BlockRunner::operator()(
   return run_impl(std::move(args), kwargs);
 #else
   return run_impl_record_functions(std::move(args), kwargs);
+#endif
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> BlockRunner::runAsync(
+    const std::vector<c10::IValue>& args,
+    const KeywordArgs& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
+  return run_impl_async(args, kwargs);
+#else
+  return run_impl_record_functions_async(args, kwargs);
+#endif
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> BlockRunner::runAsync(
+    std::vector<c10::IValue>&& args,
+    const KeywordArgs& kwargs) {
+#ifdef PYTORCH_DISABLE_NET_PROFILING
+  return run_impl_async(std::move(args), kwargs);
+#else
+  return run_impl_record_functions_async(std::move(args), kwargs);
 #endif
 }
 
@@ -1348,10 +1449,19 @@ void BlockRunner::benchmark(
                 << planner_->total_reused_tensors() << std::endl;
     }
   }
+
+  auto unsupported_nodes_count = results.total_nodes_count -
+      results.out_nodes_count - results.native_nodes.size();
   std::cout << "Total number of 'out' variant nodes/total number of nodes: "
             << results.out_nodes_count << "/" << results.total_nodes_count
             << " ("
             << 100.0 * (results.out_nodes_count) /
+          static_cast<float>(results.total_nodes_count)
+            << "%)" << std::endl;
+  std::cout << "Total number of nodes not covered by SR/total number of nodes: "
+            << unsupported_nodes_count << "/" << results.total_nodes_count
+            << " ("
+            << 100.0 * (unsupported_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << std::endl;
 
@@ -1680,10 +1790,10 @@ bool BlockRunner::check_for_memory_leak(
         }
       }
     }
-
-    auto* block_runners = pnode.block_runners();
-    if (recurse_on_sub_blocks && block_runners) {
-      for (auto& block_runner : *block_runners) {
+    auto* metadata = pnode.metadata();
+    if (recurse_on_sub_blocks && metadata) {
+      auto& block_runners = metadata->block_runners();
+      for (auto& block_runner : block_runners) {
         block_runner.check_for_memory_leak(
             output_returned, recurse_on_sub_blocks);
       }
@@ -1843,9 +1953,9 @@ std::vector<IValue> ProcessedNode::inputs_ivalue_vec() const {
 void ProcessedNode::run() {
 #ifndef PYTORCH_DISABLE_PER_OP_PROFILING
   auto step_callbacks =
-      at::getStepCallbacks(at::RecordScope::STATIC_RUNTIME_OP);
-  if (!step_callbacks.empty()) {
-    at::RecordFunction guard(std::move(step_callbacks));
+      at::getStepCallbacksUnlessEmpty(at::RecordScope::STATIC_RUNTIME_OP);
+  if (C10_UNLIKELY(step_callbacks.has_value())) {
+    at::RecordFunction guard(std::move(*step_callbacks));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(guard.isActive());
     if (guard.needsInputs()) {
       const auto inputs = inputs_ivalue_vec();
@@ -1878,11 +1988,11 @@ void ProcessedNode::run() {
 
 static bool checkNoMemoryOverlap(const at::Tensor& a, const at::Tensor& b) {
   at::MemOverlapStatus status = at::get_overlap_status(a, b);
-  if (status == at::MemOverlapStatus::FULL ||
-      status == at::MemOverlapStatus::PARTIAL) {
+  if (status == at::MemOverlapStatus::Full ||
+      status == at::MemOverlapStatus::Partial) {
     return false;
   }
-  if (status == at::MemOverlapStatus::TOO_HARD) {
+  if (status == at::MemOverlapStatus::TooHard) {
     VLOG(1) << "Detected TOO_HARD memory overlap status";
   }
   return true;
@@ -2013,9 +2123,14 @@ void ProcessedNode::verify_and_correct_memory_overlap() {
 StaticRuntime::StaticRuntime(const StaticModule& sm)
     : values_(sm.value_buffer_size()) {
   std::copy(sm.constants().begin(), sm.constants().end(), values_.data());
+  // default task launcher set to inter-op thread pool
+  async_task_launcher_ = at::launch;
   block_ = std::make_unique<BlockRunner>(
-      sm, values_.data(), sm.root_block(), /*is_root_block*/ true);
-  ;
+      sm,
+      values_.data(),
+      sm.root_block(),
+      &async_task_launcher_,
+      true /*is_root_block*/);
 }
 
 c10::IValue StaticRuntime::operator()(
@@ -2028,6 +2143,22 @@ c10::IValue StaticRuntime::operator()(
     std::vector<c10::IValue>&& args,
     const KeywordArgs& kwargs) {
   return (*block_)(std::move(args), kwargs);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> StaticRuntime::runAsync(
+    const std::vector<c10::IValue>& args,
+    const KeywordArgs& kwargs,
+    torch::jit::TaskLauncher taskLauncher) {
+  async_task_launcher_ = std::move(taskLauncher);
+  return block_->runAsync(args, kwargs);
+}
+
+c10::intrusive_ptr<c10::ivalue::Future> StaticRuntime::runAsync(
+    std::vector<c10::IValue>&& args,
+    const KeywordArgs& kwargs,
+    torch::jit::TaskLauncher taskLauncher) {
+  async_task_launcher_ = std::move(taskLauncher);
+  return block_->runAsync(std::move(args), kwargs);
 }
 
 bool StaticRuntime::check_for_memory_leak(bool output_returned) {

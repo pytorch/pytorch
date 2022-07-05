@@ -13,6 +13,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/BatchLinearAlgebra.h>
+#include <ATen/native/TransposeType.h>
 #if defined(BUILD_LAZY_CUDA_LINALG)
 #include <ATen/native/cuda/linalg/BatchLinearAlgebraLib.h>
 
@@ -32,9 +33,7 @@ namespace at {
 namespace native {
 #if defined(BUILD_LAZY_CUDA_LINALG)
 namespace {
-cuda::detail::LinalgDispatch disp = {_solve_helper_cuda,
-                                     _symeig_helper_cuda,
-                                     _linalg_qr_helper_cuda,
+cuda::detail::LinalgDispatch disp = {_symeig_helper_cuda,
                                      _cholesky_solve_helper_cuda,
                                      legacy_lstsq_cuda,
                                      _linalg_inv_out_helper_cuda};
@@ -108,12 +107,13 @@ void lazy_linalg_eig_kernel(Tensor& eigenvalues, Tensor& eigenvectors, Tensor& i
 void lazy_svd_kernel(const Tensor& A,
                      const bool full_matrices,
                      const bool compute_uv,
+                     const c10::optional<c10::string_view>& driver,
                      const Tensor& U,
                      const Tensor& S,
                      const Tensor& Vh,
                      const Tensor& info) {
   getTorchLinalgLibrary();
-  svd_stub(DeviceType::CUDA, A, full_matrices, compute_uv, U, S, Vh, info);
+  svd_stub(DeviceType::CUDA, A, full_matrices, compute_uv, driver, U, S, Vh, info);
 }
 
 void lazy_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, TransposeType trans) {
@@ -195,22 +195,10 @@ Tensor _cholesky_solve_helper_cuda(const Tensor& self, const Tensor& A, bool upp
     return disp.cholesky_solve_helper(self, A, upper);
 }
 
-std::tuple<Tensor, Tensor> _linalg_qr_helper_cuda(const Tensor& input, c10::string_view mode) {
-    getTorchLinalgLibrary();
-    TORCH_CHECK(disp.qr_helper != _linalg_qr_helper_cuda, "Can't find _linalg_qr_helper_cuda");
-    return disp.qr_helper(input, mode);
-}
-
 std::tuple<Tensor, Tensor> _symeig_helper_cuda(const Tensor& self, bool eigenvectors, bool upper) {
     getTorchLinalgLibrary();
     TORCH_CHECK(disp.symeig_helper != _symeig_helper_cuda, "Can't find _symeig_helper_cuda");
     return disp.symeig_helper(self, eigenvectors, upper);
-}
-
-std::tuple<Tensor, Tensor> _solve_helper_cuda(const Tensor& self, const Tensor& A) {
-    getTorchLinalgLibrary();
-    TORCH_CHECK(disp.solve_helper != _solve_helper_cuda, "Can't find _solve_helper_cuda");
-    return disp.solve_helper(self, A);
 }
 
 #endif /*defined(BUILD_LAZY_CUDA_LINALG)*/

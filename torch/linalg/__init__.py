@@ -266,7 +266,7 @@ Examples::
 
     >>> A = torch.randn(2, 3, 4, 4)  # Batch of matrices
     >>> Ainv = torch.linalg.inv(A)
-    >>> torch.dist(A @ Ainv, torch.eye(4)))
+    >>> torch.dist(A @ Ainv, torch.eye(4))
     tensor(1.9073e-06)
 
     >>> A = torch.randn(4, 4, dtype=torch.complex128)  # Complex matrix
@@ -276,6 +276,43 @@ Examples::
 
 .. _invertible:
     https://en.wikipedia.org/wiki/Invertible_matrix#The_invertible_matrix_theorem
+""")
+
+solve_ex = _add_docstr(_linalg.linalg_solve_ex, r"""
+linalg.solve_ex(A, B, *, left=True, check_errors=False, out=None) -> (Tensor, Tensor)
+
+A version of :func:`~solve` that does not perform error checks unless :attr:`check_errors`\ `= True`.
+It also returns the :attr:`info` tensor returned by `LAPACK's getrf`_.
+
+""" + fr"""
+.. note:: {common_notes["sync_note_ex"]}
+
+.. warning:: {common_notes["experimental_warning"]}
+""" + r"""
+
+Args:
+    A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
+
+Keyword args:
+    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
+    check_errors (bool, optional): controls whether to check the content of ``infos`` and raise
+                                   an error if it is non-zero. Default: `False`.
+    out (tuple, optional): tuple of two tensors to write the output to. Ignored if `None`. Default: `None`.
+
+Returns:
+    A named tuple `(result, info)`.
+
+Examples::
+
+    >>> A = torch.randn(3, 3)
+    >>> Ainv, info = torch.linalg.solve_ex(A)
+    >>> torch.dist(torch.linalg.inv(A), Ainv)
+    tensor(0.)
+    >>> info
+    tensor(0, dtype=torch.int32)
+
+.. _LAPACK's getrf:
+    https://www.netlib.org/lapack/explore-html/dd/d9a/group__double_g_ecomputational_ga0019443faea08275ca60a734d0593e60.html
 """)
 
 inv_ex = _add_docstr(_linalg.linalg_inv_ex, r"""
@@ -336,16 +373,10 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
-""" + fr"""
-.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
-          {common_notes["sync_note"]}
-""" + r"""
-
 .. seealso::
 
         :func:`torch.linalg.slogdet` computes the sign (resp. angle) and natural logarithm of the
-        absolute value (resp. modulus) of the determinant of real-valued (resp. complex)
-        square matrices.
+        absolute value of the determinant of real-valued (resp. complex) square matrices.
 
 Args:
     A (Tensor): tensor of shape `(*, n, n)` where `*` is zero or more batch dimensions.
@@ -372,18 +403,12 @@ Computes the sign and natural logarithm of the absolute value of the determinant
 For complex :attr:`A`, it returns the angle and the natural logarithm of the modulus of the
 determinant, that is, a logarithmic polar decomposition of the determinant.
 
+The determinant can be recovered as `sign * exp(logabsdet)`.
+When a matrix has a determinant of zero, it returns `(0, -inf)`.
+
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
-
-""" + fr"""
-.. note:: This function is computed using :func:`torch.linalg.lu_factor`.
-          {common_notes["sync_note"]}
-""" + r"""
-
-.. note:: The determinant can be recovered as `sign * exp(logabsdet)`.
-
-.. note:: When a matrix has a determinant of zero, it returns `(0, -inf)`.
 
 .. seealso::
 
@@ -398,9 +423,9 @@ Keyword args:
 Returns:
     A named tuple `(sign, logabsdet)`.
 
-    `logabsdet` will always be real-valued, even when :attr:`A` is complex.
-
     `sign` will have the same dtype as :attr:`A`.
+
+    `logabsdet` will always be real-valued, even when :attr:`A` is complex.
 
 Examples::
 
@@ -411,7 +436,7 @@ Examples::
             [-1.6218, -0.9273, -0.0082]])
     >>> torch.linalg.det(A)
     tensor(-0.7576)
-    >>> torch.linalg.logdet(A)
+    >>> torch.logdet(A)
     tensor(nan)
     >>> torch.linalg.slogdet(A)
     torch.return_types.linalg_slogdet(sign=tensor(-1.), logabsdet=tensor(-0.2776))
@@ -1233,8 +1258,6 @@ linalg.norm(A, ord=None, dim=None, keepdim=False, *, out=None, dtype=None) -> Te
 
 Computes a vector or matrix norm.
 
-If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
-
 Supports input of float, double, cfloat and cdouble dtypes.
 
 Whether this function computes a vector or matrix norm is determined as follows:
@@ -1364,18 +1387,18 @@ Using the :attr:`dim` argument to compute matrix norms::
 """)
 
 vector_norm = _add_docstr(_linalg.linalg_vector_norm, r"""
-linalg.vector_norm(A, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
+linalg.vector_norm(x, ord=2, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes a vector norm.
 
-If :attr:`A` is complex valued, it computes the norm of :attr:`A`\ `.abs()`
+If :attr:`x` is complex valued, it computes the norm of :attr:`x`\ `.abs()`
 
 Supports input of float, double, cfloat and cdouble dtypes.
 
-This function does not necessarily treat multidimensonal :attr:`A` as a batch of
+This function does not necessarily treat multidimensonal :attr:`x` as a batch of
 vectors, instead:
 
-- If :attr:`dim`\ `= None`, :attr:`A` will be flattened before the norm is computed.
+- If :attr:`dim`\ `= None`, :attr:`x` will be flattened before the norm is computed.
 - If :attr:`dim` is an `int` or a `tuple`, the norm will be computed over these dimensions
   and the other dimensions will be treated as batch dimensions.
 
@@ -1395,12 +1418,16 @@ other `int` or `float`   `sum(abs(x)^{ord})^{(1 / ord)}`
 
 where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
 
+:attr:`dtype` may be used to perform the computation in a more precise dtype.
+It is semantically equivalent to calling ``linalg.vector_norm(x.to(dtype))``
+but it is faster in some cases.
+
 .. seealso::
 
         :func:`torch.linalg.matrix_norm` computes a matrix norm.
 
 Args:
-    A (Tensor): tensor, flattened by default, but this behavior can be
+    x (Tensor): tensor, flattened by default, but this behavior can be
         controlled using :attr:`dim`.
     ord (int, float, inf, -inf, 'fro', 'nuc', optional): order of norm. Default: `2`
     dim (int, Tuple[int], optional): dimensions over which to compute
@@ -1411,12 +1438,14 @@ Args:
 
 Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
-    dtype (:class:`torch.dtype`, optional): If specified, the input tensor is cast to
-        :attr:`dtype` before performing the operation, and the returned tensor's type
-        will be :attr:`dtype`. Default: `None`
+    dtype (:class:`torch.dtype`, optional): type used to perform the accumulation and the return.
+        If specified, :attr:`x` is cast to :attr:`dtype` before performing the operation,
+        and the returned tensor’s type will be :attr:`dtype` if real and of its real counterpart if complex.
+        :attr:`dtype` may be complex if :attr:`x` is complex, otherwise it must be real.
+        :attr:`x` should be convertible without narrowing to :attr:`dtype`. Default: None
 
 Returns:
-    A real-valued tensor, even when :attr:`A` is complex.
+    A real-valued tensor, even when :attr:`x` is complex.
 
 Examples::
 
@@ -1589,7 +1618,7 @@ Examples::
 """)
 
 svd = _add_docstr(_linalg.linalg_svd, r"""
-linalg.svd(A, full_matrices=True, *, out=None) -> (Tensor, Tensor, Tensor)
+linalg.svd(A, full_matrices=True, *, driver=None, out=None) -> (Tensor, Tensor, Tensor)
 
 Computes the singular value decomposition (SVD) of a matrix.
 
@@ -1626,6 +1655,18 @@ which corresponds to :math:`U`, :math:`S`, :math:`V^{\text{H}}` above.
 The singular values are returned in descending order.
 
 The parameter :attr:`full_matrices` chooses between the full (default) and reduced SVD.
+
+The :attr:`driver` kwarg may be used in CUDA with a cuSOLVER backend to choose the algorithm used to compute the SVD.
+The choice of a driver is a trade-off between accuracy and speed.
+
+- If :attr:`A` is well-conditioned (its `condition number`_ is not too large), or you do not mind some precision loss.
+
+  - For a general matrix: `'gesvdj'` (Jacobi method)
+  - If :attr:`A` is tall or wide (`m >> n` or `m << n`): `'gesvda'` (Approximate method)
+
+- If :attr:`A` is not well-conditioned or precision is relevant: `'gesvd'` (QR based)
+
+By default (:attr:`driver`\ `= None`), we call `'gesvdj'` and, if it fails, we fallback to `'gesvd'`.
 
 Differences with `numpy.linalg.svd`:
 
@@ -1687,6 +1728,9 @@ Args:
                                     `U` and `Vh`. Default: `True`.
 
 Keyword args:
+    driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
+        Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
+        Default: `None`.
     out (tuple, optional): output tuple of three tensors. Ignored if `None`.
 
 Returns:
@@ -1718,12 +1762,14 @@ Examples::
     >>> torch.dist(A, U @ torch.diag_embed(S) @ Vh)
     tensor(3.0957e-06)
 
+.. _condition number:
+    https://pytorch.org/docs/master/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """)
 
 svdvals = _add_docstr(_linalg.linalg_svdvals, r"""
-linalg.svdvals(A, *, out=None) -> Tensor
+linalg.svdvals(A, *, driver=None, out=None) -> Tensor
 
 Computes the singular values of a matrix.
 
@@ -1747,6 +1793,10 @@ Args:
     A (Tensor): tensor of shape `(*, m, n)` where `*` is zero or more batch dimensions.
 
 Keyword args:
+    driver (str, optional): name of the cuSOLVER method to be used. This keyword argument only works on CUDA inputs.
+        Available options are: `None`, `gesvd`, `gesvdj`, and `gesvda`.
+        Check :func:`torch.linalg.svd` for details.
+        Default: `None`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Returns:
@@ -2030,7 +2080,7 @@ Example::
 
 
 solve = _add_docstr(_linalg.linalg_solve, r"""
-linalg.solve(A, B, *, out=None) -> Tensor
+linalg.solve(A, B, *, left=True, out=None) -> Tensor
 
 Computes the solution of a square system of linear equations with a unique solution.
 
@@ -2039,6 +2089,12 @@ this function computes the solution :math:`X \in \mathbb{K}^{n \times k}` of the
 :math:`A \in \mathbb{K}^{n \times n}, B \in \mathbb{K}^{n \times k}`, which is defined as
 
 .. math:: AX = B
+
+If :attr:`left`\ `= False`, this function returns the matrix :math:`X \in \mathbb{K}^{n \times k}` that solves the system
+
+.. math::
+
+    XA = B\mathrlap{\qquad A \in \mathbb{K}^{k \times k}, B \in \mathbb{K}^{n \times k}.}
 
 This system of linear equations has one solution if and only if :math:`A` is `invertible`_.
 This function assumes that :math:`A` is invertible.
@@ -2079,6 +2135,7 @@ Args:
                 according to the rules described above
 
 Keyword args:
+    left (bool, optional): whether to solve the system :math:`AX=B` or :math:`XA = B`. Default: `True`.
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
 
 Raises:

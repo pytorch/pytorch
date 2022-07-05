@@ -363,15 +363,31 @@ auto approximate_type = get_gelutype_enum(approximate);
 }
 
 Tensor hardtanh(const Tensor& self, const Scalar& min, const Scalar& max) {
-  return at::clamp(self, min, max);
+  Tensor result = at::empty_like(self);
+  return at::hardtanh_out(result, self, min, max);
 }
 
 Tensor& hardtanh_out(const Tensor& self, const Scalar& min, const Scalar& max, Tensor& result) {
-  return at::clamp_out(result, self, min, max);
+  TORCH_CHECK(self.scalar_type() != at::kBool,
+  "Bool inputs not supported for hardtanh");
+  //preserve legacy behavior of boundaries not causing type promotion
+  Scalar min_, max_;
+  if (at::isIntegralType(self.scalar_type(), /*include_bool*/false)) {
+    int64_t minval = min.toLong();
+    int64_t maxval = max.toLong();
+    TORCH_CHECK(self.dtype() != at::kByte || (minval >= 0 &&
+       maxval >=0), "cannot do hardtanh on an unsigned type with negative limits");
+    min_ = minval;
+    max_ = maxval;
+  } else {
+    min_ = min;
+    max_ = max;
+  }
+  return at::clamp_out(result, self, min_, max_);
 }
 
 Tensor& hardtanh_(Tensor& self, const Scalar& min, const Scalar& max) {
-  return at::clamp_(self, min, max);
+  return at::hardtanh_out(self, self, min, max);
 }
 
 Tensor& hardtanh_backward_out(const Tensor& grad_output, const Tensor& self, const Scalar& min, const Scalar& max, Tensor& grad_input) {
@@ -425,10 +441,12 @@ Tensor hardswish_backward(const Tensor& grad_output, const Tensor& self) {
 }
 
 Tensor relu(const Tensor & self) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min(self, 0);
 }
 
 Tensor & relu_(Tensor & self) {
+  TORCH_CHECK(self.scalar_type() != at::kBool, "Boolean inputs not supported for relu");
   return at::clamp_min_(self, 0);
 }
 
@@ -570,14 +588,13 @@ Tensor rrelu_with_noise_backward(
     const Scalar& upper,
     bool training,
     bool is_result) {
-  auto lower_tensor = scalar_to_tensor(lower);
-  auto upper_tensor = scalar_to_tensor(upper);
-  if (training && (upper_tensor - lower_tensor).item().to<float>() > 1E-6) {
-    return grad_output.mul(noise);
+  if (training) {
+    return noise * grad_output;
   } else {
-    auto negative = (lower_tensor + upper_tensor) / 2;
-    Scalar negative_slope = negative.item();
-    return at::leaky_relu_backward(grad_output, self_or_result, negative_slope, is_result);
+    auto l = lower.toDouble();
+    auto u = upper.toDouble();
+    auto mid = (l + u) / 2.;
+    return at::leaky_relu_backward(grad_output, self_or_result, mid, is_result);
   }
 }
 
