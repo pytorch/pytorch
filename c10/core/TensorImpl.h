@@ -699,6 +699,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
   virtual IntArrayRef sizes_custom() const;
   virtual Device device_custom() const;
+  virtual Layout layout_custom() const;
 
   virtual int64_t dim_custom() const;
   virtual int64_t numel_custom() const;
@@ -979,6 +980,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   Layout layout() const {
+    if (C10_UNLIKELY(custom_layout_)) {
+      return layout_custom();
+    }
+
     // NB: This method is not virtual and avoid dispatches for perf.
     // strided is also the most common layout type, so we check for
     // strided case first.
@@ -2355,6 +2360,10 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     custom_device_ = custom_device;
   }
 
+  void set_custom_layout(bool custom_layout) {
+    custom_layout_ = custom_layout;
+  }
+
  protected:
   Storage storage_;
 
@@ -2474,6 +2483,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     reserved_ = false;
     sizes_strides_policy_ = static_cast<uint8_t>(SizesStridesPolicy::Default);
     custom_device_ = false;
+    custom_layout_ = false;
     storage_access_should_throw_ = false;
     has_symbolic_sizes_strides_ = false;
   }
@@ -2543,6 +2553,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
 
   // Call _custom() virtual method for device()
   bool custom_device_ : 1;
+
+  // Call _custom() virtual method for layout()
+  bool custom_layout_ : 1;
 
   // The set of DispatchKeys which describe this tensor.  NB: this
   // does NOT include Autograd (historically, it did, but

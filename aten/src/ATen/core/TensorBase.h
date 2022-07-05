@@ -349,7 +349,7 @@ class TORCH_API TensorBase {
   }
 
   /// Returns a `Tensor`'s layout.
-  Layout layout() const noexcept {
+  Layout layout() const {
     return impl_->layout();
   }
 
